@@ -6,10 +6,11 @@ Cloud build project for the Samsung Galaxy A52 5G (`a52xq`).
 
 1. Build the untouched touchGrass Linux 4.19.152 baseline.
 2. Apply official Linux 4.19 stable updates incrementally.
-3. Build and test Linux 4.19.325 without root modifications.
-4. Integrate a pinned SukiSU Ultra revision.
-5. Build a separate experimental kernel image.
-6. Package only after the kernel image builds successfully.
+3. Repair and audit the touchGrass BPF verifier backports.
+4. Build and test Linux 4.19.325 without root modifications.
+5. Integrate a pinned SukiSU Ultra revision.
+6. Build a separate experimental kernel image.
+7. Package only after the kernel image builds successfully.
 
 The known working KernelSU-Next + SUSFS flashable ZIP remains the rollback image and is not modified by this repository.
 
@@ -19,13 +20,19 @@ The known working KernelSU-Next + SUSFS flashable ZIP remains the rollback image
 
 The exact pinned touchGrass source compiled successfully in GitHub Actions and produced a verified kernel `Image`, configuration, logs, and checksums.
 
-## Current stage
+## Active checkpoints
 
-`02 - Official Linux 4.19.152 to 4.19.153 update`
+### `02 - Official Linux 4.19.152 to 4.19.153 update`
 
-The second workflow generates the exact upstream stable delta from the pinned Greg Kroah-Hartman Linux tags. It first runs a clean apply check against the Samsung and Qualcomm tree. If any hunk conflicts, it stops, preserves partial results and `.rej` files, and uploads a conflict report. It compiles Linux 4.19.153 only if the complete delta applies successfully.
+This workflow generates the exact upstream stable delta from the pinned Greg Kroah-Hartman Linux tags. Known Android and vendor conflicts are accepted only after strict content checks. It compiles Linux 4.19.153 after all expected changes are present.
 
-SukiSU is intentionally not integrated during this stage.
+### `03 - Repair and audit BPF verifier`
+
+This workflow recreates the Linux 4.19.153 tree, removes the dead `REG_LIVE_DONE` workaround, unifies the verifier ID-map types, restores the missing `explore_alu_limits` pruning guard, and compiles `kernel/bpf/verifier.o` with incompatible-pointer and implicit-function warnings treated as errors. It then performs a complete kernel build and uploads the repaired source patch, audit report, object file, kernel `Image`, logs, configurations, and checksums.
+
+Runtime BPF loading tests are deferred until a later device-testing checkpoint. The output of this workflow is not yet a flashable ZIP.
+
+SukiSU is intentionally not integrated during these checkpoints.
 
 ## Pinned sources
 

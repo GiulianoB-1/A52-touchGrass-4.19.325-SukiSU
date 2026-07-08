@@ -99,6 +99,41 @@ verifier = sub_once(
     "restore explore_alu_limits pruning guard",
 )
 
+# A later BPF backport introduced ctx_access but omitted the assignments
+# present in upstream. Restore the upstream branch semantics so the variable
+# is initialized on every path that reaches its use.
+verifier = sub_once(
+    verifier,
+    r"(\t\tif \(insn->code == \(BPF_LDX \| BPF_MEM \| BPF_B\) \|\|\n"
+    r"\t\t    insn->code == \(BPF_LDX \| BPF_MEM \| BPF_H\) \|\|\n"
+    r"\t\t    insn->code == \(BPF_LDX \| BPF_MEM \| BPF_W\) \|\|\n"
+    r"\t\t    insn->code == \(BPF_LDX \| BPF_MEM \| BPF_DW\)\)\n"
+    r"\t\t\ttype = BPF_READ;\n"
+    r"\t\telse if \(insn->code == \(BPF_STX \| BPF_MEM \| BPF_B\) \|\|\n"
+    r"\t\t\t insn->code == \(BPF_STX \| BPF_MEM \| BPF_H\) \|\|\n"
+    r"\t\t\t insn->code == \(BPF_STX \| BPF_MEM \| BPF_W\) \|\|\n"
+    r"\t\t\t insn->code == \(BPF_STX \| BPF_MEM \| BPF_DW\)\)\n"
+    r"\t\t\ttype = BPF_WRITE;\n"
+    r"\t\telse\n"
+    r"\t\t\tcontinue;)",
+    "\t\tif (insn->code == (BPF_LDX | BPF_MEM | BPF_B) ||\n"
+    "\t\t    insn->code == (BPF_LDX | BPF_MEM | BPF_H) ||\n"
+    "\t\t    insn->code == (BPF_LDX | BPF_MEM | BPF_W) ||\n"
+    "\t\t    insn->code == (BPF_LDX | BPF_MEM | BPF_DW)) {\n"
+    "\t\t\ttype = BPF_READ;\n"
+    "\t\t\tctx_access = true;\n"
+    "\t\t} else if (insn->code == (BPF_STX | BPF_MEM | BPF_B) ||\n"
+    "\t\t\t   insn->code == (BPF_STX | BPF_MEM | BPF_H) ||\n"
+    "\t\t\t   insn->code == (BPF_STX | BPF_MEM | BPF_W) ||\n"
+    "\t\t\t   insn->code == (BPF_STX | BPF_MEM | BPF_DW)) {\n"
+    "\t\t\ttype = BPF_WRITE;\n"
+    "\t\t\tctx_access = BPF_CLASS(insn->code) == BPF_STX;\n"
+    "\t\t} else {\n"
+    "\t\t\tcontinue;\n"
+    "\t\t}",
+    "initialize ctx_access using upstream branch semantics",
+)
+
 header_path.write_text(header)
 verifier_path.write_text(verifier)
 PY
@@ -110,6 +145,8 @@ PY
 grep -Fq 'struct bpf_id_pair *idmap' "$VERIFIER" || fail "bpf_id_pair conversion is missing"
 grep -Fq 'i < BPF_ID_MAP_SIZE' "$VERIFIER" || fail "BPF_ID_MAP_SIZE use is missing"
 grep -Fq 'if (env->explore_alu_limits)' "$VERIFIER" || fail "explore_alu_limits guard is missing"
+grep -Fq 'ctx_access = true;' "$VERIFIER" || fail "ctx_access read assignment is missing"
+grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$VERIFIER" || fail "ctx_access write assignment is missing"
 grep -Fq 'struct bpf_id_pair idmap_scratch[BPF_ID_MAP_SIZE];' "$HEADER" || fail "Header id-map scratch definition is missing"
 
 git -C "$KERNEL_DIR" diff --check -- include/linux/bpf_verifier.h kernel/bpf/verifier.c
@@ -123,6 +160,7 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'unified_id_map_type=struct bpf_id_pair\n'
   printf 'unified_id_map_size=BPF_ID_MAP_SIZE\n'
   printf 'restored_guard=env->explore_alu_limits\n'
+  printf 'initialized_ctx_access=upstream-branch-semantics\n'
   printf 'changed_files=include/linux/bpf_verifier.h,kernel/bpf/verifier.c\n'
   printf 'patch_sha256=%s\n' "$(cut -d' ' -f1 "$PATCH_OUT.sha256")"
 } | tee "$REPORT"

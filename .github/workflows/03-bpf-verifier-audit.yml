@@ -1,0 +1,83 @@
+name: 03 - Repair and audit BPF verifier
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/03-bpf-verifier-audit.yml'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/05_repair_bpf_verifier.sh'
+      - 'scripts/06_audit_and_build_bpf.sh'
+      - 'sources.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-bpf-verifier-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JOBS: '4'
+
+jobs:
+  repair-audit-build:
+    name: Repair BPF verifier and compile Linux 4.19.153
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio lz4
+
+      - name: Prepare exact touchGrass baseline source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply and resolve official Linux 4.19.153 delta
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Repair known BPF verifier inconsistencies
+        run: ./scripts/05_repair_bpf_verifier.sh
+
+      - name: Audit verifier warnings and build repaired kernel
+        run: ./scripts/06_audit_and_build_bpf.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git --version > artifacts/tool-versions.txt
+          make --version | head -n 1 >> artifacts/tool-versions.txt
+          bison --version | head -n 1 >> artifacts/tool-versions.txt
+          flex --version >> artifacts/tool-versions.txt
+
+      - name: Upload BPF repair, audit, kernel, logs, and checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-bpf-verifier-audit-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

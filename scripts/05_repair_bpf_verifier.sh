@@ -112,7 +112,7 @@ grep -Fq 'i < BPF_ID_MAP_SIZE' "$VERIFIER" || fail "BPF_ID_MAP_SIZE use is missi
 grep -Fq 'if (env->explore_alu_limits)' "$VERIFIER" || fail "explore_alu_limits guard is missing"
 grep -Fq 'struct bpf_id_pair idmap_scratch[BPF_ID_MAP_SIZE];' "$HEADER" || fail "Header id-map scratch definition is missing"
 
-git -C "$KERNEL_DIR" diff --check -- "$HEADER" "$VERIFIER"
+git -C "$KERNEL_DIR" diff --check -- include/linux/bpf_verifier.h kernel/bpf/verifier.c
 git -C "$KERNEL_DIR" diff --binary -- include/linux/bpf_verifier.h kernel/bpf/verifier.c > "$PATCH_OUT"
 test -s "$PATCH_OUT" || fail "BPF repair produced no patch"
 sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"

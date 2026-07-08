@@ -1,0 +1,74 @@
+name: 01 - Baseline Linux 4.19.152
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/01-baseline.yml'
+      - 'scripts/**'
+      - 'sources.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+
+jobs:
+  build-baseline:
+    name: Build untouched touchGrass baseline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio lz4
+
+      - name: Prepare exact source revision
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Build Linux 4.19.152 baseline
+        run: ./scripts/02_build_baseline.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git --version > artifacts/tool-versions.txt
+          make --version | head -n 1 >> artifacts/tool-versions.txt
+          bison --version | head -n 1 >> artifacts/tool-versions.txt
+          flex --version >> artifacts/tool-versions.txt
+
+      - name: Upload baseline artifacts and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-baseline-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

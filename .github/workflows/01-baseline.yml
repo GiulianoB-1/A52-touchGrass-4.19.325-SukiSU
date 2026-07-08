@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: a52-baseline-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   JOBS: '4'

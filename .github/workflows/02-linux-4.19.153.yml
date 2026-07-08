@@ -1,0 +1,79 @@
+name: 02 - Update and build Linux 4.19.153
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/02-linux-4.19.153.yml'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/04_build_linux_4.19.153.sh'
+      - 'sources.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-linux-4.19.153-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JOBS: '4'
+
+jobs:
+  update-and-build:
+    name: Apply official 4.19.153 update and compile
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio lz4
+
+      - name: Prepare exact touchGrass baseline source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply official Linux 4.19.153 stable delta
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Build updated Linux 4.19.153 kernel
+        run: ./scripts/04_build_linux_4.19.153.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git --version > artifacts/tool-versions.txt
+          make --version | head -n 1 >> artifacts/tool-versions.txt
+          bison --version | head -n 1 >> artifacts/tool-versions.txt
+          flex --version >> artifacts/tool-versions.txt
+
+      - name: Upload update, conflict, build, and checksum artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.153-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

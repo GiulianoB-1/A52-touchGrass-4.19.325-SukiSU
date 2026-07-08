@@ -7,7 +7,9 @@ on:
       - main
     paths:
       - '.github/workflows/01-baseline.yml'
-      - 'scripts/**'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/02_build_baseline.sh'
       - 'sources.lock'
 
 permissions:

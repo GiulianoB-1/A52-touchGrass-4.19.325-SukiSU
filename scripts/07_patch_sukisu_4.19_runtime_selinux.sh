@@ -82,9 +82,10 @@ grep -Fq 'strncpy_from_unsafe_user(buf, p, buf_len)' "$RUNTIME_C" || fail "Legac
 ! grep -Fq 'copy_to_user_nofault' "$RUNTIME_C" || fail "Unsupported copy_to_user_nofault call remains"
 grep -Fq 'probe_user_read(&size, st_size_ptr, sizeof(long))' "$RUNTIME_C" || fail "Legacy nofault user read was not installed"
 grep -Fq 'probe_user_write(st_size_ptr, &new_size, sizeof(long))' "$RUNTIME_C" || fail "Legacy nofault user write was not installed"
-! grep -Fq 'selinux_cred(cred)' "$SELINUX_C" || fail "Unavailable selinux_cred helper remains"
 grep -Fq '(struct task_security_struct *)cred->security' "$SELINUX_C" || fail "Mutable Linux 4.19 credential security access is missing"
 grep -Fq '(const struct task_security_struct *)cred->security' "$SELINUX_C" || fail "Const Linux 4.19 credential security access is missing"
+test "$(grep -Fc 'selinux_cred(cred)' "$SELINUX_C")" -eq 1 || fail "Unexpected number of remaining newer-kernel selinux_cred calls"
+grep -Fq 'const struct cred_security_struct *tsec = selinux_cred(cred);' "$SELINUX_C" || fail "Expected Linux 6.18+ selinux_cred branch is missing"
 
 git -C "$SUKISU_DIR" diff --check
 git -C "$SUKISU_DIR" diff --binary -- \
@@ -101,7 +102,8 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'user_write_nofault=probe_user_write\n'
   printf 'selinux_credential_storage=cred-security-task_security_struct\n'
   printf 'runtime_nofault_call_count=3\n'
-  printf 'selinux_credential_call_count=2\n'
+  printf 'selinux_old_kernel_credential_conversions=2\n'
+  printf 'selinux_new_kernel_branch=preserved\n'
   printf 'patch_sha256=%s\n' "$(cut -d' ' -f1 "$PATCH_OUT.sha256")"
 } | tee "$REPORT"
 

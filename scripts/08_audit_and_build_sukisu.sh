@@ -72,7 +72,7 @@ grep -Fq '# CONFIG_KSU_DISABLE_MANAGER is not set' "$AUDIT_CONFIG" || fail "Mana
 grep -Fq '# CONFIG_KSU_DISABLE_POLICY is not set' "$AUDIT_CONFIG" || fail "Allowlist policy is disabled"
 ! grep -Eq '^CONFIG_.*SUSFS.*=y$' "$AUDIT_CONFIG" || fail "SUSFS is unexpectedly enabled"
 
-info "Compiling repaired BPF verifier and SukiSU composite object with selected warnings as errors"
+info "Compiling repaired BPF verifier and SukiSU directory with selected warnings as errors"
 set +e
 {
   make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
@@ -81,7 +81,7 @@ set +e
     KCFLAGS="$AUDIT_FLAGS" \
     CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
     W=1 V=1 -j"${JOBS:-4}" \
-    kernel/bpf/verifier.o drivers/kernelsu/kernelsu.o
+    kernel/bpf/verifier.o drivers/kernelsu/
 } 2>&1 | tee "$AUDIT_LOG"
 audit_rc=${PIPESTATUS[0]}
 set -e

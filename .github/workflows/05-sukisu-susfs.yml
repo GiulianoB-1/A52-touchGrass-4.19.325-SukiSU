@@ -23,6 +23,7 @@ on:
       - 'scripts/07_patch_sukisu_4.19_supercall.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
       - 'scripts/09_prepare_susfs_v1_5_5_a52xq.sh'
+      - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh'
       - 'scripts/09_integrate_susfs_v1_5_5.sh'
       - 'scripts/10_audit_and_build_sukisu_susfs.sh'
       - 'sources.lock'
@@ -104,6 +105,9 @@ jobs:
 
       - name: Prepare A52XQ SUSFS vendor-context resolution
         run: ./scripts/09_prepare_susfs_v1_5_5_a52xq.sh
+
+      - name: Make A52XQ SUSFS namespace resolution context-safe
+        run: ./scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh
 
       - name: Integrate SUSFS v1.5.5 with dual userspace ABI
         run: ./scripts/09_integrate_susfs_v1_5_5.sh

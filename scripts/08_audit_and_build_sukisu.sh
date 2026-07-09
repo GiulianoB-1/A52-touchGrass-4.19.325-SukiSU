@@ -8,6 +8,8 @@ AUDIT_OUT="$KERNEL_DIR/out-sukisu-audit"
 CONFIG_LOG="$LOG_DIR/configure-sukisu-audit.log"
 CONFIG_STATUS="$ARTIFACTS_DIR/configure-sukisu-audit.status"
 CONFIG_SUMMARY="$ARTIFACTS_DIR/config-sukisu-audit-summary.txt"
+SELINUX_LOG="$LOG_DIR/generate-selinux-headers.log"
+SELINUX_STATUS="$ARTIFACTS_DIR/generate-selinux-headers.status"
 AUDIT_LOG="$LOG_DIR/build-sukisu-audit.log"
 AUDIT_STATUS="$ARTIFACTS_DIR/build-sukisu-audit.status"
 AUDIT_FLAGS="-Werror=incompatible-pointer-types -Werror=implicit-function-declaration -Werror=return-type -Werror=uninitialized"
@@ -17,6 +19,7 @@ test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
 test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before SukiSU audit"
 test -d "$SUKISU_DIR/.git" || fail "Pinned SukiSU source is missing"
 test -f "$ARTIFACTS_DIR/sukisu-integration.txt" || fail "SukiSU integration report is missing"
+test -f "$ARTIFACTS_DIR/sukisu-linux-4.19-compat.txt" || fail "SukiSU Linux 4.19 compatibility report is missing"
 test "$(git -C "$SUKISU_DIR" rev-parse HEAD)" = "$SUKISU_COMMIT" || fail "SukiSU source is not at the pinned commit"
 
 # Repeat the most important source checks at the build boundary.
@@ -72,6 +75,23 @@ grep -Fq '# CONFIG_KSU_DISABLE_MANAGER is not set' "$AUDIT_CONFIG" || fail "Mana
 grep -Fq '# CONFIG_KSU_DISABLE_POLICY is not set' "$AUDIT_CONFIG" || fail "Allowlist policy is disabled"
 ! grep -Eq '^CONFIG_.*SUSFS.*=y$' "$AUDIT_CONFIG" || fail "SUSFS is unexpectedly enabled"
 
+info "Generating SELinux headers required by the isolated SukiSU directory audit"
+set +e
+{
+  make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
+    DTC_EXT="$KERNEL_DIR/tools/dtc" \
+    CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+    KCFLAGS="$AUDIT_FLAGS" \
+    CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+    security/selinux/flask.h security/selinux/av_permissions.h
+} 2>&1 | tee "$SELINUX_LOG"
+selinux_rc=${PIPESTATUS[0]}
+set -e
+printf '%s\n' "$selinux_rc" > "$SELINUX_STATUS"
+test "$selinux_rc" -eq 0 || fail "SELinux generated-header step failed. See $SELINUX_LOG"
+test -s "$AUDIT_OUT/security/selinux/flask.h" || fail "Generated SELinux flask.h is missing"
+test -s "$AUDIT_OUT/security/selinux/av_permissions.h" || fail "Generated SELinux av_permissions.h is missing"
+
 info "Compiling repaired BPF verifier and SukiSU directory with selected warnings as errors"
 set +e
 {
@@ -113,6 +133,7 @@ test "$uninitialized_count" -eq 0 || fail "SukiSU audit contains uninitialized-v
   printf 'sukisu_commit=%s\n' "$(git -C "$SUKISU_DIR" rev-parse HEAD)"
   printf 'compiler=%s\n' "$($CC --version | head -n 1)"
   printf 'audit_flags=%s\n' "$AUDIT_FLAGS"
+  printf 'selinux_generated_headers=present\n'
   printf 'source_warning_diagnostics=%s\n' "$warning_count"
   printf 'source_error_diagnostics=%s\n' "$error_count"
   printf 'incompatible_pointer_diagnostics=%s\n' "$incompatible_count"

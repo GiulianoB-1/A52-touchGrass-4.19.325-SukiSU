@@ -5,6 +5,9 @@ source "$(dirname "$0")/common.sh"
 TARGET_VERSION=4.19.153
 SUKISU_DIR="$KERNEL_DIR/KernelSU"
 AUDIT_OUT="$KERNEL_DIR/out-sukisu-audit"
+CONFIG_LOG="$LOG_DIR/configure-sukisu-audit.log"
+CONFIG_STATUS="$ARTIFACTS_DIR/configure-sukisu-audit.status"
+CONFIG_SUMMARY="$ARTIFACTS_DIR/config-sukisu-audit-summary.txt"
 AUDIT_LOG="$LOG_DIR/build-sukisu-audit.log"
 AUDIT_STATUS="$ARTIFACTS_DIR/build-sukisu-audit.status"
 AUDIT_FLAGS="-Werror=incompatible-pointer-types -Werror=implicit-function-declaration -Werror=return-type -Werror=uninitialized"
@@ -29,14 +32,36 @@ rm -rf "$AUDIT_OUT"
 mkdir -p "$AUDIT_OUT"
 
 info "Configuring warning-enabled SukiSU audit build"
-make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
-  DTC_EXT="$KERNEL_DIR/tools/dtc" \
-  CONFIG_BUILD_ARM64_DT_OVERLAY=y \
-  KCFLAGS="$AUDIT_FLAGS" \
-  CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-  a52xq_defconfig
+set +e
+{
+  make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
+    DTC_EXT="$KERNEL_DIR/tools/dtc" \
+    CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+    KCFLAGS="$AUDIT_FLAGS" \
+    CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+    a52xq_defconfig
+} 2>&1 | tee "$CONFIG_LOG"
+config_rc=${PIPESTATUS[0]}
+set -e
+printf '%s\n' "$config_rc" > "$CONFIG_STATUS"
 
 AUDIT_CONFIG="$AUDIT_OUT/.config"
+if test -s "$AUDIT_CONFIG"; then
+  cp "$AUDIT_CONFIG" "$ARTIFACTS_DIR/config-sukisu-audit"
+  {
+    printf 'kernel_version=%s\n' "$(kernel_version)"
+    printf 'configure_exit=%s\n' "$config_rc"
+    grep -E '^(CONFIG_(KPROBES|HAVE_KPROBES|MODULES|EXT4_FS|KSU|KSU_MANUAL_SU|KSU_DEBUG|KPM|KSU_DISABLE_MANAGER|KSU_DISABLE_POLICY|KSU_SUSFS)=|# CONFIG_(KPROBES|KSU|KSU_MANUAL_SU|KSU_DEBUG|KPM|KSU_DISABLE_MANAGER|KSU_DISABLE_POLICY|KSU_SUSFS) is not set)' "$AUDIT_CONFIG" || true
+  } | tee "$CONFIG_SUMMARY"
+else
+  {
+    printf 'kernel_version=%s\n' "$(kernel_version)"
+    printf 'configure_exit=%s\n' "$config_rc"
+    printf 'generated_config=missing\n'
+  } | tee "$CONFIG_SUMMARY"
+fi
+
+test "$config_rc" -eq 0 || fail "SukiSU audit configuration failed. See $CONFIG_LOG"
 test -s "$AUDIT_CONFIG" || fail "Audit configuration was not generated"
 grep -Fq 'CONFIG_KPROBES=y' "$AUDIT_CONFIG" || fail "Final config does not enable KPROBES"
 grep -Fq 'CONFIG_KSU=y' "$AUDIT_CONFIG" || fail "Final config does not enable SukiSU"
@@ -46,7 +71,6 @@ grep -Fq '# CONFIG_KPM is not set' "$AUDIT_CONFIG" || fail "KPM is enabled"
 grep -Fq '# CONFIG_KSU_DISABLE_MANAGER is not set' "$AUDIT_CONFIG" || fail "Manager integration is disabled"
 grep -Fq '# CONFIG_KSU_DISABLE_POLICY is not set' "$AUDIT_CONFIG" || fail "Allowlist policy is disabled"
 ! grep -Eq '^CONFIG_.*SUSFS.*=y$' "$AUDIT_CONFIG" || fail "SUSFS is unexpectedly enabled"
-cp "$AUDIT_CONFIG" "$ARTIFACTS_DIR/config-sukisu-audit"
 
 info "Compiling repaired BPF verifier and SukiSU objects with selected warnings as errors"
 set +e

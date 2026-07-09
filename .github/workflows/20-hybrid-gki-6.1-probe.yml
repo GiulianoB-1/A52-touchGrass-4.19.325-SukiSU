@@ -1,0 +1,81 @@
+name: 20 - Build A52XQ Hybrid GKI 6.1 Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hybrid-gki-6.1-experiment
+    paths:
+      - '.github/workflows/20-hybrid-gki-6.1-probe.yml'
+      - 'scripts/21_build_ack_6_1_probe.sh'
+      - 'docs/HYBRID_GKI_DEVICE_AUDIT_RESULTS.md'
+      - 'docs/HYBRID_GKI_6_1_PLAN.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build-probe:
+    name: Build Android Common 6.1 deliberate-panic probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    env:
+      JOBS: '4'
+      ACK_URL: https://android.googlesource.com/kernel/common
+      ACK_BRANCH: android14-6.1
+      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts-hybrid-gki
+      LOG_DIR: ${{ github.workspace }}/logs-hybrid-gki
+      WORK_DIR: ${{ github.workspace }}/work-hybrid-gki-6.1
+
+    steps:
+      - name: Check out experimental branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/.ghcup || true
+          df -h
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates clang flex git \
+            libelf-dev libssl-dev lld llvm make python3 rsync xz-utils \
+            zlib1g-dev
+          clang --version
+          ld.lld --version
+
+      - name: Build Android Common 6.1 probe kernel
+        run: |
+          chmod +x scripts/21_build_ack_6_1_probe.sh
+          ./scripts/21_build_ack_6_1_probe.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts-hybrid-gki logs-hybrid-gki
+          {
+            echo "workflow_run=${GITHUB_RUN_ID}"
+            echo "workflow_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "project_commit=${GITHUB_SHA}"
+            echo "project_branch=${GITHUB_REF_NAME}"
+            echo "runner_os=${RUNNER_OS}"
+            echo "recorded_at=$(date -Iseconds)"
+            df -h
+          } > artifacts-hybrid-gki/runner-state.txt
+
+      - name: Upload probe image, config, DTBs and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-hybrid-gki-6.1-probe-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts-hybrid-gki/**
+            logs-hybrid-gki/**

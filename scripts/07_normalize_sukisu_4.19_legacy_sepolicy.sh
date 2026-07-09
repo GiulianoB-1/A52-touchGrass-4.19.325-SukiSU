@@ -124,10 +124,10 @@ for fn in remove_avtab_node add_filename_trans add_type add_typeattribute_raw; d
 done
 
 grep -Fq '#define strip_av' "$SEPOLICY_C" || fail "SELinux helper macro section is missing"
-first_definition=$(grep -n '^static bool add_type(struct policydb .*{' "$SEPOLICY_C" | cut -d: -f1)
+add_type_definition=$(grep -n '^static bool add_type(struct policydb' "$SEPOLICY_C" | tail -n 1 | cut -d: -f1)
 macro_line=$(grep -n '^#define strip_av' "$SEPOLICY_C" | cut -d: -f1)
-test -n "$first_definition" || fail "Normalized add_type definition is missing"
-test "$first_definition" -gt "$macro_line" || fail "Legacy function definitions still precede required compatibility macros"
+test -n "$add_type_definition" || fail "Normalized add_type definition is missing"
+test "$add_type_definition" -gt "$macro_line" || fail "Legacy function definitions still precede required compatibility macros"
 
 git -C "$SUKISU_DIR" diff --check
 set +e

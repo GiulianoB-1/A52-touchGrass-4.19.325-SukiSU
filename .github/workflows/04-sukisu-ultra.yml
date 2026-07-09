@@ -85,10 +85,7 @@ jobs:
       - name: Apply SukiSU Linux 4.19 runtime and SELinux compatibility patch
         run: ./scripts/07_patch_sukisu_4.19_runtime_selinux.sh
 
-      - name: Apply SukiSU Linux 4.19 legacy SELinux policy compatibility patch
-        run: ./scripts/07_patch_sukisu_4.19_legacy_sepolicy.sh
-
-      - name: Normalize legacy SELinux compatibility function placement
+      - name: Convert and normalize SukiSU for the legacy Linux 4.19 SELinux policydb
         run: ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
 
       - name: Correct legacy SELinux filename-transition bitmap index

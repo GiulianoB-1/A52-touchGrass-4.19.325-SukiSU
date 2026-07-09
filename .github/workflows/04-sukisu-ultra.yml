@@ -13,6 +13,7 @@ on:
       - 'scripts/07_integrate_sukisu.sh'
       - 'scripts/07_fix_sukisu_kconfig.sh'
       - 'scripts/07_patch_sukisu_4.19_compat.sh'
+      - 'scripts/07_patch_sukisu_4.19_file_wrapper.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
       - 'sources.lock'
 
@@ -69,6 +70,9 @@ jobs:
 
       - name: Apply SukiSU Linux 4.19 compatibility patch
         run: ./scripts/07_patch_sukisu_4.19_compat.sh
+
+      - name: Apply SukiSU Linux 4.19 file-wrapper compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_file_wrapper.sh
 
       - name: Audit BPF and SukiSU objects, then build full kernel
         run: ./scripts/08_audit_and_build_sukisu.sh

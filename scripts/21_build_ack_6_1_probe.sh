@@ -38,10 +38,22 @@ else
   git -C "$SRC_DIR" checkout --detach FETCH_HEAD
 fi
 
+# The probe source and Makefile entry are generated below. Always restore a
+# pristine ACK checkout so local reruns cannot accumulate duplicate entries.
+git -C "$SRC_DIR" reset --hard HEAD
+git -C "$SRC_DIR" clean -fdx
+
 ACK_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
 ACK_DESCRIBE="$(git -C "$SRC_DIR" describe --always --dirty 2>/dev/null || printf '%s' "$ACK_COMMIT")"
 
 info "Resolved ACK commit: $ACK_COMMIT"
+{
+  printf 'source_url=%s\n' "$ACK_URL"
+  printf 'source_branch=%s\n' "$ACK_BRANCH"
+  printf 'source_commit=%s\n' "$ACK_COMMIT"
+  printf 'source_describe=%s\n' "$ACK_DESCRIBE"
+  printf 'project_commit=%s\n' "${GITHUB_SHA:-local}"
+} | tee "$ARTIFACTS_DIR/ack-6.1-source-manifest.txt"
 
 required_source_files=(
   arch/arm64/boot/dts/qcom/sm6350.dtsi
@@ -114,17 +126,18 @@ make -C "$SRC_DIR" O="$OUT_DIR" LLVM=1 LLVM_IAS=1 ARCH=arm64 gki_defconfig \
 cfg="$SRC_DIR/scripts/config"
 config_args=(--file "$OUT_DIR/.config")
 
-# Core execution, logging and Android ABI requirements.
+# Core execution, persistent logging and Android ABI requirements.
 for symbol in \
   ARM64 ARCH_QCOM SMP OF OF_EARLY_FLATTREE ARM_GIC_V3 ARM_ARCH_TIMER \
   PRINTK PRINTK_TIME PANIC_ON_OOPS \
   PSTORE PSTORE_RAM PSTORE_CONSOLE PSTORE_PMSG \
   IKCONFIG IKCONFIG_PROC KALLSYMS KALLSYMS_ALL \
-  BLK_DEV_INITRD BINDER_IPC ANDROID_BINDERFS \
+  BLK_DEV_INITRD ANDROID_BINDER_IPC ANDROID_BINDERFS \
   DEVTMPFS DEVTMPFS_MOUNT TMPFS PROC_FS SYSFS; do
   "$cfg" "${config_args[@]}" --enable "$symbol"
 done
 
+"$cfg" "${config_args[@]}" --set-str ANDROID_BINDER_DEVICES "binder,hwbinder,vndbinder"
 "$cfg" "${config_args[@]}" --set-val PANIC_TIMEOUT 8
 "$cfg" "${config_args[@]}" --set-str DEFAULT_HOSTNAME a52xq-hybrid-probe
 
@@ -155,6 +168,10 @@ make -C "$SRC_DIR" O="$OUT_DIR" LLVM=1 LLVM_IAS=1 ARCH=arm64 olddefconfig \
 
 FINAL_CONFIG="$OUT_DIR/.config"
 test -s "$FINAL_CONFIG" || fail "Final config was not generated"
+cp "$FINAL_CONFIG" "$ARTIFACTS_DIR/config-android14-6.1-a52xq-hybrid-probe"
+
+grep -E '^(CONFIG_(ARM64|ARCH_QCOM|OF|ARM_GIC_V3|ARM_ARCH_TIMER|PRINTK_TIME|PSTORE|PSTORE_RAM|PSTORE_CONSOLE|PSTORE_PMSG|ANDROID_BINDER_IPC|ANDROID_BINDERFS|QCOM_RPMH|QCOM_COMMAND_DB|SM_GCC_6350|PINCTRL_SM6350|INTERCONNECT_QCOM_SM6350|SERIAL_QCOM_GENI|SCSI_UFS_QCOM|PHY_QCOM_QMP|PHY_QCOM_QMP_UFS|MODULES)=|# CONFIG_MODULES is not set)' \
+  "$FINAL_CONFIG" | tee "$ARTIFACTS_DIR/ack-6.1-probe-config-summary.txt" || true
 
 required_y=(
   CONFIG_ARM64
@@ -166,11 +183,18 @@ required_y=(
   CONFIG_PSTORE
   CONFIG_PSTORE_RAM
   CONFIG_PSTORE_CONSOLE
+  CONFIG_PSTORE_PMSG
+  CONFIG_ANDROID_BINDER_IPC
+  CONFIG_ANDROID_BINDERFS
+  CONFIG_QCOM_RPMH
+  CONFIG_QCOM_COMMAND_DB
   CONFIG_SM_GCC_6350
   CONFIG_PINCTRL_SM6350
   CONFIG_INTERCONNECT_QCOM_SM6350
   CONFIG_SERIAL_QCOM_GENI
   CONFIG_SCSI_UFS_QCOM
+  CONFIG_PHY_QCOM_QMP
+  CONFIG_PHY_QCOM_QMP_UFS
 )
 
 for symbol in "${required_y[@]}"; do
@@ -208,7 +232,6 @@ test "$dtb_rc" -eq 0 || fail "ACK 6.1 DTB build failed"
 
 cp "$IMAGE" "$ARTIFACTS_DIR/Image-android14-6.1-a52xq-hybrid-probe"
 cp "$IMAGE_GZ" "$ARTIFACTS_DIR/Image.gz-android14-6.1-a52xq-hybrid-probe"
-cp "$FINAL_CONFIG" "$ARTIFACTS_DIR/config-android14-6.1-a52xq-hybrid-probe"
 cp "$OUT_DIR/System.map" "$ARTIFACTS_DIR/System.map-android14-6.1-a52xq-hybrid-probe"
 
 find "$OUT_DIR/arch/arm64/boot/dts/qcom" -maxdepth 1 -type f \

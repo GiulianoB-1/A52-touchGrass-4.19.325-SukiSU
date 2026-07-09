@@ -17,6 +17,7 @@ on:
       - 'scripts/07_patch_sukisu_4.19_manager_policy.sh'
       - 'scripts/07_patch_sukisu_4.19_runtime_selinux.sh'
       - 'scripts/07_patch_sukisu_4.19_legacy_sepolicy.sh'
+      - 'scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh'
       - 'scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
       - 'sources.lock'
@@ -86,6 +87,9 @@ jobs:
 
       - name: Apply SukiSU Linux 4.19 legacy SELinux policy compatibility patch
         run: ./scripts/07_patch_sukisu_4.19_legacy_sepolicy.sh
+
+      - name: Normalize legacy SELinux compatibility function placement
+        run: ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
 
       - name: Correct legacy SELinux filename-transition bitmap index
         run: ./scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh

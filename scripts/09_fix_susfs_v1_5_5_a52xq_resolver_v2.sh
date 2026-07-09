@@ -3,9 +3,14 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESOLVER="$SCRIPT_DIR/09_fix_susfs_v1_5_5_a52xq_resolver_v3.sh"
+TARGET="$SCRIPT_DIR/09_integrate_susfs_v1_5_5.sh"
 
 test -f "$RESOLVER" || {
   echo "Missing A52XQ SUSFS resolver: $RESOLVER" >&2
+  exit 1
+}
+test -f "$TARGET" || {
+  echo "Missing SUSFS integration script: $TARGET" >&2
   exit 1
 }
 
@@ -40,4 +45,21 @@ for old, new, expected, label in replacements:
 path.write_text(text)
 PY
 
-exec "$RESOLVER" "$@"
+"$RESOLVER" "$@"
+
+python3 - "$TARGET" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'git -C "$KERNEL_DIR" apply --reject --whitespace=nowarn "$SUSFS_PATCH" >"$PATCH_LOG" 2>&1\n'
+new = 'git -C "$KERNEL_DIR" apply --reject --whitespace=fix "$SUSFS_PATCH" >"$PATCH_LOG" 2>&1\n'
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"SUSFS whitespace mode: expected one match, found {count}")
+path.write_text(text.replace(old, new, 1))
+PY
+
+bash -n "$TARGET"
+echo "Prepared Samsung namespace boundaries and normalized SUSFS patch whitespace"

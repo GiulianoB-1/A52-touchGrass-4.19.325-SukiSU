@@ -29,6 +29,11 @@ for symbol in \\
   "$cfg" "${config_args[@]}" --disable "$symbol"
 done
 
+# Android debug kinfo records offsets from struct module. In this ACK revision
+# that type is incomplete when CONFIG_MODULES is disabled, so the probe cannot
+# compile with CONFIG_ANDROID_DEBUG_KINFO enabled. It is not needed for bring-up.
+"$cfg" "${config_args[@]}" --disable ANDROID_DEBUG_KINFO
+
 # Keep the initial image self-contained.
 "$cfg" "${config_args[@]}" --disable MODULES
 '''
@@ -40,7 +45,7 @@ if count != 1:
 text = text.replace(anchor, replacement, 1)
 
 summary_old = "|PHY_QCOM_QMP_UFS|MODULES)=|# CONFIG_MODULES is not set)'"
-summary_new = "|PHY_QCOM_QMP_UFS|GUNYAH|MODULES)=|# CONFIG_(GUNYAH|MODULES) is not set)'"
+summary_new = "|PHY_QCOM_QMP_UFS|ANDROID_DEBUG_KINFO|GUNYAH|MODULES)=|# CONFIG_(ANDROID_DEBUG_KINFO|GUNYAH|MODULES) is not set)'"
 count = text.count(summary_old)
 if count != 1:
     raise SystemExit(f"config summary anchor: expected one match, found {count}")
@@ -48,7 +53,8 @@ text = text.replace(summary_old, summary_new, 1)
 
 assert_old = '''grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables modules"
 '''
-assert_new = '''grep -Fqx '# CONFIG_GUNYAH is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Gunyah"
+assert_new = '''grep -Fqx '# CONFIG_ANDROID_DEBUG_KINFO is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Android debug kinfo"
+grep -Fqx '# CONFIG_GUNYAH is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Gunyah"
 grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables modules"
 '''
 count = text.count(assert_old)

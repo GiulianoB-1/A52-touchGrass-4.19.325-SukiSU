@@ -61,7 +61,7 @@ static int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)
 '''
 replace_once(
     iopoll_block,
-    '/* Linux 4.19 has no file_operations.iopoll member. */\n\n',
+    '/* Linux 4.19 has no iopoll file-operation member. */\n\n',
     'file_wrapper.c iopoll block',
 )
 
@@ -87,7 +87,7 @@ static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, 
 '''
 replace_once(
     remap_block,
-    '/* Linux 4.19 has separate clone/dedupe operations and no remap_file_range member. */\n\n',
+    '/* Linux 4.19 uses separate clone and dedupe operations. */\n\n',
     'file_wrapper.c remap_file_range block',
 )
 
@@ -164,9 +164,11 @@ path.write_text(text)
 PY
 
 ! grep -Fq 'ksu_wrapper_iopoll' "$FILE_WRAPPER_C" || fail "Unsupported iopoll wrapper remains"
-! grep -Fq '.iopoll' "$FILE_WRAPPER_C" || fail "Unsupported iopoll member remains"
+! grep -Fq '->iopoll' "$FILE_WRAPPER_C" || fail "Unsupported iopoll dereference remains"
+! grep -Fq '.iopoll =' "$FILE_WRAPPER_C" || fail "Unsupported iopoll assignment remains"
 ! grep -Fq 'ksu_wrapper_remap_file_range' "$FILE_WRAPPER_C" || fail "Unsupported remap wrapper remains"
-! grep -Fq '.remap_file_range' "$FILE_WRAPPER_C" || fail "Unsupported remap member remains"
+! grep -Fq '->remap_file_range' "$FILE_WRAPPER_C" || fail "Unsupported remap dereference remains"
+! grep -Fq '.remap_file_range =' "$FILE_WRAPPER_C" || fail "Unsupported remap assignment remains"
 ! grep -Fq 'REMAP_FILE_DEDUP' "$FILE_WRAPPER_C" || fail "Unsupported remap flag remains"
 ! grep -Fq 'security_inode_init_security_anon' "$FILE_WRAPPER_C" || fail "Unsupported anonymous-inode security hook remains"
 ! grep -Fq 'selinux_inode(' "$FILE_WRAPPER_C" || fail "Unavailable selinux_inode helper remains"

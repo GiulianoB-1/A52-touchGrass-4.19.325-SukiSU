@@ -15,6 +15,7 @@ on:
       - 'scripts/07_patch_sukisu_4.19_compat.sh'
       - 'scripts/07_patch_sukisu_4.19_file_wrapper.sh'
       - 'scripts/07_patch_sukisu_4.19_manager_policy.sh'
+      - 'scripts/07_patch_sukisu_4.19_runtime_selinux.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
       - 'sources.lock'
 
@@ -77,6 +78,9 @@ jobs:
 
       - name: Apply SukiSU Linux 4.19 manager and allowlist compatibility patch
         run: ./scripts/07_patch_sukisu_4.19_manager_policy.sh
+
+      - name: Apply SukiSU Linux 4.19 runtime and SELinux compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_runtime_selinux.sh
 
       - name: Audit BPF and SukiSU objects, then build full kernel
         run: ./scripts/08_audit_and_build_sukisu.sh

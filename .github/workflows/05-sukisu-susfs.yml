@@ -1,0 +1,129 @@
+name: 05 - Build SukiSU Ultra with SUSFS v1.5.5
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/05-sukisu-susfs.yml'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/05_repair_bpf_verifier.sh'
+      - 'scripts/07_integrate_sukisu.sh'
+      - 'scripts/07_fix_sukisu_kconfig.sh'
+      - 'scripts/07_patch_sukisu_4.19_compat.sh'
+      - 'scripts/07_patch_sukisu_4.19_file_wrapper.sh'
+      - 'scripts/07_patch_sukisu_4.19_manager_policy.sh'
+      - 'scripts/07_patch_sukisu_4.19_runtime_selinux.sh'
+      - 'scripts/07_patch_sukisu_4.19_legacy_sepolicy.sh'
+      - 'scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh'
+      - 'scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh'
+      - 'scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh'
+      - 'scripts/07_patch_sukisu_4.19_supercall.sh'
+      - 'scripts/08_audit_and_build_sukisu.sh'
+      - 'scripts/09_integrate_susfs_v1_5_5.sh'
+      - 'scripts/10_audit_and_build_sukisu_susfs.sh'
+      - 'sources.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-sukisu-susfs-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JOBS: '4'
+
+jobs:
+  integrate-audit-build:
+    name: Build Linux 4.19.153 with SukiSU, SUSFS v1.5.5, and unmount disabled
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils
+
+      - name: Prepare exact touchGrass baseline source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply and resolve official Linux 4.19.153 delta
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Repair known BPF verifier inconsistencies
+        run: ./scripts/05_repair_bpf_verifier.sh
+
+      - name: Integrate exact pinned SukiSU Ultra safely
+        run: ./scripts/07_integrate_sukisu.sh
+
+      - name: Correct SukiSU Kconfig menu placement
+        run: ./scripts/07_fix_sukisu_kconfig.sh
+
+      - name: Apply SukiSU Linux 4.19 compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_compat.sh
+
+      - name: Apply SukiSU Linux 4.19 file-wrapper compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_file_wrapper.sh
+
+      - name: Apply SukiSU Linux 4.19 manager and allowlist compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_manager_policy.sh
+
+      - name: Apply SukiSU Linux 4.19 runtime and SELinux compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_runtime_selinux.sh
+
+      - name: Convert and normalize SukiSU for the legacy Linux 4.19 SELinux policydb
+        run: ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
+
+      - name: Fix Linux 4.19 SukiSU SELinux RCU deadlock
+        run: ./scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh
+
+      - name: Correct legacy SELinux filename-transition bitmap index
+        run: ./scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh
+
+      - name: Apply SukiSU Linux 4.19 supercall compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_supercall.sh
+
+      - name: Integrate SUSFS v1.5.5 with dual userspace ABI
+        run: ./scripts/09_integrate_susfs_v1_5_5.sh
+
+      - name: Audit SUSFS objects and build full kernel
+        run: ./scripts/10_audit_and_build_sukisu_susfs.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git --version > artifacts/tool-versions.txt
+          make --version | head -n 1 >> artifacts/tool-versions.txt
+          bison --version | head -n 1 >> artifacts/tool-versions.txt
+          flex --version >> artifacts/tool-versions.txt
+
+      - name: Upload SukiSU SUSFS integration, audits, kernel, logs, and checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-sukisu-susfs-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

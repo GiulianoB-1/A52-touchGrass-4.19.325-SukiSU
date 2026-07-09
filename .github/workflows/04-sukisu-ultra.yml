@@ -12,6 +12,7 @@ on:
       - 'scripts/05_repair_bpf_verifier.sh'
       - 'scripts/07_integrate_sukisu.sh'
       - 'scripts/07_fix_sukisu_kconfig.sh'
+      - 'scripts/07_patch_sukisu_4.19_compat.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
       - 'sources.lock'
 
@@ -65,6 +66,9 @@ jobs:
 
       - name: Correct SukiSU Kconfig menu placement
         run: ./scripts/07_fix_sukisu_kconfig.sh
+
+      - name: Apply SukiSU Linux 4.19 compatibility patch
+        run: ./scripts/07_patch_sukisu_4.19_compat.sh
 
       - name: Audit BPF and SukiSU objects, then build full kernel
         run: ./scripts/08_audit_and_build_sukisu.sh

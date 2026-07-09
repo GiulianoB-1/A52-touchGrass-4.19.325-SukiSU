@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/20-hybrid-gki-6.1-probe.yml'
       - 'scripts/21_build_ack_6_1_probe.sh'
+      - 'scripts/22_build_ack_6_1_probe_without_gunyah.sh'
       - 'docs/HYBRID_GKI_DEVICE_AUDIT_RESULTS.md'
       - 'docs/HYBRID_GKI_6_1_PLAN.md'
 
@@ -53,7 +54,8 @@ jobs:
       - name: Build Android Common 6.1 probe kernel
         run: |
           chmod +x scripts/21_build_ack_6_1_probe.sh
-          ./scripts/21_build_ack_6_1_probe.sh
+          chmod +x scripts/22_build_ack_6_1_probe_without_gunyah.sh
+          ./scripts/22_build_ack_6_1_probe_without_gunyah.sh
 
       - name: Record runner state
         if: always()

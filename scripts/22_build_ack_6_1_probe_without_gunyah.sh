@@ -39,6 +39,11 @@ done
 # enter the 6.1 kernel and preserve the late-init marker in ramoops.
 "$cfg" "${config_args[@]}" --disable DEBUG_INFO_BTF
 
+# ACK pKVM invokes pkvm_load_early_modules(), whose provider is available only
+# when module support is enabled in this branch. KVM is irrelevant to the first
+# physical-device boot probe, so disable it instead of enabling modules.
+"$cfg" "${config_args[@]}" --disable KVM
+
 # Keep the initial image self-contained.
 "$cfg" "${config_args[@]}" --disable MODULES
 '''
@@ -50,7 +55,7 @@ if count != 1:
 text = text.replace(anchor, replacement, 1)
 
 summary_old = "|PHY_QCOM_QMP_UFS|MODULES)=|# CONFIG_MODULES is not set)'"
-summary_new = "|PHY_QCOM_QMP_UFS|ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|MODULES)=|# CONFIG_(ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|MODULES) is not set)'"
+summary_new = "|PHY_QCOM_QMP_UFS|ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|KVM|MODULES)=|# CONFIG_(ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|KVM|MODULES) is not set)'"
 count = text.count(summary_old)
 if count != 1:
     raise SystemExit(f"config summary anchor: expected one match, found {count}")
@@ -61,6 +66,7 @@ assert_old = '''grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail 
 assert_new = '''grep -Fqx '# CONFIG_ANDROID_DEBUG_KINFO is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Android debug kinfo"
 grep -Fqx '# CONFIG_DEBUG_INFO_BTF is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables BTF generation"
 grep -Fqx '# CONFIG_GUNYAH is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Gunyah"
+grep -Fqx '# CONFIG_KVM is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables KVM"
 grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables modules"
 '''
 count = text.count(assert_old)

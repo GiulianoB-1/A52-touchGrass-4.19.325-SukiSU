@@ -75,22 +75,32 @@ grep -Fq '# CONFIG_KSU_DISABLE_MANAGER is not set' "$AUDIT_CONFIG" || fail "Mana
 grep -Fq '# CONFIG_KSU_DISABLE_POLICY is not set' "$AUDIT_CONFIG" || fail "Allowlist policy is disabled"
 ! grep -Eq '^CONFIG_.*SUSFS.*=y$' "$AUDIT_CONFIG" || fail "SUSFS is unexpectedly enabled"
 
-info "Generating SELinux headers required by the isolated SukiSU directory audit"
+info "Generating SELinux headers with the Linux 4.19 host tool"
 set +e
-{
+(
+  set -e
   make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
     DTC_EXT="$KERNEL_DIR/tools/dtc" \
     CONFIG_BUILD_ARM64_DT_OVERLAY=y \
-    KCFLAGS="$AUDIT_FLAGS" \
-    CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-    security/selinux/flask.h security/selinux/av_permissions.h
-} 2>&1 | tee "$SELINUX_LOG"
+    V=1 scripts/selinux/genheaders/
+
+  genheaders="$AUDIT_OUT/scripts/selinux/genheaders/genheaders"
+  test -x "$genheaders"
+  mkdir -p "$AUDIT_OUT/security/selinux"
+  "$genheaders" \
+    "$AUDIT_OUT/security/selinux/flask.h" \
+    "$AUDIT_OUT/security/selinux/av_permissions.h"
+) 2>&1 | tee "$SELINUX_LOG"
 selinux_rc=${PIPESTATUS[0]}
 set -e
 printf '%s\n' "$selinux_rc" > "$SELINUX_STATUS"
 test "$selinux_rc" -eq 0 || fail "SELinux generated-header step failed. See $SELINUX_LOG"
 test -s "$AUDIT_OUT/security/selinux/flask.h" || fail "Generated SELinux flask.h is missing"
 test -s "$AUDIT_OUT/security/selinux/av_permissions.h" || fail "Generated SELinux av_permissions.h is missing"
+sha256sum \
+  "$AUDIT_OUT/security/selinux/flask.h" \
+  "$AUDIT_OUT/security/selinux/av_permissions.h" \
+  > "$ARTIFACTS_DIR/selinux-generated-headers.sha256"
 
 info "Compiling repaired BPF verifier and SukiSU directory with selected warnings as errors"
 set +e
@@ -133,7 +143,7 @@ test "$uninitialized_count" -eq 0 || fail "SukiSU audit contains uninitialized-v
   printf 'sukisu_commit=%s\n' "$(git -C "$SUKISU_DIR" rev-parse HEAD)"
   printf 'compiler=%s\n' "$($CC --version | head -n 1)"
   printf 'audit_flags=%s\n' "$AUDIT_FLAGS"
-  printf 'selinux_generated_headers=present\n'
+  printf 'selinux_generated_headers=legacy-host-tool\n'
   printf 'source_warning_diagnostics=%s\n' "$warning_count"
   printf 'source_error_diagnostics=%s\n' "$error_count"
   printf 'incompatible_pointer_diagnostics=%s\n' "$incompatible_count"

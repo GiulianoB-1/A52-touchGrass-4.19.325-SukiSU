@@ -22,6 +22,7 @@ on:
       - 'scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh'
       - 'scripts/07_patch_sukisu_4.19_supercall.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
+      - 'scripts/09_prepare_susfs_v1_5_5_a52xq.sh'
       - 'scripts/09_integrate_susfs_v1_5_5.sh'
       - 'scripts/10_audit_and_build_sukisu_susfs.sh'
       - 'sources.lock'
@@ -100,6 +101,9 @@ jobs:
 
       - name: Apply SukiSU Linux 4.19 supercall compatibility patch
         run: ./scripts/07_patch_sukisu_4.19_supercall.sh
+
+      - name: Prepare A52XQ SUSFS vendor-context resolution
+        run: ./scripts/09_prepare_susfs_v1_5_5_a52xq.sh
 
       - name: Integrate SUSFS v1.5.5 with dual userspace ABI
         run: ./scripts/09_integrate_susfs_v1_5_5.sh

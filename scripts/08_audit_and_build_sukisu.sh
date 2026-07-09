@@ -119,13 +119,32 @@ printf '%s\n' "$audit_rc" > "$AUDIT_STATUS"
 test "$audit_rc" -eq 0 || fail "Warning-enabled SukiSU audit build failed. See $AUDIT_LOG"
 
 BPF_OBJECT="$AUDIT_OUT/kernel/bpf/verifier.o"
-KSU_OBJECT="$AUDIT_OUT/drivers/kernelsu/kernelsu.o"
+KSU_ARCHIVE="$AUDIT_OUT/drivers/kernelsu/built-in.a"
+KSU_MEMBERS="$ARTIFACTS_DIR/sukisu-4.19.153-built-in.members.txt"
+KSU_ARTIFACT="$ARTIFACTS_DIR/sukisu-4.19.153-built-in.a"
+AR_TOOL="${CROSS_COMPILE}ar"
+
 test -s "$BPF_OBJECT" || fail "BPF verifier object was not produced"
-test -s "$KSU_OBJECT" || fail "SukiSU composite object was not produced"
+test -s "$KSU_ARCHIVE" || fail "SukiSU Linux 4.19 built-in archive was not produced"
+test -x "$AR_TOOL" || fail "Cross-toolchain ar is missing"
+"$AR_TOOL" t "$KSU_ARCHIVE" | tee "$KSU_MEMBERS"
+test -s "$KSU_MEMBERS" || fail "SukiSU built-in archive has no members"
+for required_member in \
+  drivers/kernelsu/core/init.o \
+  drivers/kernelsu/feature/kernel_umount.o \
+  drivers/kernelsu/policy/allowlist.o \
+  drivers/kernelsu/selinux/rules.o \
+  drivers/kernelsu/selinux/sepolicy.o \
+  drivers/kernelsu/supercall/dispatch.o \
+  drivers/kernelsu/supercall/supercall.o; do
+  grep -Fxq "$required_member" "$KSU_MEMBERS" || fail "SukiSU built-in archive is missing $required_member"
+done
+
 cp "$BPF_OBJECT" "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o"
-cp "$KSU_OBJECT" "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o"
+cp "$KSU_ARCHIVE" "$KSU_ARTIFACT"
 sha256sum "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o" > "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256"
-sha256sum "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o" > "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o.sha256"
+sha256sum "$KSU_ARTIFACT" > "$KSU_ARTIFACT.sha256"
+sha256sum "$KSU_MEMBERS" > "$KSU_MEMBERS.sha256"
 
 warning_count=$(grep -Ec '(^|[[:space:]])[^[:space:]]+:[0-9]+:[0-9]+: warning:' "$AUDIT_LOG" || true)
 error_count=$(grep -Ec '(^|[[:space:]])[^[:space:]]+:[0-9]+:[0-9]+: error:' "$AUDIT_LOG" || true)
@@ -150,7 +169,9 @@ test "$uninitialized_count" -eq 0 || fail "SukiSU audit contains uninitialized-v
   printf 'implicit_function_diagnostics=%s\n' "$implicit_count"
   printf 'uninitialized_diagnostics=%s\n' "$uninitialized_count"
   printf 'bpf_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256")"
-  printf 'sukisu_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o.sha256")"
+  printf 'sukisu_archive_format=linux-4.19-thin-built-in-a\n'
+  printf 'sukisu_archive_members=%s\n' "$(wc -l < "$KSU_MEMBERS")"
+  printf 'sukisu_archive_sha256=%s\n' "$(cut -d' ' -f1 "$KSU_ARTIFACT.sha256")"
   printf 'allowlist_file_format=4\n'
   printf 'app_profile_abi=4\n'
   printf 'kernel_unmount=permanently-disabled\n'

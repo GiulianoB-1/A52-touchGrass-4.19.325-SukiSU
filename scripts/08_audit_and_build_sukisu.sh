@@ -72,7 +72,7 @@ grep -Fq '# CONFIG_KSU_DISABLE_MANAGER is not set' "$AUDIT_CONFIG" || fail "Mana
 grep -Fq '# CONFIG_KSU_DISABLE_POLICY is not set' "$AUDIT_CONFIG" || fail "Allowlist policy is disabled"
 ! grep -Eq '^CONFIG_.*SUSFS.*=y$' "$AUDIT_CONFIG" || fail "SUSFS is unexpectedly enabled"
 
-info "Compiling repaired BPF verifier and SukiSU objects with selected warnings as errors"
+info "Compiling repaired BPF verifier and SukiSU composite object with selected warnings as errors"
 set +e
 {
   make -C "$KERNEL_DIR" O="$AUDIT_OUT" \
@@ -81,7 +81,7 @@ set +e
     KCFLAGS="$AUDIT_FLAGS" \
     CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
     W=1 V=1 -j"${JOBS:-4}" \
-    kernel/bpf/verifier.o drivers/kernelsu/built-in.o
+    kernel/bpf/verifier.o drivers/kernelsu/kernelsu.o
 } 2>&1 | tee "$AUDIT_LOG"
 audit_rc=${PIPESTATUS[0]}
 set -e
@@ -89,13 +89,13 @@ printf '%s\n' "$audit_rc" > "$AUDIT_STATUS"
 test "$audit_rc" -eq 0 || fail "Warning-enabled SukiSU audit build failed. See $AUDIT_LOG"
 
 BPF_OBJECT="$AUDIT_OUT/kernel/bpf/verifier.o"
-KSU_OBJECT="$AUDIT_OUT/drivers/kernelsu/built-in.o"
+KSU_OBJECT="$AUDIT_OUT/drivers/kernelsu/kernelsu.o"
 test -s "$BPF_OBJECT" || fail "BPF verifier object was not produced"
-test -s "$KSU_OBJECT" || fail "SukiSU built-in object was not produced"
+test -s "$KSU_OBJECT" || fail "SukiSU composite object was not produced"
 cp "$BPF_OBJECT" "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o"
-cp "$KSU_OBJECT" "$ARTIFACTS_DIR/sukisu-4.19.153-built-in.o"
+cp "$KSU_OBJECT" "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o"
 sha256sum "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o" > "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256"
-sha256sum "$ARTIFACTS_DIR/sukisu-4.19.153-built-in.o" > "$ARTIFACTS_DIR/sukisu-4.19.153-built-in.o.sha256"
+sha256sum "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o" > "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o.sha256"
 
 warning_count=$(grep -Ec '(^|[[:space:]])[^[:space:]]+:[0-9]+:[0-9]+: warning:' "$AUDIT_LOG" || true)
 error_count=$(grep -Ec '(^|[[:space:]])[^[:space:]]+:[0-9]+:[0-9]+: error:' "$AUDIT_LOG" || true)
@@ -119,7 +119,7 @@ test "$uninitialized_count" -eq 0 || fail "SukiSU audit contains uninitialized-v
   printf 'implicit_function_diagnostics=%s\n' "$implicit_count"
   printf 'uninitialized_diagnostics=%s\n' "$uninitialized_count"
   printf 'bpf_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256")"
-  printf 'sukisu_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/sukisu-4.19.153-built-in.o.sha256")"
+  printf 'sukisu_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/sukisu-4.19.153-kernelsu.o.sha256")"
   printf 'allowlist_file_format=4\n'
   printf 'app_profile_abi=4\n'
   printf 'kernel_unmount=permanently-disabled\n'

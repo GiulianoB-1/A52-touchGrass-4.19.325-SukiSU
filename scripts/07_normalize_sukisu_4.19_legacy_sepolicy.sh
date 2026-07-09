@@ -20,10 +20,11 @@ temporary_legacy="$SCRIPT_DIR/.legacy-sepolicy-exec.$$.sh"
 trap 'rm -f "$before" "$temporary_legacy"' EXIT
 
 # The original conversion script intentionally verifies that no newer-layout
-# implementation remains. Four replacement ranges in its first revision begin
+# implementation remains. Three replacement ranges in its first revision begin
 # at forward declarations, so those two checks must run only after placement is
-# normalized. Create a temporary execution copy with only those premature
-# checks deferred; every other fail-closed check remains active.
+# normalized. remove_avtab_node is replaced at its real function body and must
+# remain a single definition. Create a temporary execution copy with only those
+# premature checks deferred; every other fail-closed check remains active.
 python3 - "$LEGACY_SCRIPT" "$temporary_legacy" <<'PY'
 from pathlib import Path
 import sys
@@ -140,7 +141,6 @@ def normalize(source: str, name: str) -> str:
 
 
 for function_name in (
-    "remove_avtab_node",
     "add_filename_trans",
     "add_type",
     "add_typeattribute_raw",
@@ -150,7 +150,14 @@ for function_name in (
 path.write_text(text)
 PY
 
-for fn in remove_avtab_node add_filename_trans add_type add_typeattribute_raw; do
+# remove_avtab_node was replaced at its real body and therefore has one
+# definition and no forward declaration to normalize.
+test "$(grep -Ec '^static bool remove_avtab_node\(' "$SEPOLICY_C")" -eq 1 || \
+  fail "Expected exactly one legacy remove_avtab_node definition"
+grep -Fq "Android's legacy flex-array avtab has no safe public unlink primitive" "$SEPOLICY_C" || \
+  fail "Legacy remove_avtab_node implementation is missing"
+
+for fn in add_filename_trans add_type add_typeattribute_raw; do
   test "$(grep -Ec "^static (bool|void) ${fn}\\(" "$SEPOLICY_C")" -eq 2 || \
     fail "Expected one declaration and one definition for $fn"
 done
@@ -161,8 +168,7 @@ macro_line=$(grep -n '^#define strip_av' "$SEPOLICY_C" | cut -d: -f1)
 test -n "$add_type_definition" || fail "Normalized add_type definition is missing"
 test "$add_type_definition" -gt "$macro_line" || fail "Legacy function definitions still precede required compatibility macros"
 
-# Run the formerly deferred checks now, using the real grep and the normalized
-# source. These are the exact conditions that stopped run 29002375799.
+# Run the formerly deferred checks now, using the normalized source.
 ! grep -Fq 'struct filename_trans_key' "$SEPOLICY_C" || fail "New filename transition layout remains after normalization"
 ! grep -Fq 'db->type_val_to_struct,' "$SEPOLICY_C" || fail "New type-value pointer-array path remains after normalization"
 grep -Fq 'struct filename_trans key;' "$SEPOLICY_C" || fail "Legacy filename transition implementation is missing"
@@ -185,7 +191,8 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'kernel_version=%s\n' "$(kernel_version)"
   printf 'sukisu_commit=%s\n' "$(git -C "$SUKISU_DIR" rev-parse HEAD)"
   printf 'legacy_conversion=completed-before-normalization\n'
-  printf 'normalized_functions=4\n'
+  printf 'normalized_functions=3\n'
+  printf 'single_body_replacement=remove_avtab_node\n'
   printf 'forward_declarations=restored\n'
   printf 'legacy_implementations=placed-at-original-body-locations\n'
   printf 'definitions_after_compatibility_macros=yes\n'

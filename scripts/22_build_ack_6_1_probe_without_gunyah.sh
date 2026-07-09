@@ -34,6 +34,11 @@ done
 # compile with CONFIG_ANDROID_DEBUG_KINFO enabled. It is not needed for bring-up.
 "$cfg" "${config_args[@]}" --disable ANDROID_DEBUG_KINFO
 
+# gki_defconfig also enables BTF generation. The probe runner does not install
+# pahole, and BTF is not required to determine whether the A52XQ bootloader can
+# enter the 6.1 kernel and preserve the late-init marker in ramoops.
+"$cfg" "${config_args[@]}" --disable DEBUG_INFO_BTF
+
 # Keep the initial image self-contained.
 "$cfg" "${config_args[@]}" --disable MODULES
 '''
@@ -45,7 +50,7 @@ if count != 1:
 text = text.replace(anchor, replacement, 1)
 
 summary_old = "|PHY_QCOM_QMP_UFS|MODULES)=|# CONFIG_MODULES is not set)'"
-summary_new = "|PHY_QCOM_QMP_UFS|ANDROID_DEBUG_KINFO|GUNYAH|MODULES)=|# CONFIG_(ANDROID_DEBUG_KINFO|GUNYAH|MODULES) is not set)'"
+summary_new = "|PHY_QCOM_QMP_UFS|ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|MODULES)=|# CONFIG_(ANDROID_DEBUG_KINFO|DEBUG_INFO_BTF|GUNYAH|MODULES) is not set)'"
 count = text.count(summary_old)
 if count != 1:
     raise SystemExit(f"config summary anchor: expected one match, found {count}")
@@ -54,6 +59,7 @@ text = text.replace(summary_old, summary_new, 1)
 assert_old = '''grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables modules"
 '''
 assert_new = '''grep -Fqx '# CONFIG_ANDROID_DEBUG_KINFO is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Android debug kinfo"
+grep -Fqx '# CONFIG_DEBUG_INFO_BTF is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables BTF generation"
 grep -Fqx '# CONFIG_GUNYAH is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables Gunyah"
 grep -Fqx '# CONFIG_MODULES is not set' "$FINAL_CONFIG" || fail "Probe kernel unexpectedly enables modules"
 '''

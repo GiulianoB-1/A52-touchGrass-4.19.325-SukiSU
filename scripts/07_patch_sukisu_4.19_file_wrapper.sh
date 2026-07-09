@@ -20,7 +20,7 @@ grep -Fq '(*copy_file_range)' "$KERNEL_DIR/include/linux/fs.h" || fail "Kernel f
 grep -Fq 'i_security;' "$KERNEL_DIR/include/linux/fs.h" || fail "Kernel inode security pointer is missing"
 grep -Fq 'struct inode_security_struct' "$KERNEL_DIR/security/selinux/include/objsec.h" || fail "SELinux inode security structure is missing"
 grep -Fq 'LABEL_INITIALIZED' "$KERNEL_DIR/security/selinux/include/objsec.h" || fail "SELinux initialized-label state is missing"
-grep -Fq 'SECCLASS_FILE' "$KERNEL_DIR/security/selinux/include/flask.h" || fail "SELinux file class is missing"
+grep -Fq '{ "file",' "$KERNEL_DIR/security/selinux/include/classmap.h" || fail "SELinux file class source mapping is missing"
 grep -RFn 'ksu_file_sid' "$SUKISU_DIR/kernel/selinux" >/dev/null || fail "SukiSU file SID is missing"
 
 info "Adapting SukiSU file wrapper to the exact Linux 4.19 VFS and SELinux layout"

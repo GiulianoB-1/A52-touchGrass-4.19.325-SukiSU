@@ -140,6 +140,29 @@ def normalize(source: str, name: str) -> str:
     return source
 
 
+# This Linux 5.9+ helper block is dead on 4.19, but still contains the newer
+# struct filename_trans_key layout. Remove the whole guarded block instead of
+# weakening the final source audit to ignore incompatible text.
+helper_start_marker = '// 5.9.0 : static inline int hashtab_insert'
+helper_start = text.find(helper_start_marker)
+if helper_start < 0:
+    raise SystemExit('newer filename-transition helper block start not found')
+helper_end = text.find('static bool add_filename_trans(', helper_start)
+if helper_end < 0:
+    raise SystemExit('lower add_filename_trans implementation marker not found')
+helper_block = text[helper_start:helper_end]
+for required in (
+    '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)',
+    'struct filename_trans_key',
+    'filenametr_hash',
+    'filenametr_cmp',
+    'filenametr_key_params',
+    '#endif',
+):
+    if required not in helper_block:
+        raise SystemExit(f'newer filename-transition helper block is missing: {required}')
+text = text[:helper_start] + text[helper_end:]
+
 for function_name in (
     "add_filename_trans",
     "add_type",
@@ -170,6 +193,9 @@ test "$add_type_definition" -gt "$macro_line" || fail "Legacy function definitio
 
 # Run the formerly deferred checks now, using the normalized source.
 ! grep -Fq 'struct filename_trans_key' "$SEPOLICY_C" || fail "New filename transition layout remains after normalization"
+! grep -Fq 'filenametr_key_params' "$SEPOLICY_C" || fail "New filename transition hash parameters remain"
+! grep -Fq 'filenametr_hash' "$SEPOLICY_C" || fail "New filename transition hash helper remains"
+! grep -Fq 'filenametr_cmp' "$SEPOLICY_C" || fail "New filename transition compare helper remains"
 ! grep -Fq 'db->type_val_to_struct,' "$SEPOLICY_C" || fail "New type-value pointer-array path remains after normalization"
 grep -Fq 'struct filename_trans key;' "$SEPOLICY_C" || fail "Legacy filename transition implementation is missing"
 grep -Fq 'type_val_to_struct_array' "$SEPOLICY_C" || fail "Legacy type-value flex-array implementation is missing"
@@ -195,6 +221,7 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'single_body_replacement=remove_avtab_node\n'
   printf 'forward_declarations=restored\n'
   printf 'legacy_implementations=placed-at-original-body-locations\n'
+  printf 'newer_filename_transition_helpers=removed-dead-on-4.19\n'
   printf 'definitions_after_compatibility_macros=yes\n'
   printf 'new_filename_transition_layout_remaining=no\n'
   printf 'new_type_value_pointer_array_remaining=no\n'

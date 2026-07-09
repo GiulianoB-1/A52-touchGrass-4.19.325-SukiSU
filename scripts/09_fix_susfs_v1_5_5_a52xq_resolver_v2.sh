@@ -15,12 +15,29 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-old = "                           'static void cleanup_group_ids(',\n"
-new = "                           'static void cleanup_mnt(',\n"
-count = text.count(old)
-if count != 1:
-    raise SystemExit(f"clone_mnt boundary: expected one match, found {count}")
-path.write_text(text.replace(old, new, 1))
+
+replacements = (
+    (
+        "                           'static void cleanup_group_ids(',\n",
+        "                           'static void cleanup_mnt(',\n",
+        1,
+        "clone_mnt boundary",
+    ),
+    (
+        "                           'static int __init init_mount_tree(',\n",
+        "                           'static void __init init_mount_tree(',\n",
+        2,
+        "copy_mnt_ns boundary",
+    ),
+)
+
+for old, new, expected, label in replacements:
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(f"{label}: expected {expected} matches, found {count}")
+    text = text.replace(old, new)
+
+path.write_text(text)
 PY
 
 exec "$RESOLVER" "$@"

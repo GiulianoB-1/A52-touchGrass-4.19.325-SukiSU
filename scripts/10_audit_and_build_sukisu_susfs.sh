@@ -3,9 +3,10 @@ set -Eeuo pipefail
 source "$(dirname "$0")/common.sh"
 
 TARGET_VERSION=4.19.153
-BASE_AUDIT_SCRIPT="$(dirname "$0")/08_audit_and_build_sukisu.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASE_AUDIT_SCRIPT="$SCRIPT_DIR/08_audit_and_build_sukisu.sh"
 SUSFS_REPORT="$ARTIFACTS_DIR/susfs-v1.5.5-integration.txt"
-TEMP_AUDIT_SCRIPT="$(mktemp)"
+TEMP_AUDIT_SCRIPT="$(mktemp "$SCRIPT_DIR/.susfs-audit.XXXXXX.sh")"
 trap 'rm -f "$TEMP_AUDIT_SCRIPT"' EXIT
 
 test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before SukiSU SUSFS audit"

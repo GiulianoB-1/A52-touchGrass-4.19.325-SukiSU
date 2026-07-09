@@ -22,9 +22,9 @@ trap 'rm -f "$before" "$temporary_legacy"' EXIT
 # The original conversion script intentionally verifies that no newer-layout
 # implementation remains. Three replacement ranges in its first revision begin
 # at forward declarations, so those two checks must run only after placement is
-# normalized. remove_avtab_node is replaced at its real function body and must
-# remain a single definition. Create a temporary execution copy with only those
-# premature checks deferred; every other fail-closed check remains active.
+# normalized. remove_avtab_node is replaced at its real function body and keeps
+# its original forward declaration. Create a temporary execution copy with only
+# those premature checks deferred; every other fail-closed check remains active.
 python3 - "$LEGACY_SCRIPT" "$temporary_legacy" <<'PY'
 from pathlib import Path
 import sys
@@ -173,10 +173,13 @@ for function_name in (
 path.write_text(text)
 PY
 
-# remove_avtab_node was replaced at its real body and therefore has one
-# definition and no forward declaration to normalize.
-test "$(grep -Ec '^static bool remove_avtab_node\(' "$SEPOLICY_C")" -eq 1 || \
-  fail "Expected exactly one legacy remove_avtab_node definition"
+# remove_avtab_node keeps one original forward declaration and has one legacy
+# definition. Count and verify those separately instead of treating both lines
+# as duplicate implementations.
+test "$(grep -Ec '^static bool remove_avtab_node\(' "$SEPOLICY_C")" -eq 2 || \
+  fail "Expected one declaration and one definition for remove_avtab_node"
+test "$(grep -Fc 'static bool remove_avtab_node(struct policydb *db, struct avtab_node *node);' "$SEPOLICY_C")" -eq 1 || \
+  fail "Expected exactly one remove_avtab_node forward declaration"
 grep -Fq "Android's legacy flex-array avtab has no safe public unlink primitive" "$SEPOLICY_C" || \
   fail "Legacy remove_avtab_node implementation is missing"
 
@@ -219,6 +222,8 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'legacy_conversion=completed-before-normalization\n'
   printf 'normalized_functions=3\n'
   printf 'single_body_replacement=remove_avtab_node\n'
+  printf 'remove_avtab_node_forward_declarations=1\n'
+  printf 'remove_avtab_node_definitions=1\n'
   printf 'forward_declarations=restored\n'
   printf 'legacy_implementations=placed-at-original-body-locations\n'
   printf 'newer_filename_transition_helpers=removed-dead-on-4.19\n'

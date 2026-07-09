@@ -18,6 +18,7 @@ on:
       - 'scripts/07_patch_sukisu_4.19_runtime_selinux.sh'
       - 'scripts/07_patch_sukisu_4.19_legacy_sepolicy.sh'
       - 'scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh'
+      - 'scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh'
       - 'scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh'
       - 'scripts/07_patch_sukisu_4.19_supercall.sh'
       - 'scripts/08_audit_and_build_sukisu.sh'
@@ -88,6 +89,9 @@ jobs:
 
       - name: Convert and normalize SukiSU for the legacy Linux 4.19 SELinux policydb
         run: ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
+
+      - name: Fix Linux 4.19 SukiSU SELinux RCU deadlock
+        run: ./scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh
 
       - name: Correct legacy SELinux filename-transition bitmap index
         run: ./scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh

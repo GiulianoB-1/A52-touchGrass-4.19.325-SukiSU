@@ -120,6 +120,7 @@ test "$audit_rc" -eq 0 || fail "Warning-enabled SukiSU audit build failed. See $
 
 BPF_OBJECT="$AUDIT_OUT/kernel/bpf/verifier.o"
 KSU_ARCHIVE="$AUDIT_OUT/drivers/kernelsu/built-in.a"
+KSU_MEMBERS_RAW="$ARTIFACTS_DIR/sukisu-4.19.153-built-in.members.raw.txt"
 KSU_MEMBERS="$ARTIFACTS_DIR/sukisu-4.19.153-built-in.members.txt"
 KSU_ARTIFACT="$ARTIFACTS_DIR/sukisu-4.19.153-built-in.a"
 AR_TOOL="${CROSS_COMPILE}ar"
@@ -127,8 +128,36 @@ AR_TOOL="${CROSS_COMPILE}ar"
 test -s "$BPF_OBJECT" || fail "BPF verifier object was not produced"
 test -s "$KSU_ARCHIVE" || fail "SukiSU Linux 4.19 built-in archive was not produced"
 test -x "$AR_TOOL" || fail "Cross-toolchain ar is missing"
-"$AR_TOOL" t "$KSU_ARCHIVE" | tee "$KSU_MEMBERS"
-test -s "$KSU_MEMBERS" || fail "SukiSU built-in archive has no members"
+"$AR_TOOL" t "$KSU_ARCHIVE" > "$KSU_MEMBERS_RAW"
+test -s "$KSU_MEMBERS_RAW" || fail "SukiSU built-in archive has no members"
+
+# Linux 4.19 creates a thin archive, so ar lists absolute paths into AUDIT_OUT.
+# Preserve that raw list, then normalize every member to an audit-relative path
+# before checking exact SukiSU membership.
+python3 - "$KSU_MEMBERS_RAW" "$KSU_MEMBERS" "$AUDIT_OUT" <<'PY'
+from pathlib import Path
+import sys
+
+raw_path = Path(sys.argv[1])
+normalized_path = Path(sys.argv[2])
+prefix = str(Path(sys.argv[3]).resolve()) + "/"
+raw_members = [line.strip() for line in raw_path.read_text().splitlines() if line.strip()]
+if not raw_members:
+    raise SystemExit("thin archive member list is empty")
+normalized = []
+for member in raw_members:
+    if not member.startswith(prefix):
+        raise SystemExit(f"thin archive member is outside audit output: {member}")
+    relative = member[len(prefix):]
+    if not relative.startswith("drivers/kernelsu/") or not relative.endswith(".o"):
+        raise SystemExit(f"unexpected SukiSU archive member: {relative}")
+    normalized.append(relative)
+if len(normalized) != len(set(normalized)):
+    raise SystemExit("duplicate SukiSU archive members detected")
+normalized_path.write_text("\n".join(normalized) + "\n")
+PY
+
+cat "$KSU_MEMBERS"
 for required_member in \
   drivers/kernelsu/core/init.o \
   drivers/kernelsu/feature/kernel_umount.o \
@@ -144,6 +173,7 @@ cp "$BPF_OBJECT" "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o"
 cp "$KSU_ARCHIVE" "$KSU_ARTIFACT"
 sha256sum "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o" > "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256"
 sha256sum "$KSU_ARTIFACT" > "$KSU_ARTIFACT.sha256"
+sha256sum "$KSU_MEMBERS_RAW" > "$KSU_MEMBERS_RAW.sha256"
 sha256sum "$KSU_MEMBERS" > "$KSU_MEMBERS.sha256"
 
 warning_count=$(grep -Ec '(^|[[:space:]])[^[:space:]]+:[0-9]+:[0-9]+: warning:' "$AUDIT_LOG" || true)
@@ -170,6 +200,7 @@ test "$uninitialized_count" -eq 0 || fail "SukiSU audit contains uninitialized-v
   printf 'uninitialized_diagnostics=%s\n' "$uninitialized_count"
   printf 'bpf_object_sha256=%s\n' "$(cut -d' ' -f1 "$ARTIFACTS_DIR/verifier-4.19.153-sukisu.o.sha256")"
   printf 'sukisu_archive_format=linux-4.19-thin-built-in-a\n'
+  printf 'sukisu_archive_member_paths=absolute-normalized-to-audit-relative\n'
   printf 'sukisu_archive_members=%s\n' "$(wc -l < "$KSU_MEMBERS")"
   printf 'sukisu_archive_sha256=%s\n' "$(cut -d' ' -f1 "$KSU_ARTIFACT.sha256")"
   printf 'allowlist_file_format=4\n'

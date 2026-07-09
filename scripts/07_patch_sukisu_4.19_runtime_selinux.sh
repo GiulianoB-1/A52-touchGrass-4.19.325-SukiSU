@@ -20,9 +20,7 @@ grep -Fq 'extern long notrace probe_user_write(void __user *dst, const void *src
 ! grep -RFn 'strncpy_from_user_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel unexpectedly provides strncpy_from_user_nofault; review patch"
 ! grep -RFn 'copy_from_user_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel unexpectedly provides copy_from_user_nofault; review patch"
 ! grep -RFn 'copy_to_user_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel unexpectedly provides copy_to_user_nofault; review patch"
-grep -Fq 'void' "$KERNEL_DIR/include/linux/cred.h" || fail "Credential header is unreadable"
-grep -Fq 'void' "$KERNEL_DIR/include/linux/cred.h" >/dev/null
-grep -Fq 'security;' "$KERNEL_DIR/include/linux/cred.h" || fail "Linux 4.19 cred security pointer is missing"
+grep -Fq '*security;' "$KERNEL_DIR/include/linux/cred.h" || fail "Linux 4.19 cred security pointer is missing"
 grep -Fq 'struct task_security_struct' "$KERNEL_DIR/security/selinux/include/objsec.h" || fail "Linux 4.19 SELinux task security structure is missing"
 
 info "Adapting SukiSU runtime no-fault access and SELinux credential access to Linux 4.19"

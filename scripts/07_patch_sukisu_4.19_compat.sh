@@ -6,24 +6,29 @@ TARGET_VERSION=4.19.153
 SUKISU_DIR="$KERNEL_DIR/KernelSU"
 INIT_C="$SUKISU_DIR/kernel/core/init.c"
 SUCOMPAT_C="$SUKISU_DIR/kernel/feature/sucompat.c"
+PATCH_MEMORY_C="$SUKISU_DIR/kernel/hook/arm64/patch_memory.c"
 PATCH_OUT="$ARTIFACTS_DIR/sukisu-linux-4.19-compat.patch"
 REPORT="$ARTIFACTS_DIR/sukisu-linux-4.19-compat.txt"
 
 test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before SukiSU compatibility patch"
 test -f "$INIT_C" || fail "SukiSU core/init.c is missing"
 test -f "$SUCOMPAT_C" || fail "SukiSU feature/sucompat.c is missing"
+test -f "$PATCH_MEMORY_C" || fail "SukiSU ARM64 patch_memory.c is missing"
 test ! -e "$KERNEL_DIR/include/linux/pgtable.h" || fail "Unexpected linux/pgtable.h exists; review compatibility patch"
 test -f "$KERNEL_DIR/arch/arm64/include/asm/pgtable.h" || fail "ARM64 asm/pgtable.h is missing"
 ! grep -Fq '#define MODULE_IMPORT_NS' "$KERNEL_DIR/include/linux/module.h" || fail "MODULE_IMPORT_NS already exists; review compatibility patch"
 ! grep -RFn 'strncpy_from_user_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel already provides strncpy_from_user_nofault; review compatibility patch"
+! grep -RFn 'copy_to_kernel_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel already provides copy_to_kernel_nofault; review compatibility patch"
+grep -Fq 'probe_kernel_write(void *dst, const void *src, size_t size)' "$KERNEL_DIR/include/linux/uaccess.h" || fail "Legacy probe_kernel_write helper is missing"
 
 info "Applying exact SukiSU compatibility fixes for Linux 4.19"
-python3 - "$INIT_C" "$SUCOMPAT_C" <<'PY'
+python3 - "$INIT_C" "$SUCOMPAT_C" "$PATCH_MEMORY_C" <<'PY'
 from pathlib import Path
 import sys
 
 init_c = Path(sys.argv[1])
 sucompat_c = Path(sys.argv[2])
+patch_memory_c = Path(sys.argv[3])
 
 init_text = init_c.read_text()
 old_import = '''#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
@@ -101,6 +106,13 @@ sucompat_text = sucompat_text.replace(
     'ksu_strncpy_from_user_nofault(path, *filename_user, sizeof(path));'
 )
 sucompat_c.write_text(sucompat_text)
+
+patch_text = patch_memory_c.read_text()
+old_write = 'copy_to_kernel_nofault(map, src, len);'
+new_write = 'probe_kernel_write(map, src, len); /* Linux 4.19 helper name. */'
+if patch_text.count(old_write) != 1:
+    raise SystemExit(f"hook/arm64/patch_memory.c: expected one copy_to_kernel_nofault call, found {patch_text.count(old_write)}")
+patch_memory_c.write_text(patch_text.replace(old_write, new_write, 1))
 PY
 
 grep -Fq '#ifdef MODULE_IMPORT_NS' "$INIT_C" || fail "MODULE_IMPORT_NS guard was not added"
@@ -109,9 +121,14 @@ grep -Fq '#include <asm/pgtable.h>' "$SUCOMPAT_C" || fail "ARM64 pgtable fallbac
 grep -Fq 'static long ksu_strncpy_from_user_nofault' "$SUCOMPAT_C" || fail "Local nofault copy helper was not added"
 test "$(grep -Fc 'ksu_strncpy_from_user_nofault(path, *filename_user, sizeof(path));' "$SUCOMPAT_C")" -eq 2 || fail "SukiSU nofault copy calls were not redirected"
 ! grep -Eq '^[[:space:]]*strncpy_from_user_nofault\(' "$SUCOMPAT_C" || fail "Unsupported kernel helper call remains"
+! grep -Fq 'copy_to_kernel_nofault(map, src, len)' "$PATCH_MEMORY_C" || fail "Unsupported copy_to_kernel_nofault call remains"
+grep -Fq 'probe_kernel_write(map, src, len)' "$PATCH_MEMORY_C" || fail "Legacy probe_kernel_write call was not installed"
 
 git -C "$SUKISU_DIR" diff --check
-git -C "$SUKISU_DIR" diff --binary -- kernel/core/init.c kernel/feature/sucompat.c > "$PATCH_OUT"
+git -C "$SUKISU_DIR" diff --binary -- \
+  kernel/core/init.c \
+  kernel/feature/sucompat.c \
+  kernel/hook/arm64/patch_memory.c > "$PATCH_OUT"
 test -s "$PATCH_OUT" || fail "SukiSU Linux 4.19 compatibility patch is empty"
 sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
 
@@ -122,6 +139,8 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'pgtable_include=asm/pgtable.h\n'
   printf 'user_string_nofault=local-upstream-semantics-backport\n'
   printf 'user_string_nofault_calls=2\n'
+  printf 'kernel_write_nofault=probe_kernel_write-legacy-name\n'
+  printf 'kernel_write_nofault_calls=1\n'
   printf 'compat_scope=linux-4.19-only\n'
   printf 'compat_patch_sha256=%s\n' "$(cut -d' ' -f1 "$PATCH_OUT.sha256")"
 } | tee "$REPORT"

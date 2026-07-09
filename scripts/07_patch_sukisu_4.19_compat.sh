@@ -15,6 +15,7 @@ test -f "$SUCOMPAT_C" || fail "SukiSU feature/sucompat.c is missing"
 test ! -e "$KERNEL_DIR/include/linux/pgtable.h" || fail "Unexpected linux/pgtable.h exists; review compatibility patch"
 test -f "$KERNEL_DIR/arch/arm64/include/asm/pgtable.h" || fail "ARM64 asm/pgtable.h is missing"
 ! grep -Fq '#define MODULE_IMPORT_NS' "$KERNEL_DIR/include/linux/module.h" || fail "MODULE_IMPORT_NS already exists; review compatibility patch"
+! grep -RFn 'strncpy_from_user_nofault' "$KERNEL_DIR/include" "$KERNEL_DIR/mm" >/dev/null 2>&1 || fail "Kernel already provides strncpy_from_user_nofault; review compatibility patch"
 
 info "Applying exact SukiSU compatibility fixes for Linux 4.19"
 python3 - "$INIT_C" "$SUCOMPAT_C" <<'PY'
@@ -48,12 +49,66 @@ old_include = '#include <linux/pgtable.h>\n'
 new_include = '#include <asm/pgtable.h> /* Linux 4.19 has no <linux/pgtable.h> wrapper. */\n'
 if sucompat_text.count(old_include) != 1:
     raise SystemExit(f"feature/sucompat.c: expected one linux/pgtable.h include, found {sucompat_text.count(old_include)}")
-sucompat_c.write_text(sucompat_text.replace(old_include, new_include, 1))
+sucompat_text = sucompat_text.replace(old_include, new_include, 1)
+
+helper_marker = '''#define SU_PATH "/system/bin/su"
+#define SH_PATH "/system/bin/sh"
+
+'''
+helper = '''#define SU_PATH "/system/bin/su"
+#define SH_PATH "/system/bin/sh"
+
+/*
+ * Linux 4.19 predates strncpy_from_user_nofault(). Keep this compatibility
+ * helper local to SukiSU and preserve the upstream non-pagefault semantics.
+ */
+static long ksu_strncpy_from_user_nofault(char *dst,
+                                          const char __user *unsafe_addr,
+                                          long count)
+{
+    mm_segment_t old_fs = get_fs();
+    long ret;
+
+    if (unlikely(count <= 0))
+        return 0;
+
+    set_fs(USER_DS);
+    pagefault_disable();
+    ret = strncpy_from_user(dst, unsafe_addr, count);
+    pagefault_enable();
+    set_fs(old_fs);
+
+    if (ret >= count) {
+        ret = count;
+        dst[ret - 1] = '\\0';
+    } else if (ret > 0) {
+        ret++;
+    }
+
+    return ret;
+}
+
+'''
+if sucompat_text.count(helper_marker) != 1:
+    raise SystemExit(f"feature/sucompat.c: expected one helper insertion marker, found {sucompat_text.count(helper_marker)}")
+sucompat_text = sucompat_text.replace(helper_marker, helper, 1)
+
+call_count = sucompat_text.count('strncpy_from_user_nofault(path, *filename_user, sizeof(path));')
+if call_count != 2:
+    raise SystemExit(f"feature/sucompat.c: expected two nofault copy calls, found {call_count}")
+sucompat_text = sucompat_text.replace(
+    'strncpy_from_user_nofault(path, *filename_user, sizeof(path));',
+    'ksu_strncpy_from_user_nofault(path, *filename_user, sizeof(path));'
+)
+sucompat_c.write_text(sucompat_text)
 PY
 
 grep -Fq '#ifdef MODULE_IMPORT_NS' "$INIT_C" || fail "MODULE_IMPORT_NS guard was not added"
 ! grep -Fq '#include <linux/pgtable.h>' "$SUCOMPAT_C" || fail "Unsupported linux/pgtable.h include remains"
 grep -Fq '#include <asm/pgtable.h>' "$SUCOMPAT_C" || fail "ARM64 pgtable fallback was not added"
+grep -Fq 'static long ksu_strncpy_from_user_nofault' "$SUCOMPAT_C" || fail "Local nofault copy helper was not added"
+test "$(grep -Fc 'ksu_strncpy_from_user_nofault(path, *filename_user, sizeof(path));' "$SUCOMPAT_C")" -eq 2 || fail "SukiSU nofault copy calls were not redirected"
+! grep -Eq '^[[:space:]]*strncpy_from_user_nofault\(' "$SUCOMPAT_C" || fail "Unsupported kernel helper call remains"
 
 git -C "$SUKISU_DIR" diff --check
 git -C "$SUKISU_DIR" diff --binary -- kernel/core/init.c kernel/feature/sucompat.c > "$PATCH_OUT"
@@ -65,6 +120,8 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'sukisu_commit=%s\n' "$(git -C "$SUKISU_DIR" rev-parse HEAD)"
   printf 'module_import_ns=guarded-when-macro-exists\n'
   printf 'pgtable_include=asm/pgtable.h\n'
+  printf 'user_string_nofault=local-upstream-semantics-backport\n'
+  printf 'user_string_nofault_calls=2\n'
   printf 'compat_scope=linux-4.19-only\n'
   printf 'compat_patch_sha256=%s\n' "$(cut -d' ' -f1 "$PATCH_OUT.sha256")"
 } | tee "$REPORT"

@@ -5,6 +5,7 @@ source "$(dirname "$0")/common.sh"
 TARGET_VERSION=4.19.153
 HEADER="$KERNEL_DIR/include/linux/bpf_verifier.h"
 VERIFIER="$KERNEL_DIR/kernel/bpf/verifier.c"
+SYSCALL="$KERNEL_DIR/kernel/bpf/syscall.c"
 REPORT="$ARTIFACTS_DIR/bpf-verifier-repair.txt"
 PATCH_OUT="$ARTIFACTS_DIR/bpf-verifier-repair.patch"
 
@@ -14,19 +15,23 @@ test -f "$ARTIFACTS_DIR/apply-result-v4.19.153.txt" || fail "Linux 4.19.153 upda
 grep -q '^apply_exit=0$' "$ARTIFACTS_DIR/apply-result-v4.19.153.txt" || fail "Linux 4.19.153 update did not complete successfully"
 test -f "$HEADER" || fail "Missing $HEADER"
 test -f "$VERIFIER" || fail "Missing $VERIFIER"
+test -f "$SYSCALL" || fail "Missing $SYSCALL"
 
 cp "$HEADER" "$ARTIFACTS_DIR/bpf_verifier.h.before"
 cp "$VERIFIER" "$ARTIFACTS_DIR/verifier.c.before"
+cp "$SYSCALL" "$ARTIFACTS_DIR/syscall.c.before"
 
-python3 - "$HEADER" "$VERIFIER" <<'PY'
+python3 - "$HEADER" "$VERIFIER" "$SYSCALL" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 header_path = Path(sys.argv[1])
 verifier_path = Path(sys.argv[2])
+syscall_path = Path(sys.argv[3])
 header = header_path.read_text()
 verifier = verifier_path.read_text()
+syscall = syscall_path.read_text()
 
 
 def sub_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
@@ -34,6 +39,14 @@ def sub_once(text: str, pattern: str, replacement: str, label: str, flags: int =
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one match, found {count}")
     return updated
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly one match, found {count}")
+    return text.replace(old, new, 1)
+
 
 # REG_LIVE_DONE was added locally, checked in two places, but never set.
 header = sub_once(
@@ -134,8 +147,45 @@ verifier = sub_once(
     "initialize ctx_access using upstream branch semantics",
 )
 
+# The vendor BPF attach backport called sock_map_get_from_fd() before prog was
+# initialized and left ptype unset for SK_MSG/SK_SKB attach types. Restore the
+# upstream type-selection flow, adapted to the vendor helper name/signature.
+syscall = replace_once(
+    syscall,
+    "\tcase BPF_SK_MSG_VERDICT:\n"
+    "\t\tret = sock_map_get_from_fd(attr, prog);\n"
+    "\t\tbreak;\n"
+    "\tcase BPF_SK_SKB_STREAM_PARSER:\n"
+    "\tcase BPF_SK_SKB_STREAM_VERDICT:\n"
+    "\t\tret = sock_map_get_from_fd(attr, prog);\n"
+    "\t\tbreak;\n",
+    "\tcase BPF_SK_MSG_VERDICT:\n"
+    "\t\tptype = BPF_PROG_TYPE_SK_MSG;\n"
+    "\t\tbreak;\n"
+    "\tcase BPF_SK_SKB_STREAM_PARSER:\n"
+    "\tcase BPF_SK_SKB_STREAM_VERDICT:\n"
+    "\t\tptype = BPF_PROG_TYPE_SK_SKB;\n"
+    "\t\tbreak;\n",
+    "restore socket-map attach type selection",
+)
+
+# The same backport omitted the break after BPF_LIRC_MODE2, causing it to fall
+# through and be treated as a cgroup-sysctl program.
+syscall = replace_once(
+    syscall,
+    "\tcase BPF_LIRC_MODE2:\n"
+    "\t\tptype = BPF_PROG_TYPE_LIRC_MODE2;\n"
+    "\tcase BPF_CGROUP_SYSCTL:\n",
+    "\tcase BPF_LIRC_MODE2:\n"
+    "\t\tptype = BPF_PROG_TYPE_LIRC_MODE2;\n"
+    "\t\tbreak;\n"
+    "\tcase BPF_CGROUP_SYSCTL:\n",
+    "restore LIRC attach-type break",
+)
+
 header_path.write_text(header)
 verifier_path.write_text(verifier)
+syscall_path.write_text(syscall)
 PY
 
 # Strict post-repair checks.
@@ -148,9 +198,12 @@ grep -Fq 'if (env->explore_alu_limits)' "$VERIFIER" || fail "explore_alu_limits 
 grep -Fq 'ctx_access = true;' "$VERIFIER" || fail "ctx_access read assignment is missing"
 grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$VERIFIER" || fail "ctx_access write assignment is missing"
 grep -Fq 'struct bpf_id_pair idmap_scratch[BPF_ID_MAP_SIZE];' "$HEADER" || fail "Header id-map scratch definition is missing"
+grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$SYSCALL" || fail "SK_MSG attach type repair is missing"
+grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$SYSCALL" || fail "SK_SKB attach type repair is missing"
+! sed -n '/case BPF_SK_MSG_VERDICT:/,+2p' "$SYSCALL" | grep -Fq 'ret = sock_map_get_from_fd(attr, prog);' || fail "Uninitialized sock-map attach call remains"
 
-git -C "$KERNEL_DIR" diff --check -- include/linux/bpf_verifier.h kernel/bpf/verifier.c
-git -C "$KERNEL_DIR" diff --binary -- include/linux/bpf_verifier.h kernel/bpf/verifier.c > "$PATCH_OUT"
+git -C "$KERNEL_DIR" diff --check -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c
+git -C "$KERNEL_DIR" diff --binary -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c > "$PATCH_OUT"
 test -s "$PATCH_OUT" || fail "BPF repair produced no patch"
 sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
 
@@ -161,8 +214,9 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'unified_id_map_size=BPF_ID_MAP_SIZE\n'
   printf 'restored_guard=env->explore_alu_limits\n'
   printf 'initialized_ctx_access=upstream-branch-semantics\n'
-  printf 'changed_files=include/linux/bpf_verifier.h,kernel/bpf/verifier.c\n'
+  printf 'repaired_attach_types=SK_MSG,SK_SKB,LIRC_MODE2\n'
+  printf 'changed_files=include/linux/bpf_verifier.h,kernel/bpf/verifier.c,kernel/bpf/syscall.c\n'
   printf 'patch_sha256=%s\n' "$(cut -d' ' -f1 "$PATCH_OUT.sha256")"
 } | tee "$REPORT"
 
-info "BPF verifier source repair completed"
+info "BPF verifier and syscall source repair completed"

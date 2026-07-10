@@ -68,7 +68,7 @@ require_config_y() {
 }
 
 require_config_disabled() {
-  ! grep -Fq "CONFIG_$1=y" "$QEMU_CONFIG" || fail "QEMU config unexpectedly enabled CONFIG_$1"
+  ! grep -Eq "^CONFIG_$1=(y|m)$" "$QEMU_CONFIG" || fail "QEMU config unexpectedly enabled CONFIG_$1"
 }
 
 info "Compiling exact A52 full-stack objects without producing a flashable device Image"
@@ -104,6 +104,7 @@ set +e
     CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
     W=1 V=1 -j"${JOBS:-4}" \
     kernel/bpf/verifier.o \
+    kernel/bpf/syscall.o \
     drivers/kernelsu/ \
     fs/susfs.o \
     fs/susfs_sukisu_compat.o \
@@ -118,6 +119,7 @@ test "$a52_audit_rc" -eq 0 || fail "A52 full-stack object audit failed"
 
 for object in \
   kernel/bpf/verifier.o \
+  kernel/bpf/syscall.o \
   drivers/kernelsu/built-in.a \
   fs/susfs.o \
   fs/susfs_sukisu_compat.o \
@@ -129,6 +131,7 @@ done
 cp "$A52_AUDIT_OUT/.config" "$QEMU_ARTIFACT_DIR/a52-audit-config"
 sha256sum \
   "$A52_AUDIT_OUT/kernel/bpf/verifier.o" \
+  "$A52_AUDIT_OUT/kernel/bpf/syscall.o" \
   "$A52_AUDIT_OUT/drivers/kernelsu/built-in.a" \
   "$A52_AUDIT_OUT/fs/susfs.o" \
   "$A52_AUDIT_OUT/fs/susfs_sukisu_compat.o" \
@@ -202,12 +205,16 @@ for symbol in \
   config_enable "$symbol"
 done
 
-# These host/boot-management features are irrelevant inside the QEMU guest and
-# exercise vendor ARM64 code that is incompatible with the generic v4.19 config.
+# These subsystems are not exercised by the QEMU guest. Keeping them disabled
+# avoids unrelated vendor-only API mismatches while preserving the intended
+# BPF, SukiSU, SUSFS, KASAN and Lockdep coverage.
 for symbol in \
   KVM \
   KEXEC \
   CRASH_DUMP \
+  NFS_FS \
+  TRANSPARENT_HUGEPAGE \
+  FANOTIFY \
   KPM \
   KSU_DEBUG \
   KSU_SUSFS_SUS_PATH \
@@ -252,7 +259,7 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
 # Save the resolved configuration before validation so failed runs remain diagnosable.
 cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
 grep -E '^(CONFIG_|# CONFIG_)' "$QEMU_CONFIG" \
-  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP)' \
+  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY)' \
   > "$QEMU_ARTIFACT_DIR/qemu-config-key-symbols-$PROFILE.txt" || true
 
 for required in \
@@ -278,7 +285,7 @@ if test "$PROFILE" = lockdep; then
 else
   require_config_y KASAN
 fi
-for disabled in KVM KEXEC CRASH_DUMP; do
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY; do
   require_config_disabled "$disabled"
 done
 ! grep -Eq '^CONFIG_KSU_SUSFS_(SUS_PATH|SUS_KSTAT|TRY_UMOUNT|OPEN_REDIRECT|SUS_SU)=y$' "$QEMU_CONFIG" \
@@ -288,7 +295,6 @@ info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"
 set +e
 make -C "$KERNEL_DIR" O="$QEMU_OUT" \
   DTC_EXT="$KERNEL_DIR/tools/dtc" \
-  KCFLAGS="$AUDIT_FLAGS" \
   CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
   -j"${JOBS:-4}" Image 2>&1 | tee "$QEMU_BUILD_LOG"
 qemu_build_rc=${PIPESTATUS[0]}

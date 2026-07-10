@@ -200,7 +200,7 @@ grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$VERIFIER" || fail "c
 grep -Fq 'struct bpf_id_pair idmap_scratch[BPF_ID_MAP_SIZE];' "$HEADER" || fail "Header id-map scratch definition is missing"
 grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$SYSCALL" || fail "SK_MSG attach type repair is missing"
 grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$SYSCALL" || fail "SK_SKB attach type repair is missing"
-! grep -Fq $'case BPF_SK_MSG_VERDICT:\n\t\tret = sock_map_get_from_fd(attr, prog);' "$SYSCALL" || fail "Uninitialized sock-map attach call remains"
+! sed -n '/case BPF_SK_MSG_VERDICT:/,+2p' "$SYSCALL" | grep -Fq 'ret = sock_map_get_from_fd(attr, prog);' || fail "Uninitialized sock-map attach call remains"
 
 git -C "$KERNEL_DIR" diff --check -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c
 git -C "$KERNEL_DIR" diff --binary -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c > "$PATCH_OUT"

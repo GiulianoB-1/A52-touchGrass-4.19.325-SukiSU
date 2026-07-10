@@ -9,6 +9,7 @@ STABLE_DIR="$WORKSPACE/linux-stable"
 PATCH_FILE="$ARTIFACTS_DIR/linux-${FROM_TAG#v}-to-${TO_TAG#v}.patch"
 APPLY_LOG="$LOG_DIR/apply-${TO_TAG}.log"
 RESOLUTION_LOG="$ARTIFACTS_DIR/manual-resolution-${TO_TAG}.txt"
+UPSTREAM_ARM64_DEFCONFIG="$ARTIFACTS_DIR/arm64-defconfig-${TO_TAG}.config"
 
 cleanup_report() {
   git -C "$KERNEL_DIR" status --short > "$ARTIFACTS_DIR/source-status-${TO_TAG}.txt" || true
@@ -137,14 +138,17 @@ require_fixed "crypto/algif_aead.c" "aead_request_set_callback(&areq->cra_u.aead
 require_fixed "crypto/algif_aead.c" "CRYPTO_TFM_REQ_MAY_SLEEP |"
 require_absent "crypto/algif_aead.c" "if (err == -EINPROGRESS || err == -EBUSY)"
 
-info "Installing pinned upstream ARM64 defconfig for generic QEMU builds"
+info "Extracting pinned upstream ARM64 defconfig for generic QEMU builds"
+git -C "$STABLE_DIR" show "$TO_TAG:arch/arm64/configs/defconfig" > "$UPSTREAM_ARM64_DEFCONFIG"
+test -s "$UPSTREAM_ARM64_DEFCONFIG" || fail "Unable to extract ARM64 QEMU defconfig from Linux $TO_TAG"
 install -D -m 0644 \
-  "$STABLE_DIR/arch/arm64/configs/defconfig" \
+  "$UPSTREAM_ARM64_DEFCONFIG" \
   "$KERNEL_DIR/arch/arm64/configs/defconfig"
 cmp -s \
-  "$STABLE_DIR/arch/arm64/configs/defconfig" \
+  "$UPSTREAM_ARM64_DEFCONFIG" \
   "$KERNEL_DIR/arch/arm64/configs/defconfig" \
   || fail "Installed ARM64 QEMU defconfig does not match Linux $TO_TAG"
+sha256sum "$UPSTREAM_ARM64_DEFCONFIG" > "$UPSTREAM_ARM64_DEFCONFIG.sha256"
 
 find "$KERNEL_DIR" -type f -name '*.rej' -delete
 actual_version=$(kernel_version)

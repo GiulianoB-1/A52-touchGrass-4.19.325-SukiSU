@@ -38,12 +38,14 @@ replace_once(
   SECURITYFS \\
   SECURITY_SELINUX \\
 """,
-    """  SECURITY \\
+    """  IPV6 \\
+  SAMSUNG_PRODUCT_SHIP \\
+  SECURITY \\
   SECURITY_NETWORK \\
   SECURITYFS \\
   SECURITY_SELINUX \\
 """,
-    "enable SELinux network dependency",
+    "enable generic networking and SELinux dependencies",
 )
 
 replace_once(
@@ -54,6 +56,21 @@ replace_once(
   TASKSTATS \\
   ARCH_QCOM \\
   COMMON_CLK_QCOM \\
+  SEC_PM \\
+  SEC_MM \\
+  SOC_BUS \\
+  INPUT \\
+  HID \\
+  DRM \\
+  FB \\
+  MEDIA_SUPPORT \\
+  SOUND \\
+  SND \\
+  USB \\
+  MMC \\
+  ATA \\
+  SCSI \\
+  NETFILTER \\
   SCHED_WALT \\
 """,
     "extend unused QEMU subsystem disable list",
@@ -72,7 +89,7 @@ config_value SECURITY_SELINUX_SIDTAB_HASH_BITS 9
 
 replace_once(
     """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|SCHED_WALT)""",
-    """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|TASKSTATS|ARCH_QCOM|COMMON_CLK_QCOM|SECURITY_NETWORK|NETWORK_SECMARK|SECURITY_SELINUX|SECURITY_SELINUX_SIDTAB_HASH_BITS|SCHED_WALT)""",
+    """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|IPV6|SAMSUNG_PRODUCT_SHIP|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|TASKSTATS|ARCH_QCOM|COMMON_CLK_QCOM|SEC_PM|SEC_MM|SOC_BUS|INPUT|HID|DRM|FB|MEDIA_SUPPORT|SOUND|SND|USB|MMC|ATA|SCSI|NETFILTER|SECURITY_NETWORK|NETWORK_SECMARK|SECURITY_SELINUX|SECURITY_SELINUX_SIDTAB_HASH_BITS|SCHED_WALT)""",
     "extend QEMU key-symbol diagnostics",
 )
 
@@ -81,12 +98,14 @@ replace_once(
   KSU \\
 """,
     """  EXT4_FS \\
+  IPV6 \\
+  SAMSUNG_PRODUCT_SHIP \\
   SECURITY_NETWORK \\
   NETWORK_SECMARK \\
   SECURITY_SELINUX \\
   KSU \\
 """,
-    "require resolved SELinux dependencies",
+    "require resolved generic network and SELinux dependencies",
 )
 
 replace_once(
@@ -96,7 +115,7 @@ for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY SCHED_
     """fi
 grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$QEMU_CONFIG" \\
   || fail "QEMU config did not retain CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9"
-for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SCHED_WALT; do
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SEC_PM SEC_MM SOC_BUS INPUT HID DRM FB MEDIA_SUPPORT SOUND SND USB MMC ATA SCSI NETFILTER SCHED_WALT; do
 """,
     "validate resolved SELinux sidtab and disabled subsystems",
 )
@@ -104,7 +123,44 @@ for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKST
 replace_once(
     """info "Generating generic ARM64 virt config from the exact patched source tree"
 """,
-    """info "Fixing disabled QPNP power-on fallback linkage for the generic QEMU build"
+    """info "Restoring standard skb fragment release for the generic QEMU build"
+skbuff_source="$KERNEL_DIR/net/core/skbuff.c"
+python3 - "$skbuff_source" <<'PY_SKBUFF'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old_decl = '''extern int ipa3_add_pool_page(struct page *page);
+
+'''
+old_release = '''\tfor (i = 0; i < shinfo->nr_frags; i++) {
+\t\tif (ipa3_add_pool_page(shinfo->frags[i].page.p) < 0)
+\t\t\t__skb_frag_unref(&shinfo->frags[i]);
+\t}
+'''
+new_release = '''\tfor (i = 0; i < shinfo->nr_frags; i++)
+\t\t__skb_frag_unref(&shinfo->frags[i]);
+'''
+if text.count(old_decl) != 1:
+    raise SystemExit(f"IPA skb pool declaration: expected one match, found {text.count(old_decl)}")
+if text.count(old_release) != 1:
+    raise SystemExit(f"IPA skb fragment release: expected one match, found {text.count(old_release)}")
+text = text.replace(old_decl, '', 1)
+text = text.replace(old_release, new_release, 1)
+path.write_text(text)
+PY_SKBUFF
+! grep -Fq 'ipa3_add_pool_page' "$skbuff_source" \\
+  || fail "QEMU skb fragment release still references the phone IPA pool"
+grep -Fq '__skb_frag_unref(&shinfo->frags[i]);' "$skbuff_source" \\
+  || fail "Standard QEMU skb fragment release is missing"
+git -C "$KERNEL_DIR" diff --check -- net/core/skbuff.c
+git -C "$KERNEL_DIR" diff -- net/core/skbuff.c \\
+  > "$QEMU_ARTIFACT_DIR/qemu-skb-fragment-release-compat.patch"
+test -s "$QEMU_ARTIFACT_DIR/qemu-skb-fragment-release-compat.patch" \\
+  || fail "QEMU skb fragment release compatibility patch is empty"
+
+info "Fixing disabled QPNP power-on fallback linkage for the generic QEMU build"
 qpnp_pon_header="$KERNEL_DIR/include/linux/input/qpnp-power-on.h"
 python3 - "$qpnp_pon_header" <<'PY_QPNP_PON'
 from pathlib import Path
@@ -138,7 +194,7 @@ test -s "$QEMU_ARTIFACT_DIR/qemu-qpnp-pon-fallback-compat.patch" \\
 
 info "Generating generic ARM64 virt config from the exact patched source tree"
 """,
-    "make disabled QPNP power-on fallback internal to each translation unit",
+    "prune phone-only linker dependencies from the generic QEMU build",
 )
 
 replace_once(
@@ -177,7 +233,14 @@ grep -Fq '  COMMON_CLK_QCOM \' "$RUNTIME_SCRIPT"
 grep -Fq '  SECURITY_NETWORK \' "$RUNTIME_SCRIPT"
 grep -Fq '  NETWORK_SECMARK \' "$RUNTIME_SCRIPT"
 grep -Fq '  SECURITY_SELINUX \' "$RUNTIME_SCRIPT"
+grep -Fq '  IPV6 \' "$RUNTIME_SCRIPT"
+grep -Fq '  SAMSUNG_PRODUCT_SHIP \' "$RUNTIME_SCRIPT"
+grep -Fq '  SEC_PM \' "$RUNTIME_SCRIPT"
+grep -Fq '  SEC_MM \' "$RUNTIME_SCRIPT"
+grep -Fq '  NETFILTER \' "$RUNTIME_SCRIPT"
 grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$RUNTIME_SCRIPT"
+grep -Fq '__skb_frag_unref(&shinfo->frags[i]);' "$RUNTIME_SCRIPT"
+grep -Fq 'qemu-skb-fragment-release-compat.patch' "$RUNTIME_SCRIPT"
 grep -Fq 'static inline int qpnp_pon_wd_config(bool enable)' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu-qpnp-pon-fallback-compat.patch' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"' "$RUNTIME_SCRIPT"

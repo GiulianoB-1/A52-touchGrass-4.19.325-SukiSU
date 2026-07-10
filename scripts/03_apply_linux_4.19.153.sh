@@ -137,6 +137,15 @@ require_fixed "crypto/algif_aead.c" "aead_request_set_callback(&areq->cra_u.aead
 require_fixed "crypto/algif_aead.c" "CRYPTO_TFM_REQ_MAY_SLEEP |"
 require_absent "crypto/algif_aead.c" "if (err == -EINPROGRESS || err == -EBUSY)"
 
+info "Installing pinned upstream ARM64 defconfig for generic QEMU builds"
+install -D -m 0644 \
+  "$STABLE_DIR/arch/arm64/configs/defconfig" \
+  "$KERNEL_DIR/arch/arm64/configs/defconfig"
+cmp -s \
+  "$STABLE_DIR/arch/arm64/configs/defconfig" \
+  "$KERNEL_DIR/arch/arm64/configs/defconfig" \
+  || fail "Installed ARM64 QEMU defconfig does not match Linux $TO_TAG"
+
 find "$KERNEL_DIR" -type f -name '*.rej' -delete
 actual_version=$(kernel_version)
 test "$actual_version" = "$TARGET_VERSION" || fail "Resolved tree reports Linux $actual_version instead of $TARGET_VERSION"
@@ -146,6 +155,7 @@ test "$actual_version" = "$TARGET_VERSION" || fail "Resolved tree reports Linux 
   printf 'resolution=accepted-known-preapplied-hunks\n'
   printf 'manual_crypto_adaptation=CRYPTO_TFM_REQ_MAY_SLEEP\n'
   printf 'skipped_absent_driver=drivers/slimbus/qcom-ngd-ctrl.c\n'
+  printf 'qemu_arm64_defconfig_commit=%s\n' "$to_sha"
   printf 'validated_reject_count=%s\n' "${#actual_rejects[@]}"
   printf 'kernel_version=%s\n' "$actual_version"
 } | tee "$RESOLUTION_LOG"

@@ -58,6 +58,30 @@ replace_once(
     "extend resolved-config disabled validation",
 )
 
+replace_once(
+    """info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"\n""",
+    """info "Generating SELinux headers for the generic QEMU output tree"
+make -C "$KERNEL_DIR" O="$QEMU_OUT" \\
+  DTC_EXT="$KERNEL_DIR/tools/dtc" \\
+  scripts/selinux/genheaders/
+qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"
+test -x "$qemu_genheaders" || fail "QEMU SELinux genheaders tool is missing"
+mkdir -p "$QEMU_OUT/security/selinux"
+"$qemu_genheaders" \\
+  "$QEMU_OUT/security/selinux/flask.h" \\
+  "$QEMU_OUT/security/selinux/av_permissions.h"
+test -s "$QEMU_OUT/security/selinux/flask.h" || fail "QEMU SELinux flask.h was not generated"
+test -s "$QEMU_OUT/security/selinux/av_permissions.h" || fail "QEMU SELinux av_permissions.h was not generated"
+sha256sum \\
+  "$QEMU_OUT/security/selinux/flask.h" \\
+  "$QEMU_OUT/security/selinux/av_permissions.h" \\
+  > "$QEMU_ARTIFACT_DIR/qemu-selinux-generated-headers.sha256"
+
+info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"
+""",
+    "generate SELinux headers before the generic QEMU Image build",
+)
+
 path.write_text(text)
 PY
 
@@ -67,5 +91,7 @@ grep -Fq '  TASKSTATS \' "$RUNTIME_SCRIPT"
 grep -Fq '  ARCH_QCOM \' "$RUNTIME_SCRIPT"
 grep -Fq '  COMMON_CLK_QCOM \' "$RUNTIME_SCRIPT"
 grep -Fq 'TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SCHED_WALT' "$RUNTIME_SCRIPT"
+grep -Fq 'qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"' "$RUNTIME_SCRIPT"
+grep -Fq 'qemu-selinux-generated-headers.sha256' "$RUNTIME_SCRIPT"
 
 "$RUNTIME_SCRIPT" "$@"

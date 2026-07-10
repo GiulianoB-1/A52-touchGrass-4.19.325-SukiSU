@@ -34,6 +34,19 @@ def replace_once(old: str, new: str, label: str) -> None:
 
 
 replace_once(
+    """  SECURITY \\
+  SECURITYFS \\
+  SECURITY_SELINUX \\
+""",
+    """  SECURITY \\
+  SECURITY_NETWORK \\
+  SECURITYFS \\
+  SECURITY_SELINUX \\
+""",
+    "enable SELinux network dependency",
+)
+
+replace_once(
     """  FANOTIFY \\
   SCHED_WALT \\
 """,
@@ -47,19 +60,50 @@ replace_once(
 )
 
 replace_once(
+    """config_value HZ 250
+config_value DEFAULT_HUNG_TASK_TIMEOUT 60
+""",
+    """config_value HZ 250
+config_value DEFAULT_HUNG_TASK_TIMEOUT 60
+config_value SECURITY_SELINUX_SIDTAB_HASH_BITS 9
+""",
+    "pin SELinux sidtab hash size",
+)
+
+replace_once(
     """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|SCHED_WALT)""",
-    """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|TASKSTATS|ARCH_QCOM|COMMON_CLK_QCOM|SCHED_WALT)""",
+    """(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|TASKSTATS|ARCH_QCOM|COMMON_CLK_QCOM|SECURITY_NETWORK|NETWORK_SECMARK|SECURITY_SELINUX|SECURITY_SELINUX_SIDTAB_HASH_BITS|SCHED_WALT)""",
     "extend QEMU key-symbol diagnostics",
 )
 
 replace_once(
-    """for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY SCHED_WALT; do""",
-    """for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SCHED_WALT; do""",
-    "extend resolved-config disabled validation",
+    """  EXT4_FS \\
+  KSU \\
+""",
+    """  EXT4_FS \\
+  SECURITY_NETWORK \\
+  NETWORK_SECMARK \\
+  SECURITY_SELINUX \\
+  KSU \\
+""",
+    "require resolved SELinux dependencies",
 )
 
 replace_once(
-    """info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"\n""",
+    """fi
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY SCHED_WALT; do
+""",
+    """fi
+grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$QEMU_CONFIG" \\
+  || fail "QEMU config did not retain CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9"
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SCHED_WALT; do
+""",
+    "validate resolved SELinux sidtab and disabled subsystems",
+)
+
+replace_once(
+    """info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"
+""",
     """info "Generating SELinux headers for the generic QEMU output tree"
 make -C "$KERNEL_DIR" O="$QEMU_OUT" \\
   DTC_EXT="$KERNEL_DIR/tools/dtc" \\
@@ -90,7 +134,10 @@ bash -n "$RUNTIME_SCRIPT"
 grep -Fq '  TASKSTATS \' "$RUNTIME_SCRIPT"
 grep -Fq '  ARCH_QCOM \' "$RUNTIME_SCRIPT"
 grep -Fq '  COMMON_CLK_QCOM \' "$RUNTIME_SCRIPT"
-grep -Fq 'TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SCHED_WALT' "$RUNTIME_SCRIPT"
+grep -Fq '  SECURITY_NETWORK \' "$RUNTIME_SCRIPT"
+grep -Fq '  NETWORK_SECMARK \' "$RUNTIME_SCRIPT"
+grep -Fq '  SECURITY_SELINUX \' "$RUNTIME_SCRIPT"
+grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu-selinux-generated-headers.sha256' "$RUNTIME_SCRIPT"
 

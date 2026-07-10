@@ -165,9 +165,9 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-old = 'obj-$(CONFIG_SOC_BUS) += socinfo.o\n'
-new = 'obj-$(CONFIG_ARCH_QCOM) += socinfo.o\n'
-count = text.count(old)
+old = 'obj-$(CONFIG_SOC_BUS) += socinfo.o'
+new = 'obj-$(CONFIG_ARCH_QCOM) += socinfo.o'
+count = sum(line == old for line in text.splitlines())
 if count != 1:
     raise SystemExit(f"QCOM socinfo Makefile gate: expected one match, found {count}")
 path.write_text(text.replace(old, new, 1))

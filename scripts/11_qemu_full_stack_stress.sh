@@ -168,6 +168,7 @@ for symbol in \
   BPF \
   BPF_SYSCALL \
   BPF_EVENTS \
+  MODULES \
   KPROBES \
   KPROBE_EVENTS \
   EXT4_FS \
@@ -198,7 +199,6 @@ for symbol in \
 done
 
 for symbol in \
-  MODULES \
   KPM \
   KSU_DEBUG \
   KSU_SUSFS_SUS_PATH \
@@ -243,7 +243,7 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
 # Save the resolved configuration before validation so failed runs remain diagnosable.
 cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
 grep -E '^(CONFIG_|# CONFIG_)' "$QEMU_CONFIG" \
-  | grep -E '(EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN)' \
+  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN)' \
   > "$QEMU_ARTIFACT_DIR/qemu-config-key-symbols-$PROFILE.txt" || true
 
 for required in \
@@ -252,6 +252,7 @@ for required in \
   VIRTIO_MMIO \
   BLK_DEV_INITRD \
   BPF_SYSCALL \
+  MODULES \
   KPROBES \
   EXT4_FS \
   KSU \

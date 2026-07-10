@@ -160,14 +160,20 @@ if text.count(marker_anchor) != 1:
     raise SystemExit("v4 marker insertion anchor mismatch")
 text = text.replace(marker_anchor, marker_replacement, 1)
 
-# Record the resolution strategy in build metadata.
-meta_anchor = "  printf 'logdump_target=/dev/sde18 offset=65011712 bytes=2097152\\n'"
+# Change the value inside the v3 wrapper's replacement dictionary. The actual
+# printf line does not exist until that wrapper executes, so anchoring on the
+# generated printf text would always fail before the kernel build begins.
+meta_anchor = (
+    "        'logdump_target=/dev/sde18 offset=65011712 bytes=2097152',"
+)
 meta_replacement = (
-    "  printf 'logdump_target=PARTLABEL=logdump fallback=/dev/sde18 "
-    "offset=65011712 bytes=2097152\\n'"
+    "        'logdump_target=PARTLABEL=logdump fallback=/dev/sde18 "
+    "offset=65011712 bytes=2097152',"
 )
 if text.count(meta_anchor) != 1:
-    raise SystemExit("metadata target anchor mismatch")
+    raise SystemExit(
+        f"metadata target anchor: expected one match, found {text.count(meta_anchor)}"
+    )
 text = text.replace(meta_anchor, meta_replacement, 1)
 
 path.write_text(text)

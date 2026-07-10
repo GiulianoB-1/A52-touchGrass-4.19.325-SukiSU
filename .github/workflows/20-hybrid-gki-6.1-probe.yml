@@ -1,4 +1,4 @@
-name: 20 - Build A52XQ Hybrid GKI 6.1 Probe
+name: 20 - Build A52XQ Hybrid GKI 6.1 Logdump Probe v3
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
       - '.github/workflows/20-hybrid-gki-6.1-probe.yml'
       - 'scripts/21_build_ack_6_1_probe.sh'
       - 'scripts/22_build_ack_6_1_probe_without_gunyah.sh'
+      - 'scripts/23_build_ack_6_1_logdump_probe_v3.sh'
       - 'docs/HYBRID_GKI_DEVICE_AUDIT_RESULTS.md'
       - 'docs/HYBRID_GKI_6_1_PLAN.md'
 
@@ -17,7 +18,7 @@ permissions:
 
 jobs:
   build-probe:
-    name: Build Android Common 6.1 deliberate-panic probe
+    name: Build Android Common 6.1 guarded logdump probe v3
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -51,11 +52,12 @@ jobs:
           clang --version
           ld.lld --version
 
-      - name: Build Android Common 6.1 probe kernel
+      - name: Build Android Common 6.1 guarded logdump probe v3
         run: |
           chmod +x scripts/21_build_ack_6_1_probe.sh
           chmod +x scripts/22_build_ack_6_1_probe_without_gunyah.sh
-          ./scripts/22_build_ack_6_1_probe_without_gunyah.sh
+          chmod +x scripts/23_build_ack_6_1_logdump_probe_v3.sh
+          ./scripts/23_build_ack_6_1_logdump_probe_v3.sh
 
       - name: Record runner state
         if: always()
@@ -75,7 +77,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-hybrid-gki-6.1-probe-${{ github.run_number }}
+          name: a52xq-hybrid-gki-6.1-logdump-probe-v3-${{ github.run_number }}
           if-no-files-found: warn
           retention-days: 14
           path: |

@@ -10,6 +10,7 @@ on:
       - 'scripts/21_build_ack_6_1_probe.sh'
       - 'scripts/22_build_ack_6_1_probe_without_gunyah.sh'
       - 'scripts/23_build_ack_6_1_logdump_probe_v3.sh'
+      - 'scripts/24_run_ack_6_1_logdump_probe_v3_fixed.sh'
       - 'docs/HYBRID_GKI_DEVICE_AUDIT_RESULTS.md'
       - 'docs/HYBRID_GKI_6_1_PLAN.md'
 
@@ -57,7 +58,8 @@ jobs:
           chmod +x scripts/21_build_ack_6_1_probe.sh
           chmod +x scripts/22_build_ack_6_1_probe_without_gunyah.sh
           chmod +x scripts/23_build_ack_6_1_logdump_probe_v3.sh
-          ./scripts/23_build_ack_6_1_logdump_probe_v3.sh
+          chmod +x scripts/24_run_ack_6_1_logdump_probe_v3_fixed.sh
+          ./scripts/24_run_ack_6_1_logdump_probe_v3_fixed.sh
 
       - name: Record runner state
         if: always()

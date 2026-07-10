@@ -14,6 +14,10 @@ on:
     paths:
       - '.github/workflows/06-qemu-full-stack-stress.yml'
       - 'tests/qemu/full_stack_stress.c'
+      - 'scripts/09_prepare_susfs_v1_5_5_a52xq.sh'
+      - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh'
+      - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v3.sh'
+      - 'scripts/09_integrate_susfs_v1_5_5.sh'
       - 'scripts/11_qemu_full_stack_stress.sh'
 
 permissions:
@@ -89,6 +93,9 @@ jobs:
 
       - name: Prepare exact A52XQ SUSFS v1.5.5 integration logic
         run: ./scripts/09_prepare_susfs_v1_5_5_a52xq.sh
+
+      - name: Make A52XQ SUSFS namespace resolution context-safe
+        run: ./scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh
 
       - name: Integrate quarantined SUSFS source into disposable test tree
         run: ./scripts/09_integrate_susfs_v1_5_5.sh

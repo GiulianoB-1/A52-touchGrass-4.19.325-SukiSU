@@ -14,6 +14,7 @@ on:
     paths:
       - '.github/workflows/06-qemu-full-stack-stress.yml'
       - 'tests/qemu/full_stack_stress.c'
+      - 'scripts/03_apply_linux_4.19.153.sh'
       - 'scripts/09_prepare_susfs_v1_5_5_a52xq.sh'
       - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh'
       - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v3.sh'

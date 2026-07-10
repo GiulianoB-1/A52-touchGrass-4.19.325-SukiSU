@@ -137,6 +137,7 @@ text = head + open_replacement + open_end + tail
 # edits, while keeping the audited partition geometry unchanged.
 for old, new in [
     ("A52XQ_V3_", "A52XQ_V4_"),
+    ("A52XQ_HYBRID_GKI_6_1_V3_", "A52XQ_HYBRID_GKI_6_1_V4_"),
     ("A52XQ_LOGDUMP_V3", "A52XQ_LOGDUMP_V4"),
     ("probe-v3-logdump", "probe-v4-logdump"),
     ("hybrid-logdump-v3", "hybrid-logdump-v4"),

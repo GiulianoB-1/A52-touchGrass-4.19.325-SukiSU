@@ -58,9 +58,6 @@ replace_once(
   COMMON_CLK_QCOM \\
   SEC_PM \\
   SEC_MM \\
-  SOC_BUS \\
-  INPUT \\
-  HID \\
   DRM \\
   FB \\
   MEDIA_SUPPORT \\
@@ -115,7 +112,7 @@ for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY SCHED_
     """fi
 grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$QEMU_CONFIG" \\
   || fail "QEMU config did not retain CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9"
-for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SEC_PM SEC_MM SOC_BUS INPUT HID DRM FB MEDIA_SUPPORT SOUND SND USB MMC ATA SCSI NETFILTER SCHED_WALT; do
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKSTATS ARCH_QCOM COMMON_CLK_QCOM SEC_PM SEC_MM DRM FB MEDIA_SUPPORT SOUND SND USB MMC ATA SCSI NETFILTER SCHED_WALT; do
 """,
     "validate resolved SELinux sidtab and disabled subsystems",
 )
@@ -159,6 +156,31 @@ git -C "$KERNEL_DIR" diff -- net/core/skbuff.c \\
   > "$QEMU_ARTIFACT_DIR/qemu-skb-fragment-release-compat.patch"
 test -s "$QEMU_ARTIFACT_DIR/qemu-skb-fragment-release-compat.patch" \\
   || fail "QEMU skb fragment release compatibility patch is empty"
+
+info "Gating Qualcomm socinfo on ARCH_QCOM for the generic QEMU build"
+qcom_soc_makefile="$KERNEL_DIR/drivers/soc/qcom/Makefile"
+python3 - "$qcom_soc_makefile" <<'PY_QCOM_SOCINFO'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'obj-$(CONFIG_SOC_BUS) += socinfo.o\n'
+new = 'obj-$(CONFIG_ARCH_QCOM) += socinfo.o\n'
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"QCOM socinfo Makefile gate: expected one match, found {count}")
+path.write_text(text.replace(old, new, 1))
+PY_QCOM_SOCINFO
+grep -Fq 'obj-$(CONFIG_ARCH_QCOM) += socinfo.o' "$qcom_soc_makefile" \\
+  || fail "QCOM socinfo is not gated by ARCH_QCOM"
+! grep -Fq 'obj-$(CONFIG_SOC_BUS) += socinfo.o' "$qcom_soc_makefile" \\
+  || fail "QCOM socinfo still follows generic SOC_BUS"
+git -C "$KERNEL_DIR" diff --check -- drivers/soc/qcom/Makefile
+git -C "$KERNEL_DIR" diff -- drivers/soc/qcom/Makefile \\
+  > "$QEMU_ARTIFACT_DIR/qemu-qcom-socinfo-gate.patch"
+test -s "$QEMU_ARTIFACT_DIR/qemu-qcom-socinfo-gate.patch" \\
+  || fail "QCOM socinfo gate patch is empty"
 
 info "Fixing disabled QPNP power-on fallback linkage for the generic QEMU build"
 qpnp_pon_header="$KERNEL_DIR/include/linux/input/qpnp-power-on.h"
@@ -241,6 +263,8 @@ grep -Fq '  NETFILTER \' "$RUNTIME_SCRIPT"
 grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$RUNTIME_SCRIPT"
 grep -Fq '__skb_frag_unref(&shinfo->frags[i]);' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu-skb-fragment-release-compat.patch' "$RUNTIME_SCRIPT"
+grep -Fq 'obj-$(CONFIG_ARCH_QCOM) += socinfo.o' "$RUNTIME_SCRIPT"
+grep -Fq 'qemu-qcom-socinfo-gate.patch' "$RUNTIME_SCRIPT"
 grep -Fq 'static inline int qpnp_pon_wd_config(bool enable)' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu-qpnp-pon-fallback-compat.patch' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"' "$RUNTIME_SCRIPT"

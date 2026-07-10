@@ -102,6 +102,45 @@ for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY TASKST
 )
 
 replace_once(
+    """info "Generating generic ARM64 virt config from the exact patched source tree"
+""",
+    """info "Fixing disabled QPNP power-on fallback linkage for the generic QEMU build"
+qpnp_pon_header="$KERNEL_DIR/include/linux/input/qpnp-power-on.h"
+python3 - "$qpnp_pon_header" <<'PY_QPNP_PON'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = """int qpnp_pon_wd_config(bool enable)
+{
+\treturn -ENODEV;
+}
+"""
+new = """static inline int qpnp_pon_wd_config(bool enable)
+{
+\treturn -ENODEV;
+}
+"""
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"disabled qpnp_pon_wd_config fallback: expected one match, found {count}")
+path.write_text(text.replace(old, new, 1))
+PY_QPNP_PON
+grep -Fq 'static inline int qpnp_pon_wd_config(bool enable)' "$qpnp_pon_header" \\
+  || fail "QPNP power-on fallback linkage fix is missing"
+git -C "$KERNEL_DIR" diff --check -- include/linux/input/qpnp-power-on.h
+git -C "$KERNEL_DIR" diff -- include/linux/input/qpnp-power-on.h \\
+  > "$QEMU_ARTIFACT_DIR/qemu-qpnp-pon-fallback-compat.patch"
+test -s "$QEMU_ARTIFACT_DIR/qemu-qpnp-pon-fallback-compat.patch" \\
+  || fail "QPNP power-on fallback compatibility patch is empty"
+
+info "Generating generic ARM64 virt config from the exact patched source tree"
+""",
+    "make disabled QPNP power-on fallback internal to each translation unit",
+)
+
+replace_once(
     """info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"
 """,
     """info "Generating SELinux headers for the generic QEMU output tree"
@@ -138,6 +177,8 @@ grep -Fq '  SECURITY_NETWORK \' "$RUNTIME_SCRIPT"
 grep -Fq '  NETWORK_SECMARK \' "$RUNTIME_SCRIPT"
 grep -Fq '  SECURITY_SELINUX \' "$RUNTIME_SCRIPT"
 grep -Fq 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9' "$RUNTIME_SCRIPT"
+grep -Fq 'static inline int qpnp_pon_wd_config(bool enable)' "$RUNTIME_SCRIPT"
+grep -Fq 'qemu-qpnp-pon-fallback-compat.patch' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu_genheaders="$QEMU_OUT/scripts/selinux/genheaders/genheaders"' "$RUNTIME_SCRIPT"
 grep -Fq 'qemu-selinux-generated-headers.sha256' "$RUNTIME_SCRIPT"
 

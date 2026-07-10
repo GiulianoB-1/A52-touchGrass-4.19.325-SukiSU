@@ -202,30 +202,37 @@ jobs:
         id: ccache-config
         run: |
           mkdir -p "$GITHUB_WORKSPACE/.ccache"
-          source scripts/common.sh
-          configure_toolchain
-          bundled_clang="$CC"
+          bundled_clang="$GITHUB_WORKSPACE/workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
           real_clang="${bundled_clang}.ccache-real"
           test -x "$bundled_clang"
           test ! -e "$real_clang"
+          "$bundled_clang" --version > "$RUNNER_TEMP/bundled-clang-version.txt"
+          head -n 1 "$RUNNER_TEMP/bundled-clang-version.txt"
           mv "$bundled_clang" "$real_clang"
-          printf '#!/usr/bin/env bash\nexec ccache %q "$@"\n' "$real_clang" > "$bundled_clang"
+          cat > "$bundled_clang" <<EOF
+          #!/usr/bin/env bash
+          exec /usr/bin/ccache "$real_clang" "\$@"
+          EOF
           chmod +x "$bundled_clang"
           {
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
             echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
-            echo "CCACHE_NOHASHDIR=true"
             echo "CCACHE_COMPRESS=true"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_COMPILERTYPE=clang"
           } >> "$GITHUB_ENV"
           export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
           export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
-          export CCACHE_NOHASHDIR=true
           export CCACHE_COMPRESS=true
-          ccache --set-config=max_size=2G
-          ccache --set-config=compiler_check=content
-          ccache --zero-stats
-          ccache --show-config
-          "$bundled_clang" --version | head -n 1
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_COMPILERTYPE=clang
+          ccache -M 2G
+          ccache -z
+          ccache -p
+          printf 'int main(void) { return 0; }\n' > "$RUNNER_TEMP/ccache-smoke.c"
+          "$bundled_clang" -c "$RUNNER_TEMP/ccache-smoke.c" -o "$RUNNER_TEMP/ccache-smoke.o"
+          test -s "$RUNNER_TEMP/ccache-smoke.o"
+          ccache -s
 
       - name: Run non-flashable ${{ matrix.profile }} QEMU stress lab
         env:

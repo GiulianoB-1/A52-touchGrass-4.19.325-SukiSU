@@ -140,7 +140,7 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
   DTC_EXT="$KERNEL_DIR/tools/dtc" \
   defconfig
 
-# Generic QEMU virt platform and initramfs support.
+# Generic QEMU virt platform, initramfs and SukiSU dependencies.
 for symbol in \
   ARCH_VEXPRESS \
   PCI \
@@ -170,6 +170,7 @@ for symbol in \
   BPF_EVENTS \
   KPROBES \
   KPROBE_EVENTS \
+  EXT4_FS \
   SECURITY \
   SECURITYFS \
   SECURITY_SELINUX \
@@ -239,6 +240,12 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
   DTC_EXT="$KERNEL_DIR/tools/dtc" \
   olddefconfig </dev/null
 
+# Save the resolved configuration before validation so failed runs remain diagnosable.
+cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
+grep -E '^(CONFIG_|# CONFIG_)' "$QEMU_CONFIG" \
+  | grep -E '(EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN)' \
+  > "$QEMU_ARTIFACT_DIR/qemu-config-key-symbols-$PROFILE.txt" || true
+
 for required in \
   ARCH_VEXPRESS \
   SERIAL_AMBA_PL011_CONSOLE \
@@ -246,6 +253,7 @@ for required in \
   BLK_DEV_INITRD \
   BPF_SYSCALL \
   KPROBES \
+  EXT4_FS \
   KSU \
   KSU_MANUAL_SU \
   KSU_SUSFS \
@@ -262,7 +270,6 @@ else
 fi
 ! grep -Eq '^CONFIG_KSU_SUSFS_(SUS_PATH|SUS_KSTAT|TRY_UMOUNT|OPEN_REDIRECT|SUS_SU)=y$' "$QEMU_CONFIG" \
   || fail "Risky SUSFS features are enabled in QEMU config"
-cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
 
 info "Building generic ARM64 QEMU kernel with $PROFILE diagnostics"
 set +e

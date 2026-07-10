@@ -67,6 +67,10 @@ require_config_y() {
   grep -Fq "CONFIG_$1=y" "$QEMU_CONFIG" || fail "QEMU config did not enable CONFIG_$1"
 }
 
+require_config_disabled() {
+  ! grep -Fq "CONFIG_$1=y" "$QEMU_CONFIG" || fail "QEMU config unexpectedly enabled CONFIG_$1"
+}
+
 info "Compiling exact A52 full-stack objects without producing a flashable device Image"
 rm -rf "$A52_AUDIT_OUT"
 mkdir -p "$A52_AUDIT_OUT"
@@ -198,7 +202,12 @@ for symbol in \
   config_enable "$symbol"
 done
 
+# These host/boot-management features are irrelevant inside the QEMU guest and
+# exercise vendor ARM64 code that is incompatible with the generic v4.19 config.
 for symbol in \
+  KVM \
+  KEXEC \
+  CRASH_DUMP \
   KPM \
   KSU_DEBUG \
   KSU_SUSFS_SUS_PATH \
@@ -243,7 +252,7 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
 # Save the resolved configuration before validation so failed runs remain diagnosable.
 cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
 grep -E '^(CONFIG_|# CONFIG_)' "$QEMU_CONFIG" \
-  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN)' \
+  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP)' \
   > "$QEMU_ARTIFACT_DIR/qemu-config-key-symbols-$PROFILE.txt" || true
 
 for required in \
@@ -269,6 +278,9 @@ if test "$PROFILE" = lockdep; then
 else
   require_config_y KASAN
 fi
+for disabled in KVM KEXEC CRASH_DUMP; do
+  require_config_disabled "$disabled"
+done
 ! grep -Eq '^CONFIG_KSU_SUSFS_(SUS_PATH|SUS_KSTAT|TRY_UMOUNT|OPEN_REDIRECT|SUS_SU)=y$' "$QEMU_CONFIG" \
   || fail "Risky SUSFS features are enabled in QEMU config"
 

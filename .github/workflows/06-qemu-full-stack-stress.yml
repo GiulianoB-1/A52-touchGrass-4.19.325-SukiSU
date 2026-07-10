@@ -14,11 +14,13 @@ on:
     paths:
       - '.github/workflows/06-qemu-full-stack-stress.yml'
       - 'tests/qemu/full_stack_stress.c'
+      - 'sources.lock'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
       - 'scripts/03_apply_linux_4.19.153.sh'
-      - 'scripts/09_prepare_susfs_v1_5_5_a52xq.sh'
-      - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh'
-      - 'scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v3.sh'
-      - 'scripts/09_integrate_susfs_v1_5_5.sh'
+      - 'scripts/05_repair_bpf_verifier.sh'
+      - 'scripts/07_*.sh'
+      - 'scripts/09_*.sh'
       - 'scripts/11_qemu_full_stack_stress.sh'
       - 'scripts/11_qemu_full_stack_stress_scoped.sh'
 
@@ -33,8 +35,112 @@ env:
   JOBS: '4'
 
 jobs:
+  prepare-source:
+    name: Prepare shared Linux 4.19.153 + SukiSU + SUSFS source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    outputs:
+      prepared_source_cache_key: ${{ steps.source-key.outputs.key }}
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Calculate prepared-source cache key
+        id: source-key
+        run: |
+          echo "key=a52-prepared-source-v1-${{ runner.os }}-${{ hashFiles('sources.lock', 'scripts/common.sh', 'scripts/01_prepare_source.sh', 'scripts/03_apply_linux_4.19.153.sh', 'scripts/05_repair_bpf_verifier.sh', 'scripts/07_*.sh', 'scripts/09_*.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore prepared source
+        id: prepared-source-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq
+            artifacts/susfs-v1.5.5-integration.txt
+          key: ${{ steps.source-key.outputs.key }}
+
+      - name: Install source-preparation dependencies
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio gzip file binutils
+
+      - name: Prepare exact touchGrass baseline source
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply official Linux 4.19.153 update
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Apply BPF verifier repair
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/05_repair_bpf_verifier.sh
+
+      - name: Integrate pinned SukiSU Ultra with Kernel Unmount blocked
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/07_integrate_sukisu.sh
+
+      - name: Correct SukiSU Kconfig placement
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/07_fix_sukisu_kconfig.sh
+
+      - name: Apply SukiSU Linux 4.19 compatibility layers
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/07_patch_sukisu_4.19_compat.sh
+          ./scripts/07_patch_sukisu_4.19_file_wrapper.sh
+          ./scripts/07_patch_sukisu_4.19_manager_policy.sh
+          ./scripts/07_patch_sukisu_4.19_runtime_selinux.sh
+          ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
+          ./scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh
+          ./scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh
+          ./scripts/07_patch_sukisu_4.19_supercall.sh
+
+      - name: Prepare exact A52XQ SUSFS v1.5.5 integration logic
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/09_prepare_susfs_v1_5_5_a52xq.sh
+
+      - name: Make A52XQ SUSFS namespace resolution context-safe
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh
+
+      - name: Integrate quarantined SUSFS source into disposable test tree
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        run: ./scripts/09_integrate_susfs_v1_5_5.sh
+
+      - name: Verify prepared source
+        run: |
+          test -d workspace/touchgrass-a52xq/.git
+          test -d workspace/touchgrass-a52xq/KernelSU/.git
+          test -s artifacts/susfs-v1.5.5-integration.txt
+          git -C workspace/touchgrass-a52xq rev-parse --verify HEAD
+          git -C workspace/touchgrass-a52xq/KernelSU rev-parse --verify HEAD
+
+      - name: Save prepared source
+        if: steps.prepared-source-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq
+            artifacts/susfs-v1.5.5-integration.txt
+          key: ${{ steps.source-key.outputs.key }}
+
   qemu-stress:
     name: QEMU ${{ matrix.profile }} - Linux 4.19.153 + BPF + SukiSU + SUSFS
+    needs: prepare-source
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     strategy:
@@ -55,52 +161,71 @@ jobs:
           sudo rm -rf /opt/ghc || true
           df -h
 
-      - name: Install kernel, ARM64 and QEMU dependencies
+      - name: Install kernel, ARM64, QEMU and cache dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git curl xz-utils make gcc g++ bc bison flex \
+            git curl xz-utils make gcc g++ bc bison flex ccache \
             libssl-dev libelf-dev python3 rsync cpio gzip file binutils \
             qemu-system-arm gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           qemu-system-aarch64 --version
           aarch64-linux-gnu-gcc --version | head -n 1
+          ccache --version | head -n 1
 
-      - name: Prepare exact touchGrass baseline source
+      - name: Restore prepared source
+        id: prepared-source-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq
+            artifacts/susfs-v1.5.5-integration.txt
+          key: ${{ needs.prepare-source.outputs.prepared_source_cache_key }}
+
+      - name: Verify restored prepared source
         run: |
+          test '${{ steps.prepared-source-restore.outputs.cache-hit }}' = 'true'
           chmod +x scripts/*.sh
-          ./scripts/01_prepare_source.sh
+          test -d workspace/touchgrass-a52xq/.git
+          test -d workspace/touchgrass-a52xq/KernelSU/.git
+          test -s artifacts/susfs-v1.5.5-integration.txt
 
-      - name: Apply official Linux 4.19.153 update
-        run: ./scripts/03_apply_linux_4.19.153.sh
+      - name: Restore ${{ matrix.profile }} compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52-qemu-ccache-v1-${{ runner.os }}-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            a52-qemu-ccache-v1-${{ runner.os }}-${{ matrix.profile }}-
 
-      - name: Apply BPF verifier repair
-        run: ./scripts/05_repair_bpf_verifier.sh
-
-      - name: Integrate pinned SukiSU Ultra with Kernel Unmount blocked
-        run: ./scripts/07_integrate_sukisu.sh
-
-      - name: Correct SukiSU Kconfig placement
-        run: ./scripts/07_fix_sukisu_kconfig.sh
-
-      - name: Apply SukiSU Linux 4.19 compatibility layers
+      - name: Configure compiler cache
+        id: ccache-config
         run: |
-          ./scripts/07_patch_sukisu_4.19_compat.sh
-          ./scripts/07_patch_sukisu_4.19_file_wrapper.sh
-          ./scripts/07_patch_sukisu_4.19_manager_policy.sh
-          ./scripts/07_patch_sukisu_4.19_runtime_selinux.sh
-          ./scripts/07_normalize_sukisu_4.19_legacy_sepolicy.sh
-          ./scripts/07_fix_sukisu_4.19_selinux_rcu_deadlock.sh
-          ./scripts/07_fix_sukisu_4.19_filename_trans_bitmap.sh
-          ./scripts/07_patch_sukisu_4.19_supercall.sh
-
-      - name: Prepare exact A52XQ SUSFS v1.5.5 integration logic
-        run: ./scripts/09_prepare_susfs_v1_5_5_a52xq.sh
-
-      - name: Make A52XQ SUSFS namespace resolution context-safe
-        run: ./scripts/09_fix_susfs_v1_5_5_a52xq_resolver_v2.sh
-
-      - name: Integrate quarantined SUSFS source into disposable test tree
-        run: ./scripts/09_integrate_susfs_v1_5_5.sh
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          source scripts/common.sh
+          configure_toolchain
+          bundled_clang="$CC"
+          real_clang="${bundled_clang}.ccache-real"
+          test -x "$bundled_clang"
+          test ! -e "$real_clang"
+          mv "$bundled_clang" "$real_clang"
+          printf '#!/usr/bin/env bash\nexec ccache %q "$@"\n' "$real_clang" > "$bundled_clang"
+          chmod +x "$bundled_clang"
+          {
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CCACHE_COMPRESS=true"
+          } >> "$GITHUB_ENV"
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          export CCACHE_NOHASHDIR=true
+          export CCACHE_COMPRESS=true
+          ccache --set-config=max_size=2G
+          ccache --set-config=compiler_check=content
+          ccache --zero-stats
+          ccache --show-config
+          "$bundled_clang" --version | head -n 1
 
       - name: Run non-flashable ${{ matrix.profile }} QEMU stress lab
         env:
@@ -109,6 +234,19 @@ jobs:
           ./scripts/11_qemu_full_stack_stress_scoped.sh \
             '${{ matrix.profile }}' \
             "$STRESS_SECONDS"
+
+      - name: Record compiler-cache statistics
+        if: always() && steps.ccache-config.outcome == 'success'
+        run: |
+          mkdir -p artifacts
+          ccache --show-stats > artifacts/ccache-${{ matrix.profile }}.txt || true
+
+      - name: Save ${{ matrix.profile }} compiler cache
+        if: always() && steps.ccache-config.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52-qemu-ccache-v1-${{ runner.os }}-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Record runner and source state
         if: always()

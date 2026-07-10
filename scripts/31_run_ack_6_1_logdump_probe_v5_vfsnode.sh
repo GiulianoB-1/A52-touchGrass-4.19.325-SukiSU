@@ -42,7 +42,7 @@ if text.count(include_old) != 1:
 text = text.replace(include_old, include_new, 1)
 
 open_anchor = "open_replacement = r'''static struct file *a52xq_open_logdump(const char **used_path)\n"
-open_prefix = r'''open_replacement = r'''static int a52xq_create_tmp_node(dev_t devt)
+open_prefix = """open_replacement = r'''static int a52xq_create_tmp_node(dev_t devt)
 {
     struct path parent;
     struct dentry *dentry;
@@ -51,7 +51,7 @@ open_prefix = r'''open_replacement = r'''static int a52xq_create_tmp_node(dev_t 
     dentry = kern_path_create(AT_FDCWD, A52XQ_TMP_NODE, &parent, 0);
     if (IS_ERR(dentry)) {
         ret = PTR_ERR(dentry);
-        pr_emerg("A52XQ_V5_LOGDUMP_TMP_NODE_CREATE_PATH_FAILED ret=%d\n",
+        pr_emerg("A52XQ_V5_LOGDUMP_TMP_NODE_CREATE_PATH_FAILED ret=%d\\n",
                  ret);
         return ret;
     }
@@ -60,14 +60,14 @@ open_prefix = r'''open_replacement = r'''static int a52xq_create_tmp_node(dev_t 
                     dentry, S_IFBLK | 0600, devt);
     done_path_create(&parent, dentry);
     if (ret)
-        pr_emerg("A52XQ_V5_LOGDUMP_TMP_NODE_MKNOD_FAILED ret=%d dev=%u:%u\n",
+        pr_emerg("A52XQ_V5_LOGDUMP_TMP_NODE_MKNOD_FAILED ret=%d dev=%u:%u\\n",
                  ret, MAJOR(devt), MINOR(devt));
 
     return ret;
 }
 
 static struct file *a52xq_open_logdump(const char **used_path)
-'''
+"""
 if text.count(open_anchor) != 1:
     raise SystemExit(
         f"v5 open helper anchor: expected one match, found {text.count(open_anchor)}"

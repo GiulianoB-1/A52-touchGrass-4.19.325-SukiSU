@@ -140,6 +140,41 @@ sha256sum \
   "$A52_AUDIT_OUT/kernel/sys.o" \
   > "$QEMU_ARTIFACT_DIR/a52-audit-objects.sha256"
 
+# The vendor non-WALT fallback still exposes the obsolete one-argument helper,
+# while fair.c consistently uses prefer_spread_on_idle(cpu, new_ilb). Keep the
+# fallback API aligned for the generic QEMU config where SCHED_WALT is disabled.
+WALT_HEADER="$KERNEL_DIR/kernel/sched/walt.h"
+python3 - "$WALT_HEADER" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = """static inline bool prefer_spread_on_idle(int cpu)
+{
+	return false;
+}
+"""
+new = """static inline bool prefer_spread_on_idle(int cpu, bool new_ilb)
+{
+	(void)cpu;
+	(void)new_ilb;
+	return false;
+}
+"""
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"non-WALT prefer_spread_on_idle fallback: expected one match, found {count}")
+path.write_text(text.replace(old, new, 1))
+PY
+grep -Fq 'static inline bool prefer_spread_on_idle(int cpu, bool new_ilb)' "$WALT_HEADER" \
+  || fail "Non-WALT prefer_spread_on_idle compatibility fix is missing"
+git -C "$KERNEL_DIR" diff --check -- kernel/sched/walt.h
+git -C "$KERNEL_DIR" diff -- kernel/sched/walt.h \
+  > "$QEMU_ARTIFACT_DIR/non-walt-prefer-spread-compat.patch"
+test -s "$QEMU_ARTIFACT_DIR/non-walt-prefer-spread-compat.patch" \
+  || fail "Non-WALT prefer_spread_on_idle compatibility patch is empty"
+
 info "Generating generic ARM64 virt config from the exact patched source tree"
 rm -rf "$QEMU_OUT"
 mkdir -p "$QEMU_OUT"
@@ -215,6 +250,7 @@ for symbol in \
   NFS_FS \
   TRANSPARENT_HUGEPAGE \
   FANOTIFY \
+  SCHED_WALT \
   KPM \
   KSU_DEBUG \
   KSU_SUSFS_SUS_PATH \
@@ -259,7 +295,7 @@ make -C "$KERNEL_DIR" O="$QEMU_OUT" \
 # Save the resolved configuration before validation so failed runs remain diagnosable.
 cp "$QEMU_CONFIG" "$QEMU_ARTIFACT_DIR/qemu-config-$PROFILE"
 grep -E '^(CONFIG_|# CONFIG_)' "$QEMU_CONFIG" \
-  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY)' \
+  | grep -E '(MODULES|EXT4_FS|KPROBES|KSU|PROVE_LOCKING|KASAN|KVM|KEXEC|CRASH_DUMP|NFS_FS|TRANSPARENT_HUGEPAGE|FANOTIFY|SCHED_WALT)' \
   > "$QEMU_ARTIFACT_DIR/qemu-config-key-symbols-$PROFILE.txt" || true
 
 for required in \
@@ -285,7 +321,7 @@ if test "$PROFILE" = lockdep; then
 else
   require_config_y KASAN
 fi
-for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY; do
+for disabled in KVM KEXEC CRASH_DUMP NFS_FS TRANSPARENT_HUGEPAGE FANOTIFY SCHED_WALT; do
   require_config_disabled "$disabled"
 done
 ! grep -Eq '^CONFIG_KSU_SUSFS_(SUS_PATH|SUS_KSTAT|TRY_UMOUNT|OPEN_REDIRECT|SUS_SU)=y$' "$QEMU_CONFIG" \

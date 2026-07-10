@@ -112,16 +112,17 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-old = """int qpnp_pon_wd_config(bool enable)
+# This snippet is embedded in an outer triple-double-quoted string.
+old = '''int qpnp_pon_wd_config(bool enable)
 {
 \treturn -ENODEV;
 }
-"""
-new = """static inline int qpnp_pon_wd_config(bool enable)
+'''
+new = '''static inline int qpnp_pon_wd_config(bool enable)
 {
 \treturn -ENODEV;
 }
-"""
+'''
 count = text.count(old)
 if count != 1:
     raise SystemExit(f"disabled qpnp_pon_wd_config fallback: expected one match, found {count}")

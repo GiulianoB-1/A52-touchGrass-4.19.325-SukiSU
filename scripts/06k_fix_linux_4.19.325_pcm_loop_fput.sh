@@ -193,7 +193,7 @@ if loop.count("loop_set_status(struct loop_device *lo,") != 1:
 status_start = loop.index("loop_set_status(struct loop_device *lo,")
 status_end = loop.index("\nstatic int\nloop_get_status", status_start)
 status = loop[status_start:status_end]
-if "new_size = get_size" in status or "return err;\n\n\t/* Mask" in status:
+if "new_size = get_size(info->lo_offset" in status or "return err;\n\n\t/* Mask" in status:
     raise SystemExit("stale loop status merge fragments remain")
 if "goto out_unfreeze;" not in status or "loop_config_discard(lo);" not in status:
     raise SystemExit("loop status cleanup/configuration validation failed")

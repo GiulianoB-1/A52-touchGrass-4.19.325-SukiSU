@@ -54,8 +54,14 @@ for item in required:
     if block.count(item) != 1:
         raise SystemExit(f"FunctionFS postcondition failed for: {item!r}")
 
-if "ffs_data" in block:
-    raise SystemExit("obsolete ffs_data identifier remains in bind helper")
+obsolete_identifiers = (
+    "\tstruct ffs_data *ffs_data;\n",
+    "\tffs_data = ffs_opts->dev->ffs_data;\n",
+    "\tfunc->ffs = ffs_data;\n",
+)
+for item in obsolete_identifiers:
+    if item in block:
+        raise SystemExit(f"obsolete FunctionFS variable form remains: {item!r}")
 
 lock_pos = block.index("ffs_dev_lock();")
 assign_pos = block.index("ffs = ffs_opts->dev->ffs_data;")

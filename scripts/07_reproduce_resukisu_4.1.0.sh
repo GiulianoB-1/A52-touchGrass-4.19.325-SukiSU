@@ -120,6 +120,86 @@ if text.count(body_anchor) != 1:
 path.write_text(text.replace(body_anchor, body_block, 1))
 PY
 
+info "Adding ReSukiSU init.rc size hooks to native and compat fstat paths"
+python3 - "$KERNEL_DIR/fs/stat.c" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+
+def replace_once(old: str, new: str, label: str) -> None:
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected exactly one match, found {count}')
+    text = text.replace(old, new, 1)
+
+replace_once(
+    '#ifdef CONFIG_KSU\n'
+    'extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n'
+    '#endif\n',
+    '#ifdef CONFIG_KSU\n'
+    'extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n'
+    'extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n'
+    '#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\n'
+    'extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n'
+    '#endif\n'
+    '#endif\n',
+    'ReSukiSU stat hook declarations',
+)
+
+replace_once(
+    'SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)\n'
+    '{\n'
+    '\tstruct kstat stat;\n'
+    '\tint error = vfs_fstat(fd, &stat);\n\n'
+    '\tif (!error)\n'
+    '\t\terror = cp_new_stat(&stat, statbuf);\n\n'
+    '\treturn error;\n'
+    '}\n',
+    'SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)\n'
+    '{\n'
+    '\tstruct kstat stat;\n'
+    '\tint error = vfs_fstat(fd, &stat);\n\n'
+    '\tif (!error)\n'
+    '\t\terror = cp_new_stat(&stat, statbuf);\n'
+    '#ifdef CONFIG_KSU\n'
+    '\tif (!error)\n'
+    '\t\tksu_handle_newfstat_ret(&fd, &statbuf);\n'
+    '#endif\n\n'
+    '\treturn error;\n'
+    '}\n',
+    'native newfstat return hook',
+)
+
+replace_once(
+    'SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)\n'
+    '{\n'
+    '\tstruct kstat stat;\n'
+    '\tint error = vfs_fstat(fd, &stat);\n\n'
+    '\tif (!error)\n'
+    '\t\terror = cp_new_stat64(&stat, statbuf);\n\n'
+    '\treturn error;\n'
+    '}\n',
+    'SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)\n'
+    '{\n'
+    '\tstruct kstat stat;\n'
+    '\tint error = vfs_fstat(fd, &stat);\n\n'
+    '\tif (!error)\n'
+    '\t\terror = cp_new_stat64(&stat, statbuf);\n'
+    '#ifdef CONFIG_KSU\n'
+    '\tif (!error)\n'
+    '\t\tksu_handle_fstat64_ret(&fd, &statbuf);\n'
+    '#endif\n\n'
+    '\treturn error;\n'
+    '}\n',
+    'compat fstat64 return hook',
+)
+
+path.write_text(text)
+PY
+
 info "Adapting ReSukiSU scheduler APIs to Linux 4.19"
 python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" <<'PY'
 from pathlib import Path
@@ -224,7 +304,7 @@ git -C "$RESUKISU_DIR" diff --check
 git -C "$KERNEL_DIR" diff --binary -- \
   arch/arm64/configs/a52xq_defconfig \
   drivers/Makefile drivers/Kconfig \
-  drivers/input/input.c fs/read_write.c kernel/reboot.c > "$HOST_PATCH"
+  drivers/input/input.c fs/read_write.c fs/stat.c kernel/reboot.c > "$HOST_PATCH"
 git -C "$RESUKISU_DIR" diff --binary -- \
   kernel/supercall/dispatch.c > "$COMPAT_PATCH"
 sha256sum "$HOST_PATCH" > "$HOST_PATCH.sha256"

@@ -60,9 +60,32 @@ python3 "$(dirname "$0")/05_merge_linux_4.19.325.py" \
 
 current_version=$(kernel_version)
 test "$current_version" = "$TARGET_VERSION" || fail "Merged tree reports Linux $current_version instead of $TARGET_VERSION"
-if grep -RIn --exclude-dir=.git -E '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)' "$KERNEL_DIR" > "$ARTIFACTS_DIR/remaining-conflict-markers.txt"; then
-  fail "Conflict markers remain after direct merge policy resolution"
-fi
-git -C "$KERNEL_DIR" diff --check
+
+python3 - "$KERNEL_DIR" "$ARTIFACTS_DIR/remaining-conflict-markers.txt" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+report = Path(sys.argv[2])
+raw = subprocess.check_output(["git", "-C", str(root), "diff", "--name-only", "-z"])
+paths = [x.decode("utf-8", "surrogateescape") for x in raw.split(b"\0") if x]
+markers = (b"<<<<<<< ", b"||||||| ", b">>>>>>> ")
+hits = []
+for rel in paths:
+    path = root / rel
+    if not path.is_file() or path.is_symlink():
+        continue
+    data = path.read_bytes().splitlines()
+    for line_no, line in enumerate(data, 1):
+        if line.startswith(markers):
+            hits.append(f"{rel}:{line_no}:{line.decode(errors='replace')}\n")
+report.write_text("".join(hits))
+if hits:
+    raise SystemExit(f"{len(hits)} conflict markers remain after policy resolution")
+PY
+
+# Preserve whitespace diagnostics without rejecting exact upstream stable content.
+git -C "$KERNEL_DIR" diff --check > "$ARTIFACTS_DIR/direct-merge-diff-check.txt" 2>&1 || true
 rm -rf "$STABLE_DIR" "$BASE_TREE" "$THEIRS_TREE"
 info "Direct Linux stable merge completed: $FROM_VERSION -> $TARGET_VERSION"

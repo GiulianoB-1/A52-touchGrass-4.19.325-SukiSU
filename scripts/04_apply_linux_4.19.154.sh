@@ -12,6 +12,7 @@ APPLY_LOG="$LOG_DIR/apply-$TO_TAG.log"
 REPORT="$ARTIFACTS_DIR/update-$TO_TAG.txt"
 REJECT_LIST="$ARTIFACTS_DIR/reject-files-$TO_TAG.txt"
 REJECT_ARCHIVE="$ARTIFACTS_DIR/reject-files-$TO_TAG.tar.gz"
+RESOLUTION_LOG="$ARTIFACTS_DIR/manual-resolution-$TO_TAG.txt"
 
 cleanup_report() {
   git -C "$KERNEL_DIR" status --short > "$ARTIFACTS_DIR/source-status-$TO_TAG.txt" 2>/dev/null || true
@@ -41,6 +42,7 @@ git -C "$STABLE_DIR" fetch --quiet --depth=1 origin "refs/tags/$TO_TAG:refs/tags
 from_sha=$(git -C "$STABLE_DIR" rev-parse "$FROM_TAG^{commit}")
 to_sha=$(git -C "$STABLE_DIR" rev-parse "$TO_TAG^{commit}")
 test "$from_sha" = "79524e8c64bda80bb35ab490177d0e6813bf112c" || fail "Unexpected $FROM_TAG commit: $from_sha"
+test "$to_sha" = "f5d8eef067acee3fda37137f4a08c0d3f6427a8e" || fail "Unexpected $TO_TAG commit: $to_sha"
 
 stable_version=$(git -C "$STABLE_DIR" show "$TO_TAG:Makefile" | awk '
   $1=="VERSION" {v=$3}
@@ -63,9 +65,105 @@ git -C "$KERNEL_DIR" apply --reject --whitespace=nowarn "$PATCH_FILE" > "$APPLY_
 apply_rc=$?
 set -e
 
-find "$KERNEL_DIR" -type f -name '*.rej' -printf '%P\n' | sort > "$REJECT_LIST"
-reject_count=$(wc -l < "$REJECT_LIST")
+mapfile -t actual_rejects < <(find "$KERNEL_DIR" -type f -name '*.rej' -printf '%P\n' | sort)
+expected_rejects=(
+  "drivers/mailbox/mailbox.c.rej"
+  "drivers/scsi/ufs/ufs-qcom.c.rej"
+  "drivers/usb/gadget/function/f_ncm.c.rej"
+  "fs/f2fs/sysfs.c.rej"
+  "kernel/sched/core.c.rej"
+)
+printf '%s\n' "${actual_rejects[@]}" > "$ARTIFACTS_DIR/actual-rejects-$TO_TAG.txt"
+printf '%s\n' "${expected_rejects[@]}" > "$ARTIFACTS_DIR/expected-rejects-$TO_TAG.txt"
+diff -u "$ARTIFACTS_DIR/expected-rejects-$TO_TAG.txt" "$ARTIFACTS_DIR/actual-rejects-$TO_TAG.txt" \
+  > "$ARTIFACTS_DIR/reject-set-$TO_TAG.diff" || fail "The $TO_TAG reject set changed; manual review is required"
+
+info "Resolving the five reviewed touchGrass/vendor collisions"
+python3 - "$KERNEL_DIR" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+
+def replace_once(path: Path, old: str, new: str, label: str) -> None:
+    text = path.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one match, found {count}")
+    path.write_text(text.replace(old, new, 1))
+
+# 1. Mailbox: retain touchGrass structure and apply the upstream duplicate-timer guard.
+replace_once(
+    root / "drivers/mailbox/mailbox.c",
+    "\tif (!err && (chan->txdone_method & TXDONE_BY_POLL))\n"
+    "\t\t/* kick start the timer immediately to avoid delays */\n"
+    "\t\thrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);\n",
+    "\t/* kick start the timer immediately to avoid delays */\n"
+    "\tif (!err && (chan->txdone_method & TXDONE_BY_POLL)) {\n"
+    "\t\t/* but only if not already active */\n"
+    "\t\tif (!hrtimer_active(&chan->mbox->poll_hrt))\n"
+    "\t\t\thrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);\n"
+    "\t}\n",
+    "mailbox polling timer guard",
+)
+
+# 2. Qualcomm UFS: touchGrass already omits the unsafe runtime-PM/hold pair in this function.
+ufs = (root / "drivers/scsi/ufs/ufs-qcom.c").read_text()
+start = ufs.index("int ufs_qcom_testbus_config(struct ufs_qcom_host *host)")
+end = ufs.index("static void ufs_qcom_testbus_read", start)
+segment = ufs[start:end]
+for obsolete in (
+    "pm_runtime_get_sync(host->hba->dev);",
+    "ufshcd_hold(host->hba, false);",
+    "ufshcd_release(host->hba);",
+    "pm_runtime_put_sync(host->hba->dev);",
+):
+    if obsolete in segment:
+        raise SystemExit(f"UFS testbus still contains obsolete line: {obsolete}")
+
+# 3. USB NCM: touchGrass already supplies SuperSpeed descriptors for SuperSpeedPlus.
+ncm = (root / "drivers/usb/gadget/function/f_ncm.c").read_text()
+start = ncm.index("static int ncm_bind(")
+end = ncm.index("#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE", start)
+segment = ncm[start:end]
+if "ncm_ss_function, ncm_ss_function" not in segment:
+    raise SystemExit("NCM SuperSpeedPlus descriptor fix is not present")
+
+# 4. F2FS: wait for the kobject release completion before freeing the superblock state.
+replace_once(
+    root / "fs/f2fs/sysfs.c",
+    "\tkobject_del(&sbi->s_kobj);\n"
+    "\tkobject_put(&sbi->s_kobj);\n"
+    "}\n",
+    "\tkobject_del(&sbi->s_kobj);\n"
+    "\tkobject_put(&sbi->s_kobj);\n"
+    "\twait_for_completion(&sbi->s_kobj_unregister);\n"
+    "}\n",
+    "F2FS sysfs unregister completion",
+)
+
+# 5. Scheduler: expose the feature mask for all SCHED_DEBUG builds, as in v4.19.154.
+replace_once(
+    root / "kernel/sched/core.c",
+    "#if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_JUMP_LABEL)\n",
+    "#ifdef CONFIG_SCHED_DEBUG\n",
+    "scheduler debug feature guard",
+)
+PY
+
+# The two already-present fixes and three adapted fixes now supersede all rejects.
+find "$KERNEL_DIR" -type f -name '*.rej' -delete
+
 current_version=$(kernel_version)
+test "$current_version" = "$TARGET_VERSION" || fail "Resolved tree reports Linux $current_version instead of $TARGET_VERSION"
+
+grep -Fq 'if (!hrtimer_active(&chan->mbox->poll_hrt))' "$KERNEL_DIR/drivers/mailbox/mailbox.c" \
+  || fail "Mailbox timer guard is missing"
+grep -Fq 'wait_for_completion(&sbi->s_kobj_unregister);' "$KERNEL_DIR/fs/f2fs/sysfs.c" \
+  || fail "F2FS unregister completion is missing"
+grep -Fq '#ifdef CONFIG_SCHED_DEBUG' "$KERNEL_DIR/kernel/sched/core.c" \
+  || fail "Scheduler debug guard is missing"
+git -C "$KERNEL_DIR" diff --check
 
 {
   printf 'from_tag=%s\n' "$FROM_TAG"
@@ -75,17 +173,18 @@ current_version=$(kernel_version)
   printf 'upstream_commit_count=119\n'
   printf 'changed_files=%s\n' "$(wc -l < "$ARTIFACTS_DIR/upstream-files-$TO_TAG.txt")"
   printf 'patch_bytes=%s\n' "$(wc -c < "$PATCH_FILE")"
-  printf 'apply_exit=%s\n' "$apply_rc"
-  printf 'reject_count=%s\n' "$reject_count"
+  printf 'initial_apply_exit=%s\n' "$apply_rc"
+  printf 'validated_reject_count=%s\n' "${#actual_rejects[@]}"
   printf 'reported_kernel_version=%s\n' "$current_version"
+  printf 'result=resolved-known-vendor-collisions\n'
 } | tee "$REPORT"
 
-if test "$apply_rc" -ne 0 || test "$reject_count" -ne 0; then
-  printf 'result=conflicts-require-resolution\n' >> "$REPORT"
-  fail "Linux $TARGET_VERSION update produced $reject_count reject files; inspect the uploaded artifact"
-fi
+{
+  printf 'mailbox=applied-hrtimer-active-guard\n'
+  printf 'ufs_qcom=upstream-fix-already-present\n'
+  printf 'usb_ncm=upstream-fix-already-present\n'
+  printf 'f2fs=applied-kobject-release-wait\n'
+  printf 'scheduler=applied-sched-debug-guard\n'
+} | tee "$RESOLUTION_LOG"
 
-test "$current_version" = "$TARGET_VERSION" || fail "Applied tree reports Linux $current_version instead of $TARGET_VERSION"
-git -C "$KERNEL_DIR" diff --check
-printf 'result=clean-apply\n' >> "$REPORT"
-info "Official Linux stable update applied cleanly: $FROM_VERSION -> $TARGET_VERSION"
+info "Official Linux stable update resolved safely: $FROM_VERSION -> $TARGET_VERSION"

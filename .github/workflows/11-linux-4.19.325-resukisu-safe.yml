@@ -70,7 +70,7 @@ jobs:
       - name: Apply ordered Linux 4.19.325 compatibility repairs
         run: |
           set -Eeuo pipefail
-          for repair in scripts/06*_linux_4.19.325*.sh; do
+          for repair in scripts/06*.sh; do
             printf 'Running %s\n' "$repair"
             "$repair"
           done

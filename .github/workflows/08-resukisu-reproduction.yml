@@ -51,7 +51,10 @@ jobs:
           ./scripts/01_prepare_source.sh
 
       - name: Integrate exact ReSukiSU and reproduce released source build
-        run: ./scripts/07_reproduce_resukisu_4.1.0.sh
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          ./scripts/07_reproduce_resukisu_4.1.0.sh 2>&1 | tee artifacts/reproduce-resukisu.log
 
       - name: Record runner and source state
         if: always()

@@ -98,6 +98,14 @@ def regular_text(path: Path) -> bool:
         return False
     return b"\0" not in path.read_bytes()
 
+def symlink_ancestor(path: Path):
+    current = path.parent
+    while current != root:
+        if current.is_symlink():
+            return current
+        current = current.parent
+    return None
+
 raw = status_file.read_bytes().split(b"\0")
 if raw and raw[-1] == b"":
     raw.pop()
@@ -110,6 +118,7 @@ stats = {
     "already_equal": 0,
     "clean_merges": 0,
     "vendor_deletions": 0,
+    "vendor_symlink_paths": 0,
     "conflicts": 0,
 }
 conflicts = []
@@ -121,6 +130,14 @@ for i in range(0, len(raw), 2):
     ours = root / rel
     base = base_root / rel
     theirs = theirs_root / rel
+
+    # Android vendor kernels intentionally replace some upstream directory trees
+    # with symlinks into separate vendor/DTS trees. Preserve that layout and do
+    # not materialize upstream files underneath a symlinked parent.
+    if symlink_ancestor(ours) is not None:
+        stats["vendor_symlink_paths"] += 1
+        continue
+
     ours_id = identity(ours)
     base_id = identity(base)
     theirs_id = identity(theirs)

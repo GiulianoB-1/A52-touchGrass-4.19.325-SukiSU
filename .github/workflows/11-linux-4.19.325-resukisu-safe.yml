@@ -9,6 +9,7 @@ on:
       - 'scripts/03_apply_linux_4.19.153.sh'
       - 'scripts/04_apply_linux_4.19.154.sh'
       - 'scripts/05_merge_linux_4.19.325.sh'
+      - 'scripts/05_merge_linux_4.19.325.py'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'

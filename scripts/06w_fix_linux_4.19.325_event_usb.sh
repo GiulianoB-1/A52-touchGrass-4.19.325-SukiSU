@@ -4,15 +4,17 @@ source "$(dirname "$0")/common.sh"
 
 TARGET_VERSION=4.19.325
 REPORT="$ARTIFACTS_DIR/event-usb-compat-$TARGET_VERSION.txt"
+TMP_REPORT="$ARTIFACTS_DIR/.event-usb-repairs.tmp"
 
- test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
- test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before event/USB repair"
+test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
+test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before event/USB repair"
 
-python3 - "$KERNEL_DIR" <<'PY'
+python3 - "$KERNEL_DIR" "$TMP_REPORT" <<'PY'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+tmp_report = Path(sys.argv[2])
 repairs = []
 
 
@@ -174,7 +176,7 @@ for symbol in ("DWC3_GUCTL_HSTINAUTORETRY", "DWC3_GUCTL3_SPLITDISABLE"):
     if core_h_text.count(f"#define {symbol}") != 1:
         raise SystemExit(f"DWC3 register symbol count is not one: {symbol}")
 
-adget_text = dwc3_gadget.read_text()
+gadget_text = dwc3_gadget.read_text()
 if gadget_text.count("struct dwc3_trb\t*tmp;") != 1:
     raise SystemExit("DWC3 tmp declaration count is not one")
 if gadget_text.count("int request_status;") != 1:
@@ -192,9 +194,7 @@ if "xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec)" in xhci_tex
 if xhci_text.count("xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us)") != 1:
     raise SystemExit("xHCI 64-bit handshake prototype count is not one")
 
-Path(sys.argv[1], "../artifacts/.event-usb-repairs.tmp").resolve().write_text(
-    "\n".join(repairs) + "\n"
-)
+tmp_report.write_text("\n".join(repairs) + "\n")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- \
@@ -207,9 +207,9 @@ git -C "$KERNEL_DIR" diff --check -- \
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"
-  cat "$ARTIFACTS_DIR/.event-usb-repairs.tmp"
+  cat "$TMP_REPORT"
   printf 'result=linux-4.19.325-event-and-usb-compile-compatibility-repaired\n'
 } | tee "$REPORT"
-rm -f "$ARTIFACTS_DIR/.event-usb-repairs.tmp"
+rm -f "$TMP_REPORT"
 
 info "Linux $TARGET_VERSION Qualcomm event timer and USB compatibility repaired"

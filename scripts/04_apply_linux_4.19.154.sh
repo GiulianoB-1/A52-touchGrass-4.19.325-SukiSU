@@ -81,6 +81,7 @@ diff -u "$ARTIFACTS_DIR/expected-rejects-$TO_TAG.txt" "$ARTIFACTS_DIR/actual-rej
 info "Resolving the five reviewed touchGrass/vendor collisions"
 python3 - "$KERNEL_DIR" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
@@ -123,11 +124,18 @@ for obsolete in (
 
 # 3. USB NCM: touchGrass already supplies SuperSpeed descriptors for SuperSpeedPlus.
 ncm = (root / "drivers/usb/gadget/function/f_ncm.c").read_text()
-start = ncm.index("static int ncm_bind(")
-end = ncm.index("#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE", start)
-segment = ncm[start:end]
-if "ncm_ss_function, ncm_ss_function" not in segment:
+fixed_descriptor_call = re.compile(
+    r"usb_assign_descriptors\(\s*f,\s*ncm_fs_function,\s*ncm_hs_function,\s*"
+    r"ncm_ss_function,\s*ncm_ss_function\s*\)"
+)
+legacy_descriptor_call = re.compile(
+    r"usb_assign_descriptors\(\s*f,\s*ncm_fs_function,\s*ncm_hs_function,\s*"
+    r"ncm_ss_function,\s*NULL\s*\)"
+)
+if not fixed_descriptor_call.search(ncm):
     raise SystemExit("NCM SuperSpeedPlus descriptor fix is not present")
+if legacy_descriptor_call.search(ncm):
+    raise SystemExit("NCM still contains the obsolete NULL SuperSpeedPlus descriptor")
 
 # 4. F2FS: wait for the kobject release completion before freeing the superblock state.
 replace_once(

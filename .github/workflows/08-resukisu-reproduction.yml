@@ -7,6 +7,7 @@ on:
       - 'reference/tgk-v1.5.1-a52xq-resukisu.txt'
       - 'scripts/common.sh'
       - 'scripts/01_prepare_source.sh'
+      - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/07_reproduce_resukisu_4.1.0.sh'
       - 'sources.lock'
   workflow_dispatch:
@@ -49,6 +50,9 @@ jobs:
         run: |
           chmod +x scripts/*.sh
           ./scripts/01_prepare_source.sh
+
+      - name: Replace legacy SukiSU exec dispatch with exact ReSukiSU manual hook
+        run: ./scripts/07_patch_resukisu_exec_hook.sh
 
       - name: Integrate exact ReSukiSU and reproduce released source build
         run: |

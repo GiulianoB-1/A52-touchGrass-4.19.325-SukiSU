@@ -120,40 +120,23 @@ if text.count(body_anchor) != 1:
 path.write_text(text.replace(body_anchor, body_block, 1))
 PY
 
-info "Adapting ReSukiSU scheduler and task-work APIs to Linux 4.19"
-python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" "$RESUKISU_DIR/kernel/supercall/supercall.c" <<'PY'
+info "Adapting ReSukiSU scheduler APIs to Linux 4.19"
+python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" <<'PY'
 from pathlib import Path
 import sys
 
-dispatch_path = Path(sys.argv[1])
-supercall_path = Path(sys.argv[2])
-
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f'{label}: expected exactly one match, found {count}')
-    return text.replace(old, new, 1)
-
-dispatch = dispatch_path.read_text()
-dispatch = replace_once(
-    dispatch,
-    '#include <linux/thread_info.h>\n',
+path = Path(sys.argv[1])
+text = path.read_text()
+old = '#include <linux/thread_info.h>\n'
+new = (
     '#include <linux/thread_info.h>\n'
     '#include <linux/pid.h>\n'
     '#include <linux/sched/signal.h>\n'
-    '#include <linux/sched/task.h>\n',
-    'dispatch.c legacy scheduler includes',
+    '#include <linux/sched/task.h>\n'
 )
-dispatch_path.write_text(dispatch)
-
-supercall = supercall_path.read_text()
-supercall = replace_once(
-    supercall,
-    '        if (task_work_add(current, &tw->cb, TWA_RESUME)) {\n',
-    '        if (task_work_add(current, &tw->cb, true)) { /* Linux 4.19 notify-resume API. */\n',
-    'supercall.c task_work_add notification mode',
-)
-supercall_path.write_text(supercall)
+if text.count(old) != 1:
+    raise SystemExit(f'dispatch.c legacy scheduler include: expected one match, found {text.count(old)}')
+path.write_text(text.replace(old, new, 1))
 PY
 
 info "Connecting ReSukiSU to the touchGrass build"
@@ -223,8 +206,7 @@ grep -Fq 'ksu_handle_stat' "$KERNEL_DIR/fs/stat.c" || fail "stat hook is missing
 grep -Fq 'ksu_handle_newfstat_ret' "$KERNEL_DIR/fs/stat.c" || fail "newfstat return hook is missing"
 grep -Fq 'ksu_handle_fstat64_ret' "$KERNEL_DIR/fs/stat.c" || fail "fstat64 return hook is missing"
 grep -Fq 'ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);' "$KERNEL_DIR/kernel/reboot.c" || fail "reboot hook is missing"
-grep -Fq 'task_work_add(current, &tw->cb, true)' "$RESUKISU_DIR/kernel/supercall/supercall.c" || fail "Linux 4.19 task-work adaptation is missing"
-! grep -Fq 'TWA_RESUME' "$RESUKISU_DIR/kernel/supercall/supercall.c" || fail "Unsupported TWA_RESUME remains"
+grep -Fq '#include <linux/sched/task.h>' "$RESUKISU_DIR/kernel/supercall/dispatch.c" || fail "Linux 4.19 scheduler headers are missing"
 
 test -L "$KERNEL_DIR/drivers/kernelsu" || fail "drivers/kernelsu symlink is missing"
 test "$(readlink "$KERNEL_DIR/drivers/kernelsu")" = '../KernelSU/kernel' || fail "Unexpected kernelsu symlink"
@@ -244,7 +226,7 @@ git -C "$KERNEL_DIR" diff --binary -- \
   drivers/Makefile drivers/Kconfig \
   drivers/input/input.c fs/read_write.c kernel/reboot.c > "$HOST_PATCH"
 git -C "$RESUKISU_DIR" diff --binary -- \
-  kernel/supercall/dispatch.c kernel/supercall/supercall.c > "$COMPAT_PATCH"
+  kernel/supercall/dispatch.c > "$COMPAT_PATCH"
 sha256sum "$HOST_PATCH" > "$HOST_PATCH.sha256"
 sha256sum "$COMPAT_PATCH" > "$COMPAT_PATCH.sha256"
 

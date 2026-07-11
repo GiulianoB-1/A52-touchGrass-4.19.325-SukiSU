@@ -25,17 +25,17 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Samsung already provides fscrypt_handle_d_move() in include/linux/fscrypt.h.
-# Linux stable also inserted a local copy in dcache.c, causing a redefinition in
-# this combined tree. Keep the shared header helper and remove only the local
+# Samsung already provides fscrypt_handle_d_move() in include/linux/fscrypt.h:
+# one implementation under CONFIG_FS_ENCRYPTION and one no-op fallback. Linux
+# stable also inserted a local copy in dcache.c, causing a redefinition in this
+# combined tree. Keep both conditional header helpers and remove only the local
 # duplicate.
-header = (root / "include/linux/fscrypt.h").read_text()
-if header.count("static inline void fscrypt_handle_d_move(struct dentry *dentry)") != 1:
-    raise SystemExit("unexpected fscrypt header helper definition count")
-
 path = root / "fs/dcache.c"
 text = path.read_text()
 marker = "static inline void fscrypt_handle_d_move(struct dentry *dentry)"
+header = (root / "include/linux/fscrypt.h").read_text()
+if header.count(marker) != 2:
+    raise SystemExit("unexpected conditional fscrypt header helper definition count")
 if marker in text:
     start = text.rfind("/*", 0, text.index(marker))
     if start < 0:
@@ -102,8 +102,8 @@ if old_signature in text:
 dcache = (root / "fs/dcache.c").read_text()
 if marker in dcache:
     raise SystemExit("local fscrypt_handle_d_move definition remains in dcache")
-if (root / "include/linux/fscrypt.h").read_text().count(marker) != 1:
-    raise SystemExit("shared fscrypt helper validation failed")
+if (root / "include/linux/fscrypt.h").read_text().count(marker) != 2:
+    raise SystemExit("conditional fscrypt header helper validation failed")
 
 iommu = (root / "drivers/iommu/io-pgtable-arm.c").read_text()
 start = iommu.index("static arm_lpae_iopte arm_lpae_install_table(")

@@ -58,6 +58,32 @@ python3 "$(dirname "$0")/05_merge_linux_4.19.325.py" \
   "$KERNEL_DIR" "$BASE_TREE" "$THEIRS_TREE" "$STATUS_FILE" \
   "$CONFLICT_LIST" "$REPORT" "$POLICY_LOG" "$from_sha" "$to_sha"
 
+info "Repairing vendor Kconfig menu boundaries for the newer parser"
+python3 - "$KERNEL_DIR/drivers/char/Kconfig" "$ARTIFACTS_DIR/kconfig-compat-$TO_TAG.txt" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+report = Path(sys.argv[2])
+text = path.read_text()
+menus = len(re.findall(r"^\s*menu(?:\s|$)", text, flags=re.MULTILINE))
+endmenus = len(re.findall(r"^\s*endmenu(?:\s|$)", text, flags=re.MULTILINE))
+
+if menus == 1 and endmenus == 0:
+    path.write_text(text.rstrip() + "\n\nendmenu\n")
+    report.write_text(
+        "drivers/char/Kconfig=appended-missing-endmenu\n"
+        "reason=vendor-tree-relied-on-cross-file-menu-close-rejected-by-4.19.325-parser\n"
+    )
+elif menus == endmenus:
+    report.write_text("drivers/char/Kconfig=already-balanced\n")
+else:
+    raise SystemExit(
+        f"unexpected drivers/char/Kconfig menu balance: menu={menus}, endmenu={endmenus}"
+    )
+PY
+
 current_version=$(kernel_version)
 test "$current_version" = "$TARGET_VERSION" || fail "Merged tree reports Linux $current_version instead of $TARGET_VERSION"
 

@@ -24,8 +24,8 @@ end = text.index("\n};", start)
 segment = text[start:end]
 
 if "\tCP_XATTR_DIR," not in segment:
-    old = "\tCP_RECOVER_DIR,\n\tNR_CP_REASON,\n"
-    new = "\tCP_RECOVER_DIR,\n\tCP_XATTR_DIR,\n\tNR_CP_REASON,\n"
+    old = "\tCP_RECOVER_DIR,\n\tNR_CP_REASON,"
+    new = "\tCP_RECOVER_DIR,\n\tCP_XATTR_DIR,\n\tNR_CP_REASON,"
     count = segment.count(old)
     if count != 1:
         raise SystemExit(f"F2FS checkpoint reason anchor mismatch: {count}")

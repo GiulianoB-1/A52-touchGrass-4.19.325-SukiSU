@@ -6,7 +6,7 @@ TARGET_VERSION=4.19.325
 REPORT="$ARTIFACTS_DIR/pci-unsafe-warn-compat-$TARGET_VERSION.txt"
 
 test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
-test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before PCI repair"
+test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before PCI compatibility repair"
 
 python3 - "$KERNEL_DIR" <<'PY'
 from pathlib import Path
@@ -16,46 +16,42 @@ root = Path(sys.argv[1])
 pci = root / "include/linux/pci.h"
 text = pci.read_text()
 
-field = "\tunsigned int\t\tunsafe_warn:1;\t/* warned about RW1C config write */\n"
-anchor = "\tunsigned int\t\tis_added:1;\n"
+struct_start = text.index("struct pci_bus {\n")
+struct_end = text.index("};\n", struct_start) + 3
+segment = text[struct_start:struct_end]
 
-bus_start = text.index("struct pci_bus {\n")
-bus_end = text.index("\n};", bus_start)
-segment = text[bus_start:bus_end]
+reserve = "\tANDROID_KABI_RESERVE(1);\n"
+used = "\tANDROID_KABI_USE(1, unsigned int unsafe_warn:1);\n"
 
-if field not in segment:
-    if segment.count(anchor) != 1:
+if used not in segment:
+    if segment.count(reserve) != 1:
         raise SystemExit(
-            f"pci_bus is_added anchor mismatch: {segment.count(anchor)}"
+            f"pci_bus ABI reserve anchor mismatch: {segment.count(reserve)}"
         )
-    segment = segment.replace(anchor, anchor + field, 1)
-    text = text[:bus_start] + segment + text[bus_end:]
+    segment = segment.replace(reserve, used, 1)
+    text = text[:struct_start] + segment + text[struct_end:]
     pci.write_text(text)
-elif segment.count(field) != 1:
-    raise SystemExit("unexpected pci_bus unsafe_warn field count")
+elif segment.count(used) != 1:
+    raise SystemExit("unexpected pci_bus unsafe_warn KABI field count")
 
 final = pci.read_text()
 final_start = final.index("struct pci_bus {\n")
-final_end = final.index("\n};", final_start)
+final_end = final.index("};\n", final_start) + 3
 final_segment = final[final_start:final_end]
-
-if final_segment.count(field) != 1:
-    raise SystemExit("pci_bus unsafe_warn repair failed")
-if final_segment.index(field) < final_segment.index(anchor):
-    raise SystemExit("pci_bus unsafe_warn field ordering is incorrect")
-for reserve in range(1, 5):
-    token = f"ANDROID_KABI_RESERVE({reserve});"
-    if final_segment.count(token) != 1:
-        raise SystemExit(f"PCI bus KABI reserve changed unexpectedly: {token}")
+if final_segment.count(used) != 1:
+    raise SystemExit("pci_bus unsafe_warn KABI repair failed")
+for remaining in (2, 3, 4):
+    anchor = f"\tANDROID_KABI_RESERVE({remaining});\n"
+    if final_segment.count(anchor) != 1:
+        raise SystemExit(f"pci_bus ABI reserve {remaining} was not preserved")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- include/linux/pci.h
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"
-  printf 'pci_bus=restored-unsafe-rw1c-warning-bit\n'
-  printf 'android_kabi_reserves=preserved-1-through-4\n'
-  printf 'result=linux-4.19.325-pci-unsafe-warning-compatibility-repaired\n'
+  printf 'pci_bus=used-kabi-reserve-1-for-unsafe-warn-bit\n'
+  printf 'result=linux-4.19.325-pci-unsafe-write-warning-compatible\n'
 } | tee "$REPORT"
 
-info "Linux $TARGET_VERSION PCI unsafe warning compatibility repaired"
+info "Linux $TARGET_VERSION PCI unsafe-write warning compatibility repaired"

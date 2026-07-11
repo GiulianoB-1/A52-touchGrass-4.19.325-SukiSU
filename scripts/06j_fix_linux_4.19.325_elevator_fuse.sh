@@ -45,9 +45,9 @@ segment = text[start:end]
 if "\tFUSE_I_BAD," not in segment:
     anchor = (
         "\t/** Can be filled in by open, to use direct I/O on this file. */\n"
-        "\tFUSE_I_ATTR_FORCE_SYNC,\n"
+        "\tFUSE_I_ATTR_FORCE_SYNC,"
     )
-    replacement = anchor + "\t/** Inode is unusable after a protocol or I/O failure. */\n\tFUSE_I_BAD,\n"
+    replacement = anchor + "\n\t/** Inode is unusable after a protocol or I/O failure. */\n\tFUSE_I_BAD,"
     if segment.count(anchor) != 1:
         raise SystemExit("FUSE inode-state anchor mismatch")
     segment = segment.replace(anchor, replacement, 1)

@@ -9,6 +9,7 @@ REFERENCE="$PROJECT_DIR/reference/tgk-v1.5.1-a52xq-resukisu.txt"
 LABEL="touchgrass-4.19.152-resukisu-v4.1.0-reproduction"
 REPORT="$ARTIFACTS_DIR/resukisu-v4.1.0-reproduction.txt"
 HOST_PATCH="$ARTIFACTS_DIR/resukisu-v4.1.0-host-integration.patch"
+COMPAT_PATCH="$ARTIFACTS_DIR/resukisu-v4.1.0-linux-4.19-compat.patch"
 
 require_line() {
   local file="$1"
@@ -84,6 +85,77 @@ for rel, edits in replacements.items():
     path.write_text(text)
 PY
 
+info "Adding the ReSukiSU reboot supercall hook required by manual mode"
+python3 - "$KERNEL_DIR/kernel/reboot.c" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+include_anchor = '#include <linux/uaccess.h>\n'
+include_block = (
+    '#include <linux/uaccess.h>\n\n'
+    '#ifdef CONFIG_KSU\n'
+    'extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,\n'
+    '                                 void __user **arg);\n'
+    '#endif\n'
+)
+if text.count(include_anchor) != 1:
+    raise SystemExit('kernel/reboot.c include anchor did not match exactly once')
+text = text.replace(include_anchor, include_block, 1)
+body_anchor = (
+    '\tint ret = 0;\n\n'
+    '\t/* We only trust the superuser with rebooting the system. */\n'
+)
+body_block = (
+    '\tint ret = 0;\n\n'
+    '#ifdef CONFIG_KSU\n'
+    '\t/* ReSukiSU installs its anonymous control fd through this syscall. */\n'
+    '\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n'
+    '#endif\n\n'
+    '\t/* We only trust the superuser with rebooting the system. */\n'
+)
+if text.count(body_anchor) != 1:
+    raise SystemExit('kernel/reboot.c syscall anchor did not match exactly once')
+path.write_text(text.replace(body_anchor, body_block, 1))
+PY
+
+info "Adapting ReSukiSU scheduler and task-work APIs to Linux 4.19"
+python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" "$RESUKISU_DIR/kernel/supercall/supercall.c" <<'PY'
+from pathlib import Path
+import sys
+
+dispatch_path = Path(sys.argv[1])
+supercall_path = Path(sys.argv[2])
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected exactly one match, found {count}')
+    return text.replace(old, new, 1)
+
+dispatch = dispatch_path.read_text()
+dispatch = replace_once(
+    dispatch,
+    '#include <linux/thread_info.h>\n',
+    '#include <linux/thread_info.h>\n'
+    '#include <linux/pid.h>\n'
+    '#include <linux/sched/signal.h>\n'
+    '#include <linux/sched/task.h>\n',
+    'dispatch.c legacy scheduler includes',
+)
+dispatch_path.write_text(dispatch)
+
+supercall = supercall_path.read_text()
+supercall = replace_once(
+    supercall,
+    '        if (task_work_add(current, &tw->cb, TWA_RESUME)) {\n',
+    '        if (task_work_add(current, &tw->cb, true)) { /* Linux 4.19 notify-resume API. */\n',
+    'supercall.c task_work_add notification mode',
+)
+supercall_path.write_text(supercall)
+PY
+
 info "Connecting ReSukiSU to the touchGrass build"
 ln -s ../KernelSU/kernel "$KERNEL_DIR/drivers/kernelsu"
 python3 - "$KERNEL_DIR/drivers/Makefile" "$KERNEL_DIR/drivers/Kconfig" <<'PY'
@@ -150,7 +222,9 @@ grep -Fq 'ksu_handle_faccessat' "$KERNEL_DIR/fs/open.c" || fail "faccessat hook 
 grep -Fq 'ksu_handle_stat' "$KERNEL_DIR/fs/stat.c" || fail "stat hook is missing"
 grep -Fq 'ksu_handle_newfstat_ret' "$KERNEL_DIR/fs/stat.c" || fail "newfstat return hook is missing"
 grep -Fq 'ksu_handle_fstat64_ret' "$KERNEL_DIR/fs/stat.c" || fail "fstat64 return hook is missing"
-grep -Fq 'ksu_handle_sys_reboot' "$KERNEL_DIR/kernel/reboot.c" || fail "reboot hook is missing"
+grep -Fq 'ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);' "$KERNEL_DIR/kernel/reboot.c" || fail "reboot hook is missing"
+grep -Fq 'task_work_add(current, &tw->cb, true)' "$RESUKISU_DIR/kernel/supercall/supercall.c" || fail "Linux 4.19 task-work adaptation is missing"
+! grep -Fq 'TWA_RESUME' "$RESUKISU_DIR/kernel/supercall/supercall.c" || fail "Unsupported TWA_RESUME remains"
 
 test -L "$KERNEL_DIR/drivers/kernelsu" || fail "drivers/kernelsu symlink is missing"
 test "$(readlink "$KERNEL_DIR/drivers/kernelsu")" = '../KernelSU/kernel' || fail "Unexpected kernelsu symlink"
@@ -168,8 +242,11 @@ git -C "$RESUKISU_DIR" diff --check
 git -C "$KERNEL_DIR" diff --binary -- \
   arch/arm64/configs/a52xq_defconfig \
   drivers/Makefile drivers/Kconfig \
-  drivers/input/input.c fs/read_write.c > "$HOST_PATCH"
+  drivers/input/input.c fs/read_write.c kernel/reboot.c > "$HOST_PATCH"
+git -C "$RESUKISU_DIR" diff --binary -- \
+  kernel/supercall/dispatch.c kernel/supercall/supercall.c > "$COMPAT_PATCH"
 sha256sum "$HOST_PATCH" > "$HOST_PATCH.sha256"
+sha256sum "$COMPAT_PATCH" > "$COMPAT_PATCH.sha256"
 
 info "Building the 4.19.152 ReSukiSU reproduction"
 build_kernel "$LABEL"
@@ -228,6 +305,7 @@ compiler=$($CC --version | head -n 1)
   printf 'release_image_bytes=%s\n' "$release_size"
   printf 'image_size_delta=%s\n' "$((built_size - release_size))"
   printf 'host_patch_sha256=%s\n' "$(cut -d' ' -f1 "$HOST_PATCH.sha256")"
+  printf 'compat_patch_sha256=%s\n' "$(cut -d' ' -f1 "$COMPAT_PATCH.sha256")"
 } | tee "$REPORT"
 
 info "touchGrass 4.19.152 + exact ReSukiSU v4.1.0 reproduction passed"

@@ -42,14 +42,14 @@ if old in text:
 path = root / "kernel/reboot.c"
 text = path.read_text()
 old = (
-    "\t\t\telse\n"
+    "\t\t\t} else\n"
     "\t\t\t\t*mode = REBOOT_SOFT;\n"
     "\t\t\tbreak;\n"
     "\n"
     "\t\tcase 'g':\n"
 )
 new = (
-    "\t\t\telse\n"
+    "\t\t\t} else\n"
     "\t\t\t\t*mode = REBOOT_SOFT;\n"
     "\t\t\tbreak;\n"
     "\t\t}\n"

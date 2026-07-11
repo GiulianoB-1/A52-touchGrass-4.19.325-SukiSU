@@ -10,9 +10,7 @@ on:
       - 'scripts/04_apply_linux_4.19.154.sh'
       - 'scripts/05_merge_linux_4.19.325.sh'
       - 'scripts/05_merge_linux_4.19.325.py'
-      - 'scripts/06_fix_linux_4.19.325_compile_compat.sh'
-      - 'scripts/06b_fix_linux_4.19.325_late_compile_compat.sh'
-      - 'scripts/06c_fix_linux_4.19.325_api_compat.sh'
+      - 'scripts/06*.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
@@ -69,14 +67,13 @@ jobs:
           set -o pipefail
           ./scripts/05_merge_linux_4.19.325.sh 2>&1 | tee artifacts/direct-merge-linux-4.19.325.log
 
-      - name: Apply reviewed Linux 4.19.325 compile compatibility repairs
-        run: ./scripts/06_fix_linux_4.19.325_compile_compat.sh
-
-      - name: Apply late Linux 4.19.325 compile compatibility repairs
-        run: ./scripts/06b_fix_linux_4.19.325_late_compile_compat.sh
-
-      - name: Apply Linux 4.19.325 API compatibility repairs
-        run: ./scripts/06c_fix_linux_4.19.325_api_compat.sh
+      - name: Apply ordered Linux 4.19.325 compatibility repairs
+        run: |
+          set -Eeuo pipefail
+          for repair in scripts/06*_linux_4.19.325*.sh; do
+            printf 'Running %s\n' "$repair"
+            "$repair"
+          done
 
       - name: Replace legacy exec dispatch with ReSukiSU manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh

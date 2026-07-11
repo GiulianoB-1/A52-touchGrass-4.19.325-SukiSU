@@ -2,23 +2,13 @@ name: 07 - ReSukiSU Linux 4.19.325 rebase probe (NON-FLASHABLE)
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/07-resukisu-linux-4.19.325-rebase.yml'
-      - 'sources.lock'
-      - 'scripts/common.sh'
-      - 'scripts/01_prepare_source.sh'
-      - 'scripts/03_probe_linux_4.19.325.sh'
-      - 'scripts/07_probe_resukisu_baseline.sh'
 
 permissions:
   contents: read
 
 concurrency:
   group: a52-resukisu-4.19.325-probe-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   rebase-probe:

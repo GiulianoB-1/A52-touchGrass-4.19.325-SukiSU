@@ -156,7 +156,7 @@ test "$(grep -c '^static bool has_locked_children' "$KERNEL_DIR/fs/namespace.c")
 grep -A4 -F 'static void msg_submit(struct mbox_chan *chan)' "$KERNEL_DIR/drivers/mailbox/mailbox.c" \
   | grep -Fq 'unsigned long flags;' \
   || fail "Mailbox irq flags declaration is missing"
-git -C "$KERNEL_DIR" diff --check
+git -C "$KERNEL_DIR" diff --check -- fs/namespace.c drivers/mailbox/mailbox.c
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"

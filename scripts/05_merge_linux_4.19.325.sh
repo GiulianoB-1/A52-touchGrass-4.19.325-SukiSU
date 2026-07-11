@@ -186,7 +186,9 @@ for i in range(0, len(raw), 2):
         stderr=subprocess.PIPE,
         check=False,
     )
-    if merged.returncode > 1:
+    # git merge-file returns the number of conflict regions. Only 255 means
+    # an execution error; any other positive value is a valid conflicted merge.
+    if merged.returncode == 255:
         raise SystemExit(f"git merge-file failed for {rel}: {merged.stderr.decode(errors='replace')}")
     ours.write_bytes(merged.stdout)
     if merged.returncode == 0:

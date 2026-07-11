@@ -2,13 +2,17 @@
 set -Eeuo pipefail
 source "$(dirname "$0")/common.sh"
 
-TARGET_VERSION=4.19.152
+TARGET_SERIES=4.19
 EXEC_C="$KERNEL_DIR/fs/exec.c"
 PATCH_OUT="$ARTIFACTS_DIR/resukisu-v4.1.0-exec-hook.patch"
 REPORT="$ARTIFACTS_DIR/resukisu-v4.1.0-exec-hook.txt"
 
  test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
- test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION"
+ current_version=$(kernel_version)
+ case "$current_version" in
+   "$TARGET_SERIES".*) ;;
+   *) fail "Expected Linux $TARGET_SERIES.x, found $current_version" ;;
+ esac
  test "$(git -C "$KERNEL_DIR" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT" || fail "Unexpected touchGrass commit"
  test -f "$EXEC_C" || fail "fs/exec.c is missing"
 
@@ -84,7 +88,8 @@ test -s "$PATCH_OUT" || fail "Exec-hook patch is empty"
 sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
 
 {
-  printf 'kernel_version=%s\n' "$(kernel_version)"
+  printf 'kernel_version=%s\n' "$current_version"
+  printf 'target_series=%s.x\n' "$TARGET_SERIES"
   printf 'touchgrass_commit=%s\n' "$TOUCHGRASS_COMMIT"
   printf 'hook_guard=CONFIG_KSU_MANUAL_HOOK\n'
   printf 'native_execve=ksu_handle_execveat\n'

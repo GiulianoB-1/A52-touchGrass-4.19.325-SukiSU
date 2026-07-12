@@ -74,24 +74,27 @@ jobs:
           else
             files=(
               Makefile
-              init/Makefile init/main.c init/initramfs.c init/do_mounts_initrd.c
-              kernel/Makefile kernel/time/Makefile kernel/time/timer.c
-              kernel/sched/Makefile kernel/sched/cpufreq_schedutil.c
+              init/Makefile init/main.c init/initramfs.c init/do_mounts.c init/do_mounts_initrd.c
+              kernel/Makefile kernel/audit.c kernel/time/Makefile kernel/time/timer.c kernel/time/tick-sched.c
+              kernel/sched/Makefile kernel/sched/core.c kernel/sched/cpufreq_schedutil.c
               drivers/char/Makefile drivers/char/random.c
-              lib/Makefile lib/chacha20.c
-              crypto/Makefile crypto/chacha20_generic.c
-              fs/Makefile
+              lib/Makefile lib/chacha20.c lib/crypto/Makefile lib/crypto/chacha.c
+              crypto/Makefile crypto/chacha.c crypto/chacha20_generic.c
+              drivers/md/Makefile drivers/md/Kconfig drivers/md/dm-init.c
+              drivers/rtc/Makefile drivers/rtc/Kconfig
+              security/Makefile security/selinux/Makefile security/selinux/avc.c
+              fs/Makefile fs/dlog_hook.c
               fs/crypto/Makefile fs/crypto/crypto.c fs/crypto/fname.c fs/crypto/hooks.c fs/crypto/fscrypt_private.h
               fs/proc/Makefile fs/proc/base.c fs/proc/generic.c fs/proc/internal.h fs/proc/proc_net.c fs/proc/root.c fs/proc/task_mmu.c
-              fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h fs/ext4/inode.c
+              fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h fs/ext4/inode.c fs/ext4/verity.c
               drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c drivers/iommu/io-pgtable.h
               drivers/mmc/Makefile drivers/mmc/core/Makefile
-              drivers/mmc/core/block.c drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
+              drivers/mmc/core/block.c drivers/mmc/core/bus.c drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
               drivers/mmc/core/host.c drivers/mmc/core/mmc.c drivers/mmc/core/queue.c drivers/mmc/core/sd.c drivers/mmc/core/sdio.c
-              drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h
+              drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h drivers/mmc/host/sdhci-msm.c
               include/linux/dcache.h include/linux/fscrypt.h include/linux/fscrypt_notsupp.h include/linux/fscrypt_supp.h
-              include/linux/io-pgtable.h include/linux/mm.h include/linux/mm_types.h include/linux/pagevec.h include/linux/proc_fs.h
-              include/linux/random.h include/linux/timer.h include/linux/mmc/card.h include/linux/mmc/host.h
+              include/linux/fslog.h include/linux/io-pgtable.h include/linux/mm.h include/linux/mm_types.h include/linux/pagevec.h
+              include/linux/proc_fs.h include/linux/random.h include/linux/timer.h include/linux/mmc/card.h include/linux/mmc/host.h
               arch/arm64/configs/a52xq_defconfig
             )
             for f in "${files[@]}"; do
@@ -102,6 +105,64 @@ jobs:
                 printf 'MISSING %s\n' "$f" >> "$D/missing-files.txt"
               fi
             done
+
+            symbols=(
+              dm_run_setup
+              timer_quiesce_cpu
+              check_pending_deferrable_timers
+              sec_avc_log
+              fslog_stlog
+              fslog_dlog_mm
+              fslog_dlog_efs
+              fslog_dlog_etc
+              fslog_dlog_rmdir
+              ext4_verityops
+              chacha_block
+              hchacha_block
+              sapa_param_time
+              ST_LOG
+              mmc_init_clk_scaling
+              mmc_exit_clk_scaling
+              mmc_try_claim_host
+              mmc_resume_bus
+              mmc_resume_clk_scaling
+              mmc_suspend_clk_scaling
+              mmc_gate_clock
+              mmc_ungate_clock
+              mmc_cqe_clk_scaling_stop_busy
+              mmc_deferred_scaling
+              mmc_cqe_clk_scaling_start_busy
+              mmc_flush_detect_work
+              sdhci_cfg_irq
+            )
+            mkdir -p "$D/symbol-search" "$D/symbol-files"
+            : > "$D/symbol-owner-summary.txt"
+            for symbol in "${symbols[@]}"; do
+              output="$D/symbol-search/$symbol.txt"
+              printf '===== %s =====\n' "$symbol" | tee -a "$D/symbol-owner-summary.txt"
+              grep -R -n -I -E \
+                --include='*.c' --include='*.h' --include='Makefile' --include='Kconfig' \
+                --exclude-dir=.git --exclude-dir=out --exclude-dir=KernelSU \
+                -- "$symbol" "$K" > "$output" 2>&1 || true
+              sed "s#^$K/##" "$output" | head -n 80 | tee -a "$D/symbol-owner-summary.txt"
+
+              cut -d: -f1 "$output" | sort -u | while IFS= read -r matched; do
+                [ -f "$matched" ] || continue
+                rel="${matched#"$K"/}"
+                mkdir -p "$D/symbol-files/$(dirname "$rel")"
+                cp -a "$matched" "$D/symbol-files/$rel"
+
+                dir=$(dirname "$matched")
+                for metadata in "$dir/Makefile" "$dir/Kconfig" "$(dirname "$dir")/Makefile" "$(dirname "$dir")/Kconfig"; do
+                  [ -f "$metadata" ] || continue
+                  meta_rel="${metadata#"$K"/}"
+                  mkdir -p "$D/symbol-files/$(dirname "$meta_rel")"
+                  cp -a "$metadata" "$D/symbol-files/$meta_rel"
+                done
+              done
+              printf '\n' >> "$D/symbol-owner-summary.txt"
+            done
+
             git -C "$K" status --short > "$D/source-status.txt" 2>&1 || true
             git -C "$K" diff --check > "$D/diff-check.txt" 2>&1 || true
             git -C "$K" diff -- "${files[@]}" > "$D/selected-source.diff" 2>&1 || true

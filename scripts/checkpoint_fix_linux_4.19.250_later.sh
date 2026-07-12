@@ -24,6 +24,22 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_between(path: Path, start_marker: str, end_marker: str,
+                    replacement: str, label: str) -> None:
+    text = path.read_text()
+    start_count = text.count(start_marker)
+    end_count = text.count(end_marker)
+    if start_count != 1 or end_count != 1:
+        raise SystemExit(
+            f"{label}: marker mismatch start={start_count} end={end_count}"
+        )
+    start = text.index(start_marker)
+    end = text.index(end_marker, start)
+    if end <= start:
+        raise SystemExit(f"{label}: invalid marker ordering")
+    path.write_text(text[:start] + replacement + text[end:])
+
+
 # Linux stable introduced fput_many(file, refs). The merged source retained its
 # body under the fput name, leaving refs undeclared and creating a second fput.
 file_table = root / "fs/file_table.c"
@@ -209,6 +225,91 @@ for name, member in members.items():
     if final_segment.count(member) != 1:
         raise SystemExit(f"MMC {name} callback validation failed")
 
+
+# The touchGrass release disables these Bluetooth socket entry points with broad
+# comments. Stable additions nested comments inside those blocks and exposed
+# code whose local declarations remained commented. Keep the released behavior
+# using explicit stubs that remain valid after the stable merge.
+hci = root / "net/bluetooth/hci_sock.c"
+replace_between(
+    hci,
+    "static int hci_sock_ioctl(struct socket *sock, unsigned int cmd,\n",
+    "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,\n",
+    "static int hci_sock_ioctl(struct socket *sock, unsigned int cmd,\n"
+    "\t\t\t  unsigned long arg)\n"
+    "{\n"
+    "\treturn 0;\n"
+    "}\n\n",
+    "Bluetooth ioctl stub",
+)
+replace_between(
+    hci,
+    "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,\n",
+    "static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,\n",
+    "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,\n"
+    "\t\t\t int addr_len)\n"
+    "{\n"
+    "\treturn 0;\n"
+    "}\n\n",
+    "Bluetooth bind stub",
+)
+replace_between(
+    hci,
+    "static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,\n",
+    "static void hci_sock_cmsg(struct sock *sk, struct msghdr *msg,\n",
+    "static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,\n"
+    "\t\t\t    int peer)\n"
+    "{\n"
+    "\treturn 0;\n"
+    "}\n\n",
+    "Bluetooth getname stub",
+)
+repairs.append("net/bluetooth/hci_sock.c=restored-explicit-touchgrass-stubs")
+
+hci_text = hci.read_text()
+for signature in (
+    "static int hci_sock_ioctl(struct socket *sock, unsigned int cmd,",
+    "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,",
+    "static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,",
+):
+    if hci_text.count(signature) != 1:
+        raise SystemExit(f"unexpected Bluetooth stub count for {signature}")
+
+
+# Stable PCI config-access hardening uses bus->unsafe_warn. Preserve Android's
+# struct ABI by consuming the first reserved slot instead of changing layout.
+pci = root / "include/linux/pci.h"
+text = pci.read_text()
+struct_start = text.index("struct pci_bus {\n")
+struct_end = text.index("};\n", struct_start) + 3
+segment = text[struct_start:struct_end]
+reserve = "\tANDROID_KABI_RESERVE(1);\n"
+used = "\tANDROID_KABI_USE(1, unsigned int unsafe_warn:1);\n"
+
+if used not in segment:
+    if segment.count(reserve) != 1:
+        raise SystemExit(
+            f"pci_bus ABI reserve anchor mismatch: {segment.count(reserve)}"
+        )
+    segment = segment.replace(reserve, used, 1)
+    text = text[:struct_start] + segment + text[struct_end:]
+    pci.write_text(text)
+    repairs.append("include/linux/pci.h=used-kabi-reserve-1-for-unsafe-warn")
+elif segment.count(used) != 1:
+    raise SystemExit("unexpected pci_bus unsafe_warn KABI field count")
+
+final_pci = pci.read_text()
+final_start = final_pci.index("struct pci_bus {\n")
+final_end = final_pci.index("};\n", final_start) + 3
+final_segment = final_pci[final_start:final_end]
+if final_segment.count(used) != 1:
+    raise SystemExit("pci_bus unsafe_warn KABI repair failed")
+for remaining in (2, 3, 4):
+    anchor = f"\tANDROID_KABI_RESERVE({remaining});\n"
+    if final_segment.count(anchor) != 1:
+        raise SystemExit(f"pci_bus ABI reserve {remaining} was not preserved")
+
+
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")
 print(report.read_text(), end="")
 PY
@@ -217,5 +318,7 @@ git -C "$KERNEL_DIR" diff --check -- \
   fs/file_table.c \
   fs/namespace.c \
   drivers/media/dvb-core/dmxdev.c \
-  drivers/mmc/core/core.h
+  drivers/mmc/core/core.h \
+  net/bluetooth/hci_sock.c \
+  include/linux/pci.h
 info "Linux $TARGET_VERSION later compile mismatches repaired"

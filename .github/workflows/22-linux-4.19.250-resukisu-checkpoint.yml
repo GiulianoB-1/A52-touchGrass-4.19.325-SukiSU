@@ -1,0 +1,146 @@
+name: 22 - Linux 4.19.250 reviewed ReSukiSU checkpoint (NON-FLASHABLE)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/22-linux-4.19.250-resukisu-checkpoint.yml'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/04_apply_linux_4.19.154.sh'
+      - 'scripts/05a_diagnose_linux_checkpoint.sh'
+      - 'scripts/checkpoint_resolve_linux_4.19.159.sh'
+      - 'scripts/checkpoint_resolve_linux_4.19.164.sh'
+      - 'scripts/checkpoint_resolve_linux_4.19.180.py'
+      - 'scripts/checkpoint_resolve_linux_4.19.180.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.180_fscrypt.sh'
+      - 'scripts/checkpoint_resolve_linux_4.19.200.py'
+      - 'scripts/checkpoint_resolve_linux_4.19.200.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.200_compile.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.200_noinstr.sh'
+      - 'scripts/05_merge_linux_4.19.325.py'
+      - 'scripts/checkpoint_merge_linux_4.19.250.sh'
+      - 'scripts/07_patch_resukisu_exec_hook.sh'
+      - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
+      - 'scripts/08_build_resukisu_safe_checkpoint.sh'
+      - 'sources.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-linux-4.19.250-reviewed-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build:
+    name: Build reviewed touchGrass Linux 4.19.250 + ReSukiSU
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-linux-4.19.250-ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.250-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.180-ccache-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply reviewed Linux 4.19.153 update
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Apply reviewed Linux 4.19.154 update
+        run: ./scripts/04_apply_linux_4.19.154.sh
+
+      - name: Apply and audit Linux 4.19.154 to 4.19.159
+        run: ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+
+      - name: Resolve reviewed Linux 4.19.159 vendor collisions
+        run: ./scripts/checkpoint_resolve_linux_4.19.159.sh
+
+      - name: Apply and audit Linux 4.19.159 to 4.19.164
+        run: ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+
+      - name: Resolve reviewed Linux 4.19.164 vendor collisions
+        run: ./scripts/checkpoint_resolve_linux_4.19.164.sh
+
+      - name: Apply and audit Linux 4.19.164 to 4.19.180
+        run: ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+
+      - name: Resolve hardware-tested Linux 4.19.180 vendor collisions
+        run: ./scripts/checkpoint_resolve_linux_4.19.180.sh
+
+      - name: Apply and audit Linux 4.19.180 to 4.19.200
+        run: ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+
+      - name: Resolve reviewed Linux 4.19.200 vendor collisions
+        run: ./scripts/checkpoint_resolve_linux_4.19.200.sh
+
+      - name: Three-way merge Linux 4.19.200 to 4.19.250
+        run: ./scripts/checkpoint_merge_linux_4.19.250.sh
+
+      - name: Replace legacy exec dispatch with ReSukiSU manual hook
+        run: ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Integrate safe ReSukiSU and build Linux 4.19.250
+        run: |
+          set -o pipefail
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.250 \
+            2>&1 | tee artifacts/linux-4.19.250-resukisu-safe.log
+
+      - name: Record source state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          if [ -d workspace/touchgrass-a52xq/KernelSU/.git ]; then
+            git -C workspace/touchgrass-a52xq rev-parse HEAD > artifacts/resukisu-head.txt || true
+          fi
+
+      - name: Upload reviewed build and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.250-resukisu-reviewed-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

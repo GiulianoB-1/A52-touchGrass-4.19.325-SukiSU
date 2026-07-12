@@ -26,6 +26,13 @@ def git_blob(path: str) -> str:
     )
 
 
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one match, found {count}")
+    return text.replace(old, new, 1)
+
+
 # The merged FUSE header contains the stable bad-inode helpers, while Samsung's
 # extension state bit remains the final assigned value. Append FUSE_I_BAD after
 # that vendor bit so existing state-bit numbering is preserved.
@@ -118,6 +125,36 @@ for required in (
 if "pde_force_lookup(" in generic_text and "static inline void pde_force_lookup(" not in proc_final:
     raise SystemExit("stable procfs force-lookup helper was not retained")
 
+# Samsung validates mount options before calling the stable three-argument
+# proc_fill_super(). Export its parser for inode.c and avoid parsing twice.
+proc_root = root / "fs/proc/root.c"
+root_text = proc_root.read_text()
+old_parser = "static int proc_parse_options(char *options, struct pid_namespace *pid)\n"
+new_parser = "int proc_parse_options(char *options, struct pid_namespace *pid)\n"
+if old_parser in root_text:
+    root_text = replace_once(root_text, old_parser, new_parser,
+                             "proc option parser linkage")
+    repairs.append("fs/proc/root.c=exported-proc-option-parser")
+elif root_text.count(new_parser) != 1:
+    raise SystemExit("proc_parse_options definition is neither old nor repaired")
+old_fill_call = "\t\terr = proc_fill_super(sb);\n"
+new_fill_call = "\t\terr = proc_fill_super(sb, NULL, 0);\n"
+if old_fill_call in root_text:
+    root_text = replace_once(root_text, old_fill_call, new_fill_call,
+                             "proc_fill_super stable ABI call")
+    repairs.append("fs/proc/root.c=called-stable-proc-fill-super-abi")
+elif root_text.count(new_fill_call) != 1:
+    raise SystemExit("proc_fill_super call is neither old nor repaired")
+proc_root.write_text(root_text)
+
+root_final = proc_root.read_text()
+if root_final.count(new_parser) != 1 or old_parser in root_final:
+    raise SystemExit("proc_parse_options linkage postcondition failed")
+if root_final.count(new_fill_call) != 1 or old_fill_call in root_final:
+    raise SystemExit("proc_fill_super call postcondition failed")
+if "if (!proc_parse_options(options, ns))" not in root_final:
+    raise SystemExit("Samsung proc mount option validation was lost")
+
 
 # The Samsung io-pgtable source uses public definitions from
 # include/linux/io-pgtable.h. Neither merge parent provides a local
@@ -141,10 +178,81 @@ if old_include in io_final or io_final.count(new_include) != 1:
 if not (root / "include/linux/io-pgtable.h").is_file():
     raise SystemExit("public Linux IOMMU page-table header is missing")
 
+
+# snd_pcm_hw_free() takes the runtime buffer-access lock and retains an error
+# jump to unlock, but the merge dropped the matching label and unlock call.
+pcm = root / "sound/core/pcm_native.c"
+pcm_text = pcm.read_text()
+start = pcm_text.index("static int snd_pcm_hw_free(struct snd_pcm_substream *substream)")
+end = pcm_text.index("\nstatic int snd_pcm_sw_params", start)
+segment = pcm_text[start:end]
+if "snd_pcm_buffer_access_unlock(runtime);" not in segment:
+    old = (
+        "\tif (pm_qos_request_active(&substream->latency_pm_qos_req))\n"
+        "\t\tpm_qos_remove_request(&substream->latency_pm_qos_req);\n"
+        "\treturn result;\n"
+    )
+    new = (
+        "\tif (pm_qos_request_active(&substream->latency_pm_qos_req))\n"
+        "\t\tpm_qos_remove_request(&substream->latency_pm_qos_req);\n"
+        " unlock:\n"
+        "\tsnd_pcm_buffer_access_unlock(runtime);\n"
+        "\treturn result;\n"
+    )
+    segment = replace_once(segment, old, new, "PCM hw-free unlock")
+    pcm_text = pcm_text[:start] + segment + pcm_text[end:]
+    pcm.write_text(pcm_text)
+    repairs.append("sound/core/pcm_native.c=restored-buffer-access-unlock")
+
+pcm_final = pcm.read_text()
+start = pcm_final.index("static int snd_pcm_hw_free(struct snd_pcm_substream *substream)")
+end = pcm_final.index("\nstatic int snd_pcm_sw_params", start)
+segment = pcm_final[start:end]
+if segment.count("goto unlock;") != 1 or segment.count(" unlock:") != 1:
+    raise SystemExit("PCM hw-free unlock label validation failed")
+if segment.count("snd_pcm_buffer_access_unlock(runtime);") != 1:
+    raise SystemExit("PCM buffer unlock validation failed")
+
+
+# The vendor mailbox queue split retained irqsave operations around the poll
+# hrtimer lock, but the direct merge dropped their local flags variable.
+mailbox = root / "drivers/mailbox/mailbox.c"
+mail_text = mailbox.read_text()
+submit_start = mail_text.index("static void msg_submit(struct mbox_chan *chan)")
+submit_end = mail_text.index("static void tx_tick", submit_start)
+submit = mail_text[submit_start:submit_end]
+if "\tunsigned long flags;\n" not in submit:
+    old = (
+        "static void msg_submit(struct mbox_chan *chan)\n"
+        "{\n"
+        "\tint err = 0;\n"
+    )
+    new = (
+        "static void msg_submit(struct mbox_chan *chan)\n"
+        "{\n"
+        "\tunsigned long flags;\n"
+        "\tint err = 0;\n"
+    )
+    mail_text = replace_once(mail_text, old, new,
+                             "mailbox poll timer irq flags")
+    mailbox.write_text(mail_text)
+    repairs.append("drivers/mailbox/mailbox.c=declared-poll-hrtimer-irq-flags")
+
+mail_final = mailbox.read_text()
+submit_start = mail_final.index("static void msg_submit(struct mbox_chan *chan)")
+submit_end = mail_final.index("static void tx_tick", submit_start)
+submit = mail_final[submit_start:submit_end]
+if submit.count("unsigned long flags;") != 1:
+    raise SystemExit("msg_submit flags declaration validation failed")
+if "spin_lock_irqsave(&chan->mbox->poll_hrt_lock, flags);" not in submit:
+    raise SystemExit("msg_submit poll timer lock is missing")
+
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")
 print(report.read_text(), end="")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- \
-  fs/fuse/fuse_i.h fs/proc/internal.h drivers/iommu/io-pgtable-arm.c
+  fs/fuse/fuse_i.h fs/proc/internal.h fs/proc/root.c \
+  drivers/iommu/io-pgtable-arm.c sound/core/pcm_native.c \
+  drivers/mailbox/mailbox.c
 info "Linux $TARGET_VERSION late compile mismatches repaired"

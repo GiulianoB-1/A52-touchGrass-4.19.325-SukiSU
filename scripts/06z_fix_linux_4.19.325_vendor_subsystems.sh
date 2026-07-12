@@ -87,7 +87,7 @@ fields = (
     ("\tint (*deferred_resume)(struct mmc_host *host);\n",
      "\tint (*resume)(struct mmc_host *);\n"),
     ("\tint (*change_bus_speed)(struct mmc_host *host, unsigned long *freq);\n",
-     "\tint (*cache_enabled)(struct mmc_host *);\n"),
+     "\tbool (*cache_enabled)(struct mmc_host *);\n"),
     ("\tint (*change_bus_speed_deferred)(struct mmc_host *host,\n"
      "\t\t\t\t\t\t\tunsigned long *freq);\n",
      "\tint (*change_bus_speed)(struct mmc_host *host, unsigned long *freq);\n"),
@@ -137,7 +137,7 @@ core_block = core_final[core_start:core_end]
 for field, _ in fields:
     if core_block.count(field) != 1:
         raise SystemExit(f"MMC bus-ops callback postcondition failed: {field.strip()!r}")
-if core_block.count("\tint (*cache_enabled)(struct mmc_host *);\n") != 1:
+if core_block.count("\tbool (*cache_enabled)(struct mmc_host *);\n") != 1:
     raise SystemExit("Linux stable MMC cache_enabled callback disappeared")
 
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")

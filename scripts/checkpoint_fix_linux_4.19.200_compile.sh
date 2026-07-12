@@ -63,6 +63,33 @@ replace_once(
     "ext4 reset-entry logical-block argument",
 )
 
+mmc = root / "drivers/mmc/core/mmc.c"
+mmc_text = mmc.read_text()
+helper = "static bool _mmc_cache_enabled(struct mmc_host *host)"
+field = "\t.cache_enabled = _mmc_cache_enabled,\n"
+if helper not in mmc_text:
+    raise SystemExit("MMC cache helper prerequisite missing")
+if mmc_text.count(field) != 1:
+    raise SystemExit(
+        f"MMC misplaced cache field: expected one fuzzy-applied field, found {mmc_text.count(field)}"
+    )
+mmc_text = mmc_text.replace(field, "", 1)
+old_ops = (
+    "\t.hw_reset = _mmc_hw_reset,\n"
+    "\t.change_bus_speed = mmc_change_bus_speed,\n"
+)
+new_ops = (
+    "\t.hw_reset = _mmc_hw_reset,\n"
+    "\t.cache_enabled = _mmc_cache_enabled,\n"
+    "\t.change_bus_speed = mmc_change_bus_speed,\n"
+)
+if mmc_text.count(old_ops) != 1:
+    raise SystemExit(
+        f"MMC bus-ops insertion point: expected one match, found {mmc_text.count(old_ops)}"
+    )
+mmc.write_text(mmc_text.replace(old_ops, new_ops, 1))
+print("applied=MMC cache callback placement")
+
 verifier_text = verifier.read_text()
 adjust_start = verifier_text.index("static int adjust_ptr_min_max_vals(")
 adjust_end = verifier_text.index("\nstatic int adjust_scalar_min_max_vals(", adjust_start)
@@ -74,6 +101,16 @@ namei_text = namei.read_text()
 if "&old.de, NULL, &old.lblk);" not in namei_text:
     raise SystemExit("ext4 logical-block postcondition failed")
 
+mmc_text = mmc.read_text()
+ops_start = mmc_text.index("static const struct mmc_bus_ops mmc_ops = {")
+ops_end = mmc_text.index("\n};", ops_start)
+ops = mmc_text[ops_start:ops_end]
+if field.strip() not in ops:
+    raise SystemExit("MMC cache callback postcondition failed")
+outside_ops = mmc_text[:ops_start] + mmc_text[ops_end:]
+if field in outside_ops:
+    raise SystemExit("MMC cache callback remains outside mmc_ops")
+
 print("result=linux-4.19.200-compile-api-repairs-complete")
 PY
 
@@ -81,6 +118,7 @@ PY
   echo 'target=4.19.200'
   echo 'bpf_src_register=restored'
   echo 'ext4_resetent_lblk=passed'
+  echo 'mmc_cache_callback=relocated'
   echo 'result=compile-api-compatible'
 } | tee "$REPORT"
 

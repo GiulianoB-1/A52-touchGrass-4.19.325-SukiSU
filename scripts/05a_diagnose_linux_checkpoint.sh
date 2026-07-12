@@ -40,7 +40,7 @@ stable_version=$(git -C "$STABLE_DIR" show "$TO_TAG:Makefile" | awk '
 ')
 test "$stable_version" = "$TARGET_VERSION" || fail "$TO_TAG reports Linux $stable_version"
 
-info "Generating official five-version stable delta $FROM_TAG -> $TO_TAG"
+info "Generating official stable delta $FROM_TAG -> $TO_TAG"
 git -C "$STABLE_DIR" diff --binary --full-index --no-renames "$FROM_TAG" "$TO_TAG" > "$PATCH_FILE"
 test -s "$PATCH_FILE" || fail "Generated stable patch is empty"
 git -C "$STABLE_DIR" diff --name-only "$FROM_TAG" "$TO_TAG" | sort > "$ARTIFACTS_DIR/upstream-files-$TO_TAG.txt"
@@ -91,7 +91,7 @@ def work_entry(rel):
     if path.is_symlink():
         return ("symlink", os.readlink(path).encode())
     if path.is_file():
-        mode = "100755" if os.access(path, os.X_OK) else "100644"
+        mode = "100755" if path.stat().st_mode & 0o111 else "100644"
         return (f"file:{mode}", path.read_bytes())
     if path.exists():
         return ("other", b"")

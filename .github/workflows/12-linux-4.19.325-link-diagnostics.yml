@@ -80,16 +80,19 @@ jobs:
               drivers/char/Makefile drivers/char/random.c
               lib/Makefile lib/chacha20.c
               crypto/Makefile crypto/chacha20_generic.c
-              fs/Makefile fs/proc/Makefile fs/proc/generic.c fs/proc/internal.h fs/proc/proc_net.c
-              fs/crypto/Makefile fs/crypto/fname.c fs/crypto/hooks.c fs/crypto/fscrypt_private.h
+              fs/Makefile
+              fs/crypto/Makefile fs/crypto/crypto.c fs/crypto/fname.c fs/crypto/hooks.c fs/crypto/fscrypt_private.h
+              fs/proc/Makefile fs/proc/base.c fs/proc/generic.c fs/proc/internal.h fs/proc/proc_net.c fs/proc/root.c fs/proc/task_mmu.c
               fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h fs/ext4/inode.c
-              drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c
+              drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c drivers/iommu/io-pgtable.h
               drivers/mmc/Makefile drivers/mmc/core/Makefile
-              drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
-              drivers/mmc/core/host.c drivers/mmc/core/mmc.c
+              drivers/mmc/core/block.c drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
+              drivers/mmc/core/host.c drivers/mmc/core/mmc.c drivers/mmc/core/queue.c drivers/mmc/core/sd.c drivers/mmc/core/sdio.c
               drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h
-              include/linux/random.h include/linux/timer.h include/linux/fscrypt.h
-              include/linux/mmc/card.h include/linux/mmc/host.h include/linux/proc_fs.h
+              include/linux/dcache.h include/linux/fscrypt.h include/linux/fscrypt_notsupp.h include/linux/fscrypt_supp.h
+              include/linux/io-pgtable.h include/linux/mm.h include/linux/mm_types.h include/linux/pagevec.h include/linux/proc_fs.h
+              include/linux/random.h include/linux/timer.h include/linux/mmc/card.h include/linux/mmc/host.h
+              arch/arm64/configs/a52xq_defconfig
             )
             for f in "${files[@]}"; do
               if [ -e "$K/$f" ]; then

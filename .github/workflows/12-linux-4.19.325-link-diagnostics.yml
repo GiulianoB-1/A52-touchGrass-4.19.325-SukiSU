@@ -34,64 +34,78 @@ jobs:
           sudo apt-get install -y --no-install-recommends git curl xz-utils python3 tar
 
       - name: Reconstruct Linux 4.19.325 source
+        id: reconstruct
+        continue-on-error: true
         run: |
           set -Eeuo pipefail
-          chmod +x scripts/*.sh
-          ./scripts/01_prepare_source.sh
-          ./scripts/03_apply_linux_4.19.153.sh
-          ./scripts/04_apply_linux_4.19.154.sh
-          ./scripts/05_merge_linux_4.19.325.sh
-          for repair in scripts/06*_linux_4.19.325*.sh; do
-            printf 'Running %s\n' "$repair"
-            "$repair"
-          done
-          ./scripts/07_patch_resukisu_exec_hook.sh
+          mkdir -p artifacts
+          {
+            chmod +x scripts/*.sh
+            ./scripts/01_prepare_source.sh
+            ./scripts/03_apply_linux_4.19.153.sh
+            ./scripts/04_apply_linux_4.19.154.sh
+            ./scripts/05_merge_linux_4.19.325.sh
+            for repair in scripts/06*_linux_4.19.325*.sh; do
+              printf 'Running %s\n' "$repair"
+              "$repair"
+            done
+            ./scripts/07_patch_resukisu_exec_hook.sh
+          } 2>&1 | tee artifacts/reconstruct-link-diagnostics.log
 
       - name: Collect unresolved-link source set
+        if: always()
         run: |
-          set -Eeuo pipefail
+          set -u
           K=workspace/touchgrass-a52xq
           D=artifacts/link-diagnostics
           mkdir -p "$D"
-          files=(
-            Makefile
-            init/Makefile init/main.c init/initramfs.c init/do_mounts_initrd.c
-            kernel/Makefile kernel/time/Makefile kernel/time/timer.c
-            kernel/sched/Makefile kernel/sched/cpufreq_schedutil.c
-            drivers/char/Makefile drivers/char/random.c
-            lib/Makefile lib/chacha20.c
-            crypto/Makefile crypto/chacha20_generic.c
-            fs/Makefile fs/proc/Makefile fs/proc/generic.c fs/proc/internal.h
-            fs/crypto/Makefile fs/crypto/fname.c fs/crypto/fscrypt_private.h
-            fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h
-            drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c
-            drivers/mmc/Makefile drivers/mmc/core/Makefile
-            drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
-            drivers/mmc/core/host.c drivers/mmc/core/mmc.c
-            drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h
-            include/linux/random.h include/linux/timer.h include/linux/fscrypt.h
-            include/linux/mmc/card.h include/linux/mmc/host.h
-          )
-          for f in "${files[@]}"; do
-            if [ -e "$K/$f" ]; then
-              mkdir -p "$D/$(dirname "$f")"
-              cp -a "$K/$f" "$D/$f"
-            else
-              printf 'MISSING %s\n' "$f" >> "$D/missing-files.txt"
-            fi
-          done
-          git -C "$K" status --short > "$D/source-status.txt"
-          git -C "$K" diff --check > "$D/diff-check.txt"
-          git -C "$K" diff -- "${files[@]}" > "$D/selected-source.diff"
+          printf 'reconstruct_outcome=%s\n' '${{ steps.reconstruct.outcome }}' > "$D/reconstruct-status.txt"
+          if [ ! -d "$K" ]; then
+            printf 'kernel_tree_missing=1\n' >> "$D/reconstruct-status.txt"
+          else
+            files=(
+              Makefile
+              init/Makefile init/main.c init/initramfs.c init/do_mounts_initrd.c
+              kernel/Makefile kernel/time/Makefile kernel/time/timer.c
+              kernel/sched/Makefile kernel/sched/cpufreq_schedutil.c
+              drivers/char/Makefile drivers/char/random.c
+              lib/Makefile lib/chacha20.c
+              crypto/Makefile crypto/chacha20_generic.c
+              fs/Makefile fs/proc/Makefile fs/proc/generic.c fs/proc/internal.h
+              fs/crypto/Makefile fs/crypto/fname.c fs/crypto/fscrypt_private.h
+              fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h
+              drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c
+              drivers/mmc/Makefile drivers/mmc/core/Makefile
+              drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
+              drivers/mmc/core/host.c drivers/mmc/core/mmc.c
+              drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h
+              include/linux/random.h include/linux/timer.h include/linux/fscrypt.h
+              include/linux/mmc/card.h include/linux/mmc/host.h
+            )
+            for f in "${files[@]}"; do
+              if [ -e "$K/$f" ]; then
+                mkdir -p "$D/$(dirname "$f")"
+                cp -a "$K/$f" "$D/$f"
+              else
+                printf 'MISSING %s\n' "$f" >> "$D/missing-files.txt"
+              fi
+            done
+            git -C "$K" status --short > "$D/source-status.txt" 2>&1 || true
+            git -C "$K" diff --check > "$D/diff-check.txt" 2>&1 || true
+            git -C "$K" diff -- "${files[@]}" > "$D/selected-source.diff" 2>&1 || true
+          fi
+          cp artifacts/reconstruct-link-diagnostics.log "$D/" 2>/dev/null || true
           tar -C artifacts -czf artifacts/a52xq-4.19.325-link-diagnostics.tar.gz link-diagnostics
           sha256sum artifacts/a52xq-4.19.325-link-diagnostics.tar.gz > artifacts/a52xq-4.19.325-link-diagnostics.tar.gz.sha256
 
       - name: Upload link diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: a52xq-linux-4.19.325-link-diagnostics
           path: |
             artifacts/a52xq-4.19.325-link-diagnostics.tar.gz
             artifacts/a52xq-4.19.325-link-diagnostics.tar.gz.sha256
-          if-no-files-found: error
+            artifacts/reconstruct-link-diagnostics.log
+          if-no-files-found: warn
           retention-days: 7

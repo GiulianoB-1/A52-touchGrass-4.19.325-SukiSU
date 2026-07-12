@@ -46,6 +46,54 @@ if "keyinfo.o" in crypto_makefile.read_text():
     raise SystemExit("obsolete fscrypt keyinfo.o remains in Makefile")
 
 
+# 06b temporarily supplied fscrypt_d_revalidate() for the old merged fname.c.
+# The later vendor-subsystem pass restores touchGrass fname.c, which contains the
+# native exported implementation. Remove only the injected crypto.c function and
+# retain fscrypt_d_ops there so hooks.c still has the expected operations table.
+crypto_source = root / "fs/crypto/crypto.c"
+crypto_text = crypto_source.read_text()
+fname_text = (root / "fs/crypto/fname.c").read_text()
+revalidate_sig = "int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)\n"
+injected_revalidate = '''/*
+ * Validate dentries in encrypted directories to make sure we aren't
+ * potentially caching stale dentries after a key has been added.
+ */
+int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)
+{
+\tstruct dentry *dir;
+\tint err;
+\tint valid;
+
+\tif (!(dentry->d_flags & DCACHE_ENCRYPTED_NAME))
+\t\treturn 1;
+
+\tif (flags & LOOKUP_RCU)
+\t\treturn -ECHILD;
+
+\tdir = dget_parent(dentry);
+\terr = fscrypt_get_encryption_info(d_inode(dir));
+\tvalid = !fscrypt_has_encryption_key(d_inode(dir));
+\tdput(dir);
+
+\tif (err < 0)
+\t\treturn err;
+
+\treturn valid;
+}
+
+'''
+if fname_text.count(revalidate_sig) != 1:
+    raise SystemExit("touchGrass fname.c native fscrypt_d_revalidate is missing or duplicated")
+if injected_revalidate in crypto_text:
+    if crypto_text.count(injected_revalidate) != 1:
+        raise SystemExit("unexpected injected fscrypt_d_revalidate block count")
+    crypto_text = crypto_text.replace(injected_revalidate, "", 1)
+    crypto_source.write_text(crypto_text)
+    repairs.append("fs/crypto/crypto.c=removed-duplicate-dentry-validator")
+elif revalidate_sig in crypto_text:
+    raise SystemExit("crypto.c contains an unrecognized fscrypt_d_revalidate implementation")
+
+
 # The merged inode.c uses Linux 4.19.325's three-argument proc_fill_super(),
 # while the Samsung mount path may still use the old one-argument prototype.
 # Keep Samsung's explicit option validation, expose its parser to inode.c, and
@@ -103,6 +151,14 @@ for obj in ("hkdf.o", "keyring.o", "keysetup.o", "keysetup_v1.o"):
     if obj not in final_makefile:
         raise SystemExit(f"touchGrass fscrypt object missing from Makefile: {obj}")
 
+final_crypto = crypto_source.read_text()
+if revalidate_sig in final_crypto:
+    raise SystemExit("duplicate fscrypt_d_revalidate remains in crypto.c")
+if final_crypto.count("const struct dentry_operations fscrypt_d_ops = {\n") != 1:
+    raise SystemExit("fscrypt_d_ops table was lost or duplicated")
+if (root / "fs/crypto/fname.c").read_text().count(revalidate_sig) != 1:
+    raise SystemExit("native fscrypt_d_revalidate postcondition failed")
+
 final_internal = proc_internal.read_text()
 if final_internal.count(new_fill_decl) != 1:
     raise SystemExit("stable proc_fill_super declaration postcondition failed")
@@ -123,11 +179,12 @@ print(report.read_text(), end="")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- \
-  fs/crypto/Makefile fs/proc/internal.h fs/proc/root.c
+  fs/crypto/Makefile fs/crypto/crypto.c fs/crypto/fname.c \
+  fs/proc/internal.h fs/proc/root.c
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"
-  printf 'fscrypt=touchgrass-object-set-restored\n'
+  printf 'fscrypt=touchgrass-object-set-and-native-dentry-validator\n'
   printf 'procfs=stable-fill-super-abi-with-samsung-mount-validation\n'
   printf 'result=linux-4.19.325-fscrypt-proc-compatibility-repaired\n'
 } | tee -a "$REPORT"

@@ -46,7 +46,8 @@ grep -Fq 'fname->is_ciphertext_name = true;' "$KERNEL_DIR/fs/crypto/fname.c" \
   || fail "fscrypt ciphertext-name tracking is missing"
 grep -Fq 'int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)' "$KERNEL_DIR/fs/crypto/fname.c" \
   || fail "Vendor fscrypt dentry revalidation is missing"
-test "$(grep -Rsl 'int fscrypt_d_revalidate(struct dentry \*dentry, unsigned int flags)' \
+test "$(grep -RFl --include='*.c' \
+  'int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)' \
   "$KERNEL_DIR/fs/crypto" | wc -l)" -eq 1 \
   || fail "fscrypt dentry revalidation must have exactly one implementation"
 grep -Fq 'return -EXDEV;' "$KERNEL_DIR/fs/crypto/hooks.c" \

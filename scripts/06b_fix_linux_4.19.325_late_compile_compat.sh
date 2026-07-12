@@ -25,9 +25,11 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# The 4.19.325 lookup hook now installs fscrypt_d_ops for ciphertext names.
-# Samsung already carries fscrypt_d_revalidate() in fname.c, but the direct
-# merge omitted the shared dentry-operations object and its private declaration.
+# Linux 4.19.325 installs fscrypt_d_ops for ciphertext names.  In the stable
+# tree both fscrypt_d_revalidate() and fscrypt_d_ops live in crypto.c, while an
+# earlier compatibility repair incorrectly assumed that they lived in fname.c.
+# Preserve the upstream definition and only restore the private declaration
+# when the vendor side of the merge omitted it.
 private = root / "fs/crypto/fscrypt_private.h"
 text = private.read_text()
 declaration = "extern const struct dentry_operations fscrypt_d_ops;\n"
@@ -39,25 +41,21 @@ if declaration not in text:
 elif text.count(declaration) != 1:
     raise SystemExit("unexpected fscrypt_d_ops declaration count")
 
-fname = root / "fs/crypto/fname.c"
-text = fname.read_text()
+crypto = root / "fs/crypto/crypto.c"
+crypto_text = crypto.read_text()
 definition = (
     "const struct dentry_operations fscrypt_d_ops = {\n"
     "\t.d_revalidate = fscrypt_d_revalidate,\n"
     "};\n"
 )
-if definition not in text:
-    anchor = "EXPORT_SYMBOL_GPL(fscrypt_d_revalidate);\n"
-    text = replace_once(
-        text,
-        anchor,
-        anchor + "\n" + definition,
-        "fscrypt d_ops definition",
+if crypto_text.count(definition) != 1:
+    raise SystemExit(
+        f"unexpected fscrypt_d_ops definition count in fs/crypto/crypto.c: "
+        f"{crypto_text.count(definition)}"
     )
-    fname.write_text(text)
-    repairs.append("fs/crypto/fname.c=defined-fscrypt-d-ops")
-elif text.count(definition) != 1:
-    raise SystemExit("unexpected fscrypt_d_ops definition count")
+if crypto_text.count("static int fscrypt_d_revalidate(") != 1:
+    raise SystemExit("unexpected fscrypt_d_revalidate definition count in fs/crypto/crypto.c")
+repairs.append("fs/crypto/crypto.c=validated-upstream-fscrypt-d-ops")
 
 # The stable sysfs conversion changed this function to a length-based writer,
 # but one Android line still used the removed str/end pointer variables.
@@ -91,13 +89,13 @@ elif text.count(new_sig) != 1 or text.count(new_release) != 1:
 
 # Exact postconditions.
 private_text = private.read_text()
-fname_text = fname.read_text()
+crypto_text = crypto.read_text()
 wakelock_text = wakelock.read_text()
 schedutil_text = schedutil.read_text()
 if private_text.count(declaration) != 1:
     raise SystemExit("fscrypt_d_ops declaration repair failed")
-if fname_text.count(definition) != 1:
-    raise SystemExit("fscrypt_d_ops definition repair failed")
+if crypto_text.count(definition) != 1:
+    raise SystemExit("fscrypt_d_ops definition validation failed")
 if old in wakelock_text or wakelock_text.count(new) != 1:
     raise SystemExit("wakelock writer repair failed")
 if schedutil_text.count(new_sig) != 1 or schedutil_text.count(new_release) != 1:

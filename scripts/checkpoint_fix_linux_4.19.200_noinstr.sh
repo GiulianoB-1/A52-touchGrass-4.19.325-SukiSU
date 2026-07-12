@@ -46,9 +46,10 @@ if final.count("\t\tNOINSTR_TEXT") != 1:
     raise SystemExit("NOINSTR_TEXT use count is not exactly one")
 if misplaced in final:
     raise SystemExit("misplaced NOINSTR_TEXT entry remains")
-expected = anchor + final[final.index("\n", final.index(anchor)):final.index("\n", final.index(anchor)) + 1] + insert
-if expected not in final:
-    raise SystemExit("NOINSTR_TEXT is not directly after TEXT_CFI_MAIN")
+final_pos = final.index(anchor)
+final_line_end = final.index("\n", final_pos) + 1
+if not final[final_line_end:].startswith(insert + "\t\t*(.text..refcount)"):
+    raise SystemExit("NOINSTR_TEXT is not directly between TEXT_CFI_MAIN and .text..refcount")
 report.write_text(
     f"kernel_version=4.19.200\n"
     f"result={result}\n"

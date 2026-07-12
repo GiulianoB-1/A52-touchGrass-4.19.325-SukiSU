@@ -58,6 +58,44 @@ python3 "$(dirname "$0")/05_merge_linux_4.19.325.py" \
   "$KERNEL_DIR" "$BASE_TREE" "$THEIRS_TREE" "$STATUS_FILE" \
   "$CONFLICT_LIST" "$REPORT" "$POLICY_LOG" "$from_sha" "$to_sha"
 
+# The direct diff3 merge may preserve vendor halves of conflicts while taking
+# upstream callers from other files. That can compile every object but leave
+# vmlinux with unresolved symbols. Keep these tightly coupled generic core
+# subsystems internally consistent by taking their complete 4.19.325 versions.
+# Device-specific Samsung and Qualcomm drivers remain vendor-preserved.
+LINK_CLOSURE_REPORT="$ARTIFACTS_DIR/link-closure-upstream-$TO_TAG.txt"
+: > "$LINK_CLOSURE_REPORT"
+while IFS= read -r rel; do
+  test -f "$THEIRS_TREE/$rel" || fail "Missing upstream linker-closure file: $rel"
+  install -D -m 0644 "$THEIRS_TREE/$rel" "$KERNEL_DIR/$rel"
+  printf '%s\n' "$rel" >> "$LINK_CLOSURE_REPORT"
+done <<'EOF'
+init/main.c
+init/initramfs.c
+init/Makefile
+kernel/time/timer.c
+kernel/sched/cpufreq_schedutil.c
+fs/proc/internal.h
+fs/proc/inode.c
+fs/proc/generic.c
+fs/proc/proc_net.c
+fs/proc/Makefile
+fs/ext4/Makefile
+fs/ext4/block_validity.c
+fs/crypto/fname.c
+fs/crypto/Makefile
+lib/Makefile
+lib/chacha.c
+drivers/char/random.c
+drivers/iommu/io-pgtable-arm.c
+drivers/mmc/core/core.c
+drivers/mmc/core/core.h
+drivers/mmc/core/host.c
+drivers/mmc/core/mmc.c
+drivers/mmc/core/Makefile
+drivers/mmc/host/sdhci.c
+EOF
+
 info "Repairing vendor compatibility issues exposed by the newer tree"
 python3 - \
   "$KERNEL_DIR/drivers/char/Kconfig" \

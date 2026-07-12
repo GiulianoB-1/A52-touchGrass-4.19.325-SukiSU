@@ -85,6 +85,7 @@ def replace_once(rel, old, new, label):
     if count != 1:
         raise SystemExit(f"{label}: expected one match, found {count}")
     path.write_text(text.replace(old, new, 1))
+    print(f"applied={label}")
 
 # DWC3: adapt the upstream isochronous continuation fix to Qualcomm's vendor
 # stop-transfer signature.  Do not replace the vendor probe/remove teardown.
@@ -136,12 +137,12 @@ replace_once(
 # upstream bounds check for reboot=smpN / reboot=sN.
 replace_once(
     "kernel/reboot.c",
-    "\t\t\telse\n"
+    "\t\t\t} else\n"
     "\t\t\t\t*mode = REBOOT_SOFT;\n"
     "\t\t\tbreak;\n"
     "\t\t}\n"
     "\t\tcase 'g':\n",
-    "\t\t\telse\n"
+    "\t\t\t} else\n"
     "\t\t\t\t*mode = REBOOT_SOFT;\n"
     "\n"
     "\t\t\tif (reboot_cpu >= num_possible_cpus()) {\n"

@@ -24,6 +24,13 @@ def git_blob(path: str) -> str:
     )
 
 
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one match, found {count}")
+    return text.replace(old, new, 1)
+
+
 assembler = root / "arch/arm64/include/asm/assembler.h"
 text = assembler.read_text()
 block = (
@@ -143,18 +150,111 @@ final = wakelock.read_text()
 start = final.index("ssize_t pm_show_wakelocks(")
 end = final.index("\n#if CONFIG_PM_WAKELOCKS_LIMIT", start)
 segment = final[start:end]
+if "struct wakeup_source\t*ws;" not in final:
+    raise SystemExit("wakelock vendor wakeup_source pointer is missing")
 for required in (
-    "struct wakeup_source\t*ws;",
     "if (wl->ws->active == show_active)",
     'len += sysfs_emit_at(buf, len, "%s ", wl->name);',
     'len += sysfs_emit_at(buf, len, "\\n");',
     "return len;",
 ):
-    if required not in final if required == "struct wakeup_source\t*ws;" else required not in segment:
+    if required not in segment:
         raise SystemExit(f"wakelock postcondition missing: {required}")
 if "str +=" in segment or "end - str" in segment:
     raise SystemExit("obsolete wakelock string cursor remains")
 print("applied=wakelock vendor pointer with stable sysfs emission")
+
+# Samsung's ext4 checker macro already has the late-stable logical-block
+# argument. Thread the htree leaf block into dx_make_map(), and identify the
+# root directory block explicitly for the dot and dotdot checks.
+namei = root / "fs/ext4/namei.c"
+text = namei.read_text()
+old_proto = (
+    "static int dx_make_map(struct inode *dir, struct buffer_head *bh,\n"
+    "\t\t       struct dx_hash_info *hinfo,\n"
+    "\t\t       struct dx_map_entry *map_tail);\n"
+)
+new_proto = (
+    "static int dx_make_map(struct inode *dir, struct buffer_head *bh,\n"
+    "\t\t       ext4_lblk_t lblk, struct dx_hash_info *hinfo,\n"
+    "\t\t       struct dx_map_entry *map_tail);\n"
+)
+old_def = (
+    "static int dx_make_map(struct inode *dir, struct buffer_head *bh,\n"
+    "\t\t       struct dx_hash_info *hinfo,\n"
+    "\t\t       struct dx_map_entry *map_tail)\n"
+)
+new_def = (
+    "static int dx_make_map(struct inode *dir, struct buffer_head *bh,\n"
+    "\t\t       ext4_lblk_t lblk, struct dx_hash_info *hinfo,\n"
+    "\t\t       struct dx_map_entry *map_tail)\n"
+)
+old_map_check = (
+    "\t\tif (ext4_check_dir_entry(dir, NULL, de, bh, base, buflen,\n"
+    "\t\t\t\t\t ((char *)de) - base))\n"
+)
+new_map_check = (
+    "\t\tif (ext4_check_dir_entry(dir, NULL, de, bh, base, buflen,\n"
+    "\t\t\t\t\t lblk, ((char *)de) - base))\n"
+)
+old_map_call = "\tcount = dx_make_map(dir, *bh, hinfo, map);\n"
+new_map_call = (
+    "\tcount = dx_make_map(dir, *bh, dx_get_block(frame->at), hinfo, map);\n"
+)
+text = replace_once(text, old_proto, new_proto, "ext4 dx_make_map prototype")
+text = replace_once(text, old_def, new_def, "ext4 dx_make_map definition")
+text = replace_once(text, old_map_check, new_map_check,
+                    "ext4 dx_make_map directory check")
+text = replace_once(text, old_map_call, new_map_call, "ext4 dx_make_map caller")
+
+old_dot = (
+    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
+    "\t\t\t\t\t bh->b_size, 0) ||\n"
+)
+new_dot = (
+    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
+    "\t\t\t\t\t bh->b_size, 0, 0) ||\n"
+)
+old_dotdot = (
+    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
+    "\t\t\t\t\t bh->b_size, offset) ||\n"
+)
+new_dotdot = (
+    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
+    "\t\t\t\t\t bh->b_size, 0, offset) ||\n"
+)
+text = replace_once(text, old_dot, new_dot, "ext4 dot entry check")
+text = replace_once(text, old_dotdot, new_dotdot, "ext4 dotdot entry check")
+namei.write_text(text)
+
+final = namei.read_text()
+for required in (new_proto, new_def, new_map_check, new_map_call, new_dot, new_dotdot):
+    if final.count(required) != 1:
+        raise SystemExit("ext4 logical-block postcondition failed")
+for stale in (old_map_check, old_map_call, old_dot, old_dotdot):
+    if stale in final:
+        raise SystemExit("stale ext4 directory-check signature remains")
+print("applied=ext4 logical-block directory checks")
+
+# The late CPU hotplug table names random-pool callbacks whose declarations are
+# provided by linux/random.h. The merge retained the table but dropped the
+# public include.
+cpu = root / "kernel/cpu.c"
+text = cpu.read_text()
+random_include = "#include <linux/random.h>\n"
+if random_include not in text:
+    anchor = "#include <linux/cpuset.h>\n"
+    text = replace_once(text, anchor, anchor + random_include,
+                        "CPU hotplug random include")
+    cpu.write_text(text)
+
+final = cpu.read_text()
+if final.count(random_include) != 1:
+    raise SystemExit("CPU hotplug random include postcondition failed")
+for callback in ("random_prepare_cpu", "random_online_cpu"):
+    if callback not in final:
+        raise SystemExit(f"CPU hotplug callback missing: {callback}")
+print("applied=CPU hotplug random callback declarations")
 PY
 
 {
@@ -165,6 +265,8 @@ PY
   echo 'fscrypt_filename_api=touchgrass'
   echo 'fscrypt_object_set=touchgrass'
   echo 'wakelock_sysfs_emit=stable-with-vendor-pointer'
+  echo 'ext4_directory_lblk=threaded'
+  echo 'cpu_random_hotplug_declarations=restored'
   echo 'result=compile-api-compatible'
 } | tee "$REPORT"
 

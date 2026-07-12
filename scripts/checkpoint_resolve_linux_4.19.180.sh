@@ -56,6 +56,9 @@ info "Applying reviewed Linux $TARGET_VERSION vendor adaptations"
 python3 "$(dirname "$0")/checkpoint_resolve_linux_4.19.180.py" "$KERNEL_DIR" \
   2>&1 | tee "$ARTIFACTS_DIR/reviewed-resolver-$TO_TAG.log"
 
+info "Porting the upstream no-key dentry helper to Samsung's fscrypt header"
+"$(dirname "$0")/checkpoint_fix_linux_4.19.180_fscrypt.sh"
+
 if find "$KERNEL_DIR" -type f -name '*.rej' -print -quit | grep -q .; then
   fail "Reject files remain after Linux $TARGET_VERSION review"
 fi
@@ -70,6 +73,7 @@ git -C "$KERNEL_DIR" diff --check
   echo 'fuzzy_context_ports=16'
   echo 'manual_vendor_adaptations=7'
   echo 'already_present_or_vendor_equivalent=11'
+  echo 'ported_samsung_fscrypt_nokey_helper=yes'
   echo 'retained_touchgrass_bfq_policy=yes'
   echo 'retained_qualcomm_qrtr_routing=yes'
   echo 'retained_samsung_dm_verity_readahead=yes'

@@ -39,17 +39,25 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts
+          chmod +x scripts/*.sh
           {
-            chmod +x scripts/*.sh
             ./scripts/01_prepare_source.sh
             ./scripts/03_apply_linux_4.19.153.sh
             ./scripts/04_apply_linux_4.19.154.sh
             ./scripts/05_merge_linux_4.19.325.sh
+
+            set +e
+            : > artifacts/link-diagnostic-repair-status.txt
             for repair in scripts/06*_linux_4.19.325*.sh; do
-              printf 'Running %s\n' "$repair"
+              printf '\nRunning %s\n' "$repair"
               "$repair"
+              rc=$?
+              printf '%s=%s\n' "$repair" "$rc" | tee -a artifacts/link-diagnostic-repair-status.txt
             done
             ./scripts/07_patch_resukisu_exec_hook.sh
+            rc=$?
+            printf '%s=%s\n' scripts/07_patch_resukisu_exec_hook.sh "$rc" | tee -a artifacts/link-diagnostic-repair-status.txt
+            set -e
           } 2>&1 | tee artifacts/reconstruct-link-diagnostics.log
 
       - name: Collect unresolved-link source set
@@ -60,6 +68,7 @@ jobs:
           D=artifacts/link-diagnostics
           mkdir -p "$D"
           printf 'reconstruct_outcome=%s\n' '${{ steps.reconstruct.outcome }}' > "$D/reconstruct-status.txt"
+          cp artifacts/link-diagnostic-repair-status.txt "$D/" 2>/dev/null || true
           if [ ! -d "$K" ]; then
             printf 'kernel_tree_missing=1\n' >> "$D/reconstruct-status.txt"
           else
@@ -71,16 +80,16 @@ jobs:
               drivers/char/Makefile drivers/char/random.c
               lib/Makefile lib/chacha20.c
               crypto/Makefile crypto/chacha20_generic.c
-              fs/Makefile fs/proc/Makefile fs/proc/generic.c fs/proc/internal.h
-              fs/crypto/Makefile fs/crypto/fname.c fs/crypto/fscrypt_private.h
-              fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h
+              fs/Makefile fs/proc/Makefile fs/proc/generic.c fs/proc/internal.h fs/proc/proc_net.c
+              fs/crypto/Makefile fs/crypto/fname.c fs/crypto/hooks.c fs/crypto/fscrypt_private.h
+              fs/ext4/Makefile fs/ext4/block_validity.c fs/ext4/ext4.h fs/ext4/inode.c
               drivers/iommu/Makefile drivers/iommu/io-pgtable-arm.c
               drivers/mmc/Makefile drivers/mmc/core/Makefile
               drivers/mmc/core/card.h drivers/mmc/core/core.c drivers/mmc/core/core.h
               drivers/mmc/core/host.c drivers/mmc/core/mmc.c
               drivers/mmc/host/Makefile drivers/mmc/host/sdhci.c drivers/mmc/host/sdhci.h
               include/linux/random.h include/linux/timer.h include/linux/fscrypt.h
-              include/linux/mmc/card.h include/linux/mmc/host.h
+              include/linux/mmc/card.h include/linux/mmc/host.h include/linux/proc_fs.h
             )
             for f in "${files[@]}"; do
               if [ -e "$K/$f" ]; then
@@ -107,5 +116,6 @@ jobs:
             artifacts/a52xq-4.19.325-link-diagnostics.tar.gz
             artifacts/a52xq-4.19.325-link-diagnostics.tar.gz.sha256
             artifacts/reconstruct-link-diagnostics.log
+            artifacts/link-diagnostic-repair-status.txt
           if-no-files-found: warn
           retention-days: 7

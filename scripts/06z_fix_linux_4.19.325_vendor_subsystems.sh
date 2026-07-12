@@ -37,8 +37,8 @@ if fname_path.read_text() != fname_vendor:
 
 # task_mmu.c, base.c and root.c retain Samsung PAGE_BOOST and LMKD extensions.
 # Their shared definitions were lost when internal.h came from the stable side.
-# Restore the matching private procfs ABI, then retain the stable helper needed
-# by the merged generic.c implementation.
+# Restore the matching private procfs ABI, then retain the stable declarations
+# required by the merged generic.c and inode.c implementations.
 proc_internal = root / "fs/proc/internal.h"
 proc_vendor = git_blob(touchgrass, "fs/proc/internal.h")
 if proc_internal.read_text() != proc_vendor:
@@ -47,6 +47,25 @@ if proc_internal.read_text() != proc_vendor:
 
 proc_text = proc_internal.read_text()
 generic_text = (root / "fs/proc/generic.c").read_text()
+
+old_fill_super = "extern int proc_fill_super(struct super_block *);\n"
+new_fill_super = "extern int proc_fill_super(struct super_block *, void *, int);\n"
+if old_fill_super in proc_text:
+    if proc_text.count(old_fill_super) != 1:
+        raise SystemExit("proc_fill_super declaration count mismatch")
+    proc_text = proc_text.replace(old_fill_super, new_fill_super, 1)
+    repairs.append("fs/proc/internal.h=updated-proc-fill-super-signature")
+elif proc_text.count(new_fill_super) != 1:
+    raise SystemExit("proc_fill_super declaration is neither vendor nor stable-compatible")
+
+net_ops_anchor = "extern const struct inode_operations proc_net_inode_operations;\n"
+net_dentry_decl = "extern const struct dentry_operations proc_net_dentry_ops;\n"
+if net_dentry_decl not in proc_text:
+    if proc_text.count(net_ops_anchor) != 1:
+        raise SystemExit("proc_net operations insertion anchor mismatch")
+    proc_text = proc_text.replace(net_ops_anchor, net_ops_anchor + net_dentry_decl, 1)
+    repairs.append("fs/proc/internal.h=declared-proc-net-dentry-ops")
+
 force_lookup = '''static inline void pde_force_lookup(struct proc_dir_entry *pde)
 {
 \t/* /proc/net entries can change under setns(CLONE_NEWNET). */
@@ -54,12 +73,11 @@ force_lookup = '''static inline void pde_force_lookup(struct proc_dir_entry *pde
 }
 '''
 if "pde_force_lookup(" in generic_text and "static inline void pde_force_lookup(" not in proc_text:
-    anchor = "extern const struct inode_operations proc_net_inode_operations;\n"
-    if proc_text.count(anchor) != 1:
-        raise SystemExit("proc_net operations insertion anchor mismatch")
-    proc_text = proc_text.replace(anchor, anchor + force_lookup, 1)
-    proc_internal.write_text(proc_text)
+    if proc_text.count(net_dentry_decl) != 1:
+        raise SystemExit("proc_net dentry declaration insertion anchor mismatch")
+    proc_text = proc_text.replace(net_dentry_decl, net_dentry_decl + force_lookup, 1)
     repairs.append("fs/proc/internal.h=retained-stable-pde-force-lookup")
+proc_internal.write_text(proc_text)
 
 # io-pgtable-arm.c belongs to the Samsung tree shape, whose public definitions
 # live in include/linux/io-pgtable.h. The merge left a local-header include even
@@ -118,6 +136,8 @@ for required in (
     "struct proc_filemap_private {",
     "extern int proc_pid_statlmkd(",
     "extern const struct file_operations proc_reclaim_operations;",
+    new_fill_super.strip(),
+    net_dentry_decl.strip(),
 ):
     if required not in proc_final:
         raise SystemExit(f"touchGrass procfs ABI postcondition missing: {required}")

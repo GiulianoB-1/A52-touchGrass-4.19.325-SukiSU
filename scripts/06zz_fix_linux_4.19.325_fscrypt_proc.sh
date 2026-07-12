@@ -47,15 +47,14 @@ if "keyinfo.o" in crypto_makefile.read_text():
 
 
 # The merged inode.c uses Linux 4.19.325's three-argument proc_fill_super(),
-# while the Samsung mount path and restored private header still used the old
-# one-argument prototype. Keep Samsung's explicit option validation, expose its
-# parser to inode.c, and call the stable fill helper with no second parse.
+# while the Samsung mount path may still use the old one-argument prototype.
+# Keep Samsung's explicit option validation, expose its parser to inode.c, and
+# call the stable fill helper with no second parse. The prior 06z pass may have
+# already installed the unnamed three-argument declaration, so accept it.
 proc_internal = root / "fs/proc/internal.h"
 internal = proc_internal.read_text()
 old_fill_decl = "extern int proc_fill_super(struct super_block *);\n"
-new_fill_decl = (
-    "extern int proc_fill_super(struct super_block *, void *data, int flags);\n"
-)
+new_fill_decl = "extern int proc_fill_super(struct super_block *, void *, int);\n"
 if old_fill_decl in internal:
     if internal.count(old_fill_decl) != 1:
         raise SystemExit("unexpected old proc_fill_super declaration count")

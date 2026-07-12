@@ -21,6 +21,7 @@ on:
       - 'scripts/05_merge_linux_4.19.325.py'
       - 'scripts/checkpoint_merge_linux_4.19.250.sh'
       - 'scripts/checkpoint_fix_linux_4.19.250_compile.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.250_late.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
@@ -113,6 +114,9 @@ jobs:
 
       - name: Repair Linux 4.19.250 compile mismatches
         run: ./scripts/checkpoint_fix_linux_4.19.250_compile.sh
+
+      - name: Repair late Linux 4.19.250 compile mismatches
+        run: ./scripts/checkpoint_fix_linux_4.19.250_late.sh
 
       - name: Replace legacy exec dispatch with ReSukiSU manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh

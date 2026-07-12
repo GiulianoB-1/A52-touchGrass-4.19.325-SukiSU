@@ -90,6 +90,24 @@ if mmc_text.count(old_ops) != 1:
 mmc.write_text(mmc_text.replace(old_ops, new_ops, 1))
 print("applied=MMC cache callback placement")
 
+ffs = root / "drivers/usb/gadget/function/f_fs.c"
+replace_once_in_segment(
+    ffs,
+    "static inline struct f_fs_opts *ffs_do_functionfs_bind(",
+    "\nstatic int _ffs_func_bind(",
+    "\tstruct ffs_data *ffs_data;\n",
+    "\tstruct ffs_data *ffs, *ffs_data;\n",
+    "FunctionFS vendor log pointer declaration",
+)
+replace_once_in_segment(
+    ffs,
+    "static inline struct f_fs_opts *ffs_do_functionfs_bind(",
+    "\nstatic int _ffs_func_bind(",
+    "\tfunc->ffs = ffs_data;\n",
+    "\tfunc->ffs = ffs_data;\n\tffs = ffs_data;\n",
+    "FunctionFS vendor log pointer assignment",
+)
+
 verifier_text = verifier.read_text()
 adjust_start = verifier_text.index("static int adjust_ptr_min_max_vals(")
 adjust_end = verifier_text.index("\nstatic int adjust_scalar_min_max_vals(", adjust_start)
@@ -111,6 +129,17 @@ outside_ops = mmc_text[:ops_start] + mmc_text[ops_end:]
 if field in outside_ops:
     raise SystemExit("MMC cache callback remains outside mmc_ops")
 
+ffs_text = ffs.read_text()
+ffs_start = ffs_text.index("static inline struct f_fs_opts *ffs_do_functionfs_bind(")
+ffs_end = ffs_text.index("\nstatic int _ffs_func_bind(", ffs_start)
+ffs_bind = ffs_text[ffs_start:ffs_end]
+if "struct ffs_data *ffs, *ffs_data;" not in ffs_bind:
+    raise SystemExit("FunctionFS vendor log declaration postcondition failed")
+if "func->ffs = ffs_data;\n\tffs = ffs_data;" not in ffs_bind:
+    raise SystemExit("FunctionFS vendor log assignment postcondition failed")
+if 'ffs_log("functionfs_bind returned %d", ret);' not in ffs_bind:
+    raise SystemExit("FunctionFS vendor log call postcondition failed")
+
 print("result=linux-4.19.200-compile-api-repairs-complete")
 PY
 
@@ -119,6 +148,7 @@ PY
   echo 'bpf_src_register=restored'
   echo 'ext4_resetent_lblk=passed'
   echo 'mmc_cache_callback=relocated'
+  echo 'functionfs_log_pointer=restored'
   echo 'result=compile-api-compatible'
 } | tee "$REPORT"
 

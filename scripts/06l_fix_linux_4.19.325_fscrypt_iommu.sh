@@ -54,10 +54,9 @@ if marker in text:
     repairs.append("fs/dcache.c=removed-header-duplicate-fscrypt-helper")
 
 
-# Samsung's ARM LPAE implementation tracks child-table references, while the
-# later stable code requires the full arm_lpae_io_pgtable object to encode the
-# table address. Merge both requirements: pass data plus the reference count,
-# and derive cfg inside the helper.
+# The merge can produce either Samsung's reference-counted installer API or the
+# final Linux-stable data-pointer API. Convert the transient cfg+refcount shape;
+# otherwise preserve and validate the already-final stable shape.
 path = root / "drivers/iommu/io-pgtable-arm.c"
 text = path.read_text()
 old_signature = (
@@ -70,7 +69,7 @@ old_signature = (
     "\tarm_lpae_iopte old, new;\n"
     "\tstruct io_pgtable_cfg *cfg = &data->iop.cfg;\n"
 )
-new_signature = (
+counted_signature = (
     "static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,\n"
     "\t\t\t\t\t     arm_lpae_iopte *ptep,\n"
     "\t\t\t\t\t     arm_lpae_iopte curr,\n"
@@ -80,8 +79,15 @@ new_signature = (
     "\tarm_lpae_iopte old, new;\n"
     "\tstruct io_pgtable_cfg *cfg = &data->iop.cfg;\n"
 )
+stable_signature_fragment = (
+    "static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,\n"
+    "\t\t\t\t\t     arm_lpae_iopte *ptep,\n"
+    "\t\t\t\t\t     arm_lpae_iopte curr,\n"
+    "\t\t\t\t\t     struct arm_lpae_io_pgtable *data)\n"
+)
 if old_signature in text:
-    text = replace_once(text, old_signature, new_signature, "ARM LPAE installer signature")
+    text = replace_once(text, old_signature, counted_signature,
+                        "ARM LPAE installer signature")
     text = replace_once(
         text,
         "arm_lpae_install_table(cptep, ptep, 0, cfg, 0)",
@@ -96,6 +102,12 @@ if old_signature in text:
     )
     path.write_text(text)
     repairs.append("drivers/iommu/io-pgtable-arm.c=merged-data-and-refcount-installer-api")
+elif counted_signature in text:
+    repairs.append("drivers/iommu/io-pgtable-arm.c=reference-counted-data-api-already-present")
+elif stable_signature_fragment in text:
+    repairs.append("drivers/iommu/io-pgtable-arm.c=stable-data-api-already-present")
+else:
+    raise SystemExit("ARM LPAE installer signature is not a recognized safe layout")
 
 
 # Exact postconditions.
@@ -105,9 +117,9 @@ if marker in dcache:
 if (root / "include/linux/fscrypt.h").read_text().count(marker) != 2:
     raise SystemExit("conditional fscrypt header helper validation failed")
 
-iommu = (root / "drivers/iommu/io-pgtable-arm.c").read_text()
+iommu = path.read_text()
 start = iommu.index("static arm_lpae_iopte arm_lpae_install_table(")
-end = iommu.index("\nstruct map_state", start)
+end = iommu.index("\nstatic int __arm_lpae_map", start)
 installer = iommu[start:end]
 if "struct arm_lpae_io_pgtable *data" not in installer:
     raise SystemExit("ARM LPAE installer data argument is missing")
@@ -115,12 +127,19 @@ if installer.count("struct io_pgtable_cfg *cfg") != 1:
     raise SystemExit("ARM LPAE installer cfg declaration validation failed")
 if "paddr_to_iopte(__pa(table), data)" not in installer:
     raise SystemExit("ARM LPAE table-address encoding validation failed")
-if "iopte_tblcnt_set(&new, ref_count);" not in installer:
-    raise SystemExit("Samsung ARM LPAE table reference count was lost")
-if iommu.count("arm_lpae_install_table(cptep, ptep, 0, data, 0)") != 1:
-    raise SystemExit("ARM LPAE map call validation failed")
-if iommu.count("arm_lpae_install_table(tablep, ptep, blk_pte, data, child_cnt)") != 1:
-    raise SystemExit("ARM LPAE split call validation failed")
+
+if "int ref_count" in installer:
+    if "iopte_tblcnt_set(&new, ref_count);" not in installer:
+        raise SystemExit("Samsung ARM LPAE table reference count was lost")
+    if iommu.count("arm_lpae_install_table(cptep, ptep, 0, data, 0)") != 1:
+        raise SystemExit("ARM LPAE counted map call validation failed")
+    if iommu.count("arm_lpae_install_table(tablep, ptep, blk_pte, data, child_cnt)") != 1:
+        raise SystemExit("ARM LPAE counted split call validation failed")
+else:
+    if iommu.count("arm_lpae_install_table(cptep, ptep, 0, data)") != 1:
+        raise SystemExit("ARM LPAE stable map call validation failed")
+    if iommu.count("arm_lpae_install_table(tablep, ptep, blk_pte, data)") != 1:
+        raise SystemExit("ARM LPAE stable split call validation failed")
 
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")
 print(report.read_text(), end="")

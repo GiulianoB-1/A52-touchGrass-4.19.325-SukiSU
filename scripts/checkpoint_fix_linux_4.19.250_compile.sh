@@ -237,18 +237,27 @@ for stale in (old_map_check, old_map_call, old_dot, old_dotdot):
 print("applied=ext4 logical-block directory checks")
 
 # The late CPU hotplug table names random-pool callbacks whose declarations are
-# provided by linux/random.h. The merge retained the table but dropped the
-# public include.
+# provided by linux/random.h. Normalize the duplicated cpuset include produced
+# by the direct merge, then add the random header exactly once.
 cpu = root / "kernel/cpu.c"
 text = cpu.read_text()
+cpuset_include = "#include <linux/cpuset.h>\n"
 random_include = "#include <linux/random.h>\n"
+cpuset_count = text.count(cpuset_include)
+if cpuset_count == 2:
+    first = text.index(cpuset_include)
+    second = text.index(cpuset_include, first + len(cpuset_include))
+    text = text[:second] + text[second + len(cpuset_include):]
+elif cpuset_count != 1:
+    raise SystemExit(f"CPU hotplug cpuset include count is {cpuset_count}")
 if random_include not in text:
-    anchor = "#include <linux/cpuset.h>\n"
-    text = replace_once(text, anchor, anchor + random_include,
+    text = replace_once(text, cpuset_include, cpuset_include + random_include,
                         "CPU hotplug random include")
-    cpu.write_text(text)
+cpu.write_text(text)
 
 final = cpu.read_text()
+if final.count(cpuset_include) != 1:
+    raise SystemExit("CPU hotplug cpuset include normalization failed")
 if final.count(random_include) != 1:
     raise SystemExit("CPU hotplug random include postcondition failed")
 for callback in ("random_prepare_cpu", "random_online_cpu"):

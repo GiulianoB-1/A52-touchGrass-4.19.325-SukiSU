@@ -84,6 +84,9 @@ info "Applying reviewed Linux $TARGET_VERSION vendor adaptations"
 python3 "$(dirname "$0")/checkpoint_resolve_linux_4.19.200.py" "$KERNEL_DIR" \
   2>&1 | tee "$ARTIFACTS_DIR/reviewed-resolver-$TO_TAG.log"
 
+info "Repairing Linux 4.19.200 compile API mismatches"
+"$(dirname "$0")/checkpoint_fix_linux_4.19.200_compile.sh"
+
 info "Repairing vendor linker-script NOINSTR placement"
 "$(dirname "$0")/checkpoint_fix_linux_4.19.200_noinstr.sh"
 
@@ -109,6 +112,7 @@ git -C "$KERNEL_DIR" diff --check
   echo 'retained_newer_cfg80211_key_policy=yes'
   echo 'ported_functionfs_ownership_fix=yes'
   echo 'ported_arm64_alternative_ordering=yes'
+  echo 'repaired_compile_api_mismatches=yes'
   echo 'repaired_noinstr_linker_placement=yes'
   echo 'remaining_rejects=0'
   echo 'result=reviewed-checkpoint-ready-to-build'

@@ -108,6 +108,45 @@ replace_once_in_segment(
     "FunctionFS vendor log pointer assignment",
 )
 
+wireless = root / "net/wireless/util.c"
+replace_once(
+    wireless,
+    """int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
+\t\t\t\t   struct key_params *params, int key_idx,
+\t\t\t\t   bool pairwise, const u8 *mac_addr)
+{
+\tint max_key_idx = 5;
+
+\tif (wiphy_ext_feature_isset(&rdev->wiphy,
+\t\t\t\t    NL80211_EXT_FEATURE_BEACON_PROTECTION))
+\t\tmax_key_idx = 7;
+\tif (key_idx < 0 || key_idx > max_key_idx)
+\t\treturn -EINVAL;
+""",
+    """bool cfg80211_valid_key_idx(struct cfg80211_registered_device *rdev,
+\t\t\t    int key_idx, bool pairwise)
+{
+\tint max_key_idx = 5;
+
+\t/* Keep Samsung's extended key-index policy for vendor ciphers. */
+\t(void)pairwise;
+\tif (wiphy_ext_feature_isset(&rdev->wiphy,
+\t\t\t\t    NL80211_EXT_FEATURE_BEACON_PROTECTION))
+\t\tmax_key_idx = 7;
+
+\treturn key_idx >= 0 && key_idx <= max_key_idx;
+}
+
+int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
+\t\t\t\t   struct key_params *params, int key_idx,
+\t\t\t\t   bool pairwise, const u8 *mac_addr)
+{
+\tif (!cfg80211_valid_key_idx(rdev, key_idx, pairwise))
+\t\treturn -EINVAL;
+""",
+    "cfg80211 key-index helper with vendor policy",
+)
+
 verifier_text = verifier.read_text()
 adjust_start = verifier_text.index("static int adjust_ptr_min_max_vals(")
 adjust_end = verifier_text.index("\nstatic int adjust_scalar_min_max_vals(", adjust_start)
@@ -140,6 +179,14 @@ if "func->ffs = ffs_data;\n\tffs = ffs_data;" not in ffs_bind:
 if 'ffs_log("functionfs_bind returned %d", ret);' not in ffs_bind:
     raise SystemExit("FunctionFS vendor log call postcondition failed")
 
+wireless_text = wireless.read_text()
+if wireless_text.count("bool cfg80211_valid_key_idx(") != 1:
+    raise SystemExit("cfg80211 key-index helper definition postcondition failed")
+if "return key_idx >= 0 && key_idx <= max_key_idx;" not in wireless_text:
+    raise SystemExit("cfg80211 vendor key-index policy postcondition failed")
+if "if (!cfg80211_valid_key_idx(rdev, key_idx, pairwise))" not in wireless_text:
+    raise SystemExit("cfg80211 validation call postcondition failed")
+
 print("result=linux-4.19.200-compile-api-repairs-complete")
 PY
 
@@ -149,6 +196,7 @@ PY
   echo 'ext4_resetent_lblk=passed'
   echo 'mmc_cache_callback=relocated'
   echo 'functionfs_log_pointer=restored'
+  echo 'cfg80211_key_index_helper=restored'
   echo 'result=compile-api-compatible'
 } | tee "$REPORT"
 

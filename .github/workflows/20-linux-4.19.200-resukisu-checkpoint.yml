@@ -16,6 +16,8 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.180_fscrypt.sh'
       - 'scripts/checkpoint_resolve_linux_4.19.200.py'
       - 'scripts/checkpoint_resolve_linux_4.19.200.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.200_compile.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.200_noinstr.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
       - 'sources.lock'

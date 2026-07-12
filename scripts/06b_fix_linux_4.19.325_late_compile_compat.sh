@@ -11,6 +11,7 @@ test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VER
 info "Applying late Linux $TARGET_VERSION compile compatibility repairs"
 python3 - "$KERNEL_DIR" "$REPORT" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
@@ -25,17 +26,17 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Linux 4.19.325 requires fscrypt_d_ops for ciphertext dentries.  The direct
-# three-way merge can retain Samsung's older crypto.c, which has neither the
-# dentry revalidation callback nor the operations table.  Restore the exact
-# stable implementation when it is absent, while preserving it unchanged when
-# the upstream side already won the merge.
+# Linux 4.19.325 requires fscrypt_d_ops for ciphertext dentries.  Samsung's
+# fscrypt implementation is newer in some areas and does not contain the older
+# fscrypt_restore_control_page() anchor, so insert before fscrypt_initialize()
+# when that is the layout present.
 private = root / "fs/crypto/fscrypt_private.h"
 text = private.read_text()
 declaration = "extern const struct dentry_operations fscrypt_d_ops;\n"
 if declaration not in text:
     anchor = "extern struct kmem_cache *fscrypt_info_cachep;\n"
-    text = replace_once(text, anchor, anchor + declaration, "fscrypt d_ops declaration")
+    text = replace_once(text, anchor, anchor + declaration,
+                        "fscrypt d_ops declaration")
     private.write_text(text)
     repairs.append("fs/crypto/fscrypt_private.h=declared-fscrypt-d-ops")
 elif text.count(declaration) != 1:
@@ -50,47 +51,63 @@ for include in ("#include <linux/dcache.h>\n", "#include <linux/namei.h>\n"):
                                    f"fscrypt include {include.strip()}")
         repairs.append(f"fs/crypto/crypto.c=added-{include.strip()[10:-3]}-include")
 
-function_marker = "static int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)"
+function_re = re.compile(
+    r"^(?:static\s+)?int fscrypt_d_revalidate\(struct dentry \*dentry, unsigned int flags\)$",
+    re.MULTILINE,
+)
 ops_marker = "const struct dentry_operations fscrypt_d_ops = {"
-if function_marker not in crypto_text and ops_marker not in crypto_text:
-    anchor = "void fscrypt_restore_control_page(struct page *page)\n"
-    block = '''/*
+function_count = len(function_re.findall(crypto_text))
+ops_count = crypto_text.count(ops_marker)
+if function_count == 0 and ops_count == 0:
+    public_decl = "int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags);"
+    storage = "" if public_decl in (root / "include/linux/fscrypt.h").read_text() else "static "
+    block = f'''/*
  * Validate dentries in encrypted directories to make sure we aren't
  * potentially caching stale dentries after a key has been added.
  */
-static int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)
-{
-	struct dentry *dir;
-	int err;
-	int valid;
+{storage}int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags)
+{{
+\tstruct dentry *dir;
+\tint err;
+\tint valid;
 
-	if (!(dentry->d_flags & DCACHE_ENCRYPTED_NAME))
-		return 1;
+\tif (!(dentry->d_flags & DCACHE_ENCRYPTED_NAME))
+\t\treturn 1;
 
-	if (flags & LOOKUP_RCU)
-		return -ECHILD;
+\tif (flags & LOOKUP_RCU)
+\t\treturn -ECHILD;
 
-	dir = dget_parent(dentry);
-	err = fscrypt_get_encryption_info(d_inode(dir));
-	valid = !fscrypt_has_encryption_key(d_inode(dir));
-	dput(dir);
+\tdir = dget_parent(dentry);
+\terr = fscrypt_get_encryption_info(d_inode(dir));
+\tvalid = !fscrypt_has_encryption_key(d_inode(dir));
+\tdput(dir);
 
-	if (err < 0)
-		return err;
+\tif (err < 0)
+\t\treturn err;
 
-	return valid;
-}
+\treturn valid;
+}}
 
-const struct dentry_operations fscrypt_d_ops = {
-	.d_revalidate = fscrypt_d_revalidate,
-};
+const struct dentry_operations fscrypt_d_ops = {{
+\t.d_revalidate = fscrypt_d_revalidate,
+}};
 
 '''
-    crypto_text = replace_once(crypto_text, anchor, block + anchor,
-                               "fscrypt restore-control-page insertion")
+    anchors = (
+        "void fscrypt_restore_control_page(struct page *page)\n",
+        "int fscrypt_initialize(unsigned int cop_flags)\n",
+    )
+    for anchor in anchors:
+        if crypto_text.count(anchor) == 1:
+            crypto_text = crypto_text.replace(anchor, block + anchor, 1)
+            break
+    else:
+        raise SystemExit("fscrypt dentry-ops insertion anchor not found")
     repairs.append("fs/crypto/crypto.c=restored-stable-fscrypt-d-ops")
-elif crypto_text.count(function_marker) != 1 or crypto_text.count(ops_marker) != 1:
-    raise SystemExit("partial or duplicate fscrypt_d_ops implementation")
+elif function_count != 1 or ops_count != 1:
+    raise SystemExit(
+        f"partial or duplicate fscrypt_d_ops implementation: function={function_count}, ops={ops_count}"
+    )
 
 crypto.write_text(crypto_text)
 
@@ -117,8 +134,10 @@ new_sig = "static void sugov_tunables_release(struct kobject *kobj)\n"
 old_release = "\t.release = &sugov_tunables_free,\n"
 new_release = "\t.release = &sugov_tunables_release,\n"
 if old_sig in text:
-    text = replace_once(text, old_sig, new_sig, "schedutil kobject release signature")
-    text = replace_once(text, old_release, new_release, "schedutil kobject release binding")
+    text = replace_once(text, old_sig, new_sig,
+                        "schedutil kobject release signature")
+    text = replace_once(text, old_release, new_release,
+                        "schedutil kobject release binding")
     schedutil.write_text(text)
     repairs.append("kernel/sched/cpufreq_schedutil.c=renamed-kobject-release-callback")
 elif text.count(new_sig) != 1 or text.count(new_release) != 1:
@@ -131,7 +150,7 @@ wakelock_text = wakelock.read_text()
 schedutil_text = schedutil.read_text()
 if private_text.count(declaration) != 1:
     raise SystemExit("fscrypt_d_ops declaration repair failed")
-if crypto_text.count(function_marker) != 1 or crypto_text.count(ops_marker) != 1:
+if len(function_re.findall(crypto_text)) != 1 or crypto_text.count(ops_marker) != 1:
     raise SystemExit("fscrypt_d_ops implementation repair failed")
 if old in wakelock_text or wakelock_text.count(new) != 1:
     raise SystemExit("wakelock writer repair failed")

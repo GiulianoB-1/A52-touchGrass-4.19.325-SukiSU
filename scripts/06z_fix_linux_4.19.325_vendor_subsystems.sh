@@ -8,15 +8,14 @@ REPORT="$ARTIFACTS_DIR/vendor-subsystem-compat-$TARGET_VERSION.txt"
 test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
 test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION before vendor subsystem repair"
 
-python3 - "$KERNEL_DIR" "$TOUCHGRASS_COMMIT" "$LINUX_STABLE_TARGET_COMMIT" "$REPORT" <<'PY'
+python3 - "$KERNEL_DIR" "$TOUCHGRASS_COMMIT" "$REPORT" <<'PY'
 from pathlib import Path
 import subprocess
 import sys
 
 root = Path(sys.argv[1])
 touchgrass = sys.argv[2]
-stable = sys.argv[3]
-report = Path(sys.argv[4])
+report = Path(sys.argv[3])
 repairs = []
 
 
@@ -62,13 +61,20 @@ if "pde_force_lookup(" in generic_text and "static inline void pde_force_lookup(
     proc_internal.write_text(proc_text)
     repairs.append("fs/proc/internal.h=retained-stable-pde-force-lookup")
 
-# The merge kept the stable io-pgtable-arm.c include but treated its private
-# companion header as deleted. Restore that header from the exact stable target.
-io_header = root / "drivers/iommu/io-pgtable.h"
-io_stable = git_blob(stable, "drivers/iommu/io-pgtable.h")
-if not io_header.exists() or io_header.read_text() != io_stable:
-    io_header.write_text(io_stable)
-    repairs.append("drivers/iommu/io-pgtable.h=restored-linux-stable-private-header")
+# io-pgtable-arm.c belongs to the Samsung tree shape, whose public definitions
+# live in include/linux/io-pgtable.h. The merge left a local-header include even
+# though neither source side contains drivers/iommu/io-pgtable.h.
+io_arm = root / "drivers/iommu/io-pgtable-arm.c"
+io_text = io_arm.read_text()
+old_include = '#include "io-pgtable.h"\n'
+new_include = '#include <linux/io-pgtable.h>\n'
+if old_include in io_text:
+    if io_text.count(old_include) != 1:
+        raise SystemExit("unexpected local io-pgtable include count")
+    io_arm.write_text(io_text.replace(old_include, new_include, 1))
+    repairs.append("drivers/iommu/io-pgtable-arm.c=used-public-page-table-header")
+elif io_text.count(new_include) != 1:
+    raise SystemExit("IOMMU page-table include is neither local nor repaired")
 
 # Samsung SD bus operations still initialize these callbacks. Preserve them in
 # the merged bus-ops structure alongside Linux stable's cache_enabled callback.
@@ -118,8 +124,11 @@ for required in (
 if "pde_force_lookup(" in generic_text and "static inline void pde_force_lookup(" not in proc_final:
     raise SystemExit("stable procfs force-lookup helper was not retained")
 
-if not io_header.exists() or "struct io_pgtable_cfg" not in io_header.read_text():
-    raise SystemExit("stable io-pgtable private header restoration failed")
+io_final = io_arm.read_text()
+if old_include in io_final or io_final.count(new_include) != 1:
+    raise SystemExit("public IOMMU page-table include repair failed")
+if not (root / "include/linux/io-pgtable.h").exists():
+    raise SystemExit("public Linux IOMMU page-table header is missing")
 
 core_final = core_h.read_text()
 core_start = core_final.index("struct mmc_bus_ops {\n")
@@ -137,13 +146,13 @@ PY
 
 git -C "$KERNEL_DIR" diff --check -- \
   fs/crypto/fname.c fs/proc/internal.h \
-  drivers/iommu/io-pgtable.h drivers/mmc/core/core.h
+  drivers/iommu/io-pgtable-arm.c drivers/mmc/core/core.h
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"
   printf 'fscrypt=touchgrass-filename-api-preserved\n'
   printf 'procfs=touchgrass-private-abi-plus-stable-net-lookup\n'
-  printf 'iommu=stable-private-header-restored\n'
+  printf 'iommu=public-page-table-header-used\n'
   printf 'mmc=vendor-bus-callbacks-restored\n'
   printf 'result=linux-4.19.325-vendor-subsystem-compatibility-repaired\n'
 } | tee -a "$REPORT"

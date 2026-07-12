@@ -125,8 +125,8 @@ elif text.count(new) != 1:
     raise SystemExit("wakelock writer is neither old nor repaired")
 
 # Two independently merged helpers received the same name but different
-# signatures. Rename only the kobject release callback; keep the policy-level
-# sugov_tunables_free() and its callers unchanged.
+# signatures. Rename only the kobject release callback. Some stable layouts do
+# not have a separate policy-level free helper, so do not require one.
 schedutil = root / "kernel/sched/cpufreq_schedutil.c"
 text = schedutil.read_text()
 old_sig = "static void sugov_tunables_free(struct kobject *kobj)\n"
@@ -156,8 +156,6 @@ if old in wakelock_text or wakelock_text.count(new) != 1:
     raise SystemExit("wakelock writer repair failed")
 if schedutil_text.count(new_sig) != 1 or schedutil_text.count(new_release) != 1:
     raise SystemExit("schedutil release callback repair failed")
-if schedutil_text.count("static void sugov_tunables_free(struct sugov_tunables *tunables)\n") != 1:
-    raise SystemExit("schedutil policy-level free helper changed unexpectedly")
 
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")
 print(report.read_text(), end="")

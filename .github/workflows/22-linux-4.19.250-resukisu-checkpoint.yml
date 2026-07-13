@@ -26,6 +26,7 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.250_event_usb.sh'
       - 'scripts/checkpoint_fix_linux_4.19.250_link.sh'
       - 'scripts/06zzz_fix_linux_4.19.325_final_link_closure.sh'
+      - 'scripts/06zzzz_fix_linux_4.19.325_mmc_bkops_state.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'

@@ -89,6 +89,33 @@ if hits:
     raise SystemExit(f"{len(hits)} conflict markers remain after policy resolution")
 PY
 
+# Linux v4.19.220 contains two whitespace-only indentation defects in
+# synclink_gt.c. Normalize only those exact upstream lines so diff --check stays
+# strict for every other file and semantic content is unchanged.
+python3 - \
+  "$KERNEL_DIR/drivers/tty/synclink_gt.c" \
+  "$ARTIFACTS_DIR/upstream-whitespace-normalization-$TO_TAG.txt" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+report = Path(sys.argv[2])
+text = path.read_text()
+replacements = (
+    ("\t \tset_gtsignals(info);", "\t\tset_gtsignals(info);", "set_gtsignals"),
+    (" \tget_gtsignals(info);", "\tget_gtsignals(info);", "get_gtsignals"),
+)
+rows = []
+for old, new, label in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one upstream whitespace defect, found {count}")
+    text = text.replace(old, new, 1)
+    rows.append(f"{label}=normalized\n")
+path.write_text(text)
+report.write_text("".join(rows))
+PY
+
 git -C "$KERNEL_DIR" diff --check > "$ARTIFACTS_DIR/direct-merge-diff-check-$TO_TAG.txt" 2>&1
 
 conflict_count=$(wc -l < "$CONFLICT_LIST")
@@ -105,6 +132,7 @@ policy_theirs=$(awk -F '\t' '$2=="theirs" {n++} END {print n+0}' "$POLICY_LOG")
   printf 'policy_vendor_preserved=%s\n' "$policy_ours"
   printf 'policy_upstream_selected=%s\n' "$policy_theirs"
   printf 'forced_link_closure_files=0\n'
+  printf 'upstream_whitespace_normalizations=2\n'
   printf 'remaining_conflict_markers=0\n'
   printf 'result=three-way-merge-ready-for-compile-test\n'
   printf 'flashable=no\n'

@@ -20,6 +20,7 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.200_noinstr.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
+      - 'scripts/08_build_resukisu_susfs_compat.sh'
       - 'scripts/09_package_a52xq_anykernel.sh'
       - 'sources.lock'
   workflow_dispatch:
@@ -112,7 +113,7 @@ jobs:
       - name: Integrate ReSukiSU and SUSFS, then build Linux 4.19.200
         run: |
           set -o pipefail
-          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 susfs \
+          ./scripts/08_build_resukisu_susfs_compat.sh 4.19.200 susfs \
             2>&1 | tee artifacts/linux-4.19.200-resukisu-susfs.log
 
       - name: Check out pinned AnyKernel3

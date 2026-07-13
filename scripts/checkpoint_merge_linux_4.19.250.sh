@@ -85,6 +85,7 @@ fs/ext4/block_validity.c
 fs/crypto/fname.c
 fs/crypto/Makefile
 lib/Makefile
+lib/chacha20.c
 drivers/char/random.c
 drivers/iommu/io-pgtable-arm.c
 drivers/mmc/core/core.c

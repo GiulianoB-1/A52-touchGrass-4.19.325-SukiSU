@@ -30,6 +30,8 @@ def write_if_changed(path: Path, old: str, new: str, label: str, expected_max: i
     rows.append(f"{label}=not-present\n")
     return False
 
+
+# BPF merge-shape repair.
 path = root / "kernel/bpf/verifier.c"
 text = path.read_text()
 loop_old = "\tfor (i = 0; i < insn_cnt; i++, insn++) {\n\t\tbool ctx_access;\n"
@@ -49,6 +51,7 @@ else:
     rows.append("bpf_socket_context_guard=not-needed\n")
 path.write_text(text)
 
+# File reference-count helper rename, only when the malformed merge is present.
 path = root / "fs/file_table.c"
 write_if_changed(
     path,
@@ -57,6 +60,7 @@ write_if_changed(
     "fput_many_signature",
 )
 
+# Samsung schedutil lifetime compatibility.
 path = root / "kernel/sched/cpufreq_schedutil.c"
 text = path.read_text()
 if "static void sugov_tunables_free(struct kobject *kobj)" in text:
@@ -110,6 +114,9 @@ else:
     rows.append("schedutil_release_order=not-needed\n")
 path.write_text(text)
 
+# Keep a single KDP-aware has_locked_children() helper. The 4.19.210 merge
+# contains two copies with slightly different whitespace, so exact-string
+# duplicate detection is insufficient.
 path = root / "fs/namespace.c"
 text = path.read_text()
 plain_helper = (
@@ -134,11 +141,50 @@ if plain_helper in text:
     rows.append("namespace_locked_children=repaired\n")
 else:
     rows.append("namespace_locked_children=not-needed\n")
-if text.count(kdp_helper) > 1:
-    text = text.replace(kdp_helper, "", 1)
-    rows.append("namespace_duplicate_helper=removed\n")
-else:
-    rows.append("namespace_duplicate_helper=not-needed\n")
+
+signature = "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
+
+
+def function_end(source: str, start: int) -> int:
+    brace = source.find("{", start)
+    if brace < 0:
+        raise SystemExit("fs/namespace.c: has_locked_children opening brace missing")
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                while end < len(source) and source[end] == "\n":
+                    end += 1
+                return end
+    raise SystemExit("fs/namespace.c: has_locked_children closing brace missing")
+
+starts = []
+pos = 0
+while True:
+    pos = text.find(signature, pos)
+    if pos < 0:
+        break
+    starts.append(pos)
+    pos += len(signature)
+
+if not starts:
+    raise SystemExit("fs/namespace.c: has_locked_children helper is missing")
+removed = 0
+for start in reversed(starts[1:]):
+    text = text[:start] + text[function_end(text, start):]
+    removed += 1
+rows.append(f"namespace_duplicate_helpers_removed={removed}\n")
+if text.count(signature) != 1:
+    raise SystemExit("fs/namespace.c: expected exactly one has_locked_children helper")
+helper_start = text.index(signature)
+helper_end = function_end(text, helper_start)
+if "#ifdef CONFIG_KDP_NS" not in text[helper_start:helper_end]:
+    raise SystemExit("fs/namespace.c: remaining has_locked_children helper is not KDP-aware")
+
 clone_return = (
     "#ifdef CONFIG_KDP_NS\n\treturn new_mnt->mnt;\n#else\n\treturn &new_mnt->mnt;\n#endif\n"
     "}\nEXPORT_SYMBOL_GPL(clone_private_mount);\n"
@@ -156,6 +202,7 @@ else:
     rows.append("clone_private_mount_invalid_exit=not-needed\n")
 path.write_text(text)
 
+# Restore Samsung's intentionally disabled HCI bind stub.
 path = root / "net/bluetooth/hci_sock.c"
 text = path.read_text()
 start_marker = "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,\n"
@@ -178,6 +225,7 @@ else:
     rows.append("hci_sock_bind=anchors-missing\n")
 path.write_text(text)
 
+# Qualcomm event timer queue shape.
 path = root / "drivers/soc/qcom/event_timer.c"
 write_if_changed(
     path,
@@ -186,6 +234,7 @@ write_if_changed(
     "event_timer_queue",
 )
 
+# USB address-zero serialization local state.
 path = root / "drivers/usb/core/hub.c"
 text = path.read_text()
 anchor = "\tstatic int unreliable_port = -1;\n"
@@ -196,6 +245,7 @@ else:
     rows.append("usb_hub_retry_locked=not-needed\n")
 path.write_text(text)
 
+# Preserve Samsung's previous-TRB fullness check.
 path = root / "drivers/usb/dwc3/gadget.c"
 text = path.read_text()
 anchor = (

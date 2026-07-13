@@ -53,12 +53,32 @@ cp "$SUSFS_DIR/kernel_patches/fs/susfs.c" "$KERNEL_DIR/fs/susfs.c"
 cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" "$KERNEL_DIR/include/linux/susfs.h"
 patch -d "$KERNEL_DIR" -p1 --forward --batch --fuzz=3 < "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
 sed -i 's/[[:space:]]\+$//' "$KERNEL_DIR/fs/namespace.c" "$KERNEL_DIR/fs/overlayfs/readdir.c"
+python3 - "$KERNEL_DIR/kernel/sys.c" <<'HOOKPY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)\n{\n'
+new = ('#ifdef CONFIG_KSU\n'
+       'extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n'
+       '#endif\n\n'
+       'long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)\n'
+       '{\n'
+       '#ifdef CONFIG_KSU\n'
+       '\tksu_handle_setresuid(ruid, euid, suid);\n'
+       '#endif\n')
+if text.count(old) != 1:
+    raise SystemExit('kernel/sys.c setresuid anchor mismatch')
+path.write_text(text.replace(old, new, 1))
+HOOKPY
 cp "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch" \
   "$ARTIFACTS_DIR/susfs-$SUSFS_VERSION-kernel-4.19.patch"
 test -f "$KERNEL_DIR/fs/susfs.c" || fail "SUSFS source was not installed"
 test -f "$KERNEL_DIR/include/linux/susfs.h" || fail "SUSFS header was not installed"
 grep -Fq 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' "$KERNEL_DIR/fs/Makefile" || \
   fail "SUSFS fs/Makefile hook is missing"
+grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL_DIR/kernel/sys.c" || \
+  fail "ReSukiSU setresuid hook is missing"
 '''
     if text.count(checkout_anchor) != 1:
         raise SystemExit("ReSukiSU checkout anchor mismatch")

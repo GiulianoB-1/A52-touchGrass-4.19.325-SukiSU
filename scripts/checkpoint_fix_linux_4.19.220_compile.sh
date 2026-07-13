@@ -160,17 +160,39 @@ rows.append("schedutil_cached_values=saved_before_release\n")
 # Use one KDP-aware locked-child helper for both clone_private_mount() and bind
 # mount validation. Restore the upstream invalid exit that releases namespace_sem.
 text = namespace.read_text()
-plain_flag = "\t\tif (child->mnt.mnt_flags & MNT_LOCKED)\n"
-kdp_flag = (
+first_helper = (
+    "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
+    "{\n"
+    "\tstruct mount *child;\n\n"
+    "\tlist_for_each_entry(child, &mnt->mnt_mounts, mnt_child) {\n"
+    "\t\tif (!is_subdir(child->mnt_mountpoint, dentry))\n"
+    "\t\t\tcontinue;\n\n"
+    "\t\tif (child->mnt.mnt_flags & MNT_LOCKED)\n"
+    "\t\t\treturn true;\n"
+    "\t}\n"
+    "\treturn false;\n"
+    "}\n\n"
+)
+first_helper_kdp = (
+    "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
+    "{\n"
+    "\tstruct mount *child;\n\n"
+    "\tlist_for_each_entry(child, &mnt->mnt_mounts, mnt_child) {\n"
+    "\t\tif (!is_subdir(child->mnt_mountpoint, dentry))\n"
+    "\t\t\tcontinue;\n\n"
     "#ifdef CONFIG_KDP_NS\n"
     "\t\tif (child->mnt->mnt_flags & MNT_LOCKED)\n"
     "#else\n"
     "\t\tif (child->mnt.mnt_flags & MNT_LOCKED)\n"
     "#endif\n"
+    "\t\t\treturn true;\n"
+    "\t}\n"
+    "\treturn false;\n"
+    "}\n\n"
 )
-if text.count(plain_flag) != 1:
-    raise SystemExit("fs/namespace.c: expected one upstream-only locked-child flag access")
-text = text.replace(plain_flag, kdp_flag, 1)
+if text.count(first_helper) != 1:
+    raise SystemExit("fs/namespace.c: expected one upstream locked-child helper")
+text = text.replace(first_helper, first_helper_kdp, 1)
 
 duplicate_helper = (
     "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"

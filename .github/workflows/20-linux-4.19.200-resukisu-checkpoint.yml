@@ -1,4 +1,4 @@
-name: 20 - Linux 4.19.200 reviewed ReSukiSU checkpoint (NON-FLASHABLE)
+name: 20 - Linux 4.19.200 ReSukiSU A52xq flashable build
 
 on:
   pull_request:
@@ -20,6 +20,7 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.200_noinstr.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
+      - 'scripts/09_package_a52xq_anykernel.sh'
       - 'sources.lock'
   workflow_dispatch:
 
@@ -34,10 +35,11 @@ env:
   JOBS: '4'
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 5G
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
 
 jobs:
   build:
-    name: Build reviewed touchGrass Linux 4.19.200 + ReSukiSU
+    name: Build and package touchGrass Linux 4.19.200 + ReSukiSU for A52xq
     runs-on: ubuntu-22.04
     timeout-minutes: 300
 
@@ -113,6 +115,22 @@ jobs:
           ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 \
             2>&1 | tee artifacts/linux-4.19.200-resukisu-safe.log
 
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package and verify A52xq flashable ZIP
+        run: |
+          ./scripts/09_package_a52xq_anykernel.sh \
+            4.19.200 \
+            artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe \
+            packaging/AnyKernel3 \
+            release
+
       - name: Record source state
         if: always()
         run: |
@@ -127,14 +145,22 @@ jobs:
             git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
           fi
           if [ -d workspace/touchgrass-a52xq/KernelSU/.git ]; then
-            git -C workspace/touchgrass-a52xq rev-parse HEAD > artifacts/resukisu-head.txt || true
+            git -C workspace/touchgrass-a52xq/KernelSU rev-parse HEAD > artifacts/resukisu-head.txt || true
           fi
 
-      - name: Upload reviewed build and diagnostics
+      - name: Upload A52xq flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchGrass-A52xq-Linux-4.19.200-ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-linux-4.19.200-resukisu-reviewed-${{ github.run_number }}-NON-FLASHABLE
+          name: a52xq-linux-4.19.200-resukisu-reviewed-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

@@ -20,6 +20,7 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.200_noinstr.sh'
       - 'scripts/05_merge_linux_4.19.325.py'
       - 'scripts/checkpoint_merge_linux_4.19.220.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.220_compile.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
@@ -111,6 +112,9 @@ jobs:
 
       - name: Three-way merge Linux 4.19.200 to 4.19.220
         run: ./scripts/checkpoint_merge_linux_4.19.220.sh
+
+      - name: Repair Linux 4.19.220 compile API mismatches
+        run: ./scripts/checkpoint_fix_linux_4.19.220_compile.sh
 
       - name: Replace legacy exec dispatch with ReSukiSU manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh

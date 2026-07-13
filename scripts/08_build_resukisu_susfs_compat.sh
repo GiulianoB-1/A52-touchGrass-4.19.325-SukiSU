@@ -69,6 +69,22 @@ void susfs_start_sdcard_monitor_fn(void);
 
 #endif
 SUSFSDEFEOT
+# susfs.h is also included directly by supercall.c, which uses SUSFS_MAGIC.
+# Keep the ABI definitions available through the public SUSFS header as in
+# newer integrations; the include guard makes the dispatcher include harmless.
+python3 - "$KERNEL_DIR/include/linux/susfs.h" <<'SUSFSHEADERPY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+include = '#include <linux/susfs_def.h>\n'
+if include not in text:
+    guard = '#define KSU_SUSFS_H\n'
+    if text.count(guard) != 1:
+        raise SystemExit('include/linux/susfs.h guard anchor mismatch')
+    text = text.replace(guard, guard + '\n' + include, 1)
+    path.write_text(text)
+SUSFSHEADERPY
 '''
 if text.count(anchor) != 1:
     raise SystemExit('SUSFS header-copy anchor mismatch')

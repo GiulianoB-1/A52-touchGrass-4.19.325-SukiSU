@@ -59,7 +59,8 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text()
 field = '\tunsigned long android_kabi_reserved1; /* SUSFS per-user state */\n'
-if 'android_kabi_reserved1' not in text:
+member = '\tunsigned long android_kabi_reserved1;'
+if member not in text:
     anchor = '\tstruct ratelimit_state ratelimit;\n'
     if text.count(anchor) != 1:
         raise SystemExit('include/linux/sched/user.h anchor mismatch')

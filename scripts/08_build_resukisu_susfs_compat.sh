@@ -21,14 +21,31 @@ anchor = 'cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" "$KERNEL_DIR/incl
 compat = r'''cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" "$KERNEL_DIR/include/linux/susfs.h"
 # SUSFS 1.4.2 only needs core_hook.h for the disabled legacy SUS_SU mode.
 sed -i '/#include "\.\.\/drivers\/kernelsu\/core_hook\.h"/d' "$KERNEL_DIR/fs/susfs.c"
-# ReSukiSU v4.1.0 expects the modern process-state helpers supplied by
-# susfs_def.h. Keep this shim deliberately limited to those helpers.
+# ReSukiSU v4.1.0 includes susfs_def.h from its supercall dispatcher. Supply
+# the userspace command ABI plus the process-state helpers required on 4.19.
 cat > "$KERNEL_DIR/include/linux/susfs_def.h" <<'SUSFSDEFEOT'
 #ifndef KSU_SUSFS_DEF_H
 #define KSU_SUSFS_DEF_H
 
 #include <linux/cred.h>
 #include <linux/thread_info.h>
+
+#define SUSFS_MAGIC 0xFAFAFAFA
+#define CMD_SUSFS_ADD_SUS_PATH 0x55550
+#define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55553
+#define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
+#define CMD_SUSFS_ADD_SUS_KSTAT 0x55570
+#define CMD_SUSFS_UPDATE_SUS_KSTAT 0x55571
+#define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY 0x55572
+#define CMD_SUSFS_SET_UNAME 0x55590
+#define CMD_SUSFS_ENABLE_LOG 0x555a0
+#define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG 0x555b0
+#define CMD_SUSFS_ADD_OPEN_REDIRECT 0x555c0
+#define CMD_SUSFS_SHOW_VERSION 0x555e1
+#define CMD_SUSFS_SHOW_ENABLED_FEATURES 0x555e2
+#define CMD_SUSFS_SHOW_VARIANT 0x555e3
+#define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x60010
+#define CMD_SUSFS_ADD_SUS_MAP 0x60020
 
 #define TIF_PROC_UMOUNTED 33
 

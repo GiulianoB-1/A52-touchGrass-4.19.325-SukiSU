@@ -103,7 +103,7 @@ grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL_DIR/kernel/sys.c" ||
     cleanup_anchor = "PY\n\ninfo \"Adding ReSukiSU reboot and fstat hooks\"\n"
     read_hook_block = r'''
 
-info "Restoring SUSFS inline read hook after legacy cleanup"
+info "Restoring SUSFS inline read and input hooks after legacy cleanup"
 python3 - "$KERNEL_DIR/fs/read_write.c" <<'READHOOKPY'
 from pathlib import Path
 import sys
@@ -126,10 +126,40 @@ if text.count(function_anchor) != 1:
     raise SystemExit('fs/read_write.c read syscall anchor mismatch')
 path.write_text(text.replace(function_anchor, declaration + function_hook, 1))
 READHOOKPY
+python3 - "$KERNEL_DIR/drivers/input/input.c" <<'INPUTHOOKPY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+declaration = ('#ifdef CONFIG_KSU\n'
+               'extern int ksu_handle_input_handle_event(unsigned int *type,\n'
+               '\t\t\tunsigned int *code, int *value);\n'
+               '#endif\n\n')
+function_anchor = ('void input_event(struct input_dev *dev,\n'
+                   '\t\t unsigned int type, unsigned int code, int value)\n'
+                   '{\n'
+                   '\tunsigned long flags;\n')
+function_hook = (function_anchor +
+                 '\n#ifdef CONFIG_KSU\n'
+                 '\tksu_handle_input_handle_event(&type, &code, &value);\n'
+                 '#endif\n')
+if 'ksu_input_hook' in text:
+    raise SystemExit('drivers/input/input.c still contains incompatible legacy input-hook flag')
+if ('extern int ksu_handle_input_handle_event(' in text or
+        'ksu_handle_input_handle_event(&type, &code, &value);' in text):
+    raise SystemExit('drivers/input/input.c still contains an input hook after legacy cleanup')
+if text.count(function_anchor) != 1:
+    raise SystemExit('drivers/input/input.c input_event anchor mismatch')
+path.write_text(text.replace(function_anchor, declaration + function_hook, 1))
+INPUTHOOKPY
 ! grep -Fq 'ksu_vfs_read_hook' "$KERNEL_DIR/fs/read_write.c" || \
   fail "Incompatible legacy ReSukiSU read-hook flag remains"
 grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" || \
   fail "ReSukiSU sys_read hook is missing"
+! grep -Fq 'ksu_input_hook' "$KERNEL_DIR/drivers/input/input.c" || \
+  fail "Incompatible legacy ReSukiSU input-hook flag remains"
+grep -Fq 'ksu_handle_input_handle_event(&type, &code, &value);' "$KERNEL_DIR/drivers/input/input.c" || \
+  fail "ReSukiSU input event hook is missing"
 '''
     if text.count(cleanup_anchor) != 1:
         raise SystemExit("legacy cleanup end anchor mismatch")

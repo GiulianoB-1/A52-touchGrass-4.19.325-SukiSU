@@ -103,18 +103,6 @@ replace_once(
     "xhci=matched-handshake-timeout-type",
 )
 
-# The vendor tree uses the newer generic ChaCha implementation in lib/chacha.c
-# and crypto/chacha_generic.c. The direct checkpoint merge copied upstream's
-# chacha20.o Makefile entry without importing the unchanged upstream source.
-# Preserve the vendor implementation and its matching API.
-lib_makefile = root / "lib/Makefile"
-replace_once(
-    lib_makefile,
-    "\t sha1.o chacha20.o irq_regs.o argv_split.o \\\n",
-    "\t sha1.o chacha.o irq_regs.o argv_split.o \\\n",
-    "lib_makefile=restored-vendor-chacha-object",
-)
-
 # Validate the exact post-merge state before allowing the build to continue.
 event_text = event_timer.read_text()
 if ".head = RB_ROOT" in event_text or ".next = NULL" in event_text:
@@ -140,11 +128,11 @@ if xhci_text.count(
 ) != 1:
     raise SystemExit("xHCI 64-bit handshake prototype count is not one")
 
-makefile_text = lib_makefile.read_text()
-if "sha1.o chacha20.o irq_regs.o" in makefile_text:
-    raise SystemExit("obsolete upstream chacha20 object remains in lib/Makefile")
-if makefile_text.count("sha1.o chacha.o irq_regs.o") != 1:
-    raise SystemExit("vendor chacha object entry count is not one")
+lib_makefile = (root / "lib/Makefile").read_text()
+if lib_makefile.count("sha1.o chacha20.o irq_regs.o") != 1:
+    raise SystemExit("Linux stable chacha20 object entry count is not one")
+if not (root / "lib/chacha20.c").is_file():
+    raise SystemExit("Linux stable lib/chacha20.c source is missing")
 if not (root / "lib/chacha.c").is_file():
     raise SystemExit("vendor lib/chacha.c source is missing")
 
@@ -156,7 +144,6 @@ git -C "$KERNEL_DIR" diff --check -- \
   drivers/soc/qcom/event_timer.c \
   drivers/usb/core/hub.c \
   drivers/usb/dwc3/gadget.c \
-  drivers/usb/host/xhci.h \
-  lib/Makefile
+  drivers/usb/host/xhci.h
 
-info "Linux $TARGET_VERSION Qualcomm event timer, USB and ChaCha compatibility repaired"
+info "Linux $TARGET_VERSION Qualcomm event timer and USB compatibility repaired"

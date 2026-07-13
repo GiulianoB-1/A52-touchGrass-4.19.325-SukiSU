@@ -85,6 +85,32 @@ if text.count(old) != 1:
     raise SystemExit('kernel/sys.c setresuid anchor mismatch')
 path.write_text(text.replace(old, new, 1))
 HOOKPY
+python3 - "$KERNEL_DIR/fs/read_write.c" <<'READHOOKPY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+declaration = ('#ifdef CONFIG_KSU\n'
+               'extern bool ksu_vfs_read_hook __read_mostly;\n'
+               'extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,\n'
+               '\t\t\tsize_t *count_ptr);\n'
+               '#endif\n\n')
+function_anchor = 'SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{\n'
+function_hook = (function_anchor +
+                 '#ifdef CONFIG_KSU\n'
+                 '\tif (unlikely(ksu_vfs_read_hook))\n'
+                 '\t\tksu_handle_sys_read(fd, &buf, &count);\n'
+                 '#endif\n')
+if 'extern int ksu_handle_sys_read(' not in text:
+    if text.count(function_anchor) != 1:
+        raise SystemExit('fs/read_write.c read syscall anchor mismatch')
+    text = text.replace(function_anchor, declaration + function_hook, 1)
+elif 'ksu_handle_sys_read(fd, &buf, &count);' not in text:
+    if text.count(function_anchor) != 1:
+        raise SystemExit('fs/read_write.c read syscall hook anchor mismatch')
+    text = text.replace(function_anchor, function_hook, 1)
+path.write_text(text)
+READHOOKPY
 cp "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch" \
   "$ARTIFACTS_DIR/susfs-$SUSFS_VERSION-kernel-4.19.patch"
 test -f "$KERNEL_DIR/fs/susfs.c" || fail "SUSFS source was not installed"
@@ -95,6 +121,8 @@ grep -Fq 'unsigned long android_kabi_reserved1;' "$KERNEL_DIR/include/linux/sche
   fail "SUSFS user state field is missing"
 grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL_DIR/kernel/sys.c" || \
   fail "ReSukiSU setresuid hook is missing"
+grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" || \
+  fail "ReSukiSU sys_read hook is missing"
 '''
     if text.count(checkout_anchor) != 1:
         raise SystemExit("ReSukiSU checkout anchor mismatch")

@@ -85,6 +85,25 @@ if text.count(old) != 1:
     raise SystemExit('kernel/sys.c setresuid anchor mismatch')
 path.write_text(text.replace(old, new, 1))
 HOOKPY
+cp "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch" \
+  "$ARTIFACTS_DIR/susfs-$SUSFS_VERSION-kernel-4.19.patch"
+test -f "$KERNEL_DIR/fs/susfs.c" || fail "SUSFS source was not installed"
+test -f "$KERNEL_DIR/include/linux/susfs.h" || fail "SUSFS header was not installed"
+grep -Fq 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' "$KERNEL_DIR/fs/Makefile" || \
+  fail "SUSFS fs/Makefile hook is missing"
+grep -Fq 'unsigned long android_kabi_reserved1;' "$KERNEL_DIR/include/linux/sched/user.h" || \
+  fail "SUSFS user state field is missing"
+grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL_DIR/kernel/sys.c" || \
+  fail "ReSukiSU setresuid hook is missing"
+'''
+    if text.count(checkout_anchor) != 1:
+        raise SystemExit("ReSukiSU checkout anchor mismatch")
+    text = text.replace(checkout_anchor, checkout_anchor + susfs_block, 1)
+
+    cleanup_anchor = "PY\n\ninfo \"Adding ReSukiSU reboot and fstat hooks\"\n"
+    read_hook_block = r'''
+
+info "Restoring SUSFS inline read hook after legacy cleanup"
 python3 - "$KERNEL_DIR/fs/read_write.c" <<'READHOOKPY'
 from pathlib import Path
 import sys
@@ -101,32 +120,18 @@ function_hook = (function_anchor +
                  '\tif (unlikely(ksu_vfs_read_hook))\n'
                  '\t\tksu_handle_sys_read(fd, &buf, &count);\n'
                  '#endif\n')
-if 'extern int ksu_handle_sys_read(' not in text:
-    if text.count(function_anchor) != 1:
-        raise SystemExit('fs/read_write.c read syscall anchor mismatch')
-    text = text.replace(function_anchor, declaration + function_hook, 1)
-elif 'ksu_handle_sys_read(fd, &buf, &count);' not in text:
-    if text.count(function_anchor) != 1:
-        raise SystemExit('fs/read_write.c read syscall hook anchor mismatch')
-    text = text.replace(function_anchor, function_hook, 1)
-path.write_text(text)
+if 'extern int ksu_handle_sys_read(' in text or 'ksu_handle_sys_read(fd, &buf, &count);' in text:
+    raise SystemExit('fs/read_write.c still contains a read hook after legacy cleanup')
+if text.count(function_anchor) != 1:
+    raise SystemExit('fs/read_write.c read syscall anchor mismatch')
+path.write_text(text.replace(function_anchor, declaration + function_hook, 1))
 READHOOKPY
-cp "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch" \
-  "$ARTIFACTS_DIR/susfs-$SUSFS_VERSION-kernel-4.19.patch"
-test -f "$KERNEL_DIR/fs/susfs.c" || fail "SUSFS source was not installed"
-test -f "$KERNEL_DIR/include/linux/susfs.h" || fail "SUSFS header was not installed"
-grep -Fq 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' "$KERNEL_DIR/fs/Makefile" || \
-  fail "SUSFS fs/Makefile hook is missing"
-grep -Fq 'unsigned long android_kabi_reserved1;' "$KERNEL_DIR/include/linux/sched/user.h" || \
-  fail "SUSFS user state field is missing"
-grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL_DIR/kernel/sys.c" || \
-  fail "ReSukiSU setresuid hook is missing"
 grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" || \
   fail "ReSukiSU sys_read hook is missing"
 '''
-    if text.count(checkout_anchor) != 1:
-        raise SystemExit("ReSukiSU checkout anchor mismatch")
-    text = text.replace(checkout_anchor, checkout_anchor + susfs_block, 1)
+    if text.count(cleanup_anchor) != 1:
+        raise SystemExit("legacy cleanup end anchor mismatch")
+    text = text.replace(cleanup_anchor, "PY\n" + read_hook_block + "\ninfo \"Adding ReSukiSU reboot and fstat hooks\"\n", 1)
 
     old_config = ('  -e KSU_MULTI_MANAGER_SUPPORT -d KSU_TRACEPOINT_HOOK -e KSU_MANUAL_HOOK \\\n'
                   '  -d KSU_SUSFS -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK \\\n'
@@ -138,6 +143,8 @@ grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" 
         raise SystemExit("ReSukiSU config anchor mismatch")
     text = text.replace(old_config, new_config, 1)
 
+    text = text.replace('require_absent "$KERNEL_DIR/fs/read_write.c" "ksu_vfs_read_hook"',
+                        'grep -Fq \'ksu_handle_sys_read(fd, &buf, &count);\' "$KERNEL_DIR/fs/read_write.c" || fail "ReSukiSU sys_read hook is missing"')
     text = text.replace('resukisu-v4.1.0-safe', 'resukisu-v4.1.0-susfs-v1.4.2-safe')
     text = text.replace("require_line \"$FINAL_CONFIG\" 'CONFIG_KSU_MANUAL_HOOK=y'",
                         "require_line \"$FINAL_CONFIG\" '# CONFIG_KSU_MANUAL_HOOK is not set'")

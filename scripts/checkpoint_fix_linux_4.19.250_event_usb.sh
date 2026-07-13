@@ -94,6 +94,15 @@ replace_once(
     "dwc3_gadget=restored-request-status-declaration",
 )
 
+# Match the Linux 4.19.250 implementation, which accepts a 64-bit timeout.
+xhci_h = root / "drivers/usb/host/xhci.h"
+replace_once(
+    xhci_h,
+    "int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec);\n",
+    "int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us);\n",
+    "xhci=matched-handshake-timeout-type",
+)
+
 # The vendor tree uses the newer generic ChaCha implementation in lib/chacha.c
 # and crypto/chacha_generic.c. The direct checkpoint merge copied upstream's
 # chacha20.o Makefile entry without importing the unchanged upstream source.
@@ -123,6 +132,14 @@ if gadget_text.count("struct dwc3_trb\t*tmp;") != 1:
 if gadget_text.count("int request_status;") != 1:
     raise SystemExit("DWC3 request_status declaration count is not one")
 
+xhci_text = xhci_h.read_text()
+if "xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec)" in xhci_text:
+    raise SystemExit("obsolete xHCI handshake prototype remains")
+if xhci_text.count(
+    "xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us)"
+) != 1:
+    raise SystemExit("xHCI 64-bit handshake prototype count is not one")
+
 makefile_text = lib_makefile.read_text()
 if "sha1.o chacha20.o irq_regs.o" in makefile_text:
     raise SystemExit("obsolete upstream chacha20 object remains in lib/Makefile")
@@ -139,6 +156,7 @@ git -C "$KERNEL_DIR" diff --check -- \
   drivers/soc/qcom/event_timer.c \
   drivers/usb/core/hub.c \
   drivers/usb/dwc3/gadget.c \
+  drivers/usb/host/xhci.h \
   lib/Makefile
 
 info "Linux $TARGET_VERSION Qualcomm event timer, USB and ChaCha compatibility repaired"

@@ -63,6 +63,49 @@ replace_once(
     "usb_hub=restored-retry-locked-declaration",
 )
 
+# The checkpoint merge retained code using two DWC3 locals while dropping their
+# declarations. Restore the declarations without changing the surrounding
+# Samsung gadget implementation.
+dwc3_gadget = root / "drivers/usb/dwc3/gadget.c"
+replace_once(
+    dwc3_gadget,
+    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
+    "{\n"
+    "\tu8\t\t\ttrbs_left;\n",
+    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
+    "{\n"
+    "\tstruct dwc3_trb\t*tmp;\n"
+    "\tu8\t\t\ttrbs_left;\n",
+    "dwc3_gadget=restored-previous-trb-declaration",
+)
+replace_once(
+    dwc3_gadget,
+    "{\n"
+    "\tstruct dwc3 *dwc = dep->dwc;\n"
+    "\tint ret;\n\n"
+    "\t/*\n"
+    "\t * If the HWO is set, it implies the TRB is still being\n",
+    "{\n"
+    "\tstruct dwc3 *dwc = dep->dwc;\n"
+    "\tint request_status;\n"
+    "\tint ret;\n\n"
+    "\t/*\n"
+    "\t * If the HWO is set, it implies the TRB is still being\n",
+    "dwc3_gadget=restored-request-status-declaration",
+)
+
+# The vendor tree uses the newer generic ChaCha implementation in lib/chacha.c
+# and crypto/chacha_generic.c. The direct checkpoint merge copied upstream's
+# chacha20.o Makefile entry without importing the unchanged upstream source.
+# Preserve the vendor implementation and its matching API.
+lib_makefile = root / "lib/Makefile"
+replace_once(
+    lib_makefile,
+    "\t sha1.o chacha20.o irq_regs.o argv_split.o \\\n",
+    "\t sha1.o chacha.o irq_regs.o argv_split.o \\\n",
+    "lib_makefile=restored-vendor-chacha-object",
+)
+
 # Validate the exact post-merge state before allowing the build to continue.
 event_text = event_timer.read_text()
 if ".head = RB_ROOT" in event_text or ".next = NULL" in event_text:
@@ -74,12 +117,28 @@ hub_text = hub.read_text()
 if hub_text.count("bool retry_locked;") != 1:
     raise SystemExit("hub retry_locked declaration count is not one")
 
+gadget_text = dwc3_gadget.read_text()
+if gadget_text.count("struct dwc3_trb\t*tmp;") != 1:
+    raise SystemExit("DWC3 tmp declaration count is not one")
+if gadget_text.count("int request_status;") != 1:
+    raise SystemExit("DWC3 request_status declaration count is not one")
+
+makefile_text = lib_makefile.read_text()
+if "sha1.o chacha20.o irq_regs.o" in makefile_text:
+    raise SystemExit("obsolete upstream chacha20 object remains in lib/Makefile")
+if makefile_text.count("sha1.o chacha.o irq_regs.o") != 1:
+    raise SystemExit("vendor chacha object entry count is not one")
+if not (root / "lib/chacha.c").is_file():
+    raise SystemExit("vendor lib/chacha.c source is missing")
+
 report.write_text("\n".join(repairs or ["repairs=already-present"]) + "\n")
 print(report.read_text(), end="")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- \
   drivers/soc/qcom/event_timer.c \
-  drivers/usb/core/hub.c
+  drivers/usb/core/hub.c \
+  drivers/usb/dwc3/gadget.c \
+  lib/Makefile
 
-info "Linux $TARGET_VERSION Qualcomm event timer and USB compatibility repaired"
+info "Linux $TARGET_VERSION Qualcomm event timer, USB and ChaCha compatibility repaired"

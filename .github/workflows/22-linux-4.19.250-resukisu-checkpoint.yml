@@ -24,6 +24,8 @@ on:
       - 'scripts/checkpoint_fix_linux_4.19.250_late.sh'
       - 'scripts/checkpoint_fix_linux_4.19.250_later.sh'
       - 'scripts/checkpoint_fix_linux_4.19.250_event_usb.sh'
+      - 'scripts/checkpoint_fix_linux_4.19.250_link.sh'
+      - 'scripts/06zzz_fix_linux_4.19.325_final_link_closure.sh'
       - 'scripts/07_patch_resukisu_exec_hook.sh'
       - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
       - 'scripts/08_build_resukisu_safe_checkpoint.sh'
@@ -125,6 +127,9 @@ jobs:
 
       - name: Repair Linux 4.19.250 event timer and USB mismatches
         run: ./scripts/checkpoint_fix_linux_4.19.250_event_usb.sh
+
+      - name: Repair Linux 4.19.250 final linker closure
+        run: ./scripts/checkpoint_fix_linux_4.19.250_link.sh
 
       - name: Replace legacy exec dispatch with ReSukiSU manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh

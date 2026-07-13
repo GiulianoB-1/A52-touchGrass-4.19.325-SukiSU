@@ -51,7 +51,7 @@ git -C "$SUSFS_DIR" fetch --quiet --depth=1 origin "refs/tags/$SUSFS_TAG"
 git -C "$SUSFS_DIR" checkout --quiet --detach FETCH_HEAD
 cp "$SUSFS_DIR/kernel_patches/fs/susfs.c" "$KERNEL_DIR/fs/susfs.c"
 cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" "$KERNEL_DIR/include/linux/susfs.h"
-patch -d "$KERNEL_DIR" -p1 --forward --batch < "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
+patch -d "$KERNEL_DIR" -p1 --forward --batch --fuzz=3 < "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
 cp "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch" \
   "$ARTIFACTS_DIR/susfs-$SUSFS_VERSION-kernel-4.19.patch"
 test -f "$KERNEL_DIR/fs/susfs.c" || fail "SUSFS source was not installed"

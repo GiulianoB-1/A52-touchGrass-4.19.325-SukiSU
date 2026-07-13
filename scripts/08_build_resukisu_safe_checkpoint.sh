@@ -110,22 +110,24 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text()
 declaration = ('#ifdef CONFIG_KSU\n'
-               'extern bool ksu_vfs_read_hook __read_mostly;\n'
                'extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,\n'
                '\t\t\tsize_t *count_ptr);\n'
                '#endif\n\n')
 function_anchor = 'SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{\n'
 function_hook = (function_anchor +
                  '#ifdef CONFIG_KSU\n'
-                 '\tif (unlikely(ksu_vfs_read_hook))\n'
-                 '\t\tksu_handle_sys_read(fd, &buf, &count);\n'
+                 '\tksu_handle_sys_read(fd, &buf, &count);\n'
                  '#endif\n')
+if 'ksu_vfs_read_hook' in text:
+    raise SystemExit('fs/read_write.c still contains incompatible legacy read-hook flag')
 if 'extern int ksu_handle_sys_read(' in text or 'ksu_handle_sys_read(fd, &buf, &count);' in text:
     raise SystemExit('fs/read_write.c still contains a read hook after legacy cleanup')
 if text.count(function_anchor) != 1:
     raise SystemExit('fs/read_write.c read syscall anchor mismatch')
 path.write_text(text.replace(function_anchor, declaration + function_hook, 1))
 READHOOKPY
+! grep -Fq 'ksu_vfs_read_hook' "$KERNEL_DIR/fs/read_write.c" || \
+  fail "Incompatible legacy ReSukiSU read-hook flag remains"
 grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" || \
   fail "ReSukiSU sys_read hook is missing"
 '''
@@ -144,7 +146,7 @@ grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL_DIR/fs/read_write.c" 
     text = text.replace(old_config, new_config, 1)
 
     text = text.replace('require_absent "$KERNEL_DIR/fs/read_write.c" "ksu_vfs_read_hook"',
-                        'grep -Fq \'ksu_handle_sys_read(fd, &buf, &count);\' "$KERNEL_DIR/fs/read_write.c" || fail "ReSukiSU sys_read hook is missing"')
+                        '! grep -Fq \'ksu_vfs_read_hook\' "$KERNEL_DIR/fs/read_write.c" || fail "Incompatible legacy ReSukiSU read-hook flag remains"\ngrep -Fq \'ksu_handle_sys_read(fd, &buf, &count);\' "$KERNEL_DIR/fs/read_write.c" || fail "ReSukiSU sys_read hook is missing"')
     text = text.replace('resukisu-v4.1.0-safe', 'resukisu-v4.1.0-susfs-v1.4.2-safe')
     text = text.replace("require_line \"$FINAL_CONFIG\" 'CONFIG_KSU_MANUAL_HOOK=y'",
                         "require_line \"$FINAL_CONFIG\" '# CONFIG_KSU_MANUAL_HOOK is not set'")

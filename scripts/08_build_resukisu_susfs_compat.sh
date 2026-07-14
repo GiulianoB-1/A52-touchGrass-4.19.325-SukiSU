@@ -182,19 +182,20 @@ if text.count(checkpoint_anchor) != 1:
     raise SystemExit('checkpoint fstat injection anchor mismatch')
 text = text.replace(checkpoint_anchor, checkpoint_injection, 1)
 
-old_config = ('  -e KSU_MULTI_MANAGER_SUPPORT -d KSU_TRACEPOINT_HOOK -e KSU_MANUAL_HOOK \\\n'
-              '  -d KSU_SUSFS -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK \\\n'
-              '  -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK')
-new_config = ('  -e KSU_MULTI_MANAGER_SUPPORT -d KSU_TRACEPOINT_HOOK -d KSU_MANUAL_HOOK \\\n'
+# The safe checkpoint generator has already converted the base config to the
+# inline-hook SUSFS profile. Extend that exact generated profile by disabling
+# every optional hiding/spoofing feature for the first root/module test.
+old_config = ('  -e KSU_MULTI_MANAGER_SUPPORT -d KSU_TRACEPOINT_HOOK -d KSU_MANUAL_HOOK \\\n'
               '  -e KSU_SUSFS -d KSU_MANUAL_HOOK_AUTO_SETUID_HOOK \\\n'
-              '  -d KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -d KSU_MANUAL_HOOK_AUTO_INPUT_HOOK \\\n'
+              '  -d KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -d KSU_MANUAL_HOOK_AUTO_INPUT_HOOK')
+new_config = (old_config + ' \\\n'
               '  -d KSU_SUSFS_SUS_PATH -d KSU_SUSFS_SUS_MOUNT \\\n'
               '  -d KSU_SUSFS_SUS_KSTAT -d KSU_SUSFS_SPOOF_UNAME \\\n'
               '  -d KSU_SUSFS_ENABLE_LOG -d KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \\\n'
               '  -d KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG -d KSU_SUSFS_OPEN_REDIRECT \\\n'
               '  -d KSU_SUSFS_SUS_MAP')
 if text.count(old_config) != 1:
-    raise SystemExit('ReSukiSU config anchor mismatch')
+    raise SystemExit('ReSukiSU minimal config anchor mismatch')
 text = text.replace(old_config, new_config, 1)
 text = text.replace('resukisu-v4.1.0-safe', 'resukisu-v4.1.0-susfs-v1.4.2-minimal-test')
 text = text.replace("require_line \"$FINAL_CONFIG\" 'CONFIG_KSU_MANUAL_HOOK=y'", "require_line \"$FINAL_CONFIG\" '# CONFIG_KSU_MANUAL_HOOK is not set'")

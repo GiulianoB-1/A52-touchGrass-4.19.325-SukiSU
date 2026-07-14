@@ -113,8 +113,11 @@ void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr)
 void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr) { }
 #endif
 SUSFSCOMPATC
-printf '\nccflags-y += -include $(srctree)/include/linux/susfs_def.h\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
-printf 'obj-y += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
+# ReSukiSU is built as one composite kernelsu.o from kernel/Kbuild. Add the
+# compatibility unit to that object list, and force the ABI header into all
+# ReSukiSU translation units that reference newer SUSFS command definitions.
+printf '\nccflags-y += -include $(srctree)/include/linux/susfs_def.h\n' >> "$KERNEL_DIR/KernelSU/kernel/Kbuild"
+printf 'kernelsu-objs += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Kbuild"
 '''
 if text.count(anchor) != 1:
     raise SystemExit('SUSFS header-copy anchor mismatch')

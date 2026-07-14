@@ -1,0 +1,64 @@
+name: 26 - Publish Linux 4.19.200 ReSukiSU SUSFS release
+
+on:
+  push:
+    branches:
+      - rebase/resukisu-linux-4.19.325
+    paths:
+      - '.github/workflows/26-publish-linux-4.19.200-resukisu-susfs-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARTIFACT_ID: '8307832282'
+      RELEASE_TAG: linux-4.19.200-resukisu-v4.1.0-susfs-v1.4.2
+      TARGET_COMMIT: 20afa43f922266ff2cbe370a0164f599996dbefd
+    steps:
+      - name: Download verified flashable artifact
+        run: |
+          set -Eeuo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > artifact-wrapper.zip
+          mkdir extracted
+          unzip -q artifact-wrapper.zip -d extracted
+          find extracted -maxdepth 4 -type f -print
+
+      - name: Locate and verify flashable ZIP
+        id: asset
+        run: |
+          set -Eeuo pipefail
+          ZIP_PATH="$(find extracted -type f -name '*BUILD-VERIFIED-FLASHABLE*.zip' -print -quit)"
+          if [ -z "$ZIP_PATH" ]; then
+            ZIP_PATH="$(find extracted -type f -name '*.zip' -print -quit)"
+          fi
+          test -n "$ZIP_PATH"
+          unzip -t "$ZIP_PATH"
+          cp "$ZIP_PATH" ./touchGrass-A52xq-Linux-4.19.200-ReSukiSU-v4.1.0-SUSFS-v1.4.2-BUILD-VERIFIED-FLASHABLE.zip
+          sha256sum touchGrass-A52xq-Linux-4.19.200-ReSukiSU-v4.1.0-SUSFS-v1.4.2-BUILD-VERIFIED-FLASHABLE.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create or update GitHub Release
+        run: |
+          set -Eeuo pipefail
+          ASSET='touchGrass-A52xq-Linux-4.19.200-ReSukiSU-v4.1.0-SUSFS-v1.4.2-BUILD-VERIFIED-FLASHABLE.zip'
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$ASSET" SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$ASSET" SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$TARGET_COMMIT" \
+              --title 'touchGrass A52xq Linux 4.19.200 + ReSukiSU v4.1.0 + SUSFS v1.4.2' \
+              --notes 'Verified flashable A52xq AnyKernel3 package produced by workflow 20 run 79. Built from commit 20afa43f922266ff2cbe370a0164f599996dbefd. Includes Linux 4.19.200, ReSukiSU v4.1.0, and SUSFS v1.4.2.'
+          fi
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,name

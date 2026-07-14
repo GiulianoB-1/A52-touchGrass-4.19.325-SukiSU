@@ -30,6 +30,14 @@ for compat_name in sys.argv[1:]:
     compat_path = Path(compat_name)
     compat_text = compat_path.read_text()
     compat_text = compat_text.replace('#include <linux/susfs_def.h>\n', '#include <linux/susfs.h>\n')
+    if compat_path.name == 'sucompat.c':
+        umount_state_block = ('#ifdef CONFIG_KSU_SUSFS\n'
+                              '            if (!susfs_is_current_proc_umounted())\n'
+                              '                susfs_set_current_proc_umounted();\n'
+                              '#endif\n')
+        if compat_text.count(umount_state_block) != 1:
+            raise SystemExit('ReSukiSU sucompat SUSFS unmount-state block mismatch')
+        compat_text = compat_text.replace(umount_state_block, '', 1)
     compat_path.write_text(compat_text)
 
 path = Path(sys.argv[1])

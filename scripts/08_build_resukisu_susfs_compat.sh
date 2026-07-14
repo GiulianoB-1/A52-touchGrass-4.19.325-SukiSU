@@ -59,7 +59,7 @@ start = text.find(start_marker)
 end = text.find(end_marker, start)
 if start < 0 or end < 0:
     raise SystemExit('ReSukiSU SUSFS dispatcher block not found')
-replacement = r'''#ifdef CONFIG_KSU_SUSFS
+replacement = r"""#ifdef CONFIG_KSU_SUSFS
 int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
 {
     void __user *uarg = *arg;
@@ -94,7 +94,7 @@ int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
 #endif
 
 #ifdef CONFIG_KSU_TOOLKIT_SUPPORT
-'''
+"""
 text = text[:start] + replacement + text[end + len(end_marker):]
 path.write_text(text)
 DISPATCHPY

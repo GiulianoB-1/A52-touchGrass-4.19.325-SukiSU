@@ -126,11 +126,35 @@ jobs:
 
       - name: Package and verify A52xq flashable ZIP
         run: |
-          ./scripts/09_package_a52xq_anykernel.sh \
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-susfs.sh
+          python3 - scripts/.package-susfs.sh <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          old = """grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' \"$CONFIG_PATH\" || fail \"Kernel config does not enable manual hooks\"
+grep -Fxq '# CONFIG_KSU_SUSFS is not set' \"$CONFIG_PATH\" || fail \"SUSFS must remain disabled for this package\"
+"""
+          new = """grep -Fxq '# CONFIG_KSU_MANUAL_HOOK is not set' \"$CONFIG_PATH\" || fail \"SUSFS package must use inline hooks\"
+grep -Fxq 'CONFIG_KSU_SUSFS=y' \"$CONFIG_PATH\" || fail \"Kernel config does not enable SUSFS\"
+"""
+          if text.count(old) != 1:
+              raise SystemExit('package config verification anchor mismatch')
+          text = text.replace(old, new, 1)
+          text = text.replace('susfs=disabled', 'susfs=enabled')
+          text = text.replace('SUSFS: disabled', 'SUSFS: enabled')
+          text = text.replace(
+              'ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip',
+              'ReSukiSU-v4.1.0-SUSFS-v1.4.2-BUILD-VERIFIED-FLASHABLE.zip')
+          path.write_text(text)
+          PY
+          chmod +x scripts/.package-susfs.sh
+          ./scripts/.package-susfs.sh \
             4.19.200 \
             artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-susfs-v1.4.2-safe \
             packaging/AnyKernel3 \
             release
+          rm -f scripts/.package-susfs.sh
 
       - name: Record source state
         if: always()

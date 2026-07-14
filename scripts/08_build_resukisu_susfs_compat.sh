@@ -113,7 +113,8 @@ void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr)
 void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr) { }
 #endif
 SUSFSCOMPATC
-printf '\nobj-y += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
+printf '\nccflags-y += -include $(srctree)/include/linux/susfs_def.h\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
+printf 'obj-y += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
 '''
 if text.count(anchor) != 1:
     raise SystemExit('SUSFS header-copy anchor mismatch')

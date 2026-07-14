@@ -15,21 +15,45 @@ import sys
 root = Path(sys.argv[1])
 old = '#include <linux/susfs_def.h>\n'
 new = '#include <linux/susfs.h>\n'
-changed = 0
+replacements = {
+    'susfs_is_current_proc_umounted()': 'true',
+    'susfs_set_current_proc_umounted();': '/* unavailable in SUSFS 1.4.2 */',
+    'extern struct work_struct susfs_extra_works;': '/* susfs_extra_works unavailable in SUSFS 1.4.2 */',
+    'schedule_work(&susfs_extra_works);': '/* susfs_extra_works unavailable in SUSFS 1.4.2 */',
+}
+include_changes = 0
+api_changes = 0
+for source in root.rglob('*'):
+    if not source.is_file() or source.suffix not in {'.c', '.h'}:
+        continue
+    content = source.read_text()
+    updated = content
+    if old in updated:
+        updated = updated.replace(old, new)
+        include_changes += 1
+    for before, after in replacements.items():
+        count = updated.count(before)
+        if count:
+            updated = updated.replace(before, after)
+            api_changes += count
+    if updated != content:
+        source.write_text(updated)
+remaining = []
+unsupported = []
 for source in root.rglob('*'):
     if not source.is_file() or source.suffix not in {'.c', '.h'}:
         continue
     content = source.read_text()
     if old in content:
-        source.write_text(content.replace(old, new))
-        changed += 1
-remaining = []
-for source in root.rglob('*'):
-    if source.is_file() and source.suffix in {'.c', '.h'} and old in source.read_text():
         remaining.append(str(source))
+    for symbol in ('susfs_is_current_proc_umounted', 'susfs_set_current_proc_umounted', 'susfs_extra_works'):
+        if symbol in content:
+            unsupported.append(f'{source}:{symbol}')
 if remaining:
     raise SystemExit('susfs_def.h includes remain: ' + ', '.join(remaining))
-print(f'patched {changed} ReSukiSU SUSFS include files; no susfs_def.h includes remain')
+if unsupported:
+    raise SystemExit('unsupported SUSFS 1.4.2 API references remain: ' + ', '.join(unsupported))
+print(f'patched {include_changes} SUSFS include files and compiled out {api_changes} unsupported API references')
 SUSFSINCLUDEPY
 '''
 if text.count(anchor) != 1:

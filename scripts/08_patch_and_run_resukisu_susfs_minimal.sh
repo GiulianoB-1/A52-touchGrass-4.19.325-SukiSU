@@ -8,5 +8,6 @@ test -n "$FINAL_SCRIPT" || { printf 'ERROR: missing generated build script path\
 test -f "$FINAL_SCRIPT" || { printf 'ERROR: generated build script not found: %s\n' "$FINAL_SCRIPT" >&2; exit 1; }
 
 python3 "$SCRIPT_DIR/08_patch_resukisu_susfs_minimal.py" "$FINAL_SCRIPT"
+python3 "$SCRIPT_DIR/08_patch_resukisu_susfs_includes.py" "$FINAL_SCRIPT"
 bash -n "$FINAL_SCRIPT"
 exec bash "$FINAL_SCRIPT"

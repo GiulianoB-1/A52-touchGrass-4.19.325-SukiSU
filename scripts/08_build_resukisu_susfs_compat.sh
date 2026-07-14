@@ -113,11 +113,21 @@ void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr)
 void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr) { }
 #endif
 SUSFSCOMPATC
-# ReSukiSU is built as one composite kernelsu.o from kernel/Kbuild. Add the
-# compatibility unit to that object list, and force the ABI header into all
-# ReSukiSU translation units that reference newer SUSFS command definitions.
-printf '\nccflags-y += -include $(srctree)/include/linux/susfs_def.h\n' >> "$KERNEL_DIR/KernelSU/kernel/Kbuild"
-printf 'kernelsu-objs += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Kbuild"
+# This Linux 4.19 Kbuild evaluates the composite object list when kernelsu.o is
+# declared. Insert the compatibility unit at the start instead of appending it.
+python3 - "$KERNEL_DIR/KernelSU/kernel/Kbuild" <<'SUSFSKBUILDPY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'kernelsu-objs := core/init.o\n'
+new = 'kernelsu-objs := susfs_legacy_compat.o\nkernelsu-objs += core/init.o\n'
+if text.count(old) != 1:
+    raise SystemExit('ReSukiSU Kbuild object-list anchor mismatch')
+text = text.replace(old, new, 1)
+text += '\nccflags-y += -include $(srctree)/include/linux/susfs_def.h\n'
+path.write_text(text)
+SUSFSKBUILDPY
 '''
 if text.count(anchor) != 1:
     raise SystemExit('SUSFS header-copy anchor mismatch')

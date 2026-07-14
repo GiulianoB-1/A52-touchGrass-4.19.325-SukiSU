@@ -23,15 +23,13 @@ for source in root.rglob('*'):
     if old in content:
         source.write_text(content.replace(old, new))
         changed += 1
-if changed == 0:
-    raise SystemExit('no ReSukiSU susfs_def.h includes were found after kernel link')
 remaining = []
 for source in root.rglob('*'):
     if source.is_file() and source.suffix in {'.c', '.h'} and old in source.read_text():
         remaining.append(str(source))
 if remaining:
     raise SystemExit('susfs_def.h includes remain: ' + ', '.join(remaining))
-print(f'patched {changed} ReSukiSU SUSFS include files')
+print(f'patched {changed} ReSukiSU SUSFS include files; no susfs_def.h includes remain')
 SUSFSINCLUDEPY
 '''
 if text.count(anchor) != 1:

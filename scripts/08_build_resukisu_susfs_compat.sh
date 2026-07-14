@@ -88,10 +88,10 @@ if text.count(anchor) != 1:
 text = text.replace(anchor, minimal, 1)
 
 checkpoint_anchor = '    text = text.replace(cleanup_anchor, "PY\\n" + read_hook_block + "\\ninfo \\"Adding ReSukiSU reboot and fstat hooks\\"\\n", 1)\n'
-checkpoint_injection = checkpoint_anchor + r'''
+checkpoint_injection = checkpoint_anchor + r"""
 
     fstat_anchor = 'stat.write_text(text)\nPY\n\ninfo "Adapting ReSukiSU to Linux 4.19 and disabling unmount defaults"\n'
-    fstat_fix = r"""stat.write_text(text)
+    fstat_fix = r'''stat.write_text(text)
 PY
 
 info "Switching fstat integration to the native ReSukiSU SUSFS path"
@@ -173,11 +173,11 @@ grep -Fq 'ksu_handle_vfs_fstat(fd, &stat.size);' "$KERNEL_DIR/fs/stat.c" || fail
 ! grep -Fq 'ksu_handle_newfstat_ret' "$KERNEL_DIR/fs/stat.c" || fail "Manual newfstat hook remains in SUSFS build"
 
 info "Adapting ReSukiSU to Linux 4.19 and disabling unmount defaults"
-"""
+'''
     if text.count(fstat_anchor) != 1:
         raise SystemExit('fstat generated-script anchor mismatch')
     text = text.replace(fstat_anchor, fstat_fix, 1)
-'''
+"""
 if text.count(checkpoint_anchor) != 1:
     raise SystemExit('checkpoint fstat injection anchor mismatch')
 text = text.replace(checkpoint_anchor, checkpoint_injection, 1)

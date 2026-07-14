@@ -70,8 +70,6 @@ void susfs_start_sdcard_monitor_fn(void);
 #endif
 SUSFSDEFEOT
 # susfs.h is also included directly by supercall.c, which uses SUSFS_MAGIC.
-# Keep the ABI definitions available through the public SUSFS header as in
-# newer integrations; the include guard makes the dispatcher include harmless.
 python3 - "$KERNEL_DIR/include/linux/susfs.h" <<'SUSFSHEADERPY'
 from pathlib import Path
 import sys
@@ -85,6 +83,37 @@ if include not in text:
     text = text.replace(guard, guard + '\n' + include, 1)
     path.write_text(text)
 SUSFSHEADERPY
+
+# ReSukiSU v4.1.0 targets a newer SUSFS API than the pinned 1.4.2 kernel
+# implementation. Provide only the missing compatibility entry points. Existing
+# 1.4.2 symbols remain untouched, while unsupported newer commands safely no-op.
+cat > "$KERNEL_DIR/KernelSU/kernel/susfs_legacy_compat.c" <<'SUSFSCOMPATC'
+#include <linux/fs.h>
+#include <linux/stat.h>
+#include <linux/workqueue.h>
+#include <linux/uaccess.h>
+
+static void susfs_legacy_noop_work(struct work_struct *work) { }
+DECLARE_WORK(susfs_extra_works, susfs_legacy_noop_work);
+
+void susfs_add_sus_path_loop(void __user **arg) { }
+void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **arg) { }
+void susfs_enable_log(void __user **arg) { }
+void susfs_set_cmdline_or_bootconfig(void __user **arg) { }
+void susfs_add_open_redirect(void __user **arg) { }
+void susfs_add_sus_map(void __user **arg) { }
+void susfs_set_avc_log_spoofing(void __user **arg) { }
+void susfs_get_enabled_features(void __user **arg) { }
+void susfs_show_variant(void __user **arg) { }
+void susfs_show_version(void __user **arg) { }
+void susfs_start_sdcard_monitor_fn(void) { }
+
+void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr) { }
+#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr) { }
+#endif
+SUSFSCOMPATC
+printf '\nobj-y += susfs_legacy_compat.o\n' >> "$KERNEL_DIR/KernelSU/kernel/Makefile"
 '''
 if text.count(anchor) != 1:
     raise SystemExit('SUSFS header-copy anchor mismatch')

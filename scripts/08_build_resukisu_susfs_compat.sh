@@ -10,7 +10,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 - "$SOURCE" "$GENERATED" <<'PY'
+python3 - "$SOURCE" "$GENERATED" <<'RESUKISUWRAPPERPY'
 from pathlib import Path
 import sys
 
@@ -205,6 +205,6 @@ text = text.replace("printf 'resukisu_version=%s\\n' \"$RESUKISU_VERSION_FULL\""
 
 out.write_text(text)
 out.chmod(0o755)
-PY
+RESUKISUWRAPPERPY
 
 exec "$GENERATED" "$@"

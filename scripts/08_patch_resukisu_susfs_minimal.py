@@ -22,12 +22,18 @@ if '#define SUSFS_MAGIC 0xFAFAFAFA\n' not in text:
         raise SystemExit('include/linux/susfs.h guard anchor mismatch')
     path.write_text(text.replace(guard, guard + '\n#define SUSFS_MAGIC 0xFAFAFAFA\n', 1))
 SUSFSHEADERPY
-python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" <<'DISPATCHPY'
+python3 - "$RESUKISU_DIR/kernel/supercall/dispatch.c" "$RESUKISU_DIR/kernel/feature/sucompat.c" "$RESUKISU_DIR/kernel/feature/kernel_umount.c" <<'DISPATCHPY'
 from pathlib import Path
 import sys
+
+for compat_name in sys.argv[1:]:
+    compat_path = Path(compat_name)
+    compat_text = compat_path.read_text()
+    compat_text = compat_text.replace('#include <linux/susfs_def.h>\n', '#include <linux/susfs.h>\n')
+    compat_path.write_text(compat_text)
+
 path = Path(sys.argv[1])
 text = path.read_text()
-text = text.replace('#include <linux/susfs_def.h>\n', '#include <linux/susfs.h>\n', 1)
 text = text.replace('#ifdef CONFIG_KSU_SUSFS\n                susfs_start_sdcard_monitor_fn();\n#endif\n', '', 1)
 start_marker = '#ifdef CONFIG_KSU_SUSFS\nint ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)\n'
 end_marker = '#endif\n\n#ifdef CONFIG_KSU_TOOLKIT_SUPPORT\n'

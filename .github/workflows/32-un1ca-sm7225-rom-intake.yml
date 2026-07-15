@@ -1,0 +1,55 @@
+name: 32 - UN1CA SM7225 ROM compatibility intake
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - rebase/resukisu-linux-4.19.325
+    paths:
+      - '.github/workflows/32-un1ca-sm7225-rom-intake.yml'
+      - 'rom-sources.lock'
+      - 'scripts/33_collect_un1ca_sm7225_requirements.sh'
+      - 'projects/un1ca-sm7225-rom-intake/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-un1ca-sm7225-rom-intake-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rom-intake:
+    name: Extract pinned UN1CA A52 boot requirements
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out compatibility project
+        uses: actions/checkout@v4
+
+      - name: Install intake dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Collect UN1CA SM7225 requirements
+        run: |
+          chmod +x scripts/33_collect_un1ca_sm7225_requirements.sh
+          ./scripts/33_collect_un1ca_sm7225_requirements.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts/compatibility/un1ca-sm7225/runner
+          uname -a > artifacts/compatibility/un1ca-sm7225/runner/uname.txt
+          git --version > artifacts/compatibility/un1ca-sm7225/runner/git-version.txt
+
+      - name: Upload ROM compatibility intake
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-un1ca-sm7225-rom-intake-${{ github.run_number }}
+          path: artifacts/compatibility/un1ca-sm7225/
+          if-no-files-found: error
+          retention-days: 14

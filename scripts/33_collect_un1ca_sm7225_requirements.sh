@@ -15,6 +15,8 @@ mkdir -p "$WORK_DIR" "$DEST/source-files"
 git init -q "$SRC_DIR"
 git -C "$SRC_DIR" remote add origin "$UN1CA_REPO"
 git -C "$SRC_DIR" config core.sparseCheckout true
+git -C "$SRC_DIR" config remote.origin.promisor true
+git -C "$SRC_DIR" config remote.origin.partialclonefilter blob:none
 cat > "$SRC_DIR/.git/info/sparse-checkout" <<'EOF'
 /README.md
 /.github/workflows/build.yml
@@ -27,7 +29,7 @@ cat > "$SRC_DIR/.git/info/sparse-checkout" <<'EOF'
 /target/a52xq/vintf/compatibility_matrix.device.xml
 EOF
 
-git -C "$SRC_DIR" fetch --no-tags --depth=1 origin "$UN1CA_COMMIT"
+git -C "$SRC_DIR" fetch --filter=blob:none --no-tags --depth=1 origin "$UN1CA_COMMIT"
 git -C "$SRC_DIR" checkout --detach FETCH_HEAD
 actual_commit="$(git -C "$SRC_DIR" rev-parse HEAD)"
 [[ "$actual_commit" == "$UN1CA_COMMIT" ]] || {

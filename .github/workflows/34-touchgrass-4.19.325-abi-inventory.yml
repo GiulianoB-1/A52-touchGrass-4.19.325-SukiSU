@@ -1,0 +1,133 @@
+name: 34 - touchGrass 4.19.325 ABI inventory
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - rebase/resukisu-linux-4.19.325
+    paths:
+      - '.github/workflows/34-touchgrass-4.19.325-abi-inventory.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-touchgrass-4.19.325-abi-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  abi-inventory:
+    name: Build touchGrass 4.19.325 and collect ABI inputs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-linux-4.19.325-abi-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.325-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.325-abi-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+
+      - name: Merge and repair Linux 4.19.325
+        run: |
+          set -Eeuo pipefail
+          ./scripts/05_merge_linux_4.19.325.sh
+          for repair in scripts/06*_linux_4.19.325*.sh; do
+            printf 'Running %s\n' "$repair"
+            "$repair"
+          done
+
+      - name: Integrate ReSukiSU and build
+        run: |
+          set -Eeuo pipefail
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.325
+
+      - name: Collect same-version ABI and device-tree inventory
+        run: |
+          set -Eeuo pipefail
+          KERNEL_DIR="$GITHUB_WORKSPACE/workspace/touchgrass-a52xq"
+          OUT_DIR="$KERNEL_DIR/out"
+          DEST="$GITHUB_WORKSPACE/artifacts/touchgrass-4.19.325-abi"
+          mkdir -p "$DEST"
+
+          test -s "$OUT_DIR/.config"
+          test -s "$OUT_DIR/arch/arm64/boot/Image"
+          test -s "$OUT_DIR/Module.symvers"
+
+          cp "$OUT_DIR/.config" "$DEST/config"
+          cp "$OUT_DIR/arch/arm64/boot/Image" "$DEST/Image"
+          cp "$OUT_DIR/Module.symvers" "$DEST/Module.symvers"
+          test ! -s "$OUT_DIR/System.map" || cp "$OUT_DIR/System.map" "$DEST/System.map"
+
+          find "$OUT_DIR" -type f -name '*.ko' -printf '%P\n' | sort > "$DEST/modules.list"
+          find "$OUT_DIR/arch/arm64/boot" -type f \( -name '*.dtb' -o -name '*.dtbo' \) \
+            -printf '%P\n' | sort > "$DEST/device-trees.list"
+
+          make -s -C "$KERNEL_DIR" O="$OUT_DIR" ARCH=arm64 kernelrelease > "$DEST/kernel-release.txt"
+          {
+            echo "kernel_release=$(cat "$DEST/kernel-release.txt")"
+            echo "image_bytes=$(stat -c %s "$DEST/Image")"
+            echo "exported_symbol_count=$(wc -l < "$DEST/Module.symvers")"
+            echo "module_count=$(wc -l < "$DEST/modules.list")"
+            echo "device_tree_count=$(wc -l < "$DEST/device-trees.list")"
+            echo "flashable=no"
+          } > "$DEST/metadata.txt"
+
+          cat > "$DEST/NOTICE.txt" <<'EOF'
+This artifact is an ABI and source-comparison input. It is not a flashable kernel package.
+EOF
+
+          (
+            cd "$DEST"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts/runner
+          df -h > artifacts/runner/disk.txt
+          free -h > artifacts/runner/memory.txt
+          ccache --show-stats > artifacts/runner/ccache.txt 2>&1 || true
+
+      - name: Upload same-version ABI inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-4.19.325-abi-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

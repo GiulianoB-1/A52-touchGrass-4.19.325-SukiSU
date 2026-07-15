@@ -153,10 +153,18 @@ set -e
 printf '%s\n' "$build_status" > "$ARTIFACT_DIR/build-exit-code.txt"
 
 set_stage "artifact-collection"
-# Always collect diagnostics, including on a failed build.
-for file_name in Image vmlinux System.map Module.symvers .config; do
-  if [[ -f "$OUT_DIR/$file_name" ]]; then
-    cp "$OUT_DIR/$file_name" "$ARTIFACT_DIR/$file_name"
+declare -A output_files=(
+  [Image]="$OUT_DIR/arch/arm64/boot/Image"
+  [vmlinux]="$OUT_DIR/vmlinux"
+  [System.map]="$OUT_DIR/System.map"
+  [Module.symvers]="$OUT_DIR/Module.symvers"
+  [final.config]="$OUT_DIR/.config"
+)
+
+for artifact_name in "${!output_files[@]}"; do
+  source_path="${output_files[$artifact_name]}"
+  if [[ -f "$source_path" ]]; then
+    cp "$source_path" "$ARTIFACT_DIR/$artifact_name"
   fi
 done
 
@@ -184,10 +192,6 @@ if [[ -f "$ARTIFACT_DIR/Image" ]]; then
   stat "$ARTIFACT_DIR/Image" > "$ARTIFACT_DIR/image-stat.txt"
 fi
 
-find "$ARTIFACT_DIR" -maxdepth 1 -type f -print0 \
-  | sort -z \
-  | xargs -0 sha256sum > "$ARTIFACT_DIR/SHA256SUMS"
-
 cat > "$ARTIFACT_DIR/FLASHING-NOTICE.txt" <<'EOF'
 THIS OUTPUT IS NOT FLASHABLE.
 
@@ -198,10 +202,22 @@ phone. Do not place this Image in AnyKernel3 or flash it to the boot partition.
 EOF
 
 if (( build_status != 0 )); then
+  set_stage "failed"
+else
+  set_stage "complete"
+fi
+
+(
+  cd "$ARTIFACT_DIR"
+  find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -print0 \
+    | sort -z \
+    | xargs -0 sha256sum > SHA256SUMS
+)
+
+if (( build_status != 0 )); then
   echo "The GKI build failed. Diagnostics were collected in $ARTIFACT_DIR." >&2
   exit "$build_status"
 fi
 
-set_stage "complete"
 echo "Minimal GKI build completed: $kernel_version"
 echo "Artifacts: $ARTIFACT_DIR"

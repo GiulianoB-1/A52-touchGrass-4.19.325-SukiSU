@@ -78,6 +78,21 @@ jobs:
       - name: Build and audit P0 probe
         run: ./scripts/35_build_a52_p0_boot_probe.sh
 
+      - name: Preserve build diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts/p0-boot-probe/diagnostics
+          cp -a artifacts/logs/. artifacts/p0-boot-probe/diagnostics/ 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/.config \
+            artifacts/p0-boot-probe/diagnostics/resolved.config 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/include/config/auto.conf \
+            artifacts/p0-boot-probe/diagnostics/auto.conf 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/.config.old \
+            artifacts/p0-boot-probe/diagnostics/config.old 2>/dev/null || true
+          find workspace/touchgrass-a52xq/out -maxdepth 3 -type f \
+            \( -name '*.cmd' -o -name '*.o' \) -printf '%P\n' \
+            | sort > artifacts/p0-boot-probe/diagnostics/partial-build-files.txt || true
+
       - name: Record runner state
         if: always()
         run: |

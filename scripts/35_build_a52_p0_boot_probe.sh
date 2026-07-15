@@ -62,6 +62,30 @@ cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.p0"
 grep -Fq -- '-not -name audio -not -name camera -not -name display' "$TECHPACK_KBUILD" \
   || fail "late techpack exclusions were not applied"
 
+# When QPNP PON is disabled, this vendor header defines qpnp_pon_wd_config()
+# directly in the header without static linkage. Every user then emits a global
+# copy and the final vmlinux link fails with multiple definitions. Match the
+# surrounding fallback helpers and make it static inline.
+QPNP_PON_HEADER="$KERNEL_DIR/include/linux/input/qpnp-power-on.h"
+[[ -s "$QPNP_PON_HEADER" ]] || fail "qpnp-power-on.h is missing"
+cp "$QPNP_PON_HEADER" "$OUT/qpnp-power-on.h.before"
+python3 - "$QPNP_PON_HEADER" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = 'int qpnp_pon_wd_config(bool enable)\n{\n\treturn -ENODEV;\n}'
+replacement = 'static inline int qpnp_pon_wd_config(bool enable)\n{\n\treturn -ENODEV;\n}'
+count = text.count(needle)
+if count != 1:
+    raise SystemExit(f"expected one non-static qpnp_pon_wd_config fallback, found {count}")
+path.write_text(text.replace(needle, replacement))
+PY
+cp "$QPNP_PON_HEADER" "$OUT/qpnp-power-on.h.p0"
+grep -Fq 'static inline int qpnp_pon_wd_config(bool enable)' "$QPNP_PON_HEADER" \
+  || fail "QPNP PON fallback linkage repair was not applied"
+
 cp "$DEFCONFIG" "$OUT/a52xq_defconfig.requested"
 build_kernel "$LABEL"
 

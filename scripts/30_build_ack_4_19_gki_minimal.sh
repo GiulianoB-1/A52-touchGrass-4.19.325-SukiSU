@@ -9,6 +9,28 @@ OUT_DIR="$WORK_DIR/out"
 ARTIFACT_DIR="$ROOT_DIR/artifacts/gki-4.19-minimal"
 JOBS="${JOBS:-4}"
 
+record_failure() {
+  local exit_code=$?
+  local failed_line="${BASH_LINENO[0]:-unknown}"
+  local failed_command="${BASH_COMMAND:-unknown}"
+
+  trap - ERR
+  mkdir -p "$ARTIFACT_DIR"
+  {
+    echo "exit_code=$exit_code"
+    echo "line=$failed_line"
+    echo "command=$failed_command"
+    echo "stage=$(cat "$ARTIFACT_DIR/stage.txt" 2>/dev/null || echo unknown)"
+  } > "$ARTIFACT_DIR/failure-context.txt"
+  exit "$exit_code"
+}
+trap record_failure ERR
+
+set_stage() {
+  mkdir -p "$ARTIFACT_DIR"
+  printf '%s\n' "$1" > "$ARTIFACT_DIR/stage.txt"
+}
+
 if [[ ! -f "$LOCK_FILE" ]]; then
   echo "Missing $LOCK_FILE" >&2
   exit 1
@@ -34,6 +56,7 @@ export PATH="$LLVM_BIN:$PATH"
 
 rm -rf "$WORK_DIR" "$ARTIFACT_DIR"
 mkdir -p "$WORK_DIR" "$ARTIFACT_DIR/logs"
+set_stage "source-selection"
 
 {
   echo "Repository: $GKI_REPO"
@@ -43,6 +66,7 @@ mkdir -p "$WORK_DIR" "$ARTIFACT_DIR/logs"
   echo "Defconfig: $GKI_DEFCONFIG"
 } | tee "$ARTIFACT_DIR/source-selection.txt"
 
+set_stage "source-clone"
 echo "Cloning the pinned Android Common Kernel revision"
 git clone --no-tags --depth=1 --branch "$GKI_BRANCH" "$GKI_REPO" "$SRC_DIR" \
   2>&1 | tee "$ARTIFACT_DIR/logs/01-clone.log"
@@ -66,11 +90,19 @@ fi
   git -C "$SRC_DIR" show -s --format='commit_date=%cI%nsubject=%s' HEAD
 } > "$ARTIFACT_DIR/source-revision.txt"
 
+set_stage "toolchain-recording"
 {
+  echo "== clang =="
   clang --version
+  echo
+  echo "== lld =="
   ld.lld --version
-  llvm-ar --version | head -n 1
-  make --version | head -n 1
+  echo
+  echo "== llvm-ar =="
+  llvm-ar --version
+  echo
+  echo "== make =="
+  make --version
 } > "$ARTIFACT_DIR/toolchain.txt"
 
 make_args=(
@@ -81,11 +113,13 @@ make_args=(
   LLVM_IAS=1
 )
 
+set_stage "gki-defconfig"
 echo "Generating the official GKI defconfig"
 make "${make_args[@]}" "$GKI_DEFCONFIG" \
   2>&1 | tee "$ARTIFACT_DIR/logs/02-defconfig.log"
 
 cp "$OUT_DIR/.config" "$ARTIFACT_DIR/gki_defconfig.expanded"
+set_stage "save-defconfig"
 make "${make_args[@]}" savedefconfig \
   2>&1 | tee "$ARTIFACT_DIR/logs/03-savedefconfig.log"
 cp "$OUT_DIR/defconfig" "$ARTIFACT_DIR/gki_defconfig.minimal"
@@ -93,6 +127,7 @@ cp "$OUT_DIR/defconfig" "$ARTIFACT_DIR/gki_defconfig.minimal"
 kernel_version="$(make -s "${make_args[@]}" kernelversion)"
 printf '%s\n' "$kernel_version" > "$ARTIFACT_DIR/kernel-version.txt"
 
+set_stage "kernel-build"
 echo "Building the stock arm64 GKI Image and modules"
 set +e
 make "${make_args[@]}" -j"$JOBS" Image modules \
@@ -101,6 +136,7 @@ build_status=${PIPESTATUS[0]}
 set -e
 printf '%s\n' "$build_status" > "$ARTIFACT_DIR/build-exit-code.txt"
 
+set_stage "artifact-collection"
 # Always collect diagnostics, including on a failed build.
 for file_name in Image vmlinux System.map Module.symvers .config; do
   if [[ -f "$OUT_DIR/$file_name" ]]; then
@@ -150,5 +186,6 @@ if (( build_status != 0 )); then
   exit "$build_status"
 fi
 
+set_stage "complete"
 echo "Minimal GKI build completed: $kernel_version"
 echo "Artifacts: $ARTIFACT_DIR"

@@ -39,9 +39,9 @@ cp "$DEFCONFIG" "$OUT/a52xq_defconfig.before"
   -d BT -d NFC -d INPUT_TOUCHSCREEN -d INPUT_MISC
 
 # This vendor tree's techpack/Kbuild enumerates every first-level directory,
-# independently of the normal SOUND/MEDIA/DRM Kconfig gates. Exclude only the
-# three late hardware stacks that P0 intentionally omits. Keep all other
-# Qualcomm techpacks available for platform and early-boot dependencies.
+# independently of the normal SOUND/MEDIA/DRM Kconfig gates. Exclude the late
+# hardware stacks P0 intentionally omits. Keep all other Qualcomm techpacks
+# available for platform and early-boot dependencies.
 TECHPACK_KBUILD="$KERNEL_DIR/techpack/Kbuild"
 [[ -s "$TECHPACK_KBUILD" ]] || fail "techpack/Kbuild is missing"
 cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.before"
@@ -52,15 +52,36 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text()
 needle = '-type d -not -name ".*")'
-replacement = '-type d -not -name ".*" -not -name audio -not -name camera -not -name display)'
+replacement = '-type d -not -name ".*" -not -name audio -not -name camera -not -name display -not -name video)'
 count = text.count(needle)
 if count != 2:
     raise SystemExit(f"expected two techpack directory enumerations, found {count}")
 path.write_text(text.replace(needle, replacement))
 PY
 cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.p0"
-grep -Fq -- '-not -name audio -not -name camera -not -name display' "$TECHPACK_KBUILD" \
+grep -Fq -- '-not -name audio -not -name camera -not -name display -not -name video' "$TECHPACK_KBUILD" \
   || fail "late techpack exclusions were not applied"
+
+# Several Samsung input symbols select the touchscreen stack back on after the
+# defconfig request. P0 does not need touch input, so gate the directory itself.
+INPUT_MAKEFILE="$KERNEL_DIR/drivers/input/Makefile"
+[[ -s "$INPUT_MAKEFILE" ]] || fail "drivers/input/Makefile is missing"
+cp "$INPUT_MAKEFILE" "$OUT/drivers-input.Makefile.before"
+python3 - "$INPUT_MAKEFILE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = 'obj-$(CONFIG_INPUT_TOUCHSCREEN)\t+= touchscreen/'
+replacement = '# P0 excludes late touchscreen drivers\nobj-n\t\t\t\t+= touchscreen/'
+count = text.count(needle)
+if count != 1:
+    raise SystemExit(f"expected one touchscreen directory gate, found {count}")
+path.write_text(text.replace(needle, replacement))
+PY
+cp "$INPUT_MAKEFILE" "$OUT/drivers-input.Makefile.p0"
+grep -Fq 'obj-n' "$INPUT_MAKEFILE" || fail "touchscreen directory exclusion was not applied"
 
 # When QPNP PON is disabled, this vendor header defines qpnp_pon_wd_config()
 # directly in the header without static linkage. Every user then emits a global
@@ -122,13 +143,17 @@ for symbol in "${optional_off[@]}"; do
     >> "$OUT/late-stack-audit.txt" || printf 'CONFIG_%s absent\n' "$symbol" >> "$OUT/late-stack-audit.txt"
 done
 
-# Prove that the build-system exclusion worked, not merely the Kconfig request.
-for stack in audio camera display; do
+# Prove that the build-system exclusions worked, not merely the Kconfig request.
+for stack in audio camera display video; do
   if find "$KERNEL_DIR/out/techpack/$stack" -type f \( -name '*.o' -o -name '*.a' \) -print -quit 2>/dev/null | grep -q .; then
     fail "techpack/$stack objects were built despite the P0 exclusion"
   fi
 done
-printf 'excluded_techpacks=audio,camera,display\n' >> "$OUT/late-stack-audit.txt"
+if find "$KERNEL_DIR/out/drivers/input/touchscreen" -type f \( -name '*.o' -o -name '*.a' \) -print -quit 2>/dev/null | grep -q .; then
+  fail "touchscreen objects were built despite the P0 exclusion"
+fi
+printf 'excluded_techpacks=audio,camera,display,video\n' >> "$OUT/late-stack-audit.txt"
+printf 'excluded_driver_dirs=drivers/input/touchscreen\n' >> "$OUT/late-stack-audit.txt"
 
 raw_bytes=$(stat -c %s "$FINAL_IMAGE")
 gz_bytes=$(stat -c %s "$IMAGE_GZ")

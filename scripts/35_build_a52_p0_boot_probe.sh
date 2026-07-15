@@ -36,7 +36,9 @@ cp "$DEFCONFIG" "$OUT/a52xq_defconfig.before"
   -e PRINTK -e PRINTK_TIME -e IKCONFIG -e IKCONFIG_PROC \
   -d MEDIA_SUPPORT -d VIDEO_V4L2 -d DRM \
   -d SOUND -d SND -d WLAN -d CFG80211 -d MAC80211 \
-  -d BT -d NFC -d INPUT_TOUCHSCREEN -d INPUT_MISC
+  -d BT -d NFC -d INPUT_TOUCHSCREEN -d INPUT_MISC \
+  -d INPUT_TOUCHSCREEN_TCLMV2 -d TOUCHSCREEN_DUMP_MODE \
+  -d TOUCHSCREEN_STM_FTS5CU56A -d TOUCHSCREEN_ZINITIX_ZT7650
 
 # This vendor tree's techpack/Kbuild enumerates every first-level directory,
 # independently of the normal SOUND/MEDIA/DRM Kconfig gates. Exclude the late
@@ -62,8 +64,9 @@ cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.p0"
 grep -Fq -- '-not -name audio -not -name camera -not -name display -not -name video' "$TECHPACK_KBUILD" \
   || fail "late techpack exclusions were not applied"
 
-# Several Samsung input symbols select the touchscreen stack back on after the
-# defconfig request. P0 does not need touch input, so gate the directory itself.
+# Several Samsung input symbols can build touchscreen drivers independently of
+# the parent INPUT_TOUCHSCREEN menu. Keep a directory-level guard as a second
+# line of defense after disabling the concrete vendor symbols above.
 INPUT_MAKEFILE="$KERNEL_DIR/drivers/input/Makefile"
 [[ -s "$INPUT_MAKEFILE" ]] || fail "drivers/input/Makefile is missing"
 cp "$INPUT_MAKEFILE" "$OUT/drivers-input.Makefile.before"
@@ -136,9 +139,17 @@ for symbol in "${required_y[@]}"; do
 done
 [[ "$missing" == 0 ]] || fail "One or more P0 built-ins were not retained by Kconfig"
 
-optional_off=(KSU KSU_SUSFS MEDIA_SUPPORT DRM SOUND SND WLAN CFG80211 MAC80211 BT NFC INPUT_TOUCHSCREEN)
+optional_off=(
+  KSU KSU_SUSFS MEDIA_SUPPORT DRM SOUND SND WLAN CFG80211 MAC80211 BT NFC
+  INPUT_TOUCHSCREEN INPUT_TOUCHSCREEN_TCLMV2 TOUCHSCREEN_DUMP_MODE
+  TOUCHSCREEN_STM_FTS5CU56A TOUCHSCREEN_ZINITIX_ZT7650
+)
 : > "$OUT/late-stack-audit.txt"
 for symbol in "${optional_off[@]}"; do
+  if grep -Fxq "CONFIG_${symbol}=y" "$FINAL_CONFIG" || grep -Fxq "CONFIG_${symbol}=m" "$FINAL_CONFIG"; then
+    printf 'UNEXPECTED CONFIG_%s enabled\n' "$symbol" | tee -a "$OUT/late-stack-audit.txt" >&2
+    fail "Late-stack symbol CONFIG_${symbol} survived the P0 reduction"
+  fi
   grep -E "^(CONFIG_${symbol}=|# CONFIG_${symbol} is not set)" "$FINAL_CONFIG" \
     >> "$OUT/late-stack-audit.txt" || printf 'CONFIG_%s absent\n' "$symbol" >> "$OUT/late-stack-audit.txt"
 done

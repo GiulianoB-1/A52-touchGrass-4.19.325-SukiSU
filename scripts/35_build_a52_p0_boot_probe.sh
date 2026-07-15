@@ -38,6 +38,30 @@ cp "$DEFCONFIG" "$OUT/a52xq_defconfig.before"
   -d SOUND -d SND -d WLAN -d CFG80211 -d MAC80211 \
   -d BT -d NFC -d INPUT_TOUCHSCREEN -d INPUT_MISC
 
+# This vendor tree's techpack/Kbuild enumerates every first-level directory,
+# independently of the normal SOUND/MEDIA/DRM Kconfig gates. Exclude only the
+# three late hardware stacks that P0 intentionally omits. Keep all other
+# Qualcomm techpacks available for platform and early-boot dependencies.
+TECHPACK_KBUILD="$KERNEL_DIR/techpack/Kbuild"
+[[ -s "$TECHPACK_KBUILD" ]] || fail "techpack/Kbuild is missing"
+cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.before"
+python3 - "$TECHPACK_KBUILD" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = '-type d -not -name ".*")'
+replacement = '-type d -not -name ".*" -not -name audio -not -name camera -not -name display)'
+count = text.count(needle)
+if count != 2:
+    raise SystemExit(f"expected two techpack directory enumerations, found {count}")
+path.write_text(text.replace(needle, replacement))
+PY
+cp "$TECHPACK_KBUILD" "$OUT/techpack.Kbuild.p0"
+grep -Fq -- '-not -name audio -not -name camera -not -name display' "$TECHPACK_KBUILD" \
+  || fail "late techpack exclusions were not applied"
+
 cp "$DEFCONFIG" "$OUT/a52xq_defconfig.requested"
 build_kernel "$LABEL"
 
@@ -67,8 +91,6 @@ for symbol in "${required_y[@]}"; do
 done
 [[ "$missing" == 0 ]] || fail "One or more P0 built-ins were not retained by Kconfig"
 
-# These are intentionally excluded from the first probe. Record, but do not
-# fail, if dependency selection turns any of them back on.
 optional_off=(KSU KSU_SUSFS MEDIA_SUPPORT DRM SOUND SND WLAN CFG80211 MAC80211 BT NFC INPUT_TOUCHSCREEN)
 : > "$OUT/late-stack-audit.txt"
 for symbol in "${optional_off[@]}"; do
@@ -76,9 +98,16 @@ for symbol in "${optional_off[@]}"; do
     >> "$OUT/late-stack-audit.txt" || printf 'CONFIG_%s absent\n' "$symbol" >> "$OUT/late-stack-audit.txt"
 done
 
+# Prove that the build-system exclusion worked, not merely the Kconfig request.
+for stack in audio camera display; do
+  if find "$KERNEL_DIR/out/techpack/$stack" -type f \( -name '*.o' -o -name '*.a' \) -print -quit 2>/dev/null | grep -q .; then
+    fail "techpack/$stack objects were built despite the P0 exclusion"
+  fi
+done
+printf 'excluded_techpacks=audio,camera,display\n' >> "$OUT/late-stack-audit.txt"
+
 raw_bytes=$(stat -c %s "$FINAL_IMAGE")
 gz_bytes=$(stat -c %s "$IMAGE_GZ")
-# Actual boot partition is 96 MiB. Keep a conservative 80 MiB compressed cap.
 (( gz_bytes < 80 * 1024 * 1024 )) || fail "Compressed kernel exceeds conservative boot payload cap"
 
 {

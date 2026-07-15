@@ -10,6 +10,14 @@ on:
       - 'scripts/30_build_ack_4_19_gki_minimal.sh'
       - 'gki-sources.lock'
       - 'projects/gki-4.19-minimal/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/30-gki-4.19-minimal-probe.yml'
+      - 'scripts/30_build_ack_4_19_gki_minimal.sh'
+      - 'gki-sources.lock'
+      - 'projects/gki-4.19-minimal/**'
 
 permissions:
   contents: read

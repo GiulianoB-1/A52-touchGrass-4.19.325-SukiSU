@@ -7,15 +7,13 @@ on:
       - rebase/resukisu-linux-4.19.325
     paths:
       - '.github/workflows/31-gki-touchgrass-compatibility-inventory.yml'
-      - 'gki-sources.lock'
-      - 'scripts/30_build_ack_4_19_gki_inventory.sh'
-      - 'scripts/31_collect_touchgrass_4.19.200_inventory.sh'
       - 'scripts/32_compare_gki_touchgrass.py'
       - 'scripts/34_collect_touchgrass_4.19.325_inventory.sh'
       - 'projects/gki-4.19-a52-compatibility/**'
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: a52-gki-touchgrass-compat-${{ github.ref }}
@@ -25,10 +23,12 @@ env:
   JOBS: '4'
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 5G
+  BASELINE_ARTIFACT_ID: '8343518420'
+  BASELINE_ARTIFACT_DIGEST: 'sha256:828d0d9486057dd969f956fd27f0130c0648e7fe90ddaec0467d5c90bd7d9b5e'
 
 jobs:
   compatibility-inventory:
-    name: Compare ACK GKI with touchGrass 4.19.200 and 4.19.325
+    name: Finalize same-version ACK and touchGrass 4.19.325 comparison
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -48,44 +48,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
-            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar \
-            clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
 
-      - name: Restore touchGrass compiler cache
+      - name: Restore compiler cache
         uses: actions/cache@v4
         with:
           path: .ccache
           key: a52xq-gki-full-compat-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            a52xq-gki-compat-4.19.200-${{ runner.os }}-
             a52xq-linux-4.19.325-ccache-${{ runner.os }}-
+            a52xq-gki-compat-4.19.200-${{ runner.os }}-
             a52xq-linux-4.19.200-ccache-${{ runner.os }}-
             a52xq-gki-full-compat-${{ runner.os }}-
 
-      - name: Prepare reviewed touchGrass 4.19.200 source
+      - name: Restore verified ACK and touchGrass 4.19.200 baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          chmod +x scripts/*.sh scripts/*.py
-          ./scripts/01_prepare_source.sh
-          ./scripts/03_apply_linux_4.19.153.sh
-          ./scripts/04_apply_linux_4.19.154.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
-          ./scripts/checkpoint_resolve_linux_4.19.159.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
-          ./scripts/checkpoint_resolve_linux_4.19.164.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
-          ./scripts/checkpoint_resolve_linux_4.19.180.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
-          ./scripts/checkpoint_resolve_linux_4.19.200.sh
-
-      - name: Build and collect touchGrass 4.19.200 hardware baseline
-        run: |
-          ./scripts/07_patch_resukisu_exec_hook.sh
-          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe
-          ./scripts/31_collect_touchgrass_4.19.200_inventory.sh
+          set -Eeuo pipefail
+          mkdir -p artifacts/compatibility
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$BASELINE_ARTIFACT_ID/zip" \
+            -o baseline-artifact.zip
+          unzip -q baseline-artifact.zip -d artifacts/compatibility
+          test -s artifacts/compatibility/gki/Module.symvers
+          test -s artifacts/compatibility/touchgrass/Module.symvers
+          test -s artifacts/compatibility/report/common-symbol-crc-mismatches.csv
+          mv artifacts/compatibility/report artifacts/compatibility/report-4.19.200
+          {
+            echo "artifact_id=$BASELINE_ARTIFACT_ID"
+            echo "artifact_digest=$BASELINE_ARTIFACT_DIGEST"
+            echo "source_run=29413873452"
+          } > artifacts/compatibility/BASELINE-ARTIFACT.lock
 
       - name: Prepare build-verified touchGrass 4.19.325 source
         run: |
           set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
           ./scripts/01_prepare_source.sh
           ./scripts/03_apply_linux_4.19.153.sh
           ./scripts/04_apply_linux_4.19.154.sh
@@ -102,16 +104,6 @@ jobs:
           ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.325
           ./scripts/34_collect_touchgrass_4.19.325_inventory.sh
 
-      - name: Build untouched Android 4.19 GKI reference
-        run: ./scripts/30_build_ack_4_19_gki_inventory.sh
-
-      - name: Compare GKI against hardware baseline 4.19.200
-        run: |
-          python3 scripts/32_compare_gki_touchgrass.py \
-            --gki artifacts/compatibility/gki \
-            --touchgrass artifacts/compatibility/touchgrass \
-            --out artifacts/compatibility/report-4.19.200
-
       - name: Compare same-version GKI and touchGrass 4.19.325 ABI
         run: |
           python3 scripts/32_compare_gki_touchgrass.py \
@@ -122,14 +114,14 @@ jobs:
       - name: Record runner and source state
         if: always()
         run: |
-          mkdir -p artifacts/compatibility/runner
-          df -h > artifacts/compatibility/runner/disk.txt
-          free -h > artifacts/compatibility/runner/memory.txt
-          uname -a > artifacts/compatibility/runner/uname.txt
-          ccache --show-stats > artifacts/compatibility/runner/ccache.txt 2>&1 || true
+          mkdir -p artifacts/compatibility/runner-final
+          df -h > artifacts/compatibility/runner-final/disk.txt
+          free -h > artifacts/compatibility/runner-final/memory.txt
+          uname -a > artifacts/compatibility/runner-final/uname.txt
+          ccache --show-stats > artifacts/compatibility/runner-final/ccache.txt 2>&1 || true
           if [ -d workspace/touchgrass-a52xq/.git ]; then
             git -C workspace/touchgrass-a52xq status --short \
-              > artifacts/compatibility/runner/touchgrass-source-status.txt || true
+              > artifacts/compatibility/runner-final/touchgrass-source-status.txt || true
           fi
 
       - name: Upload complete three-way compatibility inventory

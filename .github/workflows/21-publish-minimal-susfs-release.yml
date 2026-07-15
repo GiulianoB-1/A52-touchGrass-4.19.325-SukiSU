@@ -1,0 +1,71 @@
+name: 21 - Publish verified minimal SUSFS test ZIP
+
+on:
+  push:
+    branches:
+      - rebase/resukisu-linux-4.19.325
+    paths:
+      - .github/workflows/21-publish-minimal-susfs-release.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish verified flashable ZIP
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download verified workflow artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ARTIFACT_ID: '8327164376'
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > artifact-wrapper.zip
+          unzip -q artifact-wrapper.zip -d release
+
+      - name: Verify flashable ZIP
+        id: verify
+        run: |
+          set -euo pipefail
+          mapfile -t zips < <(find release -type f -name '*.zip' -print)
+          if [ "${#zips[@]}" -ne 1 ]; then
+            echo "Expected exactly one flashable ZIP, found ${#zips[@]}" >&2
+            printf '%s\n' "${zips[@]}" >&2
+            exit 1
+          fi
+          ZIP="${zips[0]}"
+          unzip -t "$ZIP"
+          SHA256="$(sha256sum "$ZIP" | awk '{print $1}')"
+          BASENAME="$(basename "$ZIP")"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "basename=$BASENAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub prerelease and upload ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP: ${{ steps.verify.outputs.zip }}
+          ZIP_NAME: ${{ steps.verify.outputs.basename }}
+          ZIP_SHA256: ${{ steps.verify.outputs.sha256 }}
+          TAG: a52xq-linux-4.19.200-resukisu-susfs-minimal-test-102
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$ZIP" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'A52xq Linux 4.19.200 ReSukiSU SUSFS Minimal Test 102' \
+              --prerelease \
+              --notes "Verified minimal SUSFS root/module validation build.\n\nLinux: 4.19.200\nReSukiSU: v4.1.0\nSUSFS: v1.4.2\nOptional SUSFS hiding and spoofing features: disabled\nNative ksu_handle_vfs_fstat path: preserved\n\nFlashable ZIP SHA-256: ${ZIP_SHA256}\n\nThis is a test prerelease. Keep a known-good recovery kernel available before flashing."
+          fi

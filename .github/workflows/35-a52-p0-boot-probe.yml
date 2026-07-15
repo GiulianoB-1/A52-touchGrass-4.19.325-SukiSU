@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/35-a52-p0-boot-probe.yml'
       - 'scripts/35_build_a52_p0_boot_probe.sh'
+      - 'scripts/36_patch_a52_p0_optional_callbacks.py'
       - 'scripts/common.sh'
       - 'scripts/01_prepare_source.sh'
       - 'scripts/03_apply_linux_4.19.153.sh'
@@ -74,6 +75,9 @@ jobs:
             printf 'Running %s\n' "$repair"
             "$repair"
           done
+
+      - name: Remove optional P0 callbacks
+        run: ./scripts/36_patch_a52_p0_optional_callbacks.py
 
       - name: Build and audit P0 probe
         run: ./scripts/35_build_a52_p0_boot_probe.sh

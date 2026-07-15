@@ -12,6 +12,7 @@ permissions:
   actions: read
   contents: write
 
+# Re-triggered after manual dispatch verification on 2026-07-15.
 jobs:
   publish:
     name: Publish verified flashable ZIP

@@ -51,7 +51,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git make bc bison flex libssl-dev libelf-dev \
-            clang-14 lld-14 llvm-14 python3 rsync cpio xz-utils file
+            clang-14 lld-14 llvm-14 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            python3 rsync cpio xz-utils file
 
       - name: Build stock Android 4.19 GKI image
         run: |

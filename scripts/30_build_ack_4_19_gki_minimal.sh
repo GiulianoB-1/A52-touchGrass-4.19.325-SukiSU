@@ -52,6 +52,10 @@ if [[ ! -x "$LLVM_BIN/clang" || ! -x "$LLVM_BIN/ld.lld" ]]; then
   echo "LLVM ${LLVM_MAJOR} was not found in $LLVM_BIN" >&2
   exit 1
 fi
+if ! command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+  echo "The aarch64-linux-gnu cross toolchain was not found" >&2
+  exit 1
+fi
 export PATH="$LLVM_BIN:$PATH"
 
 rm -rf "$WORK_DIR" "$ARTIFACT_DIR"
@@ -101,6 +105,9 @@ set_stage "toolchain-recording"
   echo "== llvm-ar =="
   llvm-ar --version
   echo
+  echo "== arm64 gcc prefix =="
+  aarch64-linux-gnu-gcc --version
+  echo
   echo "== make =="
   make --version
 } > "$ARTIFACT_DIR/toolchain.txt"
@@ -109,6 +116,15 @@ make_args=(
   -C "$SRC_DIR"
   O="$OUT_DIR"
   ARCH="$GKI_ARCH"
+  CROSS_COMPILE=aarch64-linux-gnu-
+  CLANG_TRIPLE=aarch64-linux-gnu-
+  CC=clang
+  LD=ld.lld
+  AR=llvm-ar
+  NM=llvm-nm
+  OBJCOPY=llvm-objcopy
+  OBJDUMP=llvm-objdump
+  STRIP=llvm-strip
   LLVM=1
   LLVM_IAS=1
 )

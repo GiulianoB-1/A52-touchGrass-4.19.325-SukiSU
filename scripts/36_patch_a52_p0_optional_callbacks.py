@@ -6,38 +6,54 @@ ROOT = Path("workspace/touchgrass-a52xq")
 OUT = Path("artifacts/p0-boot-probe/source-patches")
 OUT.mkdir(parents=True, exist_ok=True)
 
-CALLS = {
-    ROOT / "kernel/power/main.c": "msm_drm_register_notifier_client",
-    ROOT / "fs/pstore/ss_platform_log.c": "sec_boot_stat_add",
-    ROOT / "drivers/mfd/sec_ap_pmic.c": "do_keyboard_notifier",
-}
+SYMBOLS = (
+    "msm_drm_register_notifier_client",
+    "sec_boot_stat_add",
+    "do_keyboard_notifier",
+)
 
-for path, symbol in CALLS.items():
-    if not path.is_file():
-        raise SystemExit(f"missing source file: {path}")
-
-    text = path.read_text()
+resolved = []
+for symbol in SYMBOLS:
     pattern = re.compile(
         rf"(?m)^[ \t]*{re.escape(symbol)}\s*\([^;\n]*\);[ \t]*$"
     )
-    matches = pattern.findall(text)
-    if len(matches) != 1:
+    candidates = []
+
+    for path in ROOT.rglob("*.c"):
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            continue
+        matches = pattern.findall(text)
+        if matches:
+            candidates.append((path, text, len(matches)))
+
+    total = sum(count for _, _, count in candidates)
+    if total != 1 or len(candidates) != 1:
+        details = ", ".join(
+            f"{path.relative_to(ROOT)}:{count}" for path, _, count in candidates
+        ) or "none"
         raise SystemExit(
-            f"{path}: expected exactly one standalone {symbol} call, found {len(matches)}"
+            f"expected exactly one standalone {symbol} call in the source tree, "
+            f"found {total}; candidates: {details}"
         )
 
+    path, text, _ = candidates[0]
     safe_name = str(path.relative_to(ROOT)).replace("/", "__")
     (OUT / f"{safe_name}.before").write_text(text)
 
     replacement = f"\t/* P0 omits optional callback: {symbol} */"
-    patched = pattern.sub(replacement, text)
+    patched, count = pattern.subn(replacement, text)
+    if count != 1:
+        raise SystemExit(f"{path}: failed to patch {symbol}, replacements={count}")
+
     path.write_text(patched)
     (OUT / f"{safe_name}.p0").write_text(patched)
+    resolved.append(f"{symbol}={path.relative_to(ROOT)}")
 
-    if symbol in path.read_text():
-        raise SystemExit(f"{path}: {symbol} still present after patch")
-
+(OUT / "resolved-callbacks.txt").write_text("\n".join(resolved) + "\n")
 (OUT / "README.txt").write_text(
     "P0-only removal of three standalone optional callbacks whose providers are "
-    "intentionally absent from the reduced early-boot build.\n"
+    "intentionally absent from the reduced early-boot build. Source paths are "
+    "resolved dynamically after reconstruction and recorded separately.\n"
 )

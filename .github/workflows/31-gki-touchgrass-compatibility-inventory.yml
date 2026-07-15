@@ -1,4 +1,4 @@
-name: 31 - GKI 4.19 versus A52 compatibility inventory
+name: 31 - Full GKI 4.19 versus A52 compatibility inventory
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
       - 'scripts/30_build_ack_4_19_gki_inventory.sh'
       - 'scripts/31_collect_touchgrass_4.19.200_inventory.sh'
       - 'scripts/32_compare_gki_touchgrass.py'
+      - 'scripts/34_collect_touchgrass_4.19.325_inventory.sh'
       - 'projects/gki-4.19-a52-compatibility/**'
 
 permissions:
@@ -27,7 +28,7 @@ env:
 
 jobs:
   compatibility-inventory:
-    name: Compare ACK GKI with reviewed touchGrass 4.19.200
+    name: Compare ACK GKI with touchGrass 4.19.200 and 4.19.325
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -54,12 +55,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: a52xq-gki-compat-4.19.200-${{ runner.os }}-${{ github.run_id }}
+          key: a52xq-gki-full-compat-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
             a52xq-gki-compat-4.19.200-${{ runner.os }}-
+            a52xq-linux-4.19.325-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+            a52xq-gki-full-compat-${{ runner.os }}-
 
-      - name: Prepare reviewed touchGrass source
+      - name: Prepare reviewed touchGrass 4.19.200 source
         run: |
           chmod +x scripts/*.sh scripts/*.py
           ./scripts/01_prepare_source.sh
@@ -74,21 +77,47 @@ jobs:
           ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
           ./scripts/checkpoint_resolve_linux_4.19.200.sh
 
-      - name: Rebuild known 4.19.200 ReSukiSU baseline
+      - name: Build and collect touchGrass 4.19.200 hardware baseline
         run: |
           ./scripts/07_patch_resukisu_exec_hook.sh
           ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe
           ./scripts/31_collect_touchgrass_4.19.200_inventory.sh
 
+      - name: Prepare build-verified touchGrass 4.19.325 source
+        run: |
+          set -Eeuo pipefail
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05_merge_linux_4.19.325.sh
+          for repair in scripts/06*_linux_4.19.325*.sh; do
+            printf 'Running %s\n' "$repair"
+            "$repair"
+          done
+
+      - name: Build and collect touchGrass 4.19.325 same-version baseline
+        run: |
+          set -Eeuo pipefail
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.325
+          ./scripts/34_collect_touchgrass_4.19.325_inventory.sh
+
       - name: Build untouched Android 4.19 GKI reference
         run: ./scripts/30_build_ack_4_19_gki_inventory.sh
 
-      - name: Generate compatibility inventory
+      - name: Compare GKI against hardware baseline 4.19.200
         run: |
           python3 scripts/32_compare_gki_touchgrass.py \
             --gki artifacts/compatibility/gki \
             --touchgrass artifacts/compatibility/touchgrass \
-            --out artifacts/compatibility/report
+            --out artifacts/compatibility/report-4.19.200
+
+      - name: Compare same-version GKI and touchGrass 4.19.325 ABI
+        run: |
+          python3 scripts/32_compare_gki_touchgrass.py \
+            --gki artifacts/compatibility/gki \
+            --touchgrass artifacts/compatibility/touchgrass-4.19.325 \
+            --out artifacts/compatibility/report-4.19.325
 
       - name: Record runner and source state
         if: always()
@@ -103,11 +132,11 @@ jobs:
               > artifacts/compatibility/runner/touchgrass-source-status.txt || true
           fi
 
-      - name: Upload compatibility inventory
+      - name: Upload complete three-way compatibility inventory
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-gki-4.19-compatibility-inventory-${{ github.run_number }}-NON-FLASHABLE
+          name: a52xq-gki-4.19-full-comparison-${{ github.run_number }}-NON-FLASHABLE
           path: artifacts/compatibility/
           if-no-files-found: error
           retention-days: 14

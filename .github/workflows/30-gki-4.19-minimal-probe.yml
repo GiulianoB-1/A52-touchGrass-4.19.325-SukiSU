@@ -1,0 +1,68 @@
+name: 30 - Minimal Android 4.19 GKI probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/gki-4.19-minimal-probe
+    paths:
+      - '.github/workflows/30-gki-4.19-minimal-probe.yml'
+      - 'scripts/30_build_ack_4_19_gki_minimal.sh'
+      - 'gki-sources.lock'
+      - 'projects/gki-4.19-minimal/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-gki-4.19-minimal-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JOBS: '4'
+
+jobs:
+  build-gki:
+    name: Build untouched ACK 4.19 GKI
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make bc bison flex libssl-dev libelf-dev \
+            clang-14 lld-14 llvm-14 python3 rsync cpio xz-utils file
+
+      - name: Build stock Android 4.19 GKI image
+        run: |
+          chmod +x scripts/30_build_ack_4_19_gki_minimal.sh
+          ./scripts/30_build_ack_4_19_gki_minimal.sh
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts/gki-4.19-minimal
+          df -h > artifacts/gki-4.19-minimal/runner-disk.txt
+          free -h > artifacts/gki-4.19-minimal/runner-memory.txt
+          uname -a > artifacts/gki-4.19-minimal/runner-uname.txt
+
+      - name: Upload GKI build and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-ack-4.19-gki-minimal-${{ github.run_number }}
+          path: artifacts/gki-4.19-minimal/
+          if-no-files-found: warn
+          retention-days: 14

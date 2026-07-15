@@ -34,11 +34,19 @@ cp "$DEFCONFIG" "$OUT/a52xq_defconfig.before"
   -e SECURITY -e SECURITY_SELINUX -e ANDROID_BINDER_IPC \
   -e PSTORE -e PSTORE_RAM -e PSTORE_PMSG \
   -e PRINTK -e PRINTK_TIME -e IKCONFIG -e IKCONFIG_PROC \
+  -e INPUT -e INPUT_MISC -e INPUT_QPNP_POWER_ON \
   -d MEDIA_SUPPORT -d VIDEO_V4L2 -d DRM \
   -d SOUND -d SND -d WLAN -d CFG80211 -d MAC80211 \
-  -d BT -d NFC -d INPUT_TOUCHSCREEN -d INPUT_MISC \
+  -d BT -d NFC -d INPUT_TOUCHSCREEN \
   -d INPUT_TOUCHSCREEN_TCLMV2 -d TOUCHSCREEN_DUMP_MODE \
-  -d TOUCHSCREEN_STM_FTS5CU56A -d TOUCHSCREEN_ZINITIX_ZT7650
+  -d TOUCHSCREEN_STM_FTS5CU56A -d TOUCHSCREEN_ZINITIX_ZT7650 \
+  -d ICNSS -d ICNSS_QMI -d CNSS_UTILS \
+  -d QCOM_KGSL -d QCOM_KGSL_IOMMU \
+  -d LEDS_SM5714 -d SEC_PERF_MANAGER -d SEC_PERF_MANAGER_QC \
+  -d SEC_DEBUG -d SEC_DEBUG_SCHED_LOG -d SEC_DEBUG_SUMMARY \
+  -d SEC_DEBUG_DUMP_TASK_STACK -d SEC_DEBUG_MDM_FILE_INFO \
+  -d SEC_DEBUG_MODULE_INFO -d SEC_DEBUG_APPS_CLK_LOGGING \
+  -d SEC_DEBUG_TSP_LOG
 
 # This vendor tree's techpack/Kbuild enumerates every first-level directory,
 # independently of the normal SOUND/MEDIA/DRM Kconfig gates. Exclude the late
@@ -89,7 +97,8 @@ grep -Fq 'obj-n' "$INPUT_MAKEFILE" || fail "touchscreen directory exclusion was 
 # When QPNP PON is disabled, this vendor header defines qpnp_pon_wd_config()
 # directly in the header without static linkage. Every user then emits a global
 # copy and the final vmlinux link fails with multiple definitions. Match the
-# surrounding fallback helpers and make it static inline.
+# surrounding fallback helpers and make it static inline. This remains a safe
+# fallback repair even though P0 now requires the real QPNP PON provider.
 QPNP_PON_HEADER="$KERNEL_DIR/include/linux/input/qpnp-power-on.h"
 [[ -s "$QPNP_PON_HEADER" ]] || fail "qpnp-power-on.h is missing"
 cp "$QPNP_PON_HEADER" "$OUT/qpnp-power-on.h.before"
@@ -126,6 +135,7 @@ required_y=(
   REGULATOR_QCOM_RPMH ARM_SMMU SCSI_UFSHCD SCSI_UFSHCD_PLATFORM
   SCSI_UFS_QCOM PHY_QCOM_UFS BLK_DEV_INITRD DEVTMPFS EXT4_FS
   SECURITY_SELINUX ANDROID_BINDER_IPC PSTORE PSTORE_RAM PSTORE_PMSG
+  INPUT INPUT_MISC INPUT_QPNP_POWER_ON
 )
 missing=0
 : > "$OUT/required-builtins.txt"
@@ -143,6 +153,8 @@ optional_off=(
   KSU KSU_SUSFS MEDIA_SUPPORT DRM SOUND SND WLAN CFG80211 MAC80211 BT NFC
   INPUT_TOUCHSCREEN INPUT_TOUCHSCREEN_TCLMV2 TOUCHSCREEN_DUMP_MODE
   TOUCHSCREEN_STM_FTS5CU56A TOUCHSCREEN_ZINITIX_ZT7650
+  ICNSS ICNSS_QMI CNSS_UTILS QCOM_KGSL QCOM_KGSL_IOMMU
+  LEDS_SM5714 SEC_PERF_MANAGER SEC_PERF_MANAGER_QC SEC_DEBUG
 )
 : > "$OUT/late-stack-audit.txt"
 for symbol in "${optional_off[@]}"; do

@@ -94,6 +94,46 @@ jobs:
           set -o pipefail
           ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.325 2>&1 | tee artifacts/linux-4.19.325-resukisu-safe.log
 
+      - name: Collect same-version ABI and device-tree inventory
+        run: |
+          set -Eeuo pipefail
+          KERNEL_DIR="$GITHUB_WORKSPACE/workspace/touchgrass-a52xq"
+          OUT_DIR="$KERNEL_DIR/out"
+          DEST="$GITHUB_WORKSPACE/artifacts/touchgrass-4.19.325-abi"
+          mkdir -p "$DEST"
+
+          test -s "$OUT_DIR/.config"
+          test -s "$OUT_DIR/arch/arm64/boot/Image"
+          test -s "$OUT_DIR/Module.symvers"
+
+          cp "$OUT_DIR/.config" "$DEST/config"
+          cp "$OUT_DIR/arch/arm64/boot/Image" "$DEST/Image"
+          cp "$OUT_DIR/Module.symvers" "$DEST/Module.symvers"
+          test ! -s "$OUT_DIR/System.map" || cp "$OUT_DIR/System.map" "$DEST/System.map"
+
+          find "$OUT_DIR" -type f -name '*.ko' -printf '%P\n' | sort > "$DEST/modules.list"
+          find "$OUT_DIR/arch/arm64/boot" -type f \( -name '*.dtb' -o -name '*.dtbo' \) \
+            -printf '%P\n' | sort > "$DEST/device-trees.list"
+
+          make -s -C "$KERNEL_DIR" O="$OUT_DIR" ARCH=arm64 kernelrelease > "$DEST/kernel-release.txt"
+          {
+            echo "kernel_release=$(cat "$DEST/kernel-release.txt")"
+            echo "image_bytes=$(stat -c %s "$DEST/Image")"
+            echo "exported_symbol_count=$(wc -l < "$DEST/Module.symvers")"
+            echo "module_count=$(wc -l < "$DEST/modules.list")"
+            echo "device_tree_count=$(wc -l < "$DEST/device-trees.list")"
+            echo "flashable=no"
+          } > "$DEST/metadata.txt"
+
+          cat > "$DEST/NOTICE.txt" <<'EOF'
+This artifact is an ABI and source-comparison input. It is not a flashable kernel package.
+EOF
+
+          (
+            cd "$DEST"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+
       - name: Record runner and source state
         if: always()
         run: |

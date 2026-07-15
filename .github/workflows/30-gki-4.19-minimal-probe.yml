@@ -2,14 +2,6 @@ name: 30 - Minimal Android 4.19 GKI probe
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/gki-4.19-minimal-probe
-    paths:
-      - '.github/workflows/30-gki-4.19-minimal-probe.yml'
-      - 'scripts/30_build_ack_4_19_gki_minimal.sh'
-      - 'gki-sources.lock'
-      - 'projects/gki-4.19-minimal/**'
   pull_request:
     branches:
       - main
@@ -24,10 +16,10 @@ permissions:
 
 concurrency:
   group: a52-gki-4.19-minimal-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  JOBS: '4'
+  JOBS: '8'
 
 jobs:
   build-gki:

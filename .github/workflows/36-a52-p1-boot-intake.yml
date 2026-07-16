@@ -25,18 +25,29 @@ jobs:
         with:
           ref: main
 
-      - name: Download boot image from GitHub Release
+      - name: Download newest release image asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           mkdir -p intake artifacts/p1-boot-intake
-          gh release download p1-boot-source \
-            --repo "${GITHUB_REPOSITORY}" \
-            --pattern 'boot(2).img' \
-            --output intake/boot.img
+
+          releases_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30")"
+          asset_url="$(jq -r '[.[] | .assets[] | select(.name | endswith(".img"))][0].url // empty' <<<"$releases_json")"
+          asset_name="$(jq -r '[.[] | .assets[] | select(.name | endswith(".img"))][0].name // empty' <<<"$releases_json")"
+
+          if [[ -z "$asset_url" ]]; then
+            echo "::error::No .img release asset was found in the newest 30 releases"
+            exit 1
+          fi
+
+          echo "Downloading release asset: $asset_name"
+          gh api "$asset_url" \
+            --header 'Accept: application/octet-stream' \
+            > intake/boot.img
+
           test -s intake/boot.img || {
-            echo "::error::Release asset boot(2).img was not downloaded"
+            echo "::error::Release asset download produced an empty file"
             exit 1
           }
 

@@ -34,7 +34,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p scripts projects/a52-p1-boot-image
-
           fetch_file() {
             local ref="$1"
             local path="$2"
@@ -42,7 +41,6 @@ jobs:
               --jq '.content' | tr -d '\n' | base64 --decode > "$path"
             test -s "$path"
           }
-
           fetch_file 'diag/a52-p1-full-hardware' 'scripts/40_build_a52_p1_full_hardware_diag.sh'
           fetch_file 'main' 'scripts/37_validate_a52_p1_boot_source.py'
           fetch_file 'main' 'scripts/38_repack_a52_p1_boot.py'
@@ -110,6 +108,25 @@ jobs:
             scripts/checkpoint_fix_linux_4.19.205.generated.sh
           chmod +x scripts/checkpoint_fix_linux_4.19.205.generated.sh
           ./scripts/checkpoint_fix_linux_4.19.205.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('workspace/touchgrass-a52xq/drivers/soc/qcom/event_timer.c')
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          if newer not in text:
+              raise SystemExit('event_timer newer initializer not found after generic repair')
+          path.write_text(text.replace(newer, older, 1))
+          print('Restored Linux 4.19.205-compatible Qualcomm event_timer initializer')
+          PY
 
       - name: Build full-hardware no-root Linux 4.19.205 kernel
         run: |

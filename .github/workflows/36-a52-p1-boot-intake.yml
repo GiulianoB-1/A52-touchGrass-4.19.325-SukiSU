@@ -1,0 +1,73 @@
+name: 36 - A52 P1 boot image intake
+
+on:
+  workflow_dispatch:
+    inputs:
+      boot_image_url:
+        description: Direct download URL for the checksum-locked boot(2).img
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-source:
+    name: Validate checksum-locked A52 boot source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+
+      - name: Require boot image URL
+        env:
+          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${BOOT_IMAGE_URL:-}" ]]; then
+            echo "::error::boot_image_url was not provided"
+            exit 1
+          fi
+
+      - name: Download locked boot image
+        env:
+          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/p1-boot-intake
+          curl --fail --location --retry 3 --silent --show-error \
+            --output intake/boot.img \
+            "$BOOT_IMAGE_URL"
+
+      - name: Validate source identity and header contract
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/37_validate_a52_p1_boot_source.py \
+            intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/p1-boot-intake/source-report.json
+          sha256sum intake/boot.img > artifacts/p1-boot-intake/source-SHA256SUMS
+
+      - name: Preserve intake diagnostics only
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/p1-boot-intake
+          cp projects/a52-p1-boot-image/boot-source.lock artifacts/p1-boot-intake/ 2>/dev/null || true
+          cat > artifacts/p1-boot-intake/NOTICE.txt <<'EOF'
+          SOURCE VALIDATION ONLY.
+
+          This artifact contains metadata and checksums only. The user-provided
+          boot.img is deliberately not uploaded by this workflow.
+          EOF
+
+      - name: Upload non-flashable validation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-p1-boot-source-validation-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/p1-boot-intake
+          if-no-files-found: error
+          retention-days: 14

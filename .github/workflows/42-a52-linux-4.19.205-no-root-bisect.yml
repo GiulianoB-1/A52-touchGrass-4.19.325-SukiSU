@@ -111,7 +111,10 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('workspace/touchgrass-a52xq/drivers/soc/qcom/event_timer.c')
+
+          root = Path('workspace/touchgrass-a52xq')
+
+          path = root / 'drivers/soc/qcom/event_timer.c'
           text = path.read_text()
           newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
           \t.rb_root = RB_ROOT_CACHED,
@@ -126,6 +129,29 @@ jobs:
               raise SystemExit('event_timer newer initializer not found after generic repair')
           path.write_text(text.replace(newer, older, 1))
           print('Restored Linux 4.19.205-compatible Qualcomm event_timer initializer')
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              text = text.replace(anchor, helper + anchor, 1)
+              path.write_text(text)
+              print('Added missing Linux 4.19.205 schedutil cleanup helper')
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing after generic repair')
+          else:
+              print('schedutil cleanup helper already present')
           PY
 
       - name: Build full-hardware no-root Linux 4.19.205 kernel

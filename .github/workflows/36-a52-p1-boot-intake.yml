@@ -6,8 +6,8 @@ run-name: Validate checksum-locked A52 boot source
   workflow_dispatch:
     inputs:
       boot_image_url:
-        description: Optional direct URL. Leave blank when assets/private/boot-2.img.gz exists.
-        required: false
+        description: Google Drive share link or direct URL for checksum-locked boot(2).img
+        required: true
         type: string
 
 permissions:
@@ -32,16 +32,24 @@ jobs:
           set -Eeuo pipefail
           mkdir -p intake artifacts/p1-boot-intake
 
-          if [[ -s assets/private/boot-2.img.gz ]]; then
-            gzip -dc assets/private/boot-2.img.gz > intake/boot.img
-          elif [[ -n "${BOOT_IMAGE_URL:-}" ]]; then
+          if [[ -z "${BOOT_IMAGE_URL:-}" ]]; then
+            echo "::error::boot_image_url was not provided"
+            exit 1
+          fi
+
+          if [[ "$BOOT_IMAGE_URL" == *"drive.google.com"* ]]; then
+            python3 -m pip install --disable-pip-version-check --no-cache-dir 'gdown==5.2.0'
+            gdown --fuzzy "$BOOT_IMAGE_URL" --output intake/boot.img
+          else
             curl --fail --location --retry 3 --silent --show-error \
               --output intake/boot.img \
               "$BOOT_IMAGE_URL"
-          else
-            echo "::error::Upload assets/private/boot-2.img.gz to main or provide boot_image_url"
-            exit 1
           fi
+
+          test -s intake/boot.img || {
+            echo "::error::Downloaded boot image is empty"
+            exit 1
+          }
 
       - name: Validate source identity and header contract
         run: |

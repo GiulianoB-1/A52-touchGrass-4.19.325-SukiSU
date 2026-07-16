@@ -2,6 +2,11 @@ name: 36 - A52 P1 boot image intake
 
 on:
   workflow_dispatch:
+    inputs:
+      boot_image_url:
+        description: Direct download URL for the checksum-locked boot(2).img
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,22 +18,22 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check out P1 branch
+      - name: Check out selected branch
         uses: actions/checkout@v4
 
-      - name: Require private boot image URL
+      - name: Require boot image URL
         env:
-          BOOT_IMAGE_URL: ${{ secrets.P1_BOOT_IMAGE_URL }}
+          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
         run: |
           set -Eeuo pipefail
           if [[ -z "${BOOT_IMAGE_URL:-}" ]]; then
-            echo "::error::Repository secret P1_BOOT_IMAGE_URL is not configured"
+            echo "::error::boot_image_url was not provided"
             exit 1
           fi
 
       - name: Download locked boot image
         env:
-          BOOT_IMAGE_URL: ${{ secrets.P1_BOOT_IMAGE_URL }}
+          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
         run: |
           set -Eeuo pipefail
           mkdir -p intake artifacts/p1-boot-intake
@@ -50,7 +55,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts/p1-boot-intake
-          cp projects/a52-p1-boot-image/boot-source.lock artifacts/p1-boot-intake/
+          cp projects/a52-p1-boot-image/boot-source.lock artifacts/p1-boot-intake/ 2>/dev/null || true
           cat > artifacts/p1-boot-intake/NOTICE.txt <<'EOF'
           SOURCE VALIDATION ONLY.
 

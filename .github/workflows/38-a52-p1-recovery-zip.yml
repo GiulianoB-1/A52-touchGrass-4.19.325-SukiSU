@@ -1,0 +1,114 @@
+name: 38 - A52 P1 recovery flashable ZIPs
+
+run-name: Build A52 P1 recovery flash and restore ZIPs
+
+"on":
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/38-a52-p1-recovery-zip.yml'
+      - 'scripts/39_build_a52_recovery_zip.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    name: Build and audit recovery ZIPs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download latest audited P1 boot artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p input/p1 input/original output
+          ARTIFACT_JSON="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("a52xq-p1-test-boot-")))] | sort_by(.created_at) | reverse | .[0]')"
+          ARTIFACT_ID="$(jq -r '.id // empty' <<<"$ARTIFACT_JSON")"
+          [ -n "$ARTIFACT_ID" ] || { echo '::error::No current audited P1 boot artifact found'; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > input/p1-artifact.zip
+          unzip -q input/p1-artifact.zip -d input/p1
+          test -s input/p1/boot.img || { echo '::error::P1 artifact does not contain boot.img'; exit 1; }
+          test "$(stat -c %s input/p1/boot.img)" = 100663296
+
+      - name: Download original validated boot image from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          RELEASES="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=30")"
+          ASSET="$(jq -r '[.[] | .assets[] | select(.name | endswith(".img"))] | sort_by(.created_at) | reverse | .[0] | [.id,.name] | @tsv' <<<"$RELEASES")"
+          ASSET_ID="${ASSET%%$'\t'*}"
+          ASSET_NAME="${ASSET#*$'\t'}"
+          [ -n "$ASSET_ID" ] || { echo '::error::No release .img asset found'; exit 1; }
+          gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" > input/original/boot.img
+          python3 scripts/37_validate_a52_p1_boot_source.py \
+            input/original/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output output/original-source-validation.json
+
+      - name: Build recovery flash and restore ZIPs
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/39_build_a52_recovery_zip.py \
+            --boot input/p1/boot.img \
+            --output output/a52xq-p1-recovery-flash-NOT-HARDWARE-VALIDATED.zip \
+            --label 'P1 test boot, NOT hardware validated' \
+            --notice 'Flashes the audited P1 test boot image. Use only from a compatible custom recovery after confirming Download Mode and keeping the restore ZIP available.'
+
+          python3 scripts/39_build_a52_recovery_zip.py \
+            --boot input/original/boot.img \
+            --output output/a52xq-p1-recovery-restore-original.zip \
+            --label 'Restore original validated boot image' \
+            --notice 'Restores the checksum-validated original boot image used as the P1 source.'
+
+      - name: Audit recovery packages
+        run: |
+          set -Eeuo pipefail
+          for ZIP in output/*.zip; do
+            unzip -t "$ZIP"
+            unzip -Z1 "$ZIP" | sort > "$ZIP.contents.txt"
+            grep -qx 'META-INF/com/google/android/update-binary' "$ZIP.contents.txt"
+            grep -qx 'META-INF/com/google/android/updater-script' "$ZIP.contents.txt"
+            grep -qx 'boot.img' "$ZIP.contents.txt"
+            TMP="$(mktemp -d)"
+            unzip -q "$ZIP" boot.img -d "$TMP"
+            test "$(stat -c %s "$TMP/boot.img")" = 100663296
+            rm -rf "$TMP"
+          done
+          sha256sum output/*.zip > output/SHA256SUMS
+          cat > output/FLASHING-NOTICE.txt <<'EOF'
+          RECOVERY FLASHABLE CANDIDATES, NOT HARDWARE VALIDATED.
+
+          Requirements:
+          - SM-A526B / a52xq only.
+          - Unlocked bootloader.
+          - Compatible custom recovery capable of running legacy update-binary ZIPs.
+          - Confirm Download Mode works before flashing.
+          - Keep a52xq-p1-recovery-restore-original.zip on external storage or another device.
+
+          First test:
+          1. Flash the P1 recovery ZIP.
+          2. Do not wipe data, cache, dtbo, vendor_boot, or vbmeta.
+          3. Reboot once and observe boot behavior.
+          4. If boot fails, return to recovery or Download Mode and flash the restore ZIP or original firmware.
+          EOF
+
+      - name: Upload recovery package bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-p1-recovery-bundle-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: output
+          if-no-files-found: error
+          retention-days: 14

@@ -28,6 +28,29 @@ jobs:
         with:
           ref: rebase/resukisu-linux-4.19.325
 
+      - name: Hydrate pinned diagnostic and repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+
+          fetch_file 'diag/a52-p1-full-hardware' 'scripts/40_build_a52_p1_full_hardware_diag.sh'
+          fetch_file 'main' 'scripts/37_validate_a52_p1_boot_source.py'
+          fetch_file 'main' 'scripts/38_repack_a52_p1_boot.py'
+          fetch_file 'main' 'projects/a52-p1-boot-image/boot-source.lock'
+          chmod +x scripts/40_build_a52_p1_full_hardware_diag.sh \
+            scripts/37_validate_a52_p1_boot_source.py \
+            scripts/38_repack_a52_p1_boot.py
+
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true

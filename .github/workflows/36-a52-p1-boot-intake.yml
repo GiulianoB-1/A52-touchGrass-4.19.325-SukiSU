@@ -1,18 +1,37 @@
 name: 36 - A52 P1 boot image intake
 
-on:
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && 'Validate checksum-locked A52 boot source'
+      || 'Register A52 P1 intake workflow' }}
+
+"on":
   workflow_dispatch:
     inputs:
       boot_image_url:
         description: Direct download URL for the checksum-locked boot(2).img
         required: true
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/36-a52-p1-boot-intake.yml'
 
 permissions:
   contents: read
 
 jobs:
+  register-workflow:
+    if: github.event_name == 'push'
+    name: Register workflow in Actions
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Confirm workflow availability
+        run: echo "A52 P1 boot image intake is registered and ready for manual dispatch."
+
   validate-source:
+    if: github.event_name == 'workflow_dispatch'
     name: Validate checksum-locked A52 boot source
     runs-on: ubuntu-22.04
     timeout-minutes: 30

@@ -1,0 +1,122 @@
+name: 37 - A52 P1 audited boot repack
+
+run-name: Build audited A52 P1 test boot image
+
+"on":
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/37-a52-p1-repack.yml'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repack:
+    name: Repack and audit A52 P1 boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download validated source boot image from newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake p0 artifacts/a52xq-p1-test-boot
+
+          ASSET_LINE="$({
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+              --jq '.[] | .assets[] | select(.name | endswith(".img")) | [.id, .name, .created_at] | @tsv'
+          } | head -n 1)"
+
+          if [[ -z "$ASSET_LINE" ]]; then
+            echo "::error::No .img release asset was found"
+            exit 1
+          fi
+
+          IFS=$'\t' read -r ASSET_ID ASSET_NAME ASSET_CREATED <<< "$ASSET_LINE"
+          echo "Using release asset: $ASSET_NAME ($ASSET_CREATED)"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            --output intake/boot.img
+
+          test -s intake/boot.img || {
+            echo "::error::Release boot image download is empty"
+            exit 1
+          }
+
+      - name: Validate source boot image again
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/37_validate_a52_p1_boot_source.py \
+            intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/a52xq-p1-test-boot/source-validation.json
+
+      - name: Download successful P0 kernel artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          P0_ARTIFACT_ID: '8361922486'
+        run: |
+          set -Eeuo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${P0_ARTIFACT_ID}/zip" \
+            --output p0/p0-artifact.zip
+
+          unzip -q p0/p0-artifact.zip -d p0/extracted
+          test -s p0/extracted/Image.gz || {
+            echo "::error::Image.gz is missing from P0 artifact"
+            exit 1
+          }
+
+          (
+            cd p0/extracted
+            grep '  ./Image.gz$' SHA256SUMS | sha256sum --check --strict
+          )
+
+      - name: Repack boot image and enforce invariants
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel p0/extracted/Image.gz \
+            --output artifacts/a52xq-p1-test-boot/boot.img \
+            --report artifacts/a52xq-p1-test-boot/repack-report.json
+
+          sha256sum \
+            artifacts/a52xq-p1-test-boot/boot.img \
+            artifacts/a52xq-p1-test-boot/repack-report.json \
+            > artifacts/a52xq-p1-test-boot/SHA256SUMS
+
+          cat > artifacts/a52xq-p1-test-boot/NOTICE.txt <<'EOF'
+          A52 P1 TEST BOOT IMAGE
+
+          This boot.img passed automated structural and component-preservation audits.
+          It has NOT been tested on physical hardware.
+
+          Do not flash until a recovery path is prepared and the repack report has been reviewed.
+          EOF
+
+      - name: Upload P1 test boot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-p1-test-boot-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-p1-test-boot
+          if-no-files-found: error
+          retention-days: 14

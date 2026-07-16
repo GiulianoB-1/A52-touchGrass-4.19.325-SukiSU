@@ -173,7 +173,9 @@ for stack in audio camera display video; do
     fail "techpack/$stack objects were built despite the P0 exclusion"
   fi
 done
-if find "$KERNEL_DIR/out/drivers/input/touchscreen" -type f \( -name '*.o' -o -name '*.a' \) -print -quit 2>/dev/null | grep -q .; then
+# Empty built-in.a archives can still be emitted for disabled vendor subdirectories.
+# Only compiled object files prove that touchscreen code survived the exclusion.
+if find "$KERNEL_DIR/out/drivers/input/touchscreen" -type f -name '*.o' -print -quit 2>/dev/null | grep -q .; then
   fail "touchscreen objects were built despite the P0 exclusion"
 fi
 printf 'excluded_techpacks=audio,camera,display,video\n' >> "$OUT/late-stack-audit.txt"

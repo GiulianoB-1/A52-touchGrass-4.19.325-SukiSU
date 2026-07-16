@@ -4,11 +4,11 @@ run-name: Validate checksum-locked A52 boot source
 
 "on":
   workflow_dispatch:
-    inputs:
-      boot_image_url:
-        description: Google Drive share link or direct URL for checksum-locked boot(2).img
-        required: true
-        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/36-a52-p1-boot-intake.yml'
 
 permissions:
   contents: read
@@ -25,29 +25,18 @@ jobs:
         with:
           ref: main
 
-      - name: Acquire locked boot image
+      - name: Download boot image from GitHub Release
         env:
-          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           mkdir -p intake artifacts/p1-boot-intake
-
-          if [[ -z "${BOOT_IMAGE_URL:-}" ]]; then
-            echo "::error::boot_image_url was not provided"
-            exit 1
-          fi
-
-          if [[ "$BOOT_IMAGE_URL" == *"drive.google.com"* ]]; then
-            python3 -m pip install --disable-pip-version-check --no-cache-dir 'gdown==5.2.0'
-            gdown --fuzzy "$BOOT_IMAGE_URL" --output intake/boot.img
-          else
-            curl --fail --location --retry 3 --silent --show-error \
-              --output intake/boot.img \
-              "$BOOT_IMAGE_URL"
-          fi
-
+          gh release download p1-boot-source \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'boot(2).img' \
+            --output intake/boot.img
           test -s intake/boot.img || {
-            echo "::error::Downloaded boot image is empty"
+            echo "::error::Release asset boot(2).img was not downloaded"
             exit 1
           }
 

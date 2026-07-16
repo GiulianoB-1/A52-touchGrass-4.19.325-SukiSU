@@ -42,7 +42,7 @@ for symbol in SYMBOLS:
     safe_name = str(path.relative_to(ROOT)).replace("/", "__")
     (OUT / f"{safe_name}.before").write_text(text)
 
-    replacement = f"\t/* P0 omits optional callback: {symbol} */"
+    replacement = f"\t/* P0 omits optional callback: {symbol} */ (void)0;"
     patched, count = pattern.subn(replacement, text)
     if count != 1:
         raise SystemExit(f"{path}: failed to patch {symbol}, replacements={count}")
@@ -53,7 +53,8 @@ for symbol in SYMBOLS:
 
 (OUT / "resolved-callbacks.txt").write_text("\n".join(resolved) + "\n")
 (OUT / "README.txt").write_text(
-    "P0-only removal of three standalone optional callbacks whose providers are "
-    "intentionally absent from the reduced early-boot build. Source paths are "
-    "resolved dynamically after reconstruction and recorded separately.\n"
+    "P0-only replacement of three standalone optional callbacks with a valid "
+    "no-op statement. Their providers are intentionally absent from the reduced "
+    "early-boot build. Source paths are resolved dynamically after reconstruction "
+    "and recorded separately.\n"
 )

@@ -6,8 +6,8 @@ run-name: Validate checksum-locked A52 boot source
   workflow_dispatch:
     inputs:
       boot_image_url:
-        description: Direct download URL for the checksum-locked boot(2).img
-        required: true
+        description: Optional direct URL. Leave blank when assets/private/boot-2.img.gz exists.
+        required: false
         type: string
 
 permissions:
@@ -25,25 +25,23 @@ jobs:
         with:
           ref: main
 
-      - name: Require boot image URL
-        env:
-          BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
-        run: |
-          set -Eeuo pipefail
-          if [[ -z "${BOOT_IMAGE_URL:-}" ]]; then
-            echo "::error::boot_image_url was not provided"
-            exit 1
-          fi
-
-      - name: Download locked boot image
+      - name: Acquire locked boot image
         env:
           BOOT_IMAGE_URL: ${{ inputs.boot_image_url }}
         run: |
           set -Eeuo pipefail
           mkdir -p intake artifacts/p1-boot-intake
-          curl --fail --location --retry 3 --silent --show-error \
-            --output intake/boot.img \
-            "$BOOT_IMAGE_URL"
+
+          if [[ -s assets/private/boot-2.img.gz ]]; then
+            gzip -dc assets/private/boot-2.img.gz > intake/boot.img
+          elif [[ -n "${BOOT_IMAGE_URL:-}" ]]; then
+            curl --fail --location --retry 3 --silent --show-error \
+              --output intake/boot.img \
+              "$BOOT_IMAGE_URL"
+          else
+            echo "::error::Upload assets/private/boot-2.img.gz to main or provide boot_image_url"
+            exit 1
+          fi
 
       - name: Validate source identity and header contract
         run: |

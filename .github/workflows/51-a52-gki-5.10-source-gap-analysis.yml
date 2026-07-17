@@ -19,7 +19,7 @@ jobs:
   analyze:
     name: Compare working A52 4.19 hardware tree against GKI 5.10
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: Check out project
@@ -34,7 +34,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git python3 make gcc bc bison flex libssl-dev libelf-dev rsync cpio lz4
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
 
       - name: Restore pinned official GKI 5.10 source
         id: gki-cache
@@ -49,6 +50,7 @@ jobs:
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
           test -d gki/common/.git
           test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
           git -C gki/common diff --check
 
       - name: Restore exact touchGrass Linux 4.19.200 source
@@ -57,23 +59,43 @@ jobs:
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-touchgrass-linux-4.19.200-v1-${{ runner.os }}-${{ hashFiles('scripts/common.sh', 'scripts/01_prepare_source.sh', 'scripts/03_apply_linux_4.19.153.sh', 'scripts/04_apply_linux_4.19.154.sh', 'scripts/05a_diagnose_linux_checkpoint.sh', 'scripts/checkpoint_resolve_linux_4.19.159.sh', 'scripts/checkpoint_resolve_linux_4.19.164.sh', 'scripts/checkpoint_resolve_linux_4.19.180.sh', 'scripts/checkpoint_resolve_linux_4.19.200.sh', 'scripts/05_merge_linux_4.19.325.py') }}
+          restore-keys: |
+            a52xq-touchgrass-linux-4.19.200-v1-${{ runner.os }}-
+
+      - name: Report touchGrass cache result
+        run: |
+          printf 'touchgrass_cache_hit=%s\n' '${{ steps.touchgrass-cache.outputs.cache-hit }}'
+          printf 'touchgrass_cache_key=%s\n' '${{ steps.touchgrass-cache.outputs.cache-primary-key }}'
+          printf 'touchgrass_cache_matched_key=%s\n' '${{ steps.touchgrass-cache.outputs.cache-matched-key }}'
 
       - name: Prepare touchGrass 4.19.200 on cache miss
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           chmod +x scripts/*.sh scripts/*.py
-          ./scripts/01_prepare_source.sh
-          ./scripts/03_apply_linux_4.19.153.sh
-          ./scripts/04_apply_linux_4.19.154.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
-          ./scripts/checkpoint_resolve_linux_4.19.159.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
-          ./scripts/checkpoint_resolve_linux_4.19.164.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
-          ./scripts/checkpoint_resolve_linux_4.19.180.sh
-          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
-          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          mkdir -p artifacts/logs
+          {
+            ./scripts/01_prepare_source.sh
+            ./scripts/03_apply_linux_4.19.153.sh
+            ./scripts/04_apply_linux_4.19.154.sh
+            ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+            ./scripts/checkpoint_resolve_linux_4.19.159.sh
+            ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+            ./scripts/checkpoint_resolve_linux_4.19.164.sh
+            ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+            ./scripts/checkpoint_resolve_linux_4.19.180.sh
+            ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+            ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          } 2>&1 | tee artifacts/logs/workflow51-touchgrass-4.19.200-prepare.log
+
+      - name: Validate exact touchGrass Linux 4.19.200 source
+        run: |
+          set -Eeuo pipefail
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          git -C workspace/touchgrass-a52xq diff --check
+          printf 'touchgrass_4.19.200_cache_hit=%s\n' \
+            '${{ steps.touchgrass-cache.outputs.cache-hit }}'
 
       - name: Save touchGrass 4.19.200 source cache
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'
@@ -141,3 +163,19 @@ jobs:
           path: artifacts/a52xq-gki-5.10-source-gap-analysis
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload Workflow 51 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-source-gap-analysis-failure-${{ github.run_number }}
+          path: |
+            artifacts/logs/
+            artifacts/*.txt
+            artifacts/*.diff
+            artifacts/*.stat.txt
+            artifacts/*result*
+            artifacts/*metadata*
+            artifacts/*reject*
+          if-no-files-found: warn
+          retention-days: 7

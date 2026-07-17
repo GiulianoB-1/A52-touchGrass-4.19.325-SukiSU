@@ -5,8 +5,8 @@ import argparse
 import csv
 import hashlib
 import re
-import shutil
 import subprocess
+from collections import deque
 from pathlib import Path
 
 GKI_SHA = "f960ed27302b1ff8e61e152fc202554d778deccd"
@@ -19,6 +19,7 @@ SOURCE_FILES = (
 )
 DEST_DIR = Path("drivers/iommu/legacy-qsmmu")
 TARGET = "drivers/iommu/legacy-qsmmu/arm-smmu-downstream.o"
+SYSTEM_INCLUDE = re.compile(r'^\s*#\s*include\s+<([^>]+)>', re.MULTILINE)
 
 
 def sha256(path: Path) -> str:
@@ -43,9 +44,93 @@ def copy_normalized_source(source: Path, target: Path) -> int:
     lines = source.read_text(errors="replace").splitlines()
     normalized = [line.rstrip(" \t") for line in lines]
     changed = sum(before != after for before, after in zip(lines, normalized))
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("\n".join(normalized) + "\n")
     target.chmod(0o644)
     return changed
+
+
+def header_path(root: Path, include_name: str) -> Path:
+    if include_name.startswith("asm/"):
+        return root / "arch/arm64/include" / include_name
+    return root / "include" / include_name
+
+
+def stage_missing_header_graph(
+    gki: Path,
+    touchgrass: Path,
+    seed_paths: list[Path],
+) -> tuple[list[dict[str, str]], list[str], int, int]:
+    queue: deque[tuple[str, str]] = deque()
+    for seed in seed_paths:
+        for include_name in SYSTEM_INCLUDE.findall(seed.read_text(errors="replace")):
+            queue.append((include_name, seed.relative_to(gki).as_posix()))
+
+    visited: set[str] = set()
+    rows: list[dict[str, str]] = []
+    staged_paths: list[str] = []
+    normalized_lines = 0
+    unresolved = 0
+
+    while queue:
+        include_name, requested_by = queue.popleft()
+        if include_name in visited:
+            continue
+        visited.add(include_name)
+        gki_header = header_path(gki, include_name)
+        downstream_header = header_path(touchgrass, include_name)
+
+        if gki_header.is_file():
+            rows.append({
+                "include": include_name,
+                "requested_by": requested_by,
+                "action": "kept-gki",
+                "downstream_sha256": sha256(downstream_header) if downstream_header.is_file() else "<absent>",
+                "gki_before_sha256": sha256(gki_header),
+                "gki_after_sha256": sha256(gki_header),
+                "normalized_trailing_whitespace_lines": "0",
+            })
+            continue
+
+        if not downstream_header.is_file():
+            unresolved += 1
+            rows.append({
+                "include": include_name,
+                "requested_by": requested_by,
+                "action": "unresolved-in-both-pinned-trees",
+                "downstream_sha256": "<absent>",
+                "gki_before_sha256": "<absent>",
+                "gki_after_sha256": "<absent>",
+                "normalized_trailing_whitespace_lines": "0",
+            })
+            continue
+
+        downstream_hash = sha256(downstream_header)
+        changed = copy_normalized_source(downstream_header, gki_header)
+        normalized_lines += changed
+        staged_relative = gki_header.relative_to(gki).as_posix()
+        staged_paths.append(staged_relative)
+        rows.append({
+            "include": include_name,
+            "requested_by": requested_by,
+            "action": "copied-pinned-touchgrass-missing-from-gki",
+            "downstream_sha256": downstream_hash,
+            "gki_before_sha256": "<absent>",
+            "gki_after_sha256": sha256(gki_header),
+            "normalized_trailing_whitespace_lines": str(changed),
+        })
+
+        for dependency in SYSTEM_INCLUDE.findall(downstream_header.read_text(errors="replace")):
+            queue.append((dependency, staged_relative))
+
+    return rows, staged_paths, normalized_lines, unresolved
+
+
+def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def stage(args: argparse.Namespace) -> None:
@@ -61,8 +146,9 @@ def stage(args: argparse.Namespace) -> None:
 
     destination = gki / DEST_DIR
     destination.mkdir(parents=True, exist_ok=True)
-    rows: list[dict[str, str]] = []
-    normalized_lines = 0
+    source_rows: list[dict[str, str]] = []
+    staged_source_paths: list[Path] = []
+    normalized_source_lines = 0
     for relative in SOURCE_FILES:
         source = touchgrass / relative
         if not source.is_file():
@@ -72,14 +158,19 @@ def stage(args: argparse.Namespace) -> None:
             name = "arm-smmu-downstream.c"
         target = destination / name
         changed = copy_normalized_source(source, target)
-        normalized_lines += changed
-        rows.append({
+        normalized_source_lines += changed
+        staged_source_paths.append(target)
+        source_rows.append({
             "source_path": relative,
             "staged_path": target.relative_to(gki).as_posix(),
             "bytes": str(target.stat().st_size),
             "sha256": sha256(target),
             "normalized_trailing_whitespace_lines": str(changed),
         })
+
+    header_rows, staged_header_paths, normalized_header_lines, unresolved_headers = (
+        stage_missing_header_graph(gki, touchgrass, staged_source_paths)
+    )
 
     (destination / "Makefile").write_text(
         "obj-$(CONFIG_ARM_SMMU) += arm-smmu-downstream.o\n"
@@ -90,31 +181,48 @@ def stage(args: argparse.Namespace) -> None:
         "obj-$(CONFIG_ARM_SMMU) += legacy-qsmmu/",
     )
 
-    with (artifact / "staged-files.tsv").open("w", newline="") as stream:
-        writer = csv.DictWriter(
-            stream,
-            fieldnames=[
-                "source_path", "staged_path", "bytes", "sha256",
-                "normalized_trailing_whitespace_lines",
-            ],
-            delimiter="\t",
-        )
-        writer.writeheader()
-        writer.writerows(rows)
+    write_tsv(
+        artifact / "staged-files.tsv",
+        [
+            "source_path", "staged_path", "bytes", "sha256",
+            "normalized_trailing_whitespace_lines",
+        ],
+        source_rows,
+    )
+    write_tsv(
+        artifact / "compatibility-headers.tsv",
+        [
+            "include", "requested_by", "action", "downstream_sha256",
+            "gki_before_sha256", "gki_after_sha256",
+            "normalized_trailing_whitespace_lines",
+        ],
+        header_rows,
+    )
 
-    staged = [row["staged_path"] for row in rows]
+    staged = [row["staged_path"] for row in source_rows]
+    staged.extend(staged_header_paths)
     staged.append((DEST_DIR / "Makefile").as_posix())
     subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *staged], check=True)
     patch = output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
     (artifact / "downstream-qsmmu-stage.patch").write_text(patch + "\n")
 
+    copied_headers = sum(
+        row["action"] == "copied-pinned-touchgrass-missing-from-gki"
+        for row in header_rows
+    )
+    kept_headers = sum(row["action"] == "kept-gki" for row in header_rows)
     metadata = [
         "artifact_type=a52xq-gki-5.10-downstream-qsmmu-isolated-object-probe-not-flashable",
         f"gki_commit={gki_head}",
         f"touchgrass_commit={tg_head}",
         f"compile_target={TARGET}",
-        f"staged_source_count={len(rows)}",
-        f"normalized_trailing_whitespace_lines={normalized_lines}",
+        f"staged_source_count={len(source_rows)}",
+        f"compatibility_header_checks={len(header_rows)}",
+        f"copied_missing_downstream_headers={copied_headers}",
+        f"preserved_existing_gki_headers={kept_headers}",
+        f"unresolved_header_count={unresolved_headers}",
+        f"normalized_trailing_whitespace_lines={normalized_source_lines + normalized_header_lines}",
+        "header_policy=preserve-existing-gki-copy-only-downstream-headers-absent-from-gki",
         "normalization_policy=line-endings-trailing-horizontal-whitespace-and-file-mode-only",
         "staging_policy=isolated-parallel-driver-no-replacement-of-gki-arm-smmu",
         "link_test=no",
@@ -158,6 +266,7 @@ def finalize(args: argparse.Namespace) -> None:
         "## Safety", "",
         "- The downstream source is staged under an isolated directory.",
         "- GKI's working ARM-SMMU driver is not replaced.",
+        "- Existing GKI headers remain authoritative; only absent downstream headers are copied.",
         "- This is an object-only compile probe with no link, Image, DTB, or boot packaging.", "",
         "## Result", "",
         f"- target: `{row['target']}`",

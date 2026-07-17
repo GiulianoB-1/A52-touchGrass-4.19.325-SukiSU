@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+GKI_SHA = "f960ed27302b1ff8e61e152fc202554d778deccd"
+TOUCHGRASS_SHA = "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7"
+
+STAGED_FILES = [
+    ("binding", "include/dt-bindings/clock/qcom,gcc-lagoon.h", "GCC clock and reset IDs"),
+    ("binding", "include/dt-bindings/clock/qcom,camcc-lagoon.h", "camera clock IDs"),
+    ("binding", "include/dt-bindings/clock/qcom,dispcc-lagoon.h", "display clock IDs"),
+    ("binding", "include/dt-bindings/clock/qcom,gpucc-lagoon.h", "GPU clock IDs"),
+    ("binding", "include/dt-bindings/clock/qcom,videocc-lagoon.h", "video clock IDs"),
+    ("binding", "include/dt-bindings/phy/qcom,lagoon-qmp-usb3.h", "USB3 PHY IDs"),
+    ("driver", "drivers/clk/qcom/gcc-lagoon.c", "Lagoon global clock controller"),
+    ("dependency", "drivers/clk/qcom/vdd-level-lagoon.h", "Lagoon voltage corner definitions"),
+    ("driver", "drivers/pinctrl/qcom/pinctrl-lagoon.c", "Lagoon TLMM pin controller"),
+    ("driver", "drivers/soc/qcom/llcc-lagoon.c", "Lagoon last-level cache data"),
+]
+
+PROBES = {
+    "gcc-lagoon": {
+        "target": "drivers/clk/qcom/gcc-lagoon.o",
+        "symbol": "CONFIG_SDM_GCC_LAGOON",
+    },
+    "pinctrl-lagoon": {
+        "target": "drivers/pinctrl/qcom/pinctrl-lagoon.o",
+        "symbol": "CONFIG_PINCTRL_LAGOON",
+    },
+    "llcc-lagoon": {
+        "target": "drivers/soc/qcom/llcc-lagoon.o",
+        "symbol": "CONFIG_QCOM_LAGOON_LLCC",
+    },
+}
+
+CLOCK_KCONFIG = r'''
+config SDM_GCC_LAGOON
+	tristate "LAGOON Global Clock Controller"
+	depends on COMMON_CLK_QCOM
+	select QCOM_GDSC
+	help
+	  Compile-probe support for the Qualcomm Lagoon global clock controller.
+	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
+'''.strip()
+
+PINCTRL_KCONFIG = r'''
+config PINCTRL_LAGOON
+	tristate "Qualcomm Lagoon pin controller driver"
+	depends on GPIOLIB && OF
+	select PINCTRL_MSM
+	help
+	  Compile-probe support for the Qualcomm Lagoon TLMM pin controller.
+	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
+'''.strip()
+
+LLCC_KCONFIG = r'''
+config QCOM_LAGOON_LLCC
+	tristate "Qualcomm Lagoon LLCC driver"
+	depends on QCOM_LLCC
+	help
+	  Compile-probe support for the Qualcomm Lagoon last-level cache data.
+	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
+'''.strip()
+
+CONFIG_FRAGMENT = [
+    "# A52xq Lagoon phase-1 compile-probe fragment",
+    "# Non-flashable bring-up input.",
+    "CONFIG_SDM_GCC_LAGOON=y",
+    "CONFIG_PINCTRL_LAGOON=y",
+    "CONFIG_QCOM_LLCC=y",
+    "CONFIG_QCOM_LAGOON_LLCC=y",
+]
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def git_head(tree: Path) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(tree), "rev-parse", "HEAD"], text=True
+    ).strip()
+
+
+def kernel_version(tree: Path) -> str:
+    return subprocess.check_output(
+        ["make", "-s", "-C", str(tree), "kernelversion"], text=True
+    ).strip()
+
+
+def append_once(path: Path, marker: str, block: str) -> None:
+    text = path.read_text(errors="replace")
+    if marker in text:
+        return
+    path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
+
+
+def insert_before_last(path: Path, token: str, marker: str, block: str) -> None:
+    text = path.read_text(errors="replace")
+    if marker in text:
+        return
+    matches = list(re.finditer(rf"(?m)^\s*{re.escape(token)}\s*$", text))
+    if not matches:
+        path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
+        return
+    index = matches[-1].start()
+    path.write_text(text[:index].rstrip() + "\n\n" + block.rstrip() + "\n\n" + text[index:])
+
+
+def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def stage(args: argparse.Namespace) -> None:
+    gki = args.gki.resolve()
+    touchgrass = args.touchgrass.resolve()
+    out = args.output.resolve()
+    seed_config = args.seed_config.resolve()
+
+    gki_head = git_head(gki)
+    touchgrass_head = git_head(touchgrass)
+    if gki_head != GKI_SHA:
+        raise SystemExit(f"unexpected GKI commit: {gki_head}")
+    if touchgrass_head != TOUCHGRASS_SHA:
+        raise SystemExit(f"unexpected touchGrass commit: {touchgrass_head}")
+    if not seed_config.is_file():
+        raise SystemExit(f"missing Workflow 52 resolved config: {seed_config}")
+
+    out.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, str]] = []
+    for kind, rel, purpose in STAGED_FILES:
+        src = touchgrass / rel
+        dst = gki / rel
+        if not src.is_file():
+            raise SystemExit(f"missing touchGrass source: {rel}")
+        before = sha256(dst) if dst.is_file() else "<absent>"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        rows.append(
+            {
+                "kind": kind,
+                "relative_path": rel,
+                "purpose": purpose,
+                "source_sha256": sha256(src),
+                "gki_before_sha256": before,
+                "gki_after_sha256": sha256(dst),
+            }
+        )
+
+    append_once(
+        gki / "drivers/clk/qcom/Kconfig",
+        "config SDM_GCC_LAGOON",
+        CLOCK_KCONFIG,
+    )
+    append_once(
+        gki / "drivers/clk/qcom/Makefile",
+        "gcc-lagoon.o",
+        "obj-$(CONFIG_SDM_GCC_LAGOON) += gcc-lagoon.o",
+    )
+    insert_before_last(
+        gki / "drivers/pinctrl/qcom/Kconfig",
+        "endif",
+        "config PINCTRL_LAGOON",
+        PINCTRL_KCONFIG,
+    )
+    append_once(
+        gki / "drivers/pinctrl/qcom/Makefile",
+        "pinctrl-lagoon.o",
+        "obj-$(CONFIG_PINCTRL_LAGOON) += pinctrl-lagoon.o",
+    )
+    insert_before_last(
+        gki / "drivers/soc/qcom/Kconfig",
+        "endmenu",
+        "config QCOM_LAGOON_LLCC",
+        LLCC_KCONFIG,
+    )
+    append_once(
+        gki / "drivers/soc/qcom/Makefile",
+        "llcc-lagoon.o",
+        "obj-$(CONFIG_QCOM_LAGOON_LLCC) += llcc-lagoon.o",
+    )
+
+    (out / "lagoon-phase1.fragment").write_text("\n".join(CONFIG_FRAGMENT) + "\n")
+    shutil.copy2(seed_config, out / "workflow52-resolved.config")
+    write_tsv(
+        out / "staged-files.tsv",
+        [
+            "kind",
+            "relative_path",
+            "purpose",
+            "source_sha256",
+            "gki_before_sha256",
+            "gki_after_sha256",
+        ],
+        rows,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(gki), "add", "-N", "--", *[rel for _, rel, _ in STAGED_FILES]],
+        check=True,
+    )
+    patch = subprocess.check_output(
+        ["git", "-C", str(gki), "diff", "--binary", "--no-ext-diff"], text=True
+    )
+    (out / "lagoon-phase1-port.patch").write_text(patch)
+    if not patch.strip():
+        raise SystemExit("staging produced no GKI diff")
+
+    metadata = [
+        "artifact_type=a52xq-gki-5.10-lagoon-phase1-compile-probe-not-flashable",
+        f"gki_commit={gki_head}",
+        f"gki_kernel_version={kernel_version(gki)}",
+        f"touchgrass_commit={touchgrass_head}",
+        f"touchgrass_kernel_version={kernel_version(touchgrass)}",
+        f"staged_files={len(rows)}",
+        f"planned_probes={len(PROBES)}",
+    ]
+    (out / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
+
+
+def first_diagnostics(log: Path) -> list[str]:
+    if not log.is_file():
+        return ["log missing"]
+    lines = log.read_text(errors="replace").splitlines()
+    patterns = (
+        "error:",
+        "fatal error:",
+        "undefined reference",
+        "No rule to make target",
+        "No such file or directory",
+    )
+    selected: list[str] = []
+    for line in lines:
+        if any(pattern.lower() in line.lower() for pattern in patterns):
+            cleaned = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            if cleaned and cleaned not in selected:
+                selected.append(cleaned)
+        if len(selected) >= 8:
+            break
+    if not selected:
+        selected = [line.strip() for line in lines[-8:] if line.strip()]
+    return selected or ["no diagnostic text found"]
+
+
+def finalize(args: argparse.Namespace) -> None:
+    out = args.output.resolve()
+    status_path = args.status_file.resolve()
+    if not status_path.is_file():
+        raise SystemExit(f"missing compile status: {status_path}")
+
+    with status_path.open(newline="") as f:
+        rows = list(csv.DictReader(f, delimiter="\t"))
+    expected = set(PROBES)
+    found = {row.get("probe", "") for row in rows}
+    if found != expected:
+        raise SystemExit(f"compile status probes mismatch: expected {sorted(expected)}, found {sorted(found)}")
+
+    shutil.copy2(status_path, out / "compile-status.tsv")
+
+    passed = sum(row.get("result") == "compiled" for row in rows)
+    failed = sum(row.get("result") == "compile-failed" for row in rows)
+    blocked = sum(row.get("result") == "config-blocked" for row in rows)
+
+    report = [
+        "# A52xq GKI 5.10 Lagoon phase-1 compile probe",
+        "",
+        "This artifact is a non-flashable source-port probe. It stages the first Lagoon platform files in the pinned Android 12 GKI 5.10 tree and compiles each platform object independently.",
+        "",
+        "## Result",
+        "",
+        f"- probes compiled successfully: **{passed}**",
+        f"- probes with compiler/API failures: **{failed}**",
+        f"- probes blocked by Kconfig resolution: **{blocked}**",
+        "",
+        "A compiler failure here is an expected porting result, not a device boot result. The logs identify the first Linux 4.19 to 5.10 API adaptations required.",
+        "",
+        "## Probe details",
+        "",
+    ]
+    for row in rows:
+        probe = row["probe"]
+        report.extend(
+            [
+                f"### `{probe}`",
+                "",
+                f"- target: `{row['target']}`",
+                f"- requested symbol: `{row['config_symbol']}`",
+                f"- resolved value: `{row['resolved_value']}`",
+                f"- result: **{row['result']}**",
+                f"- compiler exit code: `{row['exit_code']}`",
+                f"- object produced: `{row['object_produced']}`",
+                "",
+                "First diagnostics:",
+                "",
+            ]
+        )
+        for line in first_diagnostics(out / "logs" / f"{probe}.log"):
+            report.append(f"- `{line.replace('`', chr(39))}`")
+        report.append("")
+
+    report.extend(
+        [
+            "## Next gate",
+            "",
+            "Adapt only the compile failures in these three drivers. Do not add the Lagoon device tree or build a flashable kernel until all three objects compile in the pinned 5.10 tree.",
+            "",
+        ]
+    )
+    (out / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
+
+    metadata_path = out / "analysis-metadata.txt"
+    metadata = metadata_path.read_text().rstrip().splitlines()
+    metadata.extend(
+        [
+            f"compiled_success={passed}",
+            f"compile_failed={failed}",
+            f"config_blocked={blocked}",
+        ]
+    )
+    metadata_path.write_text("\n".join(metadata) + "\n")
+
+    sums = out / "SHA256SUMS"
+    files = sorted(
+        p for p in out.rglob("*")
+        if p.is_file() and p.name != "SHA256SUMS"
+    )
+    with sums.open("w") as f:
+        for path in files:
+            f.write(f"{sha256(path)}  {path.relative_to(out).as_posix()}\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_stage = sub.add_parser("stage")
+    p_stage.add_argument("--gki", type=Path, required=True)
+    p_stage.add_argument("--touchgrass", type=Path, required=True)
+    p_stage.add_argument("--seed-config", type=Path, required=True)
+    p_stage.add_argument("--output", type=Path, required=True)
+    p_stage.set_defaults(func=stage)
+
+    p_finalize = sub.add_parser("finalize")
+    p_finalize.add_argument("--output", type=Path, required=True)
+    p_finalize.add_argument("--status-file", type=Path, required=True)
+    p_finalize.set_defaults(func=finalize)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

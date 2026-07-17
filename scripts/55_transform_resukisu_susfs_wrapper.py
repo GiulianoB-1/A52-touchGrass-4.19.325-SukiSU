@@ -101,7 +101,7 @@ def patch_wrapper(path: Path) -> None:
         r'(?=python3 - "\$KERNEL_DIR/include/linux/sched/user\.h" <<\'USERPY\')',
         re.S,
     )
-    text, count = clone_pattern.subn(NEW_CLONE, text, count=1)
+    text, count = clone_pattern.subn(lambda _match: NEW_CLONE, text, count=1)
     if count != 1:
         raise SystemExit(f"legacy SUSFS clone block: expected one match, found {count}")
 

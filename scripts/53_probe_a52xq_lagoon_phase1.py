@@ -24,18 +24,9 @@ STAGED_FILES = [
 ]
 
 PROBES = {
-    "gcc-lagoon": {
-        "target": "drivers/clk/qcom/gcc-lagoon.o",
-        "symbol": "CONFIG_SDM_GCC_LAGOON",
-    },
-    "pinctrl-lagoon": {
-        "target": "drivers/pinctrl/qcom/pinctrl-lagoon.o",
-        "symbol": "CONFIG_PINCTRL_LAGOON",
-    },
-    "llcc-lagoon": {
-        "target": "drivers/soc/qcom/llcc-qcom.o",
-        "symbol": "CONFIG_QCOM_LLCC",
-    },
+    "gcc-lagoon": ("drivers/clk/qcom/gcc-lagoon.o", "CONFIG_SDM_GCC_LAGOON"),
+    "pinctrl-lagoon": ("drivers/pinctrl/qcom/pinctrl-lagoon.o", "CONFIG_PINCTRL_LAGOON"),
+    "llcc-lagoon": ("drivers/soc/qcom/llcc-qcom.o", "CONFIG_QCOM_LLCC"),
 }
 
 CLOCK_KCONFIG = '''
@@ -45,7 +36,6 @@ config SDM_GCC_LAGOON
 \tselect QCOM_GDSC
 \thelp
 \t  Compile-probe support for the Qualcomm Lagoon global clock controller.
-\t  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
 '''.strip()
 
 PINCTRL_KCONFIG = '''
@@ -55,7 +45,6 @@ config PINCTRL_LAGOON
 \tselect PINCTRL_MSM
 \thelp
 \t  Compile-probe support for the Qualcomm Lagoon TLMM pin controller.
-\t  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
 '''.strip()
 
 CONFIG_FRAGMENT = [
@@ -69,99 +58,38 @@ CONFIG_FRAGMENT = [
 LAGOON_LLCC_DATA = '''
 /* A52xq Lagoon LLCC data ported from the downstream Linux 4.19 driver. */
 static const struct llcc_slice_config lagoon_data[] = {
-\t{
-\t\t.usecase_id = LLCC_CPUSS,
-\t\t.slice_id = 1,
-\t\t.max_cap = 768,
-\t\t.priority = 1,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t\t.activate_on_init = true,
-\t}, {
-\t\t.usecase_id = LLCC_MDM,
-\t\t.slice_id = 8,
-\t\t.max_cap = 512,
-\t\t.priority = 2,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t}, {
-\t\t.usecase_id = LLCC_GPUHTW,
-\t\t.slice_id = 11,
-\t\t.max_cap = 256,
-\t\t.priority = 1,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t}, {
-\t\t.usecase_id = LLCC_GPU,
-\t\t.slice_id = 12,
-\t\t.max_cap = 512,
-\t\t.priority = 1,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t}, {
-\t\t.usecase_id = LLCC_MDMPNG,
-\t\t.slice_id = 21,
-\t\t.max_cap = 768,
-\t\t.fixed_size = true,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t}, {
-\t\t.usecase_id = 23, /* downstream LLCC_NPU */
-\t\t.slice_id = 23,
-\t\t.max_cap = 768,
-\t\t.priority = 1,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t}, {
-\t\t.usecase_id = 29, /* downstream LLCC_MODEMVPE */
-\t\t.slice_id = 29,
-\t\t.max_cap = 64,
-\t\t.priority = 1,
-\t\t.fixed_size = true,
-\t\t.bonus_ways = 0xfff,
-\t\t.retain_on_pc = true,
-\t},
-};
-
-static const u32 lagoon_reg_offset[] = {
-\t[LLCC_COMMON_HW_INFO] = 0x00030000,
-\t[LLCC_COMMON_STATUS0] = 0x0003000c,
+\t{ LLCC_CPUSS,  1, 768, 1, 0, 0xfff, 0, 0, 0, 1, 1, 0 },
+\t{ LLCC_MDM,    8, 512, 2, 0, 0xfff, 0, 0, 0, 1, 0, 0 },
+\t{ LLCC_GPUHTW, 11, 256, 1, 0, 0xfff, 0, 0, 0, 1, 0, 0 },
+\t{ LLCC_GPU,    12, 512, 1, 0, 0xfff, 0, 0, 0, 1, 0, 0 },
+\t{ LLCC_MDMPNG, 21, 768, 0, 1, 0xfff, 0, 0, 0, 1, 0, 0 },
+\t{ 23,          23, 768, 1, 0, 0xfff, 0, 0, 0, 1, 0, 0 }, /* LLCC_NPU */
+\t{ 29,          29,  64, 1, 1, 0xfff, 0, 0, 0, 1, 0, 0 }, /* LLCC_MODEMVPE */
 };
 
 static const struct qcom_llcc_config lagoon_cfg = {
 \t.sct_data = lagoon_data,
 \t.size = ARRAY_SIZE(lagoon_data),
-\t.need_llcc_cfg = true,
-\t.reg_offset = lagoon_reg_offset,
 };
 '''.strip()
 
 
 def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def git_head(tree: Path) -> str:
-    return subprocess.check_output(
-        ["git", "-C", str(tree), "rev-parse", "HEAD"], text=True
-    ).strip()
-
-
-def kernel_version(tree: Path) -> str:
-    return subprocess.check_output(
-        ["make", "-s", "-C", str(tree), "kernelversion"], text=True
-    ).strip()
+def command_output(*args: str) -> str:
+    return subprocess.check_output(args, text=True).strip()
 
 
 def append_once(path: Path, marker: str, block: str) -> None:
     text = path.read_text(errors="replace")
-    if marker in text:
-        return
-    path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
+    if marker not in text:
+        path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
 
 
 def insert_before_last(path: Path, token: str, marker: str, block: str) -> None:
@@ -173,121 +101,93 @@ def insert_before_last(path: Path, token: str, marker: str, block: str) -> None:
         path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
         return
     index = matches[-1].start()
-    path.write_text(text[:index].rstrip() + "\n\n" + block.rstrip() + "\n\n" + text[index:])
+    path.write_text(text[:index].rstrip() + "\n\n" + block + "\n\n" + text[index:])
 
 
 def adapt_gcc_driver(path: Path) -> None:
     lines = path.read_text(errors="replace").splitlines()
-    out: list[str] = []
-    removed_rate_tables = 0
+    output: list[str] = []
+    removed_rates = 0
     removed_regulators = 0
-    i = 0
+    index = 0
 
-    while i < len(lines):
-        line = lines[i]
+    while index < len(lines):
+        line = lines[index]
         stripped = line.strip()
 
-        if stripped == '#include "vdd-level-lagoon.h"':
-            i += 1
+        if stripped == '#include "vdd-level-lagoon.h"' or "DEFINE_VDD_REGULATORS(" in line:
+            index += 1
             continue
-
-        if "DEFINE_VDD_REGULATORS(" in line:
-            i += 1
-            continue
-
         if ".enable_safe_config =" in line:
-            i += 1
+            index += 1
             continue
-
         if "&clk_branch2_hw_ctl_ops" in line:
-            out.append(line.replace("&clk_branch2_hw_ctl_ops", "&clk_branch2_ops"))
-            i += 1
+            output.append(line.replace("&clk_branch2_hw_ctl_ops", "&clk_branch2_ops"))
+            index += 1
             continue
 
         if ".vdd_class =" in line:
-            i += 1
-            if i < len(lines) and ".num_rate_max =" in lines[i]:
-                i += 1
-            if i >= len(lines) or ".rate_max =" not in lines[i]:
-                raise SystemExit("downstream GCC VDD block is missing rate_max")
-
-            depth = lines[i].count("{") - lines[i].count("}")
-            i += 1
-            while i < len(lines) and depth > 0:
-                depth += lines[i].count("{") - lines[i].count("}")
-                i += 1
-            if depth != 0:
-                raise SystemExit("unterminated downstream GCC rate_max block")
-            removed_rate_tables += 1
+            index += 1
+            if index < len(lines) and ".num_rate_max =" in lines[index]:
+                index += 1
+            if index >= len(lines) or ".rate_max =" not in lines[index]:
+                raise SystemExit("downstream GCC VDD rate table is malformed")
+            depth = lines[index].count("{") - lines[index].count("}")
+            index += 1
+            while index < len(lines) and depth > 0:
+                depth += lines[index].count("{") - lines[index].count("}")
+                index += 1
+            removed_rates += 1
             continue
 
         if re.match(r"^vdd_cx(?:_ao)?\.regulator\[0\] = devm_regulator_get", stripped):
-            i += 1
-            if i >= len(lines) or not lines[i].lstrip().startswith("if (IS_ERR("):
-                raise SystemExit("downstream GCC regulator assignment has no error block")
-
-            depth = lines[i].count("{") - lines[i].count("}")
-            i += 1
-            while i < len(lines) and depth > 0:
-                depth += lines[i].count("{") - lines[i].count("}")
-                i += 1
-            if depth != 0:
-                raise SystemExit("unterminated downstream GCC regulator block")
+            index += 1
+            if index >= len(lines) or not lines[index].lstrip().startswith("if (IS_ERR("):
+                raise SystemExit("downstream GCC regulator block is malformed")
+            depth = lines[index].count("{") - lines[index].count("}")
+            index += 1
+            while index < len(lines) and depth > 0:
+                depth += lines[index].count("{") - lines[index].count("}")
+                index += 1
             removed_regulators += 1
             continue
 
-        out.append(line)
-        i += 1
+        output.append(line)
+        index += 1
 
-    if removed_rate_tables < 2:
-        raise SystemExit("expected downstream GCC VDD rate tables")
-    if removed_regulators != 2:
+    if removed_rates < 2 or removed_regulators != 2:
         raise SystemExit(
-            f"expected two downstream GCC regulator blocks, removed {removed_regulators}"
+            f"unexpected GCC VDD adaptation counts: rates={removed_rates}, regulators={removed_regulators}"
         )
 
-    text = "\n".join(out) + "\n"
+    text = "\n".join(output) + "\n"
     forbidden = (
-        "DEFINE_VDD_REGULATORS",
-        ".vdd_class =",
-        ".num_rate_max =",
-        ".rate_max =",
-        "vdd_cx.regulator",
-        "vdd_cx_ao.regulator",
-        '"vdd-level-lagoon.h"',
-        ".enable_safe_config =",
-        "clk_branch2_hw_ctl_ops",
+        "DEFINE_VDD_REGULATORS", ".vdd_class =", ".num_rate_max =", ".rate_max =",
+        "vdd_cx.regulator", "vdd_cx_ao.regulator", '"vdd-level-lagoon.h"',
+        ".enable_safe_config =", "clk_branch2_hw_ctl_ops",
     )
-    leftovers = [token for token in forbidden if token in text]
+    leftovers = [item for item in forbidden if item in text]
     if leftovers:
-        raise SystemExit(f"GCC adaptation left unsupported tokens: {leftovers}")
+        raise SystemExit(f"unsupported GCC tokens remain: {leftovers}")
     path.write_text(text)
 
 
 def adapt_pinctrl_driver(path: Path) -> None:
     text = path.read_text(errors="replace")
-    unsupported_fields = (
-        ".dir_conn_reg =",
-        ".egpio_enable =",
-        ".egpio_present =",
-        ".dir_conn_en_bit =",
-        ".wake_reg =",
-        ".wake_bit =",
-        ".dir_conn =",
+    unsupported = (
+        ".dir_conn_reg =", ".egpio_enable =", ".egpio_present =",
+        ".dir_conn_en_bit =", ".wake_reg =", ".wake_bit =", ".dir_conn =",
     )
-    lines = [
+    text = "\n".join(
         line for line in text.splitlines()
-        if not any(field in line for field in unsupported_fields)
-    ]
-    text = "\n".join(lines) + "\n"
+        if not any(field in line for field in unsupported)
+    ) + "\n"
     text, count = re.subn(
         r"\nstatic struct msm_dir_conn lagoon_dir_conn\[\] = \{.*?\n\};\n",
-        "\n",
-        text,
-        flags=re.DOTALL,
+        "\n", text, flags=re.DOTALL,
     )
     if count != 1:
-        raise SystemExit("expected exactly one downstream msm_dir_conn table")
+        raise SystemExit("expected one downstream msm_dir_conn table")
     path.write_text(text)
 
 
@@ -296,22 +196,21 @@ def integrate_llcc(path: Path) -> None:
     if "static const struct llcc_slice_config lagoon_data[]" not in text:
         anchor = "static const struct qcom_llcc_config sc7180_cfg = {"
         if anchor not in text:
-            raise SystemExit("could not locate the first GKI LLCC configuration")
+            raise SystemExit("GKI LLCC configuration anchor is missing")
         text = text.replace(anchor, LAGOON_LLCC_DATA + "\n\n" + anchor, 1)
 
     match = '{ .compatible = "lagoon-llcc-v1", .data = &lagoon_cfg },'
     if match not in text:
         anchor = "static const struct of_device_id qcom_llcc_of_match[] = {"
         if anchor not in text:
-            raise SystemExit("could not locate the GKI LLCC OF match table")
+            raise SystemExit("GKI LLCC match-table anchor is missing")
         text = text.replace(anchor, anchor + "\n\t" + match, 1)
-
     path.write_text(text)
 
 
-def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
-    with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, delimiter="\t")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -319,133 +218,95 @@ def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> 
 def stage(args: argparse.Namespace) -> None:
     gki = args.gki.resolve()
     touchgrass = args.touchgrass.resolve()
-    out = args.output.resolve()
-    seed_config = args.seed_config.resolve()
+    output = args.output.resolve()
+    seed = args.seed_config.resolve()
 
-    gki_head = git_head(gki)
-    touchgrass_head = git_head(touchgrass)
-    if gki_head != GKI_SHA:
-        raise SystemExit(f"unexpected GKI commit: {gki_head}")
-    if touchgrass_head != TOUCHGRASS_SHA:
-        raise SystemExit(f"unexpected touchGrass commit: {touchgrass_head}")
-    if not seed_config.is_file():
-        raise SystemExit(f"missing Workflow 52 resolved config: {seed_config}")
+    gki_head = command_output("git", "-C", str(gki), "rev-parse", "HEAD")
+    tg_head = command_output("git", "-C", str(touchgrass), "rev-parse", "HEAD")
+    if gki_head != GKI_SHA or tg_head != TOUCHGRASS_SHA:
+        raise SystemExit(f"unexpected source revisions: gki={gki_head}, touchgrass={tg_head}")
+    if not seed.is_file():
+        raise SystemExit(f"missing Workflow 52 resolved config: {seed}")
 
-    out.mkdir(parents=True, exist_ok=True)
+    output.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, str]] = []
-    for kind, rel, purpose in STAGED_FILES:
-        src = touchgrass / rel
-        dst = gki / rel
-        if not src.is_file():
-            raise SystemExit(f"missing touchGrass source: {rel}")
-        before = sha256(dst) if dst.is_file() else "<absent>"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        if rel == "drivers/clk/qcom/gcc-lagoon.c":
-            adapt_gcc_driver(dst)
-        elif rel == "drivers/pinctrl/qcom/pinctrl-lagoon.c":
-            adapt_pinctrl_driver(dst)
-        rows.append(
-            {
-                "kind": kind,
-                "relative_path": rel,
-                "purpose": purpose,
-                "source_sha256": sha256(src),
-                "gki_before_sha256": before,
-                "gki_after_sha256": sha256(dst),
-            }
-        )
+    for kind, relative, purpose in STAGED_FILES:
+        source = touchgrass / relative
+        target = gki / relative
+        if not source.is_file():
+            raise SystemExit(f"missing touchGrass source: {relative}")
+        before = sha256(target) if target.is_file() else "<absent>"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        if relative == "drivers/clk/qcom/gcc-lagoon.c":
+            adapt_gcc_driver(target)
+        elif relative == "drivers/pinctrl/qcom/pinctrl-lagoon.c":
+            adapt_pinctrl_driver(target)
+        rows.append({
+            "kind": kind, "relative_path": relative, "purpose": purpose,
+            "source_sha256": sha256(source), "gki_before_sha256": before,
+            "gki_after_sha256": sha256(target),
+        })
 
     llcc_source = touchgrass / "drivers/soc/qcom/llcc-lagoon.c"
     llcc_target = gki / "drivers/soc/qcom/llcc-qcom.c"
     if not llcc_source.is_file():
         raise SystemExit("missing downstream Lagoon LLCC source")
-    llcc_before = sha256(llcc_target)
+    before = sha256(llcc_target)
     integrate_llcc(llcc_target)
-    rows.append(
-        {
-            "kind": "integration",
-            "relative_path": "drivers/soc/qcom/llcc-qcom.c",
-            "purpose": "Lagoon LLCC slice data integrated into the GKI core driver",
-            "source_sha256": sha256(llcc_source),
-            "gki_before_sha256": llcc_before,
-            "gki_after_sha256": sha256(llcc_target),
-        }
-    )
+    rows.append({
+        "kind": "integration", "relative_path": "drivers/soc/qcom/llcc-qcom.c",
+        "purpose": "Lagoon LLCC slice data integrated into the GKI core driver",
+        "source_sha256": sha256(llcc_source), "gki_before_sha256": before,
+        "gki_after_sha256": sha256(llcc_target),
+    })
 
+    append_once(gki / "drivers/clk/qcom/Kconfig", "config SDM_GCC_LAGOON", CLOCK_KCONFIG)
     append_once(
-        gki / "drivers/clk/qcom/Kconfig",
-        "config SDM_GCC_LAGOON",
-        CLOCK_KCONFIG,
-    )
-    append_once(
-        gki / "drivers/clk/qcom/Makefile",
-        "gcc-lagoon.o",
+        gki / "drivers/clk/qcom/Makefile", "gcc-lagoon.o",
         "obj-$(CONFIG_SDM_GCC_LAGOON) += gcc-lagoon.o",
     )
     insert_before_last(
-        gki / "drivers/pinctrl/qcom/Kconfig",
-        "endif",
-        "config PINCTRL_LAGOON",
+        gki / "drivers/pinctrl/qcom/Kconfig", "endif", "config PINCTRL_LAGOON",
         PINCTRL_KCONFIG,
     )
     append_once(
-        gki / "drivers/pinctrl/qcom/Makefile",
-        "pinctrl-lagoon.o",
+        gki / "drivers/pinctrl/qcom/Makefile", "pinctrl-lagoon.o",
         "obj-$(CONFIG_PINCTRL_LAGOON) += pinctrl-lagoon.o",
     )
 
-    (out / "lagoon-phase1.fragment").write_text("\n".join(CONFIG_FRAGMENT) + "\n")
-    shutil.copy2(seed_config, out / "workflow52-resolved.config")
-    write_tsv(
-        out / "staged-files.tsv",
-        [
-            "kind",
-            "relative_path",
-            "purpose",
-            "source_sha256",
-            "gki_before_sha256",
-            "gki_after_sha256",
-        ],
-        rows,
-    )
+    (output / "lagoon-phase1.fragment").write_text("\n".join(CONFIG_FRAGMENT) + "\n")
+    shutil.copy2(seed, output / "workflow52-resolved.config")
+    fields = [
+        "kind", "relative_path", "purpose", "source_sha256",
+        "gki_before_sha256", "gki_after_sha256",
+    ]
+    write_tsv(output / "staged-files.tsv", fields, rows)
 
-    new_paths = [rel for _, rel, _ in STAGED_FILES]
-    subprocess.run(
-        ["git", "-C", str(gki), "add", "-N", "--", *new_paths],
-        check=True,
-    )
-    patch = subprocess.check_output(
-        ["git", "-C", str(gki), "diff", "--binary", "--no-ext-diff"], text=True
-    )
-    (out / "lagoon-phase1-port.patch").write_text(patch)
-    if not patch.strip():
+    new_paths = [relative for _, relative, _ in STAGED_FILES]
+    subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *new_paths], check=True)
+    patch = command_output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
+    if not patch:
         raise SystemExit("staging produced no GKI diff")
+    (output / "lagoon-phase1-port.patch").write_text(patch + "\n")
 
     metadata = [
         "artifact_type=a52xq-gki-5.10-lagoon-phase1-compile-probe-not-flashable",
         f"gki_commit={gki_head}",
-        f"gki_kernel_version={kernel_version(gki)}",
-        f"touchgrass_commit={touchgrass_head}",
-        f"touchgrass_kernel_version={kernel_version(touchgrass)}",
-        f"staged_files={len(rows)}",
-        f"planned_probes={len(PROBES)}",
+        f"gki_kernel_version={command_output('make', '-s', '-C', str(gki), 'kernelversion')}",
+        f"touchgrass_commit={tg_head}",
+        f"touchgrass_kernel_version={command_output('make', '-s', '-C', str(touchgrass), 'kernelversion')}",
+        f"staged_files={len(rows)}", f"planned_probes={len(PROBES)}",
         "llcc_integration=drivers/soc/qcom/llcc-qcom.c",
     ]
-    (out / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
+    (output / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
 
 def first_diagnostics(log: Path) -> list[str]:
     if not log.is_file():
         return ["log missing"]
     lines = log.read_text(errors="replace").splitlines()
-    patterns = (
-        "error:",
-        "fatal error:",
-        "undefined reference",
-        "No rule to make target",
-        "No such file or directory",
-    )
+    patterns = ("error:", "fatal error:", "undefined reference", "No rule to make target", "No such file or directory")
     selected: list[str] = []
     for line in lines:
         if any(pattern.lower() in line.lower() for pattern in patterns):
@@ -460,108 +321,62 @@ def first_diagnostics(log: Path) -> list[str]:
 
 
 def finalize(args: argparse.Namespace) -> None:
-    out = args.output.resolve()
-    status_path = args.status_file.resolve()
-    if not status_path.is_file():
-        raise SystemExit(f"missing compile status: {status_path}")
-
-    with status_path.open(newline="") as f:
-        rows = list(csv.DictReader(f, delimiter="\t"))
-    expected = set(PROBES)
-    found = {row.get("probe", "") for row in rows}
-    if found != expected:
-        raise SystemExit(f"compile status probes mismatch: expected {sorted(expected)}, found {sorted(found)}")
-
-    shutil.copy2(status_path, out / "compile-status.tsv")
+    output = args.output.resolve()
+    status = args.status_file.resolve()
+    if not status.is_file():
+        raise SystemExit(f"missing compile status: {status}")
+    with status.open(newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    if {row.get("probe", "") for row in rows} != set(PROBES):
+        raise SystemExit("compile status probe set does not match Workflow 53")
+    shutil.copy2(status, output / "compile-status.tsv")
 
     passed = sum(row.get("result") == "compiled" for row in rows)
     failed = sum(row.get("result") == "compile-failed" for row in rows)
     blocked = sum(row.get("result") == "config-blocked" for row in rows)
-
     report = [
-        "# A52xq GKI 5.10 Lagoon phase-1 compile probe",
-        "",
-        "This artifact is a non-flashable source-port probe. It stages the first Lagoon platform files in the pinned Android 12 GKI 5.10 tree and compiles each platform object independently.",
-        "",
-        "## Result",
-        "",
+        "# A52xq GKI 5.10 Lagoon phase-1 compile probe", "", "## Result", "",
         f"- probes compiled successfully: **{passed}**",
         f"- probes with compiler/API failures: **{failed}**",
-        f"- probes blocked by Kconfig resolution: **{blocked}**",
-        "",
-        "A compiler failure here is an expected porting result, not a device boot result. The logs identify the first Linux 4.19 to 5.10 API adaptations required.",
-        "",
-        "## Probe details",
-        "",
+        f"- probes blocked by Kconfig resolution: **{blocked}**", "",
     ]
     for row in rows:
         probe = row["probe"]
-        report.extend(
-            [
-                f"### `{probe}`",
-                "",
-                f"- target: `{row['target']}`",
-                f"- requested symbol: `{row['config_symbol']}`",
-                f"- resolved value: `{row['resolved_value']}`",
-                f"- result: **{row['result']}**",
-                f"- compiler exit code: `{row['exit_code']}`",
-                f"- object produced: `{row['object_produced']}`",
-                "",
-                "First diagnostics:",
-                "",
-            ]
-        )
-        for line in first_diagnostics(out / "logs" / f"{probe}.log"):
-            report.append(f"- `{line.replace('`', chr(39))}`")
+        report.extend([
+            f"### `{probe}`", "", f"- target: `{row['target']}`",
+            f"- requested symbol: `{row['config_symbol']}`",
+            f"- resolved value: `{row['resolved_value']}`",
+            f"- result: **{row['result']}**", f"- compiler exit code: `{row['exit_code']}`",
+            f"- object produced: `{row['object_produced']}`", "", "First diagnostics:", "",
+        ])
+        report.extend(f"- `{line.replace('`', chr(39))}`" for line in first_diagnostics(output / "logs" / f"{probe}.log"))
         report.append("")
+    report.extend(["## Next gate", "", "Add the next Lagoon platform layer only after all three phase-1 objects compile.", ""])
+    (output / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
 
-    report.extend(
-        [
-            "## Next gate",
-            "",
-            "Adapt only the compile failures in these three drivers. Do not add the Lagoon device tree or build a flashable kernel until all three objects compile in the pinned 5.10 tree.",
-            "",
-        ]
-    )
-    (out / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
+    metadata = (output / "analysis-metadata.txt").read_text().rstrip().splitlines()
+    metadata.extend([f"compiled_success={passed}", f"compile_failed={failed}", f"config_blocked={blocked}"])
+    (output / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
-    metadata_path = out / "analysis-metadata.txt"
-    metadata = metadata_path.read_text().rstrip().splitlines()
-    metadata.extend(
-        [
-            f"compiled_success={passed}",
-            f"compile_failed={failed}",
-            f"config_blocked={blocked}",
-        ]
-    )
-    metadata_path.write_text("\n".join(metadata) + "\n")
-
-    sums = out / "SHA256SUMS"
-    files = sorted(
-        p for p in out.rglob("*")
-        if p.is_file() and p.name != "SHA256SUMS"
-    )
-    with sums.open("w") as f:
+    files = sorted(path for path in output.rglob("*") if path.is_file() and path.name != "SHA256SUMS")
+    with (output / "SHA256SUMS").open("w") as stream:
         for path in files:
-            f.write(f"{sha256(path)}  {path.relative_to(out).as_posix()}\n")
+            stream.write(f"{sha256(path)}  {path.relative_to(output).as_posix()}\n")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_stage = sub.add_parser("stage")
-    p_stage.add_argument("--gki", type=Path, required=True)
-    p_stage.add_argument("--touchgrass", type=Path, required=True)
-    p_stage.add_argument("--seed-config", type=Path, required=True)
-    p_stage.add_argument("--output", type=Path, required=True)
-    p_stage.set_defaults(func=stage)
-
-    p_finalize = sub.add_parser("finalize")
-    p_finalize.add_argument("--output", type=Path, required=True)
-    p_finalize.add_argument("--status-file", type=Path, required=True)
-    p_finalize.set_defaults(func=finalize)
-
+    commands = parser.add_subparsers(dest="command", required=True)
+    stage_parser = commands.add_parser("stage")
+    stage_parser.add_argument("--gki", type=Path, required=True)
+    stage_parser.add_argument("--touchgrass", type=Path, required=True)
+    stage_parser.add_argument("--seed-config", type=Path, required=True)
+    stage_parser.add_argument("--output", type=Path, required=True)
+    stage_parser.set_defaults(func=stage)
+    finalize_parser = commands.add_parser("finalize")
+    finalize_parser.add_argument("--output", type=Path, required=True)
+    finalize_parser.add_argument("--status-file", type=Path, required=True)
+    finalize_parser.set_defaults(func=finalize)
     args = parser.parse_args()
     args.func(args)
 

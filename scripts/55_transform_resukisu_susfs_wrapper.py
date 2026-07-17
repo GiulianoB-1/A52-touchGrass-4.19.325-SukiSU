@@ -33,25 +33,22 @@ import sys
 header = Path(sys.argv[1])
 text = header.read_text()
 anchor = '#endif // #ifndef KSU_SUSFS_DEF_H\n'
-compat = r'''
-
-/* ReSukiSU compatibility names for the maintained 4.19 SUSFS state bit. */
-static inline bool susfs_is_current_proc_umounted(void)
-{
-    return susfs_is_current_non_root_user_app_proc();
-}
-
-static inline void susfs_set_current_proc_umounted(void)
-{
-    susfs_set_current_non_root_user_app_proc();
-}
-
-/* SUS_PATH is disabled in this conservative build, so no monitor is needed. */
-static inline void susfs_start_sdcard_monitor_fn(void)
-{
-}
-
-'''
+compat = (
+    '\n\n'
+    '/* ReSukiSU compatibility names for the maintained 4.19 SUSFS state bit. */\n'
+    'static inline bool susfs_is_current_proc_umounted(void)\n'
+    '{\n'
+    '    return susfs_is_current_non_root_user_app_proc();\n'
+    '}\n\n'
+    'static inline void susfs_set_current_proc_umounted(void)\n'
+    '{\n'
+    '    susfs_set_current_non_root_user_app_proc();\n'
+    '}\n\n'
+    '/* SUS_PATH is disabled in this conservative build, so no monitor is needed. */\n'
+    'static inline void susfs_start_sdcard_monitor_fn(void)\n'
+    '{\n'
+    '}\n\n'
+)
 if 'susfs_is_current_proc_umounted' not in text:
     if text.count(anchor) != 1:
         raise SystemExit('susfs_def.h final guard anchor mismatch')

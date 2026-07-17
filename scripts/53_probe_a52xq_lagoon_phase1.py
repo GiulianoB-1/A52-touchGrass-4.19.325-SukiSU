@@ -20,7 +20,6 @@ STAGED_FILES = [
     ("binding", "include/dt-bindings/clock/qcom,videocc-lagoon.h", "video clock IDs"),
     ("binding", "include/dt-bindings/phy/qcom,lagoon-qmp-usb3.h", "USB3 PHY IDs"),
     ("driver", "drivers/clk/qcom/gcc-lagoon.c", "Lagoon global clock controller"),
-    ("dependency", "drivers/clk/qcom/vdd-level-lagoon.h", "Lagoon voltage corner definitions"),
     ("driver", "drivers/pinctrl/qcom/pinctrl-lagoon.c", "Lagoon TLMM pin controller"),
 ]
 
@@ -39,24 +38,24 @@ PROBES = {
     },
 }
 
-CLOCK_KCONFIG = r'''
+CLOCK_KCONFIG = '''
 config SDM_GCC_LAGOON
-	tristate "LAGOON Global Clock Controller"
-	depends on COMMON_CLK_QCOM
-	select QCOM_GDSC
-	help
-	  Compile-probe support for the Qualcomm Lagoon global clock controller.
-	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
+\ttristate "LAGOON Global Clock Controller"
+\tdepends on COMMON_CLK_QCOM
+\tselect QCOM_GDSC
+\thelp
+\t  Compile-probe support for the Qualcomm Lagoon global clock controller.
+\t  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
 '''.strip()
 
-PINCTRL_KCONFIG = r'''
+PINCTRL_KCONFIG = '''
 config PINCTRL_LAGOON
-	tristate "Qualcomm Lagoon pin controller driver"
-	depends on GPIOLIB && OF
-	select PINCTRL_MSM
-	help
-	  Compile-probe support for the Qualcomm Lagoon TLMM pin controller.
-	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
+\ttristate "Qualcomm Lagoon pin controller driver"
+\tdepends on GPIOLIB && OF
+\tselect PINCTRL_MSM
+\thelp
+\t  Compile-probe support for the Qualcomm Lagoon TLMM pin controller.
+\t  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
 '''.strip()
 
 CONFIG_FRAGMENT = [
@@ -67,68 +66,68 @@ CONFIG_FRAGMENT = [
     "CONFIG_QCOM_LLCC=y",
 ]
 
-LAGOON_LLCC_DATA = r'''
+LAGOON_LLCC_DATA = '''
 /* A52xq Lagoon LLCC data ported from the downstream Linux 4.19 driver. */
 static const struct llcc_slice_config lagoon_data[] = {
-	{
-		.usecase_id = LLCC_CPUSS,
-		.slice_id = 1,
-		.max_cap = 768,
-		.priority = 1,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-		.activate_on_init = true,
-	}, {
-		.usecase_id = LLCC_MDM,
-		.slice_id = 8,
-		.max_cap = 512,
-		.priority = 2,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	}, {
-		.usecase_id = LLCC_GPUHTW,
-		.slice_id = 11,
-		.max_cap = 256,
-		.priority = 1,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	}, {
-		.usecase_id = LLCC_GPU,
-		.slice_id = 12,
-		.max_cap = 512,
-		.priority = 1,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	}, {
-		.usecase_id = LLCC_MDMPNG,
-		.slice_id = 21,
-		.max_cap = 768,
-		.fixed_size = true,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	}, {
-		.usecase_id = 23, /* downstream LLCC_NPU */
-		.slice_id = 23,
-		.max_cap = 768,
-		.priority = 1,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	}, {
-		.usecase_id = 29, /* downstream LLCC_MODEMVPE */
-		.slice_id = 29,
-		.max_cap = 64,
-		.priority = 1,
-		.fixed_size = true,
-		.bonus_ways = 0xfff,
-		.retain_on_pc = true,
-	},
+\t{
+\t\t.usecase_id = LLCC_CPUSS,
+\t\t.slice_id = 1,
+\t\t.max_cap = 768,
+\t\t.priority = 1,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t\t.activate_on_init = true,
+\t}, {
+\t\t.usecase_id = LLCC_MDM,
+\t\t.slice_id = 8,
+\t\t.max_cap = 512,
+\t\t.priority = 2,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t}, {
+\t\t.usecase_id = LLCC_GPUHTW,
+\t\t.slice_id = 11,
+\t\t.max_cap = 256,
+\t\t.priority = 1,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t}, {
+\t\t.usecase_id = LLCC_GPU,
+\t\t.slice_id = 12,
+\t\t.max_cap = 512,
+\t\t.priority = 1,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t}, {
+\t\t.usecase_id = LLCC_MDMPNG,
+\t\t.slice_id = 21,
+\t\t.max_cap = 768,
+\t\t.fixed_size = true,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t}, {
+\t\t.usecase_id = 23, /* downstream LLCC_NPU */
+\t\t.slice_id = 23,
+\t\t.max_cap = 768,
+\t\t.priority = 1,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t}, {
+\t\t.usecase_id = 29, /* downstream LLCC_MODEMVPE */
+\t\t.slice_id = 29,
+\t\t.max_cap = 64,
+\t\t.priority = 1,
+\t\t.fixed_size = true,
+\t\t.bonus_ways = 0xfff,
+\t\t.retain_on_pc = true,
+\t},
 };
 
 static const struct qcom_llcc_config lagoon_cfg = {
-	.sct_data = lagoon_data,
-	.size = ARRAY_SIZE(lagoon_data),
-	.need_llcc_cfg = true,
-	.reg_offset = llcc_v1_reg_offset,
+\t.sct_data = lagoon_data,
+\t.size = ARRAY_SIZE(lagoon_data),
+\t.need_llcc_cfg = true,
+\t.reg_offset = llcc_v1_2_reg_offset,
 };
 '''.strip()
 
@@ -172,19 +171,81 @@ def insert_before_last(path: Path, token: str, marker: str, block: str) -> None:
     path.write_text(text[:index].rstrip() + "\n\n" + block.rstrip() + "\n\n" + text[index:])
 
 
-def replace_required(path: Path, old: str, new: str) -> None:
-    text = path.read_text(errors="replace")
-    if old not in text:
-        raise SystemExit(f"required text not found in {path}: {old}")
-    path.write_text(text.replace(old, new, 1))
+def adapt_gcc_driver(path: Path) -> None:
+    lines = path.read_text(errors="replace").splitlines()
+    out: list[str] = []
+    removed_rate_tables = 0
+    removed_regulators = 0
+    i = 0
 
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
 
-def adapt_vdd_header(path: Path) -> None:
-    replace_required(
-        path,
-        "#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>",
-        "#include <dt-bindings/power/qcom-rpmpd.h>",
+        if stripped == '#include "vdd-level-lagoon.h"':
+            i += 1
+            continue
+
+        if "DEFINE_VDD_REGULATORS(" in line:
+            i += 1
+            continue
+
+        if ".vdd_class =" in line:
+            i += 1
+            if i < len(lines) and ".num_rate_max =" in lines[i]:
+                i += 1
+            if i >= len(lines) or ".rate_max =" not in lines[i]:
+                raise SystemExit("downstream GCC VDD block is missing rate_max")
+
+            depth = lines[i].count("{") - lines[i].count("}")
+            i += 1
+            while i < len(lines) and depth > 0:
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            if depth != 0:
+                raise SystemExit("unterminated downstream GCC rate_max block")
+            removed_rate_tables += 1
+            continue
+
+        if re.match(r"^vdd_cx(?:_ao)?\.regulator\[0\] = devm_regulator_get", stripped):
+            i += 1
+            if i >= len(lines) or not lines[i].lstrip().startswith("if (IS_ERR("):
+                raise SystemExit("downstream GCC regulator assignment has no error block")
+
+            depth = lines[i].count("{") - lines[i].count("}")
+            i += 1
+            while i < len(lines) and depth > 0:
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            if depth != 0:
+                raise SystemExit("unterminated downstream GCC regulator block")
+            removed_regulators += 1
+            continue
+
+        out.append(line)
+        i += 1
+
+    if removed_rate_tables < 2:
+        raise SystemExit("expected downstream GCC VDD rate tables")
+    if removed_regulators != 2:
+        raise SystemExit(
+            f"expected two downstream GCC regulator blocks, removed {removed_regulators}"
+        )
+
+    text = "\n".join(out) + "\n"
+    forbidden = (
+        "DEFINE_VDD_REGULATORS",
+        ".vdd_class =",
+        ".num_rate_max =",
+        ".rate_max =",
+        "vdd_cx.regulator",
+        "vdd_cx_ao.regulator",
+        '"vdd-level-lagoon.h"',
     )
+    leftovers = [token for token in forbidden if token in text]
+    if leftovers:
+        raise SystemExit(f"GCC VDD adaptation left unsupported tokens: {leftovers}")
+    path.write_text(text)
 
 
 def adapt_pinctrl_driver(path: Path) -> None:
@@ -264,8 +325,8 @@ def stage(args: argparse.Namespace) -> None:
         before = sha256(dst) if dst.is_file() else "<absent>"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        if rel == "drivers/clk/qcom/vdd-level-lagoon.h":
-            adapt_vdd_header(dst)
+        if rel == "drivers/clk/qcom/gcc-lagoon.c":
+            adapt_gcc_driver(dst)
         elif rel == "drivers/pinctrl/qcom/pinctrl-lagoon.c":
             adapt_pinctrl_driver(dst)
         rows.append(

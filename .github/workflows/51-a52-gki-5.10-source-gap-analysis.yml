@@ -194,9 +194,17 @@ jobs:
 
           GKI_OUT="$PWD/gki-config-out"
           rm -rf "$GKI_OUT"
-          GKI_CLANG="$(find gki/prebuilts/clang/host/linux-x86 -type f -path '*/bin/clang' -print | sort | tail -n 1)"
-          test -n "$GKI_CLANG"
-          test -x "$GKI_CLANG"
+          GKI_PREBUILT_ROOT="gki/prebuilts/clang/host/linux-x86"
+          test -d "$GKI_PREBUILT_ROOT"
+          mapfile -t GKI_CLANG_CANDIDATES < <(
+            find "$GKI_PREBUILT_ROOT" -path '*/bin/clang' \
+              \( -type f -o -type l \) -print | sort -V
+          )
+          test "${#GKI_CLANG_CANDIDATES[@]}" -gt 0
+          GKI_CLANG="${GKI_CLANG_CANDIDATES[$((${#GKI_CLANG_CANDIDATES[@]} - 1))]}"
+          GKI_CLANG_REAL="$(readlink -f "$GKI_CLANG")"
+          test -n "$GKI_CLANG_REAL"
+          test -x "$GKI_CLANG_REAL"
           GKI_CLANG_BIN="$(dirname "$GKI_CLANG")"
           test -x "$GKI_CLANG_BIN/ld.lld"
           test -x "$GKI_CLANG_BIN/llvm-ar"
@@ -204,6 +212,7 @@ jobs:
             unset CC CROSS_COMPILE CLANG_TRIPLE KCFLAGS CONFIG_SECTION_MISMATCH_WARN_ONLY CONFIG_DRV_BUILD_IN
             export PATH="$GKI_CLANG_BIN:$PATH"
             printf 'gki_clang=%s\n' "$GKI_CLANG"
+            printf 'gki_clang_real=%s\n' "$GKI_CLANG_REAL"
             clang --version | head -n 1
             make -C gki/common O="$GKI_OUT" ARCH=arm64 \
               LLVM=1 LLVM_IAS=1 gki_defconfig

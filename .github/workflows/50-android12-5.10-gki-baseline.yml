@@ -102,7 +102,10 @@ jobs:
           grep -Fxq 'CONFIG_ARM64=y' "$OUT/gki-5.10.config"
           grep -Fxq 'CONFIG_MODULES=y' "$OUT/gki-5.10.config"
           grep -Fxq 'CONFIG_ANDROID_BINDER_IPC=y' "$OUT/gki-5.10.config"
-          sha256sum -c "$OUT/SHA256SUMS"
+          (
+            cd "$OUT"
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Upload official GKI reference artifacts
         uses: actions/upload-artifact@v4

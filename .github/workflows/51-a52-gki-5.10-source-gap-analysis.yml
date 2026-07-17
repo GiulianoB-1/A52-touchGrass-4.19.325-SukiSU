@@ -49,7 +49,12 @@ jobs:
           fetch_file scripts/checkpoint_resolve_linux_4.19.159.sh
           fetch_file scripts/checkpoint_resolve_linux_4.19.164.sh
           fetch_file scripts/checkpoint_resolve_linux_4.19.180.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.180.py
+          fetch_file scripts/checkpoint_fix_linux_4.19.180_fscrypt.sh
           fetch_file scripts/checkpoint_resolve_linux_4.19.200.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.200.py
+          fetch_file scripts/checkpoint_fix_linux_4.19.200_compile.sh
+          fetch_file scripts/checkpoint_fix_linux_4.19.200_noinstr.sh
           fetch_file scripts/05_merge_linux_4.19.325.py
           chmod +x scripts/*.sh scripts/*.py
 
@@ -62,7 +67,12 @@ jobs:
             scripts/checkpoint_resolve_linux_4.19.159.sh \
             scripts/checkpoint_resolve_linux_4.19.164.sh \
             scripts/checkpoint_resolve_linux_4.19.180.sh \
-            scripts/checkpoint_resolve_linux_4.19.200.sh; do
+            scripts/checkpoint_resolve_linux_4.19.180.py \
+            scripts/checkpoint_fix_linux_4.19.180_fscrypt.sh \
+            scripts/checkpoint_resolve_linux_4.19.200.sh \
+            scripts/checkpoint_resolve_linux_4.19.200.py \
+            scripts/checkpoint_fix_linux_4.19.200_compile.sh \
+            scripts/checkpoint_fix_linux_4.19.200_noinstr.sh; do
             test -x "$path"
           done
 

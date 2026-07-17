@@ -106,6 +106,7 @@ jobs:
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
           test -d gki/common/.git
+          test -x gki/build/build.sh
           test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
           test "$(make -s -C gki/common kernelversion)" = 5.10.252
           git -C gki/common diff --check
@@ -165,24 +166,46 @@ jobs:
       - name: Generate resolved touchGrass and GKI configurations
         run: |
           set -Eeuo pipefail
-          TG=workspace/touchgrass-a52xq
+          mkdir -p artifacts/logs
+
+          TG="$PWD/workspace/touchgrass-a52xq"
           TG_OUT="$PWD/workspace/touchgrass-config-out"
           test "$(make -s -C "$TG" kernelversion)" = 4.19.200
-          source scripts/common.sh
-          configure_toolchain
           rm -rf "$TG_OUT"
-          make -C "$TG" O="$TG_OUT" ARCH=arm64 \
-            DTC_EXT="$TG/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
-            a52xq_defconfig
+          (
+            source scripts/common.sh
+            configure_toolchain
+            printf 'touchgrass_cc=%s\n' "$CC"
+            printf 'touchgrass_cross_compile=%s\n' "$CROSS_COMPILE"
+            "$CC" --version | head -n 1
+            "${CROSS_COMPILE}gcc" --version | head -n 1
+            make -C "$TG" O="$TG_OUT" ARCH=arm64 \
+              DTC_EXT="$TG/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+              a52xq_defconfig
+          ) 2>&1 | tee artifacts/logs/workflow51-touchgrass-config.log
           test -s "$TG_OUT/.config"
 
           GKI_OUT="$PWD/gki-config-out"
           rm -rf "$GKI_OUT"
-          CLANG="$(find gki/prebuilts/clang/host/linux-x86 -type f -path '*/bin/clang' | sort | tail -n 1)"
-          test -x "$CLANG"
-          export PATH="$(dirname "$CLANG"):$PATH"
-          make -C gki/common O="$GKI_OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          GKI_CLANG="$(find gki/prebuilts/clang/host/linux-x86 -type f -path '*/bin/clang' -print | sort | tail -n 1)"
+          test -n "$GKI_CLANG"
+          test -x "$GKI_CLANG"
+          GKI_CLANG_BIN="$(dirname "$GKI_CLANG")"
+          test -x "$GKI_CLANG_BIN/ld.lld"
+          test -x "$GKI_CLANG_BIN/llvm-ar"
+          (
+            unset CC CROSS_COMPILE CLANG_TRIPLE KCFLAGS CONFIG_SECTION_MISMATCH_WARN_ONLY CONFIG_DRV_BUILD_IN
+            export PATH="$GKI_CLANG_BIN:$PATH"
+            printf 'gki_clang=%s\n' "$GKI_CLANG"
+            clang --version | head -n 1
+            make -C gki/common O="$GKI_OUT" ARCH=arm64 \
+              LLVM=1 LLVM_IAS=1 gki_defconfig
+          ) 2>&1 | tee artifacts/logs/workflow51-gki-config.log
           test -s "$GKI_OUT/.config"
+
+          grep -Fxq 'CONFIG_ARM64=y' "$TG_OUT/.config"
+          grep -Fxq 'CONFIG_ARM64=y' "$GKI_OUT/.config"
+          grep -Fxq 'CONFIG_ANDROID_BINDER_IPC=y' "$GKI_OUT/.config"
 
       - name: Produce A52 GKI source and configuration gap matrix
         run: |

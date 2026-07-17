@@ -20,6 +20,7 @@ SOURCE_FILES = (
 DEST_DIR = Path("drivers/iommu/legacy-qsmmu")
 TARGET = "drivers/iommu/legacy-qsmmu/arm-smmu-downstream.o"
 SYSTEM_INCLUDE = re.compile(r'^\s*#\s*include\s+<([^>]+)>', re.MULTILINE)
+COMPAT_HEADER = "qsmmu-compat.h"
 
 
 def sha256(path: Path) -> str:
@@ -48,6 +49,36 @@ def copy_normalized_source(source: Path, target: Path) -> int:
     target.write_text("\n".join(normalized) + "\n")
     target.chmod(0o644)
     return changed
+
+
+def adapt_downstream_driver(path: Path) -> list[str]:
+    text = path.read_text(errors="replace")
+    adaptations: list[str] = []
+
+    legacy_dma = "#include <asm/dma-iommu.h>\n"
+    if legacy_dma in text:
+        text = text.replace(legacy_dma, "", 1)
+        adaptations.append("removed-unused-legacy-asm-dma-iommu-include")
+
+    samsung_debug = "#include <linux/sec_debug.h>\n"
+    if samsung_debug in text:
+        text = text.replace(samsung_debug, f'#include "{COMPAT_HEADER}"\n', 1)
+        adaptations.append("replaced-samsung-sec-debug-with-local-noop-hooks")
+
+    path.write_text(text)
+    return adaptations
+
+
+def write_compat_header(path: Path) -> None:
+    path.write_text(
+        "/* Isolated compile-probe compatibility hooks. */\n"
+        "#ifndef A52XQ_LEGACY_QSMMU_COMPAT_H\n"
+        "#define A52XQ_LEGACY_QSMMU_COMPAT_H\n\n"
+        "static inline void sec_debug_save_smmu_info_asf_fatal(void) {}\n"
+        "static inline void sec_debug_save_smmu_info_fatal(void) {}\n\n"
+        "#endif\n"
+    )
+    path.chmod(0o644)
 
 
 def header_path(root: Path, include_name: str) -> Path:
@@ -149,6 +180,8 @@ def stage(args: argparse.Namespace) -> None:
     source_rows: list[dict[str, str]] = []
     staged_source_paths: list[Path] = []
     normalized_source_lines = 0
+    adaptations: list[str] = []
+
     for relative in SOURCE_FILES:
         source = touchgrass / relative
         if not source.is_file():
@@ -159,6 +192,8 @@ def stage(args: argparse.Namespace) -> None:
         target = destination / name
         changed = copy_normalized_source(source, target)
         normalized_source_lines += changed
+        if name == "arm-smmu-downstream.c":
+            adaptations.extend(adapt_downstream_driver(target))
         staged_source_paths.append(target)
         source_rows.append({
             "source_path": relative,
@@ -167,6 +202,17 @@ def stage(args: argparse.Namespace) -> None:
             "sha256": sha256(target),
             "normalized_trailing_whitespace_lines": str(changed),
         })
+
+    compat_path = destination / COMPAT_HEADER
+    write_compat_header(compat_path)
+    staged_source_paths.append(compat_path)
+    source_rows.append({
+        "source_path": "<generated-isolated-compatibility-hooks>",
+        "staged_path": compat_path.relative_to(gki).as_posix(),
+        "bytes": str(compat_path.stat().st_size),
+        "sha256": sha256(compat_path),
+        "normalized_trailing_whitespace_lines": "0",
+    })
 
     header_rows, staged_header_paths, normalized_header_lines, unresolved_headers = (
         stage_missing_header_graph(gki, touchgrass, staged_source_paths)
@@ -198,6 +244,7 @@ def stage(args: argparse.Namespace) -> None:
         ],
         header_rows,
     )
+    (artifact / "source-adaptations.txt").write_text("\n".join(adaptations) + "\n")
 
     staged = [row["staged_path"] for row in source_rows]
     staged.extend(staged_header_paths)
@@ -217,11 +264,14 @@ def stage(args: argparse.Namespace) -> None:
         f"touchgrass_commit={tg_head}",
         f"compile_target={TARGET}",
         f"staged_source_count={len(source_rows)}",
+        f"source_adaptation_count={len(adaptations)}",
         f"compatibility_header_checks={len(header_rows)}",
         f"copied_missing_downstream_headers={copied_headers}",
         f"preserved_existing_gki_headers={kept_headers}",
         f"unresolved_header_count={unresolved_headers}",
         f"normalized_trailing_whitespace_lines={normalized_source_lines + normalized_header_lines}",
+        "debug_hook_policy=samsung-crash-report-hooks-noop-only-in-isolated-compile-probe",
+        "legacy_dma_header_policy=removed-because-no-declared-symbol-is-used-by-downstream-driver",
         "header_policy=preserve-existing-gki-copy-only-downstream-headers-absent-from-gki",
         "normalization_policy=line-endings-trailing-horizontal-whitespace-and-file-mode-only",
         "staging_policy=isolated-parallel-driver-no-replacement-of-gki-arm-smmu",
@@ -267,6 +317,7 @@ def finalize(args: argparse.Namespace) -> None:
         "- The downstream source is staged under an isolated directory.",
         "- GKI's working ARM-SMMU driver is not replaced.",
         "- Existing GKI headers remain authoritative; only absent downstream headers are copied.",
+        "- Samsung crash-report hooks are no-op only inside this isolated compile probe.",
         "- This is an object-only compile probe with no link, Image, DTB, or boot packaging.", "",
         "## Result", "",
         f"- target: `{row['target']}`",

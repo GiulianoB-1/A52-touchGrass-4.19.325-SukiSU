@@ -19,9 +19,7 @@ ROOT_DEST = Path("lagoon-earlyboot-probe.dtsi")
 WRAPPER_DTS = Path("lagoon-earlyboot-probe.dts")
 ANGLE_INCLUDE = re.compile(r'^\s*#include\s+<([^>]+)>', re.MULTILINE)
 LOCAL_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
-REFERENCE_ONLY_PREFIXES = (
-    "camera/", "lagoon-audio", "lagoon-sde", "lagoon-vidc",
-)
+REFERENCE_ONLY_PREFIXES = ("camera/", "lagoon-audio", "lagoon-sde", "lagoon-vidc")
 
 
 def sha256(path: Path) -> str:
@@ -63,8 +61,7 @@ def stage(args: argparse.Namespace) -> None:
 
     source_root = (touchgrass / SOURCE_ROOT).resolve()
     dest_root = (gki / DEST_ROOT).resolve()
-    root_source = source_root / ROOT_SOURCE
-    if not root_source.is_file():
+    if not (source_root / ROOT_SOURCE).is_file():
         raise SystemExit(f"missing touchGrass base DTS: {SOURCE_ROOT / ROOT_SOURCE}")
 
     artifact.mkdir(parents=True, exist_ok=True)
@@ -83,8 +80,8 @@ def stage(args: argparse.Namespace) -> None:
         if relative in visited:
             continue
         visited.add(relative)
-
         source = source_root / relative
+
         if not source.is_file():
             unresolved_local += 1
             local_rows.append({
@@ -105,12 +102,9 @@ def stage(args: argparse.Namespace) -> None:
         shutil.copy2(source, destination)
         staged_paths.append((DEST_ROOT / destination_relative).as_posix())
 
-        scope = "early-boot"
         relative_text = relative.as_posix()
-        if relative_text.startswith(REFERENCE_ONLY_PREFIXES):
-            scope = "reference-only"
-            reference_only += 1
-
+        scope = "reference-only" if relative_text.startswith(REFERENCE_ONLY_PREFIXES) else "early-boot"
+        reference_only += int(scope == "reference-only")
         local_rows.append({
             "relative_path": relative_text,
             "included_from": included_from,
@@ -136,17 +130,17 @@ def stage(args: argparse.Namespace) -> None:
                     "gki_before_sha256": "<unresolved>",
                     "gki_after_sha256": "<unresolved>",
                 })
-                continue
-            queue.append((child, relative_text))
+            else:
+                queue.append((child, relative_text))
 
     wrapper = dest_root / WRAPPER_DTS
     wrapper.write_text(
-        "/dts-v1/;\n\n"
-        "#include \"lagoon-earlyboot-probe.dtsi\"\n\n"
-        "/ {\n"
-        "\tmodel = \"Samsung A52xq Lagoon early-boot compile probe\";\n"
-        "\tcompatible = \"qcom,lagoon-mtp\", \"qcom,lagoon\";\n"
-        "};\n"
+        '/dts-v1/;\n\n'
+        '#include "lagoon-earlyboot-probe.dtsi"\n\n'
+        '/ {\n'
+        '\tmodel = "Samsung A52xq Lagoon early-boot compile probe";\n'
+        '\tcompatible = "qcom,lagoon-mtp", "qcom,lagoon";\n'
+        '};\n'
     )
     staged_paths.append((DEST_ROOT / WRAPPER_DTS).as_posix())
 
@@ -157,8 +151,6 @@ def stage(args: argparse.Namespace) -> None:
         gki_path = gki / relative
         touchgrass_path = touchgrass / relative
         existed = gki_path.is_file()
-        source_hash = sha256(touchgrass_path) if touchgrass_path.is_file() else "<absent>"
-        before_hash = sha256(gki_path) if existed else "<absent>"
         action = "kept-gki"
 
         if not existed and touchgrass_path.is_file():
@@ -170,21 +162,18 @@ def stage(args: argparse.Namespace) -> None:
             action = "unresolved"
             unresolved_binding += 1
 
-        after_hash = sha256(gki_path) if gki_path.is_file() else "<absent>"
         binding_rows.append({
             "include": include_name,
             "action": action,
-            "touchgrass_sha256": source_hash,
-            "gki_before_sha256": before_hash,
-            "gki_after_sha256": after_hash,
+            "touchgrass_sha256": sha256(touchgrass_path) if touchgrass_path.is_file() else "<absent>",
+            "gki_before_sha256": sha256(gki_path) if existed else "<absent>",
+            "gki_after_sha256": sha256(gki_path) if gki_path.is_file() else "<absent>",
         })
 
     write_tsv(
         artifact / "local-include-graph.tsv",
-        [
-            "relative_path", "included_from", "action", "scope",
-            "source_sha256", "gki_before_sha256", "gki_after_sha256",
-        ],
+        ["relative_path", "included_from", "action", "scope",
+         "source_sha256", "gki_before_sha256", "gki_after_sha256"],
         local_rows,
     )
     write_tsv(
@@ -192,13 +181,17 @@ def stage(args: argparse.Namespace) -> None:
         ["include", "action", "touchgrass_sha256", "gki_before_sha256", "gki_after_sha256"],
         binding_rows,
     )
+    (artifact / "source-summary.tsv").write_text(
+        "source_scope\tlocal_file_count\treference_only_file_count\t"
+        "unresolved_local_include_count\tbinding_include_count\tunresolved_binding_count\n"
+        f"recursive-lagoon-base-include-graph\t{len(visited)}\t{reference_only}\t"
+        f"{unresolved_local}\t{len(binding_rows)}\t{unresolved_binding}\n"
+    )
 
-    existing_paths = sorted(set(path for path in staged_paths if (gki / path).exists()))
+    existing_paths = sorted({path for path in staged_paths if (gki / path).exists()})
     subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *existing_paths], check=True)
     patch = output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
-    (artifact / "lagoon-earlyboot-dt-port.patch").write_text(
-        patch + ("\n" if patch else "")
-    )
+    (artifact / "lagoon-earlyboot-dt-port.patch").write_text(patch + ("\n" if patch else ""))
 
     metadata = [
         "artifact_type=a52xq-gki-5.10-lagoon-earlyboot-dt-compile-probe-not-flashable",
@@ -219,12 +212,12 @@ def stage(args: argparse.Namespace) -> None:
 def diagnostics(path: Path, limit: int = 40) -> list[str]:
     if not path.is_file():
         return ["log missing"]
-    lines = path.read_text(errors="replace").splitlines()
     patterns = (
         "error:", "fatal error:", "syntax error", "reference to non-existent node",
         "not found", "No such file", "undefined", "parse error",
     )
     selected: list[str] = []
+    lines = path.read_text(errors="replace").splitlines()
     for line in lines:
         if any(pattern.lower() in line.lower() for pattern in patterns):
             cleaned = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
@@ -232,9 +225,7 @@ def diagnostics(path: Path, limit: int = 40) -> list[str]:
                 selected.append(cleaned)
         if len(selected) >= limit:
             break
-    if not selected:
-        selected = [line.strip() for line in lines[-12:] if line.strip()]
-    return selected or ["no diagnostic text found"]
+    return selected or [line.strip() for line in lines[-12:] if line.strip()] or ["no diagnostic text found"]
 
 
 def finalize(args: argparse.Namespace) -> None:
@@ -262,8 +253,10 @@ def finalize(args: argparse.Namespace) -> None:
         f"- DTB bytes: `{row['dtb_bytes']}`", "",
         "First diagnostics:", "",
     ]
-    report.extend(f"- `{line.replace('`', chr(39))}`" for line in diagnostics(artifact / "logs" / "lagoon-base-dt.log"))
-    report.append("")
+    report.extend(
+        f"- `{line.replace('`', chr(39))}`"
+        for line in diagnostics(artifact / "logs" / "lagoon-base-dt.log")
+    )
     (artifact / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
 
     metadata = (artifact / "analysis-metadata.txt").read_text().rstrip().splitlines()

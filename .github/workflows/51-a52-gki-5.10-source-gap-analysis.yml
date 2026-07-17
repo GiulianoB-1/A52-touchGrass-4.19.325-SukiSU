@@ -14,16 +14,57 @@ concurrency:
 env:
   GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
 
 jobs:
   analyze:
     name: Compare working A52 4.19 hardware tree against GKI 5.10
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    timeout-minutes: 360
 
     steps:
       - name: Check out project
         uses: actions/checkout@v4
+
+      - name: Hydrate proven Linux 4.19.200 preparation toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREP_REF: rebase/resukisu-linux-4.19.325
+        run: |
+          set -Eeuo pipefail
+          fetch_file() {
+            local path="$1"
+            mkdir -p "$(dirname "$path")"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${PREP_REF}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+
+          fetch_file sources.lock
+          fetch_file scripts/common.sh
+          fetch_file scripts/01_prepare_source.sh
+          fetch_file scripts/03_apply_linux_4.19.153.sh
+          fetch_file scripts/04_apply_linux_4.19.154.sh
+          fetch_file scripts/05a_diagnose_linux_checkpoint.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.159.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.164.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.180.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.200.sh
+          fetch_file scripts/05_merge_linux_4.19.325.py
+          chmod +x scripts/*.sh scripts/*.py
+
+          test "$(grep '^TOUCHGRASS_COMMIT=' sources.lock | cut -d= -f2)" = "${TOUCHGRASS_COMMIT}"
+          for path in \
+            scripts/01_prepare_source.sh \
+            scripts/03_apply_linux_4.19.153.sh \
+            scripts/04_apply_linux_4.19.154.sh \
+            scripts/05a_diagnose_linux_checkpoint.sh \
+            scripts/checkpoint_resolve_linux_4.19.159.sh \
+            scripts/checkpoint_resolve_linux_4.19.164.sh \
+            scripts/checkpoint_resolve_linux_4.19.180.sh \
+            scripts/checkpoint_resolve_linux_4.19.200.sh; do
+            test -x "$path"
+          done
 
       - name: Free runner disk space
         run: |
@@ -58,9 +99,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-touchgrass-linux-4.19.200-v1-${{ runner.os }}-${{ hashFiles('scripts/common.sh', 'scripts/01_prepare_source.sh', 'scripts/03_apply_linux_4.19.153.sh', 'scripts/04_apply_linux_4.19.154.sh', 'scripts/05a_diagnose_linux_checkpoint.sh', 'scripts/checkpoint_resolve_linux_4.19.159.sh', 'scripts/checkpoint_resolve_linux_4.19.164.sh', 'scripts/checkpoint_resolve_linux_4.19.180.sh', 'scripts/checkpoint_resolve_linux_4.19.200.sh', 'scripts/05_merge_linux_4.19.325.py') }}
-          restore-keys: |
-            a52xq-touchgrass-linux-4.19.200-v1-${{ runner.os }}-
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
       - name: Report touchGrass cache result
         run: |
@@ -72,7 +111,7 @@ jobs:
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
-          chmod +x scripts/*.sh scripts/*.py
+          rm -rf workspace/touchgrass-a52xq artifacts
           mkdir -p artifacts/logs
           {
             ./scripts/01_prepare_source.sh
@@ -92,7 +131,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
           test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          test -f workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
           git -C workspace/touchgrass-a52xq diff --check
           printf 'touchgrass_4.19.200_cache_hit=%s\n' \
             '${{ steps.touchgrass-cache.outputs.cache-hit }}'

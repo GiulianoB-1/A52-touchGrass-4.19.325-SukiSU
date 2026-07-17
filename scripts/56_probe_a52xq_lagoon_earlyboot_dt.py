@@ -146,27 +146,39 @@ def stage(args: argparse.Namespace) -> None:
 
     binding_rows: list[dict[str, str]] = []
     unresolved_binding = 0
+    overlaid_binding = 0
     for include_name in sorted(angle_includes):
         relative = Path("include") / include_name
         gki_path = gki / relative
         touchgrass_path = touchgrass / relative
         existed = gki_path.is_file()
-        action = "kept-gki"
+        before = sha256(gki_path) if existed else "<absent>"
 
-        if not existed and touchgrass_path.is_file():
+        if touchgrass_path.is_file():
+            source_hash = sha256(touchgrass_path)
             gki_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(touchgrass_path, gki_path)
             staged_paths.append(relative.as_posix())
-            action = "copied-touchgrass"
-        elif not existed:
+            if existed and before == source_hash:
+                action = "matched-touchgrass"
+            elif existed:
+                action = "overlaid-touchgrass"
+                overlaid_binding += 1
+            else:
+                action = "copied-touchgrass"
+        elif existed:
+            source_hash = "<absent>"
+            action = "kept-gki-no-touchgrass-source"
+        else:
+            source_hash = "<absent>"
             action = "unresolved"
             unresolved_binding += 1
 
         binding_rows.append({
             "include": include_name,
             "action": action,
-            "touchgrass_sha256": sha256(touchgrass_path) if touchgrass_path.is_file() else "<absent>",
-            "gki_before_sha256": sha256(gki_path) if existed else "<absent>",
+            "touchgrass_sha256": source_hash,
+            "gki_before_sha256": before,
             "gki_after_sha256": sha256(gki_path) if gki_path.is_file() else "<absent>",
         })
 
@@ -183,9 +195,10 @@ def stage(args: argparse.Namespace) -> None:
     )
     (artifact / "source-summary.tsv").write_text(
         "source_scope\tlocal_file_count\treference_only_file_count\t"
-        "unresolved_local_include_count\tbinding_include_count\tunresolved_binding_count\n"
+        "unresolved_local_include_count\tbinding_include_count\toverlaid_binding_count\t"
+        "unresolved_binding_count\n"
         f"recursive-lagoon-base-include-graph\t{len(visited)}\t{reference_only}\t"
-        f"{unresolved_local}\t{len(binding_rows)}\t{unresolved_binding}\n"
+        f"{unresolved_local}\t{len(binding_rows)}\t{overlaid_binding}\t{unresolved_binding}\n"
     )
 
     existing_paths = sorted({path for path in staged_paths if (gki / path).exists()})
@@ -201,7 +214,9 @@ def stage(args: argparse.Namespace) -> None:
         f"reference_only_file_count={reference_only}",
         f"unresolved_local_include_count={unresolved_local}",
         f"binding_include_count={len(binding_rows)}",
+        f"overlaid_binding_count={overlaid_binding}",
         f"unresolved_binding_count={unresolved_binding}",
+        "binding_policy=prefer-pinned-touchgrass-headers-for-downstream-dt",
         "source_scope=recursive-lagoon-base-include-graph",
         "reference_only_subsystems=camera,display,audio,video",
         "output_scope=syntax-and-reference-validation-only",
@@ -243,6 +258,7 @@ def finalize(args: argparse.Namespace) -> None:
         "## Scope", "",
         "- Root source: `lagoon.dtsi`",
         "- Its local include graph is staged recursively for reference resolution.",
+        "- Pinned touchGrass binding headers are preferred for this downstream DT compile probe.",
         "- Camera, display, audio, and video files are reference-only and are not driver-port approvals.",
         "- The generated DTB is a compile probe and is not flashable.", "",
         "## Result", "",

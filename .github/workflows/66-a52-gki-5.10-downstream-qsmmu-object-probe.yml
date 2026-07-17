@@ -125,7 +125,8 @@ jobs:
           test -s "$OUT/analysis-metadata.txt"
           git -C gki/common diff --check
 
-      - name: Resolve configuration and compile isolated downstream object
+      - name: Resolve configuration and capture isolated compile result
+        continue-on-error: true
         run: |
           set -Eeuo pipefail
           OUT="$PWD/artifacts/a52xq-gki-5.10-downstream-qsmmu-object-probe"
@@ -163,6 +164,13 @@ jobs:
           printf 'target\tresult\texit_code\tobject_produced\n%s\t%s\t%s\t%s\n' \
             "$TARGET" "$result" "$rc" "$produced" > "$STATUS"
           cat "$STATUS"
+
+      - name: Finalize isolated QSMMU diagnostic report
+        if: ${{ always() && hashFiles('workspace/workflow66-compile-status.tsv') != '' }}
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-downstream-qsmmu-object-probe"
+          STATUS="$PWD/workspace/workflow66-compile-status.tsv"
           python3 scripts/66_probe_a52xq_downstream_qsmmu.py finalize \
             --output "$OUT" --status-file "$STATUS"
           test -s "$OUT/PORTING-PROBE-REPORT.md"

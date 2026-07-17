@@ -184,6 +184,11 @@ jobs:
             -e WLAN -e CFG80211 -e MAC80211 -e BT
           "$KERNEL/scripts/config" --file "$DEFCONFIG" --set-val PANIC_TIMEOUT 10
 
+      - name: Replace legacy exec dispatch with ReSukiSU-compatible guards
+        run: |
+          set -Eeuo pipefail
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
       - name: Integrate pinned ReSukiSU and SUSFS with inline hooks, then build
         run: |
           set -Eeuo pipefail

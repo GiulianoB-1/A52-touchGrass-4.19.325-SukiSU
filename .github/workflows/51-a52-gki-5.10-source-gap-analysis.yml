@@ -1,0 +1,143 @@
+name: 51 - A52 GKI 5.10 source gap analysis
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-source-gap-analysis
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+jobs:
+  analyze:
+    name: Compare working A52 4.19 hardware tree against GKI 5.10
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install analysis dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git python3 make gcc bc bison flex libssl-dev libelf-dev rsync cpio lz4
+
+      - name: Restore pinned official GKI 5.10 source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Require and validate GKI source cache
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common diff --check
+
+      - name: Restore exact touchGrass Linux 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-v1-${{ runner.os }}-${{ hashFiles('scripts/common.sh', 'scripts/01_prepare_source.sh', 'scripts/03_apply_linux_4.19.153.sh', 'scripts/04_apply_linux_4.19.154.sh', 'scripts/05a_diagnose_linux_checkpoint.sh', 'scripts/checkpoint_resolve_linux_4.19.159.sh', 'scripts/checkpoint_resolve_linux_4.19.164.sh', 'scripts/checkpoint_resolve_linux_4.19.180.sh', 'scripts/checkpoint_resolve_linux_4.19.200.sh', 'scripts/05_merge_linux_4.19.325.py') }}
+
+      - name: Prepare touchGrass 4.19.200 on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+
+      - name: Save touchGrass 4.19.200 source cache
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ steps.touchgrass-cache.outputs.cache-primary-key }}
+
+      - name: Generate resolved touchGrass and GKI configurations
+        run: |
+          set -Eeuo pipefail
+          TG=workspace/touchgrass-a52xq
+          TG_OUT="$PWD/workspace/touchgrass-config-out"
+          test "$(make -s -C "$TG" kernelversion)" = 4.19.200
+          source scripts/common.sh
+          configure_toolchain
+          rm -rf "$TG_OUT"
+          make -C "$TG" O="$TG_OUT" ARCH=arm64 \
+            DTC_EXT="$TG/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            a52xq_defconfig
+          test -s "$TG_OUT/.config"
+
+          GKI_OUT="$PWD/gki-config-out"
+          rm -rf "$GKI_OUT"
+          CLANG="$(find gki/prebuilts/clang/host/linux-x86 -type f -path '*/bin/clang' | sort | tail -n 1)"
+          test -x "$CLANG"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          make -C gki/common O="$GKI_OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          test -s "$GKI_OUT/.config"
+
+      - name: Produce A52 GKI source and configuration gap matrix
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/51_compare_a52_4.19_to_gki_5.10.py \
+            --touchgrass workspace/touchgrass-a52xq \
+            --gki gki/common \
+            --touchgrass-config workspace/touchgrass-config-out/.config \
+            --gki-config gki-config-out/.config \
+            --output artifacts/a52xq-gki-5.10-source-gap-analysis
+
+      - name: Enforce analysis invariants
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-source-gap-analysis
+          test -s "$OUT/PORTING-REPORT.md"
+          test -s "$OUT/config-comparison.tsv"
+          test -s "$OUT/boot-critical-config.tsv"
+          test -s "$OUT/source-capability-matrix.tsv"
+          test -s "$OUT/touchgrass-device-file-map.tsv"
+          grep -Fxq 'artifact_type=a52xq-gki-5.10-source-gap-analysis-not-flashable' "$OUT/analysis-metadata.txt"
+          grep -Fxq "gki_commit=${GKI_COMMON_SHA}" "$OUT/analysis-metadata.txt"
+          ! find "$OUT" -type f \( -name 'boot.img' -o -name 'Image' -o -name 'Image.gz' \) | grep -q .
+          (
+            cd "$OUT"
+            sha256sum -c SHA256SUMS
+          )
+          cat "$OUT/analysis-metadata.txt"
+          sed -n '1,220p' "$OUT/PORTING-REPORT.md"
+
+      - name: Upload non-flashable porting analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-source-gap-analysis-${{ github.run_number }}-NOT-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-source-gap-analysis
+          if-no-files-found: error
+          retention-days: 30

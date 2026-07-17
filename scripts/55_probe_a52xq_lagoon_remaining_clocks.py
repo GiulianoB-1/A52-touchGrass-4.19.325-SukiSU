@@ -57,10 +57,15 @@ def append_once(path: Path, marker: str, block: str) -> None:
         path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
 
 
-def strip_downstream_clock_compat(path: Path) -> None:
+def strip_npu_compat(path: Path) -> None:
     lines = path.read_text(errors="replace").splitlines()
     result: list[str] = []
     index = 0
+    obsolete_pll_configs = {
+        ".config = &npu_cc_pll0_config,",
+        ".config = &npu_cc_pll1_config,",
+        ".config = &npu_q6ss_pll_config,",
+    }
 
     while index < len(lines):
         line = lines[index]
@@ -70,6 +75,9 @@ def strip_downstream_clock_compat(path: Path) -> None:
             index += 1
             continue
         if "DEFINE_VDD_REGULATORS(" in line or "DEFINE_VDD_REGS_INIT(" in line:
+            index += 1
+            continue
+        if stripped in obsolete_pll_configs:
             index += 1
             continue
         if ".enable_safe_config =" in line or ".cal_l =" in line:
@@ -126,10 +134,11 @@ def strip_downstream_clock_compat(path: Path) -> None:
         ".num_custom_reg =",
         "clk_branch2_hw_ctl_ops",
         "devm_regulator_get",
+        *obsolete_pll_configs,
     )
     leftovers = [token for token in forbidden if token in text]
     if leftovers:
-        raise SystemExit(f"unsupported downstream clock tokens remain in {path}: {leftovers}")
+        raise SystemExit(f"unsupported NPU clock tokens remain in {path}: {leftovers}")
     path.write_text(text)
 
 
@@ -155,12 +164,10 @@ def preserve_npu_crc_calibration(path: Path) -> None:
         + text[declaration_pos + len(declaration):]
     )
 
-    probe_marker = (
+    marker = (
         '\tif (!strcmp("cc", desc->config->name)) {\n'
         "\t\tclk_fabia_pll_configure(&npu_cc_pll0, regmap,"
     )
-    if probe_marker not in text:
-        raise SystemExit("NPU main clock-domain marker not found")
     replacement = (
         '\tif (!strcmp("cc", desc->config->name)) {\n'
         "\t\t/* Preserve the downstream CRC calibration register writes. */\n"
@@ -168,23 +175,115 @@ def preserve_npu_crc_calibration(path: Path) -> None:
         "\t\t\tregmap_write(regmap, crc_reg_offset[i], crc_reg_val[i]);\n\n"
         "\t\tclk_fabia_pll_configure(&npu_cc_pll0, regmap,"
     )
-    text = text.replace(probe_marker, replacement, 1)
-
-    if "ARRAY_SIZE(crc_reg_offset)" not in text or "regmap_write(regmap, crc_reg_offset[i]" not in text:
-        raise SystemExit("NPU CRC calibration preservation was not installed")
+    if marker not in text:
+        raise SystemExit("NPU main clock-domain marker not found")
+    text = text.replace(marker, replacement, 1)
     path.write_text(text)
 
 
-def strip_msm_bus_dependency(path: Path) -> None:
+def adapt_clk_debug_header(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    include_marker = "#include <linux/platform_device.h>\n"
+    if "#include <linux/bitops.h>" not in text:
+        text = text.replace(include_marker, include_marker + "#include <linux/bitops.h>\n", 1)
+    define_block = (
+        "\n#ifndef CLK_IS_MEASURE\n"
+        "#define CLK_IS_MEASURE BIT(16)\n"
+        "#endif\n"
+    )
+    if "#define CLK_IS_MEASURE" not in text:
+        text = text.replace('#include "../clk.h"\n', '#include "../clk.h"\n' + define_block, 1)
+    path.write_text(text)
+
+
+def adapt_clk_debug_core(path: Path) -> None:
     lines = path.read_text(errors="replace").splitlines()
-    result = [
-        line for line in lines
-        if line.strip() != "#include <linux/msm-bus.h>"
-        and "msm_bus_scale_client_update_request" not in line
-    ]
+    result: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if stripped == "#include <linux/msm-bus.h>":
+            index += 1
+            continue
+        if stripped in ("if (meas->bus_cl_id)", "if (hw->init->bus_cl_id)"):
+            index += 1
+            while index < len(lines):
+                current = lines[index].strip()
+                if "msm_bus_scale_client_update_request" in current:
+                    index += 1
+                    while index < len(lines) and not lines[index - 1].rstrip().endswith(");"):
+                        index += 1
+                    break
+                if current:
+                    break
+                index += 1
+            continue
+        if "msm_bus_scale_client_update_request" in stripped:
+            index += 1
+            while index < len(lines) and not lines[index - 1].rstrip().endswith(");"):
+                index += 1
+            continue
+        result.append(lines[index])
+        index += 1
+
     text = "\n".join(result) + "\n"
-    if "msm-bus.h" in text or "msm_bus_scale_client_update_request" in text:
+    if "#include <linux/debugfs.h>" not in text:
+        text = text.replace(
+            "#include <linux/clk-provider.h>\n",
+            "#include <linux/clk-provider.h>\n#include <linux/debugfs.h>\n",
+            1,
+        )
+
+    vote_pattern = re.compile(
+        r"void clk_debug_bus_vote\(struct clk_hw \*hw, bool enable\)\n\{.*?\n\}",
+        re.S,
+    )
+    vote_replacement = (
+        "void clk_debug_bus_vote(struct clk_hw *hw, bool enable)\n"
+        "{\n"
+        "\t/* MSM bus scaling is not part of GKI. Measurement remains optional. */\n"
+        "\t(void)hw;\n"
+        "\t(void)enable;\n"
+        "}"
+    )
+    text, count = vote_pattern.subn(vote_replacement, text, count=1)
+    if count != 1:
+        raise SystemExit("clk_debug_bus_vote function was not replaced")
+    if "msm_bus_scale_client_update_request" in text or "msm-bus.h" in text:
         raise SystemExit("MSM bus dependency remains in clk-debug.c")
+    path.write_text(text)
+
+
+def adapt_debugcc_dummy_clocks(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    text = text.replace("struct clk_dummy ", "struct lagoon_clk_dummy ")
+    text = text.replace("\t.rrate =", "\t.rate =")
+    text = text.replace("&clk_dummy_ops", "&lagoon_clk_dummy_ops")
+
+    marker = "static struct lagoon_clk_dummy l3_clk = {"
+    if marker not in text:
+        raise SystemExit("Lagoon debug dummy-clock marker not found")
+    block = (
+        "struct lagoon_clk_dummy {\n"
+        "\tstruct clk_hw hw;\n"
+        "\tunsigned long rate;\n"
+        "};\n\n"
+        "#define to_lagoon_clk_dummy(_hw) \\\n"
+        "\tcontainer_of((_hw), struct lagoon_clk_dummy, hw)\n\n"
+        "static unsigned long lagoon_clk_dummy_recalc_rate(\n"
+        "\t\tstruct clk_hw *hw, unsigned long parent_rate)\n"
+        "{\n"
+        "\t(void)parent_rate;\n"
+        "\treturn to_lagoon_clk_dummy(hw)->rate;\n"
+        "}\n\n"
+        "static const struct clk_ops lagoon_clk_dummy_ops = {\n"
+        "\t.recalc_rate = lagoon_clk_dummy_recalc_rate,\n"
+        "};\n\n"
+    )
+    text = text.replace(marker, block + marker, 1)
+    if "struct clk_dummy" in text or "clk_dummy_ops" in text or ".rrate =" in text:
+        raise SystemExit("downstream dummy-clock API remains in debugcc-lagoon.c")
     path.write_text(text)
 
 
@@ -216,8 +315,8 @@ def stage(args: argparse.Namespace) -> None:
 
     artifact.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, str]] = []
-
     all_paths = [entry[0] for entry in PROBES.values()] + list(COPY_ONLY)
+
     for relative in all_paths:
         source = touchgrass / relative
         destination = gki / relative
@@ -228,10 +327,14 @@ def stage(args: argparse.Namespace) -> None:
         shutil.copy2(source, destination)
 
         if relative == "drivers/clk/qcom/npucc-lagoon.c":
-            strip_downstream_clock_compat(destination)
+            strip_npu_compat(destination)
             preserve_npu_crc_calibration(destination)
+        elif relative == "drivers/clk/qcom/clk-debug.h":
+            adapt_clk_debug_header(destination)
         elif relative == "drivers/clk/qcom/clk-debug.c":
-            strip_msm_bus_dependency(destination)
+            adapt_clk_debug_core(destination)
+        elif relative == "drivers/clk/qcom/debugcc-lagoon.c":
+            adapt_debugcc_dummy_clocks(destination)
 
         rows.append({
             "relative_path": relative,
@@ -245,21 +348,12 @@ def stage(args: argparse.Namespace) -> None:
             "gki_after_sha256": sha256(destination),
         })
 
-    append_once(
-        gki / "drivers/clk/qcom/Makefile",
-        "npucc-lagoon.o",
-        "obj-$(CONFIG_NPU_CC_LAGOON) += npucc-lagoon.o",
-    )
-    append_once(
-        gki / "drivers/clk/qcom/Makefile",
-        "clk-debug.o",
-        "obj-$(CONFIG_QCOM_CLK_DEBUG) += clk-debug.o",
-    )
-    append_once(
-        gki / "drivers/clk/qcom/Makefile",
-        "debugcc-lagoon.o",
-        "obj-$(CONFIG_DEBUG_CC_LAGOON) += debugcc-lagoon.o",
-    )
+    append_once(gki / "drivers/clk/qcom/Makefile", "npucc-lagoon.o",
+                "obj-$(CONFIG_NPU_CC_LAGOON) += npucc-lagoon.o")
+    append_once(gki / "drivers/clk/qcom/Makefile", "clk-debug.o",
+                "obj-$(CONFIG_QCOM_CLK_DEBUG) += clk-debug.o")
+    append_once(gki / "drivers/clk/qcom/Makefile", "debugcc-lagoon.o",
+                "obj-$(CONFIG_DEBUG_CC_LAGOON) += debugcc-lagoon.o")
 
     append_once(
         gki / "drivers/clk/qcom/Kconfig",
@@ -286,15 +380,13 @@ config DEBUG_CC_LAGOON
 
     fields = ["relative_path", "purpose", "source_sha256", "gki_before_sha256", "gki_after_sha256"]
     write_tsv(artifact / "staged-files.tsv", fields, rows)
-
-    fragment = [
-        "# Lagoon remaining-clock compile probes",
-        "CONFIG_DEBUG_FS=y",
-        "CONFIG_NPU_CC_LAGOON=y",
-        "CONFIG_QCOM_CLK_DEBUG=y",
-        "CONFIG_DEBUG_CC_LAGOON=y",
-    ]
-    (artifact / "lagoon-remaining-clocks.fragment").write_text("\n".join(fragment) + "\n")
+    (artifact / "lagoon-remaining-clocks.fragment").write_text(
+        "# Lagoon remaining-clock compile probes\n"
+        "CONFIG_DEBUG_FS=y\n"
+        "CONFIG_NPU_CC_LAGOON=y\n"
+        "CONFIG_QCOM_CLK_DEBUG=y\n"
+        "CONFIG_DEBUG_CC_LAGOON=y\n"
+    )
 
     subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *all_paths], check=True)
     patch = output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
@@ -310,6 +402,7 @@ config DEBUG_CC_LAGOON
         "phase_dependencies=gcc,pinctrl,llcc,camcc,dispcc,gpucc,videocc",
         "npu_crc_calibration=preserved-as-explicit-regmap-writes",
         "debug_bus_scaling=disabled-for-gki-compile-probe",
+        "debug_dummy_clocks=local-fixed-rate-compatibility",
     ]
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 

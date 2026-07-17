@@ -53,6 +53,26 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def disable_abi_symbol_trimming(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    trim_line = "# CONFIG_TRIM_UNUSED_KSYMS is not set"
+    if re.search(r"(?m)^CONFIG_TRIM_UNUSED_KSYMS=.*$", text):
+        text = re.sub(r"(?m)^CONFIG_TRIM_UNUSED_KSYMS=.*$", trim_line, text)
+    elif trim_line not in text:
+        text = text.rstrip() + "\n" + trim_line + "\n"
+
+    whitelist_line = 'CONFIG_UNUSED_KSYMS_WHITELIST=""'
+    if re.search(r"(?m)^CONFIG_UNUSED_KSYMS_WHITELIST=.*$", text):
+        text = re.sub(
+            r"(?m)^CONFIG_UNUSED_KSYMS_WHITELIST=.*$",
+            whitelist_line,
+            text,
+        )
+    else:
+        text = text.rstrip() + "\n" + whitelist_line + "\n"
+    path.write_text(text)
+
+
 def config_values(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in path.read_text(errors="replace").splitlines():
@@ -71,6 +91,8 @@ def audit(args: argparse.Namespace) -> None:
     output = args.output.resolve()
     if not config.is_file():
         raise SystemExit(f"missing integrated config: {config}")
+
+    disable_abi_symbol_trimming(config)
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(config, output / "integrated.config")
 
@@ -103,6 +125,8 @@ def audit(args: argparse.Namespace) -> None:
         "artifact_type=a52xq-gki-5.10-integrated-image-dtb-probe-not-flashable",
         f"required_symbol_count={len(rows)}",
         f"required_symbol_failures={missing}",
+        "abi_symbol_trimming=disabled-for-non-kmi-integration-probe",
+        "unused_ksyms_whitelist=cleared",
         "output_scope=integrated-Image-and-Lagoon-DTB-no-boot-packaging",
         "flashable=no",
     ]

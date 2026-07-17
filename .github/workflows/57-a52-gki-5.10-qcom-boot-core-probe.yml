@@ -165,12 +165,20 @@ jobs:
               result=config-blocked
               rc=0
             else
-              set +e
-              make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 "$target" \
-                >> "$log" 2>&1
-              rc=$?
-              set -e
-              if test -s "$probe_out/$target"; then produced=yes; fi
+              local object_target object_rc
+              local -a targets
+              IFS=',' read -r -a targets <<< "$target"
+              rc=0
+              produced=yes
+              for object_target in "${targets[@]}"; do
+                set +e
+                make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+                  "$object_target" >> "$log" 2>&1
+                object_rc=$?
+                set -e
+                if test "$object_rc" -ne 0; then rc=$object_rc; fi
+                if ! test -s "$probe_out/$object_target"; then produced=no; fi
+              done
               if test "$rc" -eq 0 && test "$produced" = yes; then
                 result=compiled
               else
@@ -182,13 +190,13 @@ jobs:
               >> "$STATUS"
           }
 
-          run_probe qcom-scm drivers/firmware/qcom-scm.o CONFIG_QCOM_SCM \
+          run_probe qcom-scm "drivers/firmware/qcom_scm.o,drivers/firmware/qcom_scm-smc.o,drivers/firmware/qcom_scm-legacy.o" CONFIG_QCOM_SCM \
             CONFIG_QCOM_SCM
           run_probe qcom-smem drivers/soc/qcom/smem.o CONFIG_QCOM_SMEM \
             CONFIG_HWSPINLOCK CONFIG_QCOM_SMEM
           run_probe qcom-command-db drivers/soc/qcom/cmd-db.o CONFIG_QCOM_COMMAND_DB \
             CONFIG_OF_RESERVED_MEM CONFIG_QCOM_COMMAND_DB
-          run_probe qcom-rpmh drivers/soc/qcom/qcom_rpmh.o CONFIG_QCOM_RPMH \
+          run_probe qcom-rpmh "drivers/soc/qcom/rpmh-rsc.o,drivers/soc/qcom/rpmh.o" CONFIG_QCOM_RPMH \
             CONFIG_OF_RESERVED_MEM CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH
           run_probe qcom-aoss-qmp drivers/soc/qcom/qcom_aoss.o CONFIG_QCOM_AOSS_QMP \
             CONFIG_MAILBOX CONFIG_COMMON_CLK CONFIG_PM CONFIG_QCOM_AOSS_QMP

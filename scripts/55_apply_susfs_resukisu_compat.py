@@ -43,6 +43,9 @@ def main() -> None:
     text = susfs_def.read_text()
     final_guard = "#endif // #ifndef KSU_SUSFS_DEF_H\n"
     command_compat = """
+#ifndef SUSFS_MAGIC
+#define SUSFS_MAGIC 0xFAFAFAFA
+#endif
 #ifndef CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS
 #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
 #endif
@@ -51,7 +54,7 @@ def main() -> None:
 #endif
 
 """
-    if "CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS" not in text:
+    if "SUSFS_MAGIC" not in text:
         if text.count(final_guard) != 1:
             raise SystemExit("SUSFS definition final guard mismatch")
         susfs_def.write_text(text.replace(final_guard, command_compat + final_guard, 1))
@@ -148,6 +151,7 @@ void susfs_compat_show_version(void __user **user_info);
         compat_target: ["susfs_compat_show_version", "compat_call_legacy_kstat"],
         makefile: [compat_line.strip()],
         susfs_def: [
+            "SUSFS_MAGIC 0xFAFAFAFA",
             "CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS",
             "CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING",
         ],

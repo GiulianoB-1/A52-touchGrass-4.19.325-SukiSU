@@ -250,8 +250,45 @@ def adapt_clk_debug_core(path: Path) -> None:
     text, count = vote_pattern.subn(vote_replacement, text, count=1)
     if count != 1:
         raise SystemExit("clk_debug_bus_vote function was not replaced")
+
+    measure_get_old = (
+        "static int clk_debug_measure_get(void *data, u64 *val)\n"
+        "{\n"
+        "\tstruct clk_hw *hw = data;\n"
+        "\tstruct clk_debug_mux *meas = to_clk_measure(measure);\n"
+    )
+    measure_get_new = (
+        "static int clk_debug_measure_get(void *data, u64 *val)\n"
+        "{\n"
+        "\tstruct clk_hw *hw = data;\n"
+    )
+    if measure_get_old not in text:
+        raise SystemExit("clk_debug_measure_get compatibility marker not found")
+    text = text.replace(measure_get_old, measure_get_new, 1)
+
+    measure_add_tail = "err:\n}\nEXPORT_SYMBOL(clk_debug_measure_add);"
+    if measure_add_tail not in text:
+        raise SystemExit("clk_debug_measure_add error label marker not found")
+    text = text.replace(
+        measure_add_tail,
+        "err:\n\treturn;\n}\nEXPORT_SYMBOL(clk_debug_measure_add);",
+        1,
+    )
+
+    warn_clk = '\tWARN_CLK(hw->core, clk_hw_get_name(hw), calltrace, "");'
+    if warn_clk not in text:
+        raise SystemExit("qcom_clk_dump WARN_CLK marker not found")
+    text = text.replace(
+        warn_clk,
+        "\t/* The downstream recursive register dumper is not part of GKI. */\n"
+        "\t(void)calltrace;",
+        1,
+    )
+
     if "msm_bus_scale_client_update_request" in text or "msm-bus.h" in text:
         raise SystemExit("MSM bus dependency remains in clk-debug.c")
+    if "WARN_CLK(" in text:
+        raise SystemExit("downstream WARN_CLK dependency remains in clk-debug.c")
     path.write_text(text)
 
 

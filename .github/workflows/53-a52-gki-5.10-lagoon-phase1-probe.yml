@@ -54,7 +54,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
-            clang lld llvm \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio lz4 file dwarves
 
       - name: Restore pinned official GKI 5.10 source
@@ -158,8 +158,10 @@ jobs:
           CLANG="$(readlink -f "$CLANG")"
           CLANG_BIN="$(dirname "$CLANG")"
           export PATH="$CLANG_BIN:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip; do
+          for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip aarch64-linux-gnu-gcc; do
             command -v "$tool"
           done
 
@@ -167,8 +169,11 @@ jobs:
             printf 'clang_source=%s\n' "$CLANG_SOURCE"
             printf 'clang=%s\n' "$CLANG"
             printf 'clang_bin=%s\n' "$CLANG_BIN"
+            printf 'cross_compile=%s\n' "$CROSS_COMPILE"
+            printf 'clang_triple=%s\n' "$CLANG_TRIPLE"
             "$CLANG" --version
             ld.lld --version
+            aarch64-linux-gnu-gcc --version | head -1
           } | tee "$OUT/logs/toolchain.log"
 
           printf 'probe\ttarget\tconfig_symbol\tresolved_value\tresult\texit_code\tobject_produced\n' \

@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/55-a52-linux-4.19.206-resukisu-susfs-inline.yml'
       - 'scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh'
+      - 'scripts/55_transform_resukisu_susfs_wrapper.py'
   workflow_dispatch:
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
         with:
           ref: rebase/resukisu-linux-4.19.325
 
-      - name: Hydrate PR build helper and pinned boot-image tools
+      - name: Hydrate PR build tools and pinned boot-image tools
         env:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -47,11 +48,16 @@ jobs:
             test -s "$path"
           }
           fetch_file "$PR_HEAD_SHA" scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh
+          fetch_file "$PR_HEAD_SHA" scripts/55_transform_resukisu_susfs_wrapper.py
           fetch_file main scripts/37_validate_a52_p1_boot_source.py
           fetch_file main scripts/38_repack_a52_p1_boot.py
           fetch_file main projects/a52-p1-boot-image/boot-source.lock
           chmod +x scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh \
+            scripts/55_transform_resukisu_susfs_wrapper.py \
             scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+          python3 -m py_compile scripts/55_transform_resukisu_susfs_wrapper.py
+          python3 scripts/55_transform_resukisu_susfs_wrapper.py --patch-helper \
+            scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh
           bash -n scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh
 
       - name: Free runner disk space
@@ -81,7 +87,12 @@ jobs:
       - name: Build and repack experimental rooted boot image
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+          set -o pipefail
+          scripts/55_build_a52_linux_4.19.206_resukisu_susfs_inline.sh \
+            2>&1 | tee artifacts/linux-4.19.206-resukisu-susfs-driver.log
 
       - name: Record runner and source diagnostics
         if: always()

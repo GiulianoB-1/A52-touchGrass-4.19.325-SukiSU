@@ -1,0 +1,32 @@
+name: 51 - Auto-run A52 GKI analysis
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/51-a52-gki-5.10-source-gap-analysis.yml
+      - scripts/51_compare_a52_4.19_to_gki_5.10.py
+      - .github/workflows/51-auto-run.yml
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-gki-5.10-analysis-auto-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Dispatch latest Workflow 51 revision
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Start Workflow 51 on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 51-a52-gki-5.10-source-gap-analysis.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main

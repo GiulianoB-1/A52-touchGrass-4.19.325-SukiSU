@@ -43,6 +43,13 @@ CLOCKS = {
     ),
 }
 
+CLOCK_API_FILES = (
+    "drivers/clk/qcom/clk-alpha-pll.h",
+    "drivers/clk/qcom/clk-alpha-pll.c",
+    "drivers/clk/qcom/common.h",
+    "drivers/clk/qcom/common.c",
+)
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -62,7 +69,18 @@ def append_once(path: Path, marker: str, block: str) -> None:
         path.write_text(text.rstrip() + "\n\n" + block.rstrip() + "\n")
 
 
-def strip_vdd_compat(path: Path) -> None:
+def skip_braced_block(lines: list[str], index: int, context: str) -> int:
+    depth = lines[index].count("{") - lines[index].count("}")
+    index += 1
+    while index < len(lines) and depth > 0:
+        depth += lines[index].count("{") - lines[index].count("}")
+        index += 1
+    if depth != 0:
+        raise SystemExit(f"unterminated {context}")
+    return index
+
+
+def adapt_clock_source(path: Path) -> None:
     lines = path.read_text(errors="replace").splitlines()
     result: list[str] = []
     index = 0
@@ -77,7 +95,7 @@ def strip_vdd_compat(path: Path) -> None:
         if "DEFINE_VDD_REGULATORS(" in line or "DEFINE_VDD_REGS_INIT(" in line:
             index += 1
             continue
-        if ".enable_safe_config =" in line:
+        if ".enable_safe_config =" in line or ".cal_l =" in line:
             index += 1
             continue
         if "&clk_branch2_hw_ctl_ops" in line:
@@ -91,21 +109,16 @@ def strip_vdd_compat(path: Path) -> None:
                 index += 1
             if index >= len(lines) or ".rate_max =" not in lines[index]:
                 raise SystemExit(f"malformed VDD rate table in {path}")
-            depth = lines[index].count("{") - lines[index].count("}")
-            index += 1
-            while index < len(lines) and depth > 0:
-                depth += lines[index].count("{") - lines[index].count("}")
-                index += 1
+            index = skip_braced_block(lines, index, f"VDD rate table in {path}")
             continue
 
-        if re.match(r"^vdd_[A-Za-z0-9_]+\.regulator\[0\] = devm_regulator_get", stripped):
+        if re.match(
+            r"^vdd_[A-Za-z0-9_]+\.regulator\[0\] = devm_regulator_get",
+            stripped,
+        ):
             index += 1
             if index < len(lines) and lines[index].lstrip().startswith("if (IS_ERR("):
-                depth = lines[index].count("{") - lines[index].count("}")
-                index += 1
-                while index < len(lines) and depth > 0:
-                    depth += lines[index].count("{") - lines[index].count("}")
-                    index += 1
+                index = skip_braced_block(lines, index, f"regulator error block in {path}")
             continue
 
         result.append(line)
@@ -120,6 +133,7 @@ def strip_vdd_compat(path: Path) -> None:
         ".num_rate_max =",
         ".rate_max =",
         ".enable_safe_config =",
+        ".cal_l =",
         "clk_branch2_hw_ctl_ops",
         "devm_regulator_get",
     )
@@ -136,6 +150,16 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
+def snapshot_clock_api(gki: Path, artifact: Path) -> None:
+    snapshot = artifact / "api-snapshot"
+    snapshot.mkdir(parents=True, exist_ok=True)
+    for relative in CLOCK_API_FILES:
+        source = gki / relative
+        if not source.is_file():
+            raise SystemExit(f"missing pinned clock API file: {relative}")
+        shutil.copy2(source, snapshot / Path(relative).name)
+
+
 def stage(args: argparse.Namespace) -> None:
     gki = args.gki.resolve()
     touchgrass = args.touchgrass.resolve()
@@ -147,10 +171,13 @@ def stage(args: argparse.Namespace) -> None:
         raise SystemExit(f"unexpected source revisions: gki={gki_head}, touchgrass={tg_head}")
     if not (gki / "drivers/clk/qcom/gcc-lagoon.c").is_file():
         raise SystemExit("Workflow 53 phase-1 source was not staged first")
-    if "lagoon_cfg" not in (gki / "drivers/soc/qcom/llcc-qcom.c").read_text(errors="replace"):
+    llcc_core = gki / "drivers/soc/qcom/llcc-qcom.c"
+    if "lagoon_cfg" not in llcc_core.read_text(errors="replace"):
         raise SystemExit("Workflow 53 Lagoon LLCC integration is missing")
 
     artifact.mkdir(parents=True, exist_ok=True)
+    snapshot_clock_api(gki, artifact)
+
     rows: list[dict[str, str]] = []
     kconfig_blocks: list[str] = []
 
@@ -162,15 +189,17 @@ def stage(args: argparse.Namespace) -> None:
         before = sha256(destination) if destination.is_file() else "<absent>"
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-        strip_vdd_compat(destination)
-        rows.append({
-            "probe": probe,
-            "relative_path": relative,
-            "purpose": description,
-            "source_sha256": sha256(source),
-            "gki_before_sha256": before,
-            "gki_after_sha256": sha256(destination),
-        })
+        adapt_clock_source(destination)
+        rows.append(
+            {
+                "probe": probe,
+                "relative_path": relative,
+                "purpose": description,
+                "source_sha256": sha256(source),
+                "gki_before_sha256": before,
+                "gki_after_sha256": sha256(destination),
+            }
+        )
         kconfig_blocks.append(
             f"config {symbol}\n"
             f"\ttristate \"{description}\"\n"
@@ -179,10 +208,11 @@ def stage(args: argparse.Namespace) -> None:
             f"\thelp\n"
             f"\t  Non-flashable A52xq GKI 5.10 compile-probe support."
         )
+        object_name = Path(relative).name.replace(".c", ".o")
         append_once(
             gki / "drivers/clk/qcom/Makefile",
-            Path(relative).name.replace(".c", ".o"),
-            f"obj-$(CONFIG_{symbol}) += {Path(relative).name.replace('.c', '.o')}",
+            object_name,
+            f"obj-$(CONFIG_{symbol}) += {object_name}",
         )
 
     append_once(
@@ -192,8 +222,12 @@ def stage(args: argparse.Namespace) -> None:
     )
 
     fields = [
-        "probe", "relative_path", "purpose", "source_sha256",
-        "gki_before_sha256", "gki_after_sha256",
+        "probe",
+        "relative_path",
+        "purpose",
+        "source_sha256",
+        "gki_before_sha256",
+        "gki_after_sha256",
     ]
     write_tsv(artifact / "staged-files.tsv", fields, rows)
 
@@ -214,6 +248,8 @@ def stage(args: argparse.Namespace) -> None:
         f"touchgrass_commit={tg_head}",
         f"planned_probes={len(CLOCKS)}",
         "phase1_dependency=gcc-lagoon,pinctrl-lagoon,llcc-lagoon",
+        "clock_api_snapshot=clk-alpha-pll.h,clk-alpha-pll.c,common.h,common.c",
+        "compat_removed=downstream-vdd,cal-l,safe-config,branch-hw-ctl",
     ]
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
@@ -222,7 +258,13 @@ def diagnostics(path: Path) -> list[str]:
     if not path.is_file():
         return ["log missing"]
     lines = path.read_text(errors="replace").splitlines()
-    patterns = ("error:", "fatal error:", "undefined reference", "No rule to make target", "No such file or directory")
+    patterns = (
+        "error:",
+        "fatal error:",
+        "undefined reference",
+        "No rule to make target",
+        "No such file or directory",
+    )
     selected: list[str] = []
     for line in lines:
         if any(pattern.lower() in line.lower() for pattern in patterns):
@@ -249,28 +291,52 @@ def finalize(args: argparse.Namespace) -> None:
     failed = sum(row.get("result") == "compile-failed" for row in rows)
     blocked = sum(row.get("result") == "config-blocked" for row in rows)
     report = [
-        "# A52xq GKI 5.10 Lagoon peripheral clocks phase-2 probe", "", "## Result", "",
-        f"- compiled: **{passed}**", f"- compile failures: **{failed}**",
-        f"- Kconfig blocked: **{blocked}**", "",
+        "# A52xq GKI 5.10 Lagoon peripheral clocks phase-2 probe",
+        "",
+        "## Result",
+        "",
+        f"- compiled: **{passed}**",
+        f"- compile failures: **{failed}**",
+        f"- Kconfig blocked: **{blocked}**",
+        "",
     ]
     for row in rows:
         probe = row["probe"]
-        report.extend([
-            f"### `{probe}`", "",
-            f"- target: `{row['target']}`",
-            f"- symbol: `{row['config_symbol']}` resolved to `{row['resolved_value']}`",
-            f"- result: **{row['result']}**",
-            f"- object produced: `{row['object_produced']}`", "", "First diagnostics:", "",
-        ])
-        report.extend(f"- `{line.replace('`', chr(39))}`" for line in diagnostics(artifact / "logs" / f"{probe}.log"))
+        report.extend(
+            [
+                f"### `{probe}`",
+                "",
+                f"- target: `{row['target']}`",
+                f"- symbol: `{row['config_symbol']}` resolved to `{row['resolved_value']}`",
+                f"- result: **{row['result']}**",
+                f"- object produced: `{row['object_produced']}`",
+                "",
+                "First diagnostics:",
+                "",
+            ]
+        )
+        report.extend(
+            f"- `{line.replace('`', chr(39))}`"
+            for line in diagnostics(artifact / "logs" / f"{probe}.log")
+        )
         report.append("")
     (artifact / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
 
     metadata = (artifact / "analysis-metadata.txt").read_text().rstrip().splitlines()
-    metadata.extend([f"compiled_success={passed}", f"compile_failed={failed}", f"config_blocked={blocked}"])
+    metadata.extend(
+        [
+            f"compiled_success={passed}",
+            f"compile_failed={failed}",
+            f"config_blocked={blocked}",
+        ]
+    )
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
-    files = sorted(path for path in artifact.rglob("*") if path.is_file() and path.name != "SHA256SUMS")
+    files = sorted(
+        path
+        for path in artifact.rglob("*")
+        if path.is_file() and path.name != "SHA256SUMS"
+    )
     with (artifact / "SHA256SUMS").open("w") as stream:
         for path in files:
             stream.write(f"{sha256(path)}  {path.relative_to(artifact).as_posix()}\n")
@@ -279,15 +345,18 @@ def finalize(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
+
     stage_parser = commands.add_parser("stage")
     stage_parser.add_argument("--gki", type=Path, required=True)
     stage_parser.add_argument("--touchgrass", type=Path, required=True)
     stage_parser.add_argument("--output", type=Path, required=True)
     stage_parser.set_defaults(func=stage)
+
     finalize_parser = commands.add_parser("finalize")
     finalize_parser.add_argument("--output", type=Path, required=True)
     finalize_parser.add_argument("--status-file", type=Path, required=True)
     finalize_parser.set_defaults(func=finalize)
+
     args = parser.parse_args()
     args.func(args)
 

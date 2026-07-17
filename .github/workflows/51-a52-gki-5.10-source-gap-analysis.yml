@@ -196,24 +196,31 @@ jobs:
           rm -rf "$GKI_OUT"
           GKI_PREBUILT_ROOT="gki/prebuilts/clang/host/linux-x86"
           test -d "$GKI_PREBUILT_ROOT"
-          mapfile -t GKI_CLANG_CANDIDATES < <(
-            find "$GKI_PREBUILT_ROOT" -path '*/bin/clang' \
-              \( -type f -o -type l \) -print | sort -V
+          mapfile -t GKI_CLANG_BINS < <(
+            while IFS= read -r bin_dir; do
+              if test -x "$bin_dir/clang"; then
+                printf '%s\n' "$bin_dir"
+              fi
+            done < <(find "$GKI_PREBUILT_ROOT" -type d -name bin -print)
           )
-          test "${#GKI_CLANG_CANDIDATES[@]}" -gt 0
-          GKI_CLANG="${GKI_CLANG_CANDIDATES[$((${#GKI_CLANG_CANDIDATES[@]} - 1))]}"
+          test "${#GKI_CLANG_BINS[@]}" -gt 0
+          IFS=$'\n' GKI_CLANG_BINS=($(printf '%s\n' "${GKI_CLANG_BINS[@]}" | sort -V))
+          unset IFS
+          GKI_CLANG_BIN="${GKI_CLANG_BINS[$((${#GKI_CLANG_BINS[@]} - 1))]}"
+          GKI_CLANG="$GKI_CLANG_BIN/clang"
           GKI_CLANG_REAL="$(readlink -f "$GKI_CLANG")"
           test -n "$GKI_CLANG_REAL"
           test -x "$GKI_CLANG_REAL"
-          GKI_CLANG_BIN="$(dirname "$GKI_CLANG")"
-          test -x "$GKI_CLANG_BIN/ld.lld"
-          test -x "$GKI_CLANG_BIN/llvm-ar"
+          {
+            printf 'gki_prebuilt_root=%s\n' "$GKI_PREBUILT_ROOT"
+            printf 'gki_clang_bin=%s\n' "$GKI_CLANG_BIN"
+            printf 'gki_clang=%s\n' "$GKI_CLANG"
+            printf 'gki_clang_real=%s\n' "$GKI_CLANG_REAL"
+          } | tee artifacts/logs/workflow51-gki-toolchain-discovery.log
           (
             unset CC CROSS_COMPILE CLANG_TRIPLE KCFLAGS CONFIG_SECTION_MISMATCH_WARN_ONLY CONFIG_DRV_BUILD_IN
             export PATH="$GKI_CLANG_BIN:$PATH"
-            printf 'gki_clang=%s\n' "$GKI_CLANG"
-            printf 'gki_clang_real=%s\n' "$GKI_CLANG_REAL"
-            clang --version | head -n 1
+            "$GKI_CLANG" --version | head -n 1
             make -C gki/common O="$GKI_OUT" ARCH=arm64 \
               LLVM=1 LLVM_IAS=1 gki_defconfig
           ) 2>&1 | tee artifacts/logs/workflow51-gki-config.log

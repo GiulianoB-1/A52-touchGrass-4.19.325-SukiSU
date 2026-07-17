@@ -1,0 +1,251 @@
+name: 55 - A52 GKI 5.10 Lagoon remaining clocks compile probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/55-a52-gki-5.10-lagoon-remaining-clocks-probe.yml
+      - scripts/53_probe_a52xq_lagoon_phase1.py
+      - scripts/54_probe_a52xq_lagoon_clocks_phase2.py
+      - scripts/55_probe_a52xq_lagoon_remaining_clocks.py
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-lagoon-remaining-clocks-probe
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  SEED_ARTIFACT_ID: '8413697551'
+  SEED_CONFIG_SHA256: b4da88c027cb7d3efad948b0f0986ee24d968dedcf14499d360f4e0c623cf01a
+
+jobs:
+  probe:
+    name: Compile-probe Lagoon NPU and debug clocks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Publish direct run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 28 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 55 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Commit: \`${GITHUB_SHA}\`
+          Event: \`${GITHUB_EVENT_NAME}\`"
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install compile-probe dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio lz4 file dwarves
+
+      - name: Restore pinned official GKI 5.10 source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Validate and clean GKI source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          test -x gki/common/scripts/config
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+      - name: Restore working touchGrass Linux 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Validate touchGrass source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.touchgrass-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Obtain Workflow 52 resolved configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/workflow52-seed artifacts/logs
+          ZIP=workspace/workflow52-seed/seed.zip
+          curl -fL --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o "$ZIP" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEED_ARTIFACT_ID}/zip"
+          unzip -p "$ZIP" a52xq-5.10-resolved.config \
+            > workspace/workflow52-seed/a52xq-5.10-resolved.config
+          test -s workspace/workflow52-seed/a52xq-5.10-resolved.config
+          printf '%s  %s\n' "$SEED_CONFIG_SHA256" \
+            workspace/workflow52-seed/a52xq-5.10-resolved.config | sha256sum -c -
+
+      - name: Stage completed Lagoon phase 1
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/workflow55-phase1
+          python3 scripts/53_probe_a52xq_lagoon_phase1.py stage \
+            --gki gki/common \
+            --touchgrass workspace/touchgrass-a52xq \
+            --seed-config workspace/workflow52-seed/a52xq-5.10-resolved.config \
+            --output workspace/workflow55-phase1
+
+      - name: Stage completed Lagoon phase 2
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/workflow55-phase2
+          python3 scripts/54_probe_a52xq_lagoon_clocks_phase2.py stage \
+            --gki gki/common \
+            --touchgrass workspace/touchgrass-a52xq \
+            --output workspace/workflow55-phase2
+
+      - name: Stage Lagoon NPU and debug clocks
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-lagoon-remaining-clocks-probe
+          rm -rf "$OUT" workspace/gki-lagoon-remaining-clocks-out
+          mkdir -p "$OUT/logs" workspace/gki-lagoon-remaining-clocks-out
+          python3 scripts/55_probe_a52xq_lagoon_remaining_clocks.py stage \
+            --gki gki/common \
+            --touchgrass workspace/touchgrass-a52xq \
+            --output "$OUT"
+          git -C gki/common diff --check > "$OUT/logs/port-diff-check.log" 2>&1 || true
+          test -s "$OUT/lagoon-remaining-clocks-port.patch"
+          test -s "$OUT/staged-files.tsv"
+          test -s "$OUT/lagoon-remaining-clocks.fragment"
+
+      - name: Resolve toolchain and compile each remaining clock object
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-lagoon-remaining-clocks-probe"
+          BASE="$PWD/workspace/workflow52-seed/a52xq-5.10-resolved.config"
+          STATUS="$PWD/workspace/workflow55-compile-status.tsv"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+
+          printf 'probe\ttarget\tconfig_symbol\tresolved_value\tresult\texit_code\tobject_produced\n' > "$STATUS"
+
+          config_value() {
+            local file="$1" symbol="$2"
+            if grep -Fxq "${symbol}=y" "$file"; then printf y
+            elif grep -Fxq "${symbol}=m" "$file"; then printf m
+            else printf n
+            fi
+          }
+
+          run_probe() {
+            local probe="$1" target="$2" config_symbol="$3"
+            shift 3
+            local probe_out="$PWD/workspace/gki-lagoon-remaining-clocks-out/$probe"
+            local log="$OUT/logs/$probe.log"
+            rm -rf "$probe_out"
+            mkdir -p "$probe_out"
+            cp "$BASE" "$probe_out/.config"
+            gki/common/scripts/config --file "$probe_out/.config" --disable TRIM_UNUSED_KSYMS
+            gki/common/scripts/config --file "$probe_out/.config" --set-str UNUSED_KSYMS_WHITELIST ''
+            for symbol in "$@"; do
+              gki/common/scripts/config --file "$probe_out/.config" --enable "${symbol#CONFIG_}"
+            done
+            make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig >> "$log" 2>&1
+            local resolved result rc produced=no
+            resolved="$(config_value "$probe_out/.config" "$config_symbol")"
+            if test "$resolved" = n; then
+              result=config-blocked
+              rc=0
+            else
+              set +e
+              make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 "$target" >> "$log" 2>&1
+              rc=$?
+              set -e
+              if test -s "$probe_out/$target"; then produced=yes; fi
+              if test "$rc" -eq 0 && test "$produced" = yes; then result=compiled
+              else result=compile-failed
+              fi
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$probe" "$target" "$config_symbol" "$resolved" "$result" "$rc" "$produced" >> "$STATUS"
+          }
+
+          run_probe npucc-lagoon drivers/clk/qcom/npucc-lagoon.o CONFIG_NPU_CC_LAGOON \
+            CONFIG_COMMON_CLK_QCOM CONFIG_NPU_CC_LAGOON
+          run_probe clk-debug-core drivers/clk/qcom/clk-debug.o CONFIG_QCOM_CLK_DEBUG \
+            CONFIG_COMMON_CLK_QCOM CONFIG_DEBUG_FS CONFIG_QCOM_CLK_DEBUG
+          run_probe debugcc-lagoon drivers/clk/qcom/debugcc-lagoon.o CONFIG_DEBUG_CC_LAGOON \
+            CONFIG_COMMON_CLK_QCOM CONFIG_DEBUG_FS CONFIG_QCOM_CLK_DEBUG CONFIG_DEBUG_CC_LAGOON
+
+          cat "$STATUS"
+          python3 scripts/55_probe_a52xq_lagoon_remaining_clocks.py finalize \
+            --output "$OUT" --status-file "$STATUS"
+
+      - name: Enforce remaining-clock probe invariants
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-lagoon-remaining-clocks-probe
+          test -s "$OUT/PORTING-PROBE-REPORT.md"
+          test -s "$OUT/compile-status.tsv"
+          test -s "$OUT/lagoon-remaining-clocks-port.patch"
+          test -s "$OUT/staged-files.tsv"
+          test -s "$OUT/analysis-metadata.txt"
+          test -s "$OUT/SHA256SUMS"
+          test "$(tail -n +2 "$OUT/compile-status.tsv" | wc -l)" -eq 3
+          grep -Fxq \
+            'artifact_type=a52xq-gki-5.10-lagoon-remaining-clocks-compile-probe-not-flashable' \
+            "$OUT/analysis-metadata.txt"
+          ! find "$OUT" -type f \( -name Image -o -name boot.img \) | grep -q .
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          cat "$OUT/analysis-metadata.txt"
+          sed -n '1,300p' "$OUT/PORTING-PROBE-REPORT.md"
+
+      - name: Upload non-flashable Lagoon remaining-clock probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-lagoon-remaining-clocks-probe-${{ github.run_number }}-NOT-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-lagoon-remaining-clocks-probe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Workflow 55 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-lagoon-remaining-clocks-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-lagoon-remaining-clocks-probe/
+            workspace/workflow55-compile-status.tsv
+            workspace/gki-lagoon-remaining-clocks-out/*/.config
+          if-no-files-found: warn
+          retention-days: 7

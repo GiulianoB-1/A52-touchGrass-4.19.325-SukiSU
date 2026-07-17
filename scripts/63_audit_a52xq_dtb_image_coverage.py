@@ -79,7 +79,11 @@ def sha256(path: Path) -> str:
 
 
 def decode_strings(statement: str) -> tuple[str, ...]:
-    return tuple(bytes(value, "utf-8").decode("unicode_escape") for value in STRING_RE.findall(statement))
+    values: list[str] = []
+    for encoded in STRING_RE.findall(statement):
+        decoded = bytes(encoded, "utf-8").decode("unicode_escape")
+        values.extend(part for part in decoded.split("\x00") if part)
+    return tuple(values)
 
 
 def parse_dts(path: Path) -> list[Node]:
@@ -179,9 +183,10 @@ def audit(args: argparse.Namespace) -> None:
     rows: list[dict[str, str]] = []
     for compatible in all_compatibles:
         match = compatible in strings
+        category = classify(compatible, required)
         rows.append({
             "compatible": compatible,
-            "category": classify(compatible, required),
+            "category": category,
             "total_node_count": str(all_count[compatible]),
             "enabled_node_count": str(enabled_count[compatible]),
             "exact_image_string_match": "yes" if match else "no",
@@ -205,10 +210,11 @@ def audit(args: argparse.Namespace) -> None:
     missing_required = 0
     for compatible in REQUIRED_BUILTIN_COMPATIBLES:
         match = compatible in strings
+        enabled = enabled_count[compatible]
         missing_required += int(not match)
         required_rows.append({
             "compatible": compatible,
-            "enabled_node_count": str(enabled_count[compatible]),
+            "enabled_node_count": str(enabled),
             "exact_image_string_match": "yes" if match else "no",
             "result": "pass" if match else "fail",
         })

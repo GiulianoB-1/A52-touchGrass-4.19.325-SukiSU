@@ -282,7 +282,7 @@ def adapt_debugcc_dummy_clocks(path: Path) -> None:
         "};\n\n"
     )
     text = text.replace(marker, block + marker, 1)
-    if "struct clk_dummy" in text or "clk_dummy_ops" in text or ".rrate =" in text:
+    if "struct clk_dummy" in text or "&clk_dummy_ops" in text or ".rrate =" in text:
         raise SystemExit("downstream dummy-clock API remains in debugcc-lagoon.c")
     path.write_text(text)
 

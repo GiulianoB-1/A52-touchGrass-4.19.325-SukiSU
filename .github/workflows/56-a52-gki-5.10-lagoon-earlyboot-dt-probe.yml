@@ -140,8 +140,9 @@ jobs:
             --output "$OUT"
           git -C gki/common diff --check > "$OUT/logs/port-diff-check.log" 2>&1 || true
           test -s "$OUT/lagoon-earlyboot-dt-port.patch"
+          test -s "$OUT/local-include-graph.tsv"
           test -s "$OUT/binding-resolution.tsv"
-          test -s "$OUT/source-summary.tsv"
+          test -s "$OUT/analysis-metadata.txt"
 
       - name: Preprocess and compile minimal Lagoon base DT
         run: |

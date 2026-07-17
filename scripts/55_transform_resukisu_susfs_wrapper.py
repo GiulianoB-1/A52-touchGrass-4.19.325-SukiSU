@@ -26,6 +26,31 @@ cp "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" "$KERNEL_DIR/include/li
 grep -Fq '#define SUSFS_VERSION "v1.5.9"' "$KERNEL_DIR/include/linux/susfs.h" || fail "Unexpected SUSFS branch version"
 patch -d "$KERNEL_DIR" -p1 --forward --batch --fuzz=3 < "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
 sed -i 's/[[:space:]]\+$//' "$KERNEL_DIR/fs/namespace.c" "$KERNEL_DIR/fs/overlayfs/readdir.c"
+python3 - "$KERNEL_DIR/fs/namei.c" "$KERNEL_DIR/fs/proc_namespace.c" <<'SUSFSWHITESPACEPY'
+from pathlib import Path
+import sys
+
+namei = Path(sys.argv[1])
+text = namei.read_text()
+bad_indent = ' \t\treturn dentry;'
+if text.count(bad_indent) != 1:
+    raise SystemExit('SUSFS namei indentation anchor mismatch')
+text = text.replace(bad_indent, '\t\treturn dentry;', 1)
+text = '\n'.join(line.rstrip(' \t') for line in text.split('\n'))
+namei.write_text(text)
+
+proc_namespace = Path(sys.argv[2])
+text = proc_namespace.read_text()
+bad_continuation = '    \t(susfs_hide_sus_mnts_for_all_procs || !susfs_is_current_ksu_domain()))'
+if text.count(bad_continuation) != 3:
+    raise SystemExit('SUSFS proc_namespace indentation anchor mismatch')
+text = text.replace(
+    bad_continuation,
+    '\t(susfs_hide_sus_mnts_for_all_procs || !susfs_is_current_ksu_domain()))',
+)
+text = '\n'.join(line.rstrip(' \t') for line in text.split('\n'))
+proc_namespace.write_text(text)
+SUSFSWHITESPACEPY
 python3 - "$KERNEL_DIR/include/linux/susfs_def.h" "$RESUKISU_DIR/kernel/feature/kernel_umount.c" <<'SUSFSCOMPATPY'
 from pathlib import Path
 import sys

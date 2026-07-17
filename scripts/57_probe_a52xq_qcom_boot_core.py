@@ -12,7 +12,7 @@ GKI_SHA = "f960ed27302b1ff8e61e152fc202554d778deccd"
 
 PROBES = {
     "qcom-scm": {
-        "target": "drivers/firmware/qcom-scm.o",
+        "target": "drivers/firmware/qcom_scm.o,drivers/firmware/qcom_scm-smc.o,drivers/firmware/qcom_scm-legacy.o",
         "config": "CONFIG_QCOM_SCM",
         "description": "Qualcomm secure-channel manager",
         "enable": ("CONFIG_QCOM_SCM",),
@@ -37,7 +37,7 @@ PROBES = {
         "sources": ("drivers/soc/qcom/cmd-db.c",),
     },
     "qcom-rpmh": {
-        "target": "drivers/soc/qcom/qcom_rpmh.o",
+        "target": "drivers/soc/qcom/rpmh-rsc.o,drivers/soc/qcom/rpmh.o",
         "config": "CONFIG_QCOM_RPMH",
         "description": "Qualcomm RPMh communication core",
         "enable": (

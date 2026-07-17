@@ -2,6 +2,12 @@ name: 51 - A52 GKI 5.10 source gap analysis
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/51-a52-gki-5.10-source-gap-analysis.yml
+      - scripts/51_compare_a52_4.19_to_gki_5.10.py
 
 permissions:
   contents: read

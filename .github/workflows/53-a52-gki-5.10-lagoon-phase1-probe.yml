@@ -197,6 +197,11 @@ jobs:
             mkdir -p "$probe_out"
             cp "$BASE" "$probe_out/.config"
 
+            gki/common/scripts/config --file "$probe_out/.config" \
+              --disable TRIM_UNUSED_KSYMS
+            gki/common/scripts/config --file "$probe_out/.config" \
+              --set-str UNUSED_KSYMS_WHITELIST ''
+
             for symbol in "$@"; do
               gki/common/scripts/config --file "$probe_out/.config" \
                 --enable "${symbol#CONFIG_}"

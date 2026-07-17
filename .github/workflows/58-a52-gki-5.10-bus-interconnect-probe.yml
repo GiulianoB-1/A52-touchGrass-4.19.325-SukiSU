@@ -203,31 +203,33 @@ jobs:
 
           run_probe qcom-bcm-voter \
             drivers/interconnect/qcom/bcm-voter.c \
-            drivers/interconnect/qcom/bcm-voter.o \
-            CONFIG_INTERCONNECT_QCOM \
+            drivers/interconnect/qcom/icc-bcm-voter.o \
+            CONFIG_INTERCONNECT_QCOM_BCM_VOTER \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM
+            CONFIG_INTERCONNECT_QCOM_BCM_VOTER
 
           run_probe qcom-icc-rpmh \
             drivers/interconnect/qcom/icc-rpmh.c \
             drivers/interconnect/qcom/icc-rpmh.o \
-            CONFIG_INTERCONNECT_QCOM \
+            CONFIG_INTERCONNECT_QCOM_RPMH \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM
+            CONFIG_INTERCONNECT_QCOM_BCM_VOTER CONFIG_INTERCONNECT_QCOM_RPMH
 
           run_probe qcom-sc7180 \
             drivers/interconnect/qcom/sc7180.c \
             drivers/interconnect/qcom/sc7180.o \
             CONFIG_INTERCONNECT_QCOM_SC7180 \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM CONFIG_INTERCONNECT_QCOM_SC7180
+            CONFIG_INTERCONNECT_QCOM_BCM_VOTER CONFIG_INTERCONNECT_QCOM_RPMH \
+            CONFIG_INTERCONNECT_QCOM_SC7180
 
           run_probe qcom-sm8250 \
             drivers/interconnect/qcom/sm8250.c \
             drivers/interconnect/qcom/sm8250.o \
             CONFIG_INTERCONNECT_QCOM_SM8250 \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM CONFIG_INTERCONNECT_QCOM_SM8250
+            CONFIG_INTERCONNECT_QCOM_BCM_VOTER CONFIG_INTERCONNECT_QCOM_RPMH \
+            CONFIG_INTERCONNECT_QCOM_SM8250
 
           cat "$STATUS"
           python3 scripts/58_probe_a52xq_bus_interconnect.py finalize \

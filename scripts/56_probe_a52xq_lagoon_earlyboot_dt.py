@@ -7,15 +7,21 @@ import hashlib
 import re
 import shutil
 import subprocess
+from collections import deque
 from pathlib import Path
 
 GKI_SHA = "f960ed27302b1ff8e61e152fc202554d778deccd"
 TOUCHGRASS_SHA = "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7"
-SOURCE_DTS = Path("arch/arm64/boot/dts/vendor/qcom/lagoon.dtsi")
-STAGED_DTS = Path("arch/arm64/boot/dts/qcom/lagoon-earlyboot-probe.dtsi")
-WRAPPER_DTS = Path("arch/arm64/boot/dts/qcom/lagoon-earlyboot-probe.dts")
+SOURCE_ROOT = Path("arch/arm64/boot/dts/vendor/qcom")
+DEST_ROOT = Path("arch/arm64/boot/dts/qcom")
+ROOT_SOURCE = Path("lagoon.dtsi")
+ROOT_DEST = Path("lagoon-earlyboot-probe.dtsi")
+WRAPPER_DTS = Path("lagoon-earlyboot-probe.dts")
 ANGLE_INCLUDE = re.compile(r'^\s*#include\s+<([^>]+)>', re.MULTILINE)
 LOCAL_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
+REFERENCE_ONLY_PREFIXES = (
+    "camera/", "lagoon-audio", "lagoon-sde", "lagoon-vidc",
+)
 
 
 def sha256(path: Path) -> str:
@@ -37,6 +43,14 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
+def normalize_local_include(source_root: Path, current: Path, include_name: str) -> Path | None:
+    candidate = (source_root / current.parent / include_name).resolve()
+    try:
+        return candidate.relative_to(source_root.resolve())
+    except ValueError:
+        return None
+
+
 def stage(args: argparse.Namespace) -> None:
     gki = args.gki.resolve()
     touchgrass = args.touchgrass.resolve()
@@ -47,19 +61,85 @@ def stage(args: argparse.Namespace) -> None:
     if gki_head != GKI_SHA or tg_head != TOUCHGRASS_SHA:
         raise SystemExit(f"unexpected source revisions: gki={gki_head}, touchgrass={tg_head}")
 
-    source = touchgrass / SOURCE_DTS
-    if not source.is_file():
-        raise SystemExit(f"missing touchGrass base DTS: {SOURCE_DTS}")
-    source_text = source.read_text(errors="replace")
-    local_includes = sorted(set(LOCAL_INCLUDE.findall(source_text)))
+    source_root = (touchgrass / SOURCE_ROOT).resolve()
+    dest_root = (gki / DEST_ROOT).resolve()
+    root_source = source_root / ROOT_SOURCE
+    if not root_source.is_file():
+        raise SystemExit(f"missing touchGrass base DTS: {SOURCE_ROOT / ROOT_SOURCE}")
 
     artifact.mkdir(parents=True, exist_ok=True)
-    destination = gki / STAGED_DTS
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    before = sha256(destination) if destination.is_file() else "<absent>"
-    shutil.copy2(source, destination)
+    dest_root.mkdir(parents=True, exist_ok=True)
 
-    wrapper = gki / WRAPPER_DTS
+    queue: deque[tuple[Path, str]] = deque([(ROOT_SOURCE, "<root>")])
+    visited: set[Path] = set()
+    local_rows: list[dict[str, str]] = []
+    angle_includes: set[str] = set()
+    staged_paths: list[str] = []
+    unresolved_local = 0
+    reference_only = 0
+
+    while queue:
+        relative, included_from = queue.popleft()
+        if relative in visited:
+            continue
+        visited.add(relative)
+
+        source = source_root / relative
+        if not source.is_file():
+            unresolved_local += 1
+            local_rows.append({
+                "relative_path": relative.as_posix(),
+                "included_from": included_from,
+                "action": "unresolved",
+                "scope": "unknown",
+                "source_sha256": "<absent>",
+                "gki_before_sha256": "<absent>",
+                "gki_after_sha256": "<absent>",
+            })
+            continue
+
+        destination_relative = ROOT_DEST if relative == ROOT_SOURCE else relative
+        destination = dest_root / destination_relative
+        before = sha256(destination) if destination.is_file() else "<absent>"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        staged_paths.append((DEST_ROOT / destination_relative).as_posix())
+
+        scope = "early-boot"
+        relative_text = relative.as_posix()
+        if relative_text.startswith(REFERENCE_ONLY_PREFIXES):
+            scope = "reference-only"
+            reference_only += 1
+
+        local_rows.append({
+            "relative_path": relative_text,
+            "included_from": included_from,
+            "action": "copied-touchgrass",
+            "scope": scope,
+            "source_sha256": sha256(source),
+            "gki_before_sha256": before,
+            "gki_after_sha256": sha256(destination),
+        })
+
+        text = source.read_text(errors="replace")
+        angle_includes.update(ANGLE_INCLUDE.findall(text))
+        for include_name in LOCAL_INCLUDE.findall(text):
+            child = normalize_local_include(source_root, relative, include_name)
+            if child is None:
+                unresolved_local += 1
+                local_rows.append({
+                    "relative_path": include_name,
+                    "included_from": relative_text,
+                    "action": "outside-source-root",
+                    "scope": "unknown",
+                    "source_sha256": "<unresolved>",
+                    "gki_before_sha256": "<unresolved>",
+                    "gki_after_sha256": "<unresolved>",
+                })
+                continue
+            queue.append((child, relative_text))
+
+    wrapper = dest_root / WRAPPER_DTS
     wrapper.write_text(
         "/dts-v1/;\n\n"
         "#include \"lagoon-earlyboot-probe.dtsi\"\n\n"
@@ -68,11 +148,11 @@ def stage(args: argparse.Namespace) -> None:
         "\tcompatible = \"qcom,lagoon-mtp\", \"qcom,lagoon\";\n"
         "};\n"
     )
+    staged_paths.append((DEST_ROOT / WRAPPER_DTS).as_posix())
 
     binding_rows: list[dict[str, str]] = []
-    staged_paths = [STAGED_DTS.as_posix(), WRAPPER_DTS.as_posix()]
-    unresolved = 0
-    for include_name in sorted(set(ANGLE_INCLUDE.findall(source_text))):
+    unresolved_binding = 0
+    for include_name in sorted(angle_includes):
         relative = Path("include") / include_name
         gki_path = gki / relative
         touchgrass_path = touchgrass / relative
@@ -88,7 +168,7 @@ def stage(args: argparse.Namespace) -> None:
             action = "copied-touchgrass"
         elif not existed:
             action = "unresolved"
-            unresolved += 1
+            unresolved_binding += 1
 
         after_hash = sha256(gki_path) if gki_path.is_file() else "<absent>"
         binding_rows.append({
@@ -100,20 +180,20 @@ def stage(args: argparse.Namespace) -> None:
         })
 
     write_tsv(
+        artifact / "local-include-graph.tsv",
+        [
+            "relative_path", "included_from", "action", "scope",
+            "source_sha256", "gki_before_sha256", "gki_after_sha256",
+        ],
+        local_rows,
+    )
+    write_tsv(
         artifact / "binding-resolution.tsv",
         ["include", "action", "touchgrass_sha256", "gki_before_sha256", "gki_after_sha256"],
         binding_rows,
     )
-    (artifact / "local-includes.txt").write_text(
-        "\n".join(local_includes) + ("\n" if local_includes else "")
-    )
-    (artifact / "source-summary.tsv").write_text(
-        "source\tgki_destination\tgki_before_sha256\ttouchgrass_sha256\tgki_after_sha256\n"
-        f"{SOURCE_DTS.as_posix()}\t{STAGED_DTS.as_posix()}\t{before}\t"
-        f"{sha256(source)}\t{sha256(destination)}\n"
-    )
 
-    existing_paths = [path for path in staged_paths if (gki / path).exists()]
+    existing_paths = sorted(set(path for path in staged_paths if (gki / path).exists()))
     subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *existing_paths], check=True)
     patch = output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
     (artifact / "lagoon-earlyboot-dt-port.patch").write_text(
@@ -124,17 +204,19 @@ def stage(args: argparse.Namespace) -> None:
         "artifact_type=a52xq-gki-5.10-lagoon-earlyboot-dt-compile-probe-not-flashable",
         f"gki_commit={gki_head}",
         f"touchgrass_commit={tg_head}",
+        f"local_file_count={len(visited)}",
+        f"reference_only_file_count={reference_only}",
+        f"unresolved_local_include_count={unresolved_local}",
         f"binding_include_count={len(binding_rows)}",
-        f"unresolved_binding_count={unresolved}",
-        f"local_include_count={len(local_includes)}",
-        "source_scope=lagoon.dtsi-only",
-        "excluded_overlays=samsung-board,display,camera,audio,wifi,modem",
+        f"unresolved_binding_count={unresolved_binding}",
+        "source_scope=recursive-lagoon-base-include-graph",
+        "reference_only_subsystems=camera,display,audio,video",
         "output_scope=syntax-and-reference-validation-only",
     ]
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
 
-def diagnostics(path: Path, limit: int = 30) -> list[str]:
+def diagnostics(path: Path, limit: int = 40) -> list[str]:
     if not path.is_file():
         return ["log missing"]
     lines = path.read_text(errors="replace").splitlines()
@@ -168,8 +250,9 @@ def finalize(args: argparse.Namespace) -> None:
     report = [
         "# A52xq GKI 5.10 Lagoon early-boot device-tree probe", "",
         "## Scope", "",
-        "- Source: `lagoon.dtsi` only",
-        "- Samsung board and multimedia overlays are deliberately excluded.",
+        "- Root source: `lagoon.dtsi`",
+        "- Its local include graph is staged recursively for reference resolution.",
+        "- Camera, display, audio, and video files are reference-only and are not driver-port approvals.",
         "- The generated DTB is a compile probe and is not flashable.", "",
         "## Result", "",
         f"- preprocessing: **{row['preprocess_result']}**",

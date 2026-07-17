@@ -119,6 +119,8 @@ jobs:
             --touchgrass workspace/touchgrass-a52xq \
             --output "$OUT"
           test -s "$OUT/staged-files.tsv"
+          test -s "$OUT/compatibility-headers.tsv"
+          test -s "$OUT/source-adaptations.txt"
           test -s "$OUT/downstream-qsmmu-stage.patch"
           test -s "$OUT/analysis-metadata.txt"
           git -C gki/common diff --check
@@ -149,11 +151,9 @@ jobs:
             > "$OUT/logs/olddefconfig.log" 2>&1
           cp "$BUILD/.config" "$OUT/resolved.config"
 
-          set +e
+          rc=0
           make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
-            "$TARGET" > "$OUT/logs/downstream-qsmmu.log" 2>&1
-          rc=$?
-          set -e
+            "$TARGET" > "$OUT/logs/downstream-qsmmu.log" 2>&1 || rc=$?
           result=compile-failed
           produced=no
           if test "$rc" -eq 0 && test -s "$BUILD/$TARGET"; then
@@ -165,6 +165,9 @@ jobs:
           cat "$STATUS"
           python3 scripts/66_probe_a52xq_downstream_qsmmu.py finalize \
             --output "$OUT" --status-file "$STATUS"
+          test -s "$OUT/PORTING-PROBE-REPORT.md"
+          test -s "$OUT/compile-status.tsv"
+          test -s "$OUT/SHA256SUMS"
 
       - name: Enforce isolated QSMMU probe invariants
         run: |
@@ -173,6 +176,8 @@ jobs:
           test -s "$OUT/PORTING-PROBE-REPORT.md"
           test -s "$OUT/compile-status.tsv"
           test -s "$OUT/staged-files.tsv"
+          test -s "$OUT/compatibility-headers.tsv"
+          test -s "$OUT/source-adaptations.txt"
           test -s "$OUT/downstream-qsmmu-stage.patch"
           test -s "$OUT/resolved.config"
           test -s "$OUT/analysis-metadata.txt"

@@ -53,8 +53,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git curl unzip make gcc g++ python3 bc bison flex \
-            libssl-dev libelf-dev rsync cpio lz4 file
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm \
+            libssl-dev libelf-dev rsync cpio lz4 file dwarves
 
       - name: Restore pinned official GKI 5.10 source
         id: gki-cache
@@ -134,21 +135,40 @@ jobs:
           BASE="$PWD/workspace/workflow52-seed/a52xq-5.10-resolved.config"
           STATUS="$PWD/workspace/workflow53-compile-status.tsv"
 
-          mapfile -t CLANG_CANDIDATES < <(
-            find -L gki/prebuilts/clang/host/linux-x86 \
-              -type f -path '*/bin/clang' -perm -111 -print | sort -V
-          )
-          test "${#CLANG_CANDIDATES[@]}" -gt 0
-          CLANG_LINK="${CLANG_CANDIDATES[$((${#CLANG_CANDIDATES[@]} - 1))]}"
-          CLANG_BIN="$(cd "$(dirname "$CLANG_LINK")" && pwd)"
-          CLANG="$CLANG_BIN/clang"
+          CLANG=''
+          CLANG_SOURCE='system'
+
+          if test -d gki/prebuilts/clang/host/linux-x86; then
+            mapfile -t CLANG_CANDIDATES < <(
+              find -L gki/prebuilts/clang/host/linux-x86 \
+                -type f -path '*/bin/clang' -perm -111 -print | sort -V
+            )
+            if test "${#CLANG_CANDIDATES[@]}" -gt 0; then
+              CLANG="${CLANG_CANDIDATES[$((${#CLANG_CANDIDATES[@]} - 1))]}"
+              CLANG_SOURCE='android-prebuilt'
+            fi
+          fi
+
+          if test -z "$CLANG"; then
+            CLANG="$(command -v clang)"
+          fi
+
+          test -n "$CLANG"
           test -x "$CLANG"
+          CLANG="$(readlink -f "$CLANG")"
+          CLANG_BIN="$(dirname "$CLANG")"
           export PATH="$CLANG_BIN:$PATH"
 
+          for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip; do
+            command -v "$tool"
+          done
+
           {
+            printf 'clang_source=%s\n' "$CLANG_SOURCE"
             printf 'clang=%s\n' "$CLANG"
-            printf 'clang_real=%s\n' "$(readlink -f "$CLANG")"
+            printf 'clang_bin=%s\n' "$CLANG_BIN"
             "$CLANG" --version
+            ld.lld --version
           } | tee "$OUT/logs/toolchain.log"
 
           printf 'probe\ttarget\tconfig_symbol\tresolved_value\tresult\texit_code\tobject_produced\n' \

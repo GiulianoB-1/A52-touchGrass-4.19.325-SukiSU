@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 concurrency:
   group: a52-gki-5.10-source-gap-analysis
@@ -33,6 +34,22 @@ jobs:
     steps:
       - name: Check out project
         uses: actions/checkout@v4
+
+      - name: Publish direct run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body=$(cat <<EOF
+          Workflow 51 run: ${run_url}
+
+          Commit: \`${GITHUB_SHA}\`
+          Event: \`${GITHUB_EVENT_NAME}\`
+          EOF
+          )
+          gh issue comment 26 --repo "$GITHUB_REPOSITORY" --body "$body"
+          printf 'workflow_run_url=%s\n' "$run_url"
 
       - name: Hydrate proven Linux 4.19.200 preparation toolchain
         env:

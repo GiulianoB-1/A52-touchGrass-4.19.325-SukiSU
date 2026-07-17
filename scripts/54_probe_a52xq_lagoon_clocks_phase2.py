@@ -50,6 +50,109 @@ CLOCK_API_FILES = (
     "drivers/clk/qcom/common.c",
 )
 
+AGERA_REGS = r'''
+	[CLK_ALPHA_PLL_TYPE_AGERA] = {
+		[PLL_OFF_L_VAL] = 0x04,
+		[PLL_OFF_ALPHA_VAL] = 0x08,
+		[PLL_OFF_USER_CTL] = 0x0c,
+		[PLL_OFF_CONFIG_CTL] = 0x10,
+		[PLL_OFF_CONFIG_CTL_U] = 0x14,
+		[PLL_OFF_TEST_CTL] = 0x18,
+		[PLL_OFF_TEST_CTL_U] = 0x1c,
+		[PLL_OFF_STATUS] = 0x2c,
+	},
+'''.strip("\n")
+
+AGERA_IMPLEMENTATION = r'''
+
+/* Agera PLL support backported for the Lagoon camera clock controller. */
+int clk_agera_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
+			    const struct alpha_pll_config *config)
+{
+	u32 val, mask;
+
+	if (!config)
+		return -EINVAL;
+
+	if (config->l)
+		regmap_write(regmap, PLL_L_VAL(pll), config->l);
+	if (config->alpha)
+		regmap_write(regmap, PLL_ALPHA_VAL(pll), config->alpha);
+	if (config->post_div_mask)
+		regmap_update_bits(regmap, PLL_USER_CTL(pll),
+				   config->post_div_mask, config->post_div_val);
+
+	val = config->main_output_mask | config->aux_output_mask |
+	      config->aux2_output_mask | config->early_output_mask;
+	mask = val;
+	if (mask)
+		regmap_update_bits(regmap, PLL_USER_CTL(pll), mask, val);
+
+	if (config->config_ctl_val)
+		regmap_write(regmap, PLL_CONFIG_CTL(pll), config->config_ctl_val);
+	if (config->config_ctl_hi_val)
+		regmap_write(regmap, PLL_CONFIG_CTL_U(pll),
+			     config->config_ctl_hi_val);
+	if (config->test_ctl_val)
+		regmap_write(regmap, PLL_TEST_CTL(pll), config->test_ctl_val);
+	if (config->test_ctl_hi_val)
+		regmap_write(regmap, PLL_TEST_CTL_U(pll),
+			     config->test_ctl_hi_val);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(clk_agera_pll_configure);
+
+static unsigned long
+clk_agera_pll_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
+{
+	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
+	u32 l, alpha, alpha_width = pll_alpha_width(pll);
+
+	regmap_read(pll->clkr.regmap, PLL_L_VAL(pll), &l);
+	regmap_read(pll->clkr.regmap, PLL_ALPHA_VAL(pll), &alpha);
+
+	return alpha_pll_calc_rate(parent_rate, l, alpha, alpha_width);
+}
+
+static int clk_agera_pll_set_rate(struct clk_hw *hw, unsigned long rate,
+				  unsigned long parent_rate)
+{
+	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
+	u32 l, alpha_width = pll_alpha_width(pll);
+	unsigned long rounded;
+	u64 alpha;
+	int ret;
+
+	rounded = alpha_pll_round_rate(rate, parent_rate, &l, &alpha,
+				       alpha_width);
+	if (rounded > rate + PLL_RATE_MARGIN || rounded < rate)
+		return -EINVAL;
+
+	regmap_write(pll->clkr.regmap, PLL_L_VAL(pll), l);
+	regmap_write(pll->clkr.regmap, PLL_ALPHA_VAL(pll), alpha);
+	mb();
+
+	if (clk_hw_is_enabled(hw)) {
+		ret = wait_for_pll_enable_lock(pll);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+const struct clk_ops clk_alpha_pll_agera_ops = {
+	.enable = clk_alpha_pll_enable,
+	.disable = clk_alpha_pll_disable,
+	.is_enabled = clk_alpha_pll_is_enabled,
+	.recalc_rate = clk_agera_pll_recalc_rate,
+	.round_rate = clk_alpha_pll_round_rate,
+	.set_rate = clk_agera_pll_set_rate,
+};
+EXPORT_SYMBOL_GPL(clk_alpha_pll_agera_ops);
+'''.rstrip()
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -125,6 +228,9 @@ def adapt_clock_source(path: Path) -> None:
         index += 1
 
     text = "\n".join(result) + "\n"
+    text = text.replace(".hwclks =", ".clk_hws =")
+    text = text.replace(".num_hwclks =", ".num_clk_hws =")
+
     forbidden = (
         '"vdd-level-lagoon.h"',
         "DEFINE_VDD_REGULATORS",
@@ -136,11 +242,58 @@ def adapt_clock_source(path: Path) -> None:
         ".cal_l =",
         "clk_branch2_hw_ctl_ops",
         "devm_regulator_get",
+        ".hwclks =",
+        ".num_hwclks =",
     )
     leftovers = [token for token in forbidden if token in text]
     if leftovers:
         raise SystemExit(f"unsupported downstream clock tokens remain in {path}: {leftovers}")
     path.write_text(text)
+
+
+def backport_agera_support(gki: Path) -> None:
+    header = gki / "drivers/clk/qcom/clk-alpha-pll.h"
+    source = gki / "drivers/clk/qcom/clk-alpha-pll.c"
+    header_text = header.read_text(errors="replace")
+    source_text = source.read_text(errors="replace")
+
+    if "CLK_ALPHA_PLL_TYPE_AGERA" not in header_text:
+        enum_anchor = "\tCLK_ALPHA_PLL_TYPE_LUCID = CLK_ALPHA_PLL_TYPE_TRION,\n\tCLK_ALPHA_PLL_TYPE_MAX,"
+        enum_replacement = (
+            "\tCLK_ALPHA_PLL_TYPE_LUCID = CLK_ALPHA_PLL_TYPE_TRION,\n"
+            "\tCLK_ALPHA_PLL_TYPE_AGERA,\n"
+            "\tCLK_ALPHA_PLL_TYPE_MAX,"
+        )
+        if enum_anchor not in header_text:
+            raise SystemExit("could not locate alpha PLL type enum")
+        header_text = header_text.replace(enum_anchor, enum_replacement, 1)
+
+        endif = header_text.rfind("#endif")
+        if endif < 0:
+            raise SystemExit("could not locate clk-alpha-pll.h end guard")
+        declarations = (
+            "extern const struct clk_ops clk_alpha_pll_agera_ops;\n"
+            "int clk_agera_pll_configure(struct clk_alpha_pll *pll,\n"
+            "\t\t\t    struct regmap *regmap,\n"
+            "\t\t\t    const struct alpha_pll_config *config);\n\n"
+        )
+        header_text = header_text[:endif] + declarations + header_text[endif:]
+        header.write_text(header_text)
+
+    if "[CLK_ALPHA_PLL_TYPE_AGERA]" not in source_text:
+        regs_end = "};\nEXPORT_SYMBOL_GPL(clk_alpha_pll_regs);"
+        if regs_end not in source_text:
+            raise SystemExit("could not locate alpha PLL register table end")
+        source_text = source_text.replace(
+            regs_end,
+            AGERA_REGS + "\n};\nEXPORT_SYMBOL_GPL(clk_alpha_pll_regs);",
+            1,
+        )
+
+    if "const struct clk_ops clk_alpha_pll_agera_ops" not in source_text:
+        source_text = source_text.rstrip() + AGERA_IMPLEMENTATION + "\n"
+
+    source.write_text(source_text)
 
 
 def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
@@ -150,8 +303,8 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
-def snapshot_clock_api(gki: Path, artifact: Path) -> None:
-    snapshot = artifact / "api-snapshot"
+def snapshot_clock_api(gki: Path, artifact: Path, directory: str) -> None:
+    snapshot = artifact / directory
     snapshot.mkdir(parents=True, exist_ok=True)
     for relative in CLOCK_API_FILES:
         source = gki / relative
@@ -176,7 +329,9 @@ def stage(args: argparse.Namespace) -> None:
         raise SystemExit("Workflow 53 Lagoon LLCC integration is missing")
 
     artifact.mkdir(parents=True, exist_ok=True)
-    snapshot_clock_api(gki, artifact)
+    snapshot_clock_api(gki, artifact, "api-snapshot-before")
+    backport_agera_support(gki)
+    snapshot_clock_api(gki, artifact, "api-snapshot-after")
 
     rows: list[dict[str, str]] = []
     kconfig_blocks: list[str] = []
@@ -248,8 +403,10 @@ def stage(args: argparse.Namespace) -> None:
         f"touchgrass_commit={tg_head}",
         f"planned_probes={len(CLOCKS)}",
         "phase1_dependency=gcc-lagoon,pinctrl-lagoon,llcc-lagoon",
-        "clock_api_snapshot=clk-alpha-pll.h,clk-alpha-pll.c,common.h,common.c",
+        "agera_backport=official-register-map-and-minimal-5.10-ops",
+        "clock_api_snapshots=before,after",
         "compat_removed=downstream-vdd,cal-l,safe-config,branch-hw-ctl",
+        "compat_renamed=hwclks-to-clk_hws",
     ]
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 

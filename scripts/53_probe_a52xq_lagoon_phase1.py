@@ -22,7 +22,6 @@ STAGED_FILES = [
     ("driver", "drivers/clk/qcom/gcc-lagoon.c", "Lagoon global clock controller"),
     ("dependency", "drivers/clk/qcom/vdd-level-lagoon.h", "Lagoon voltage corner definitions"),
     ("driver", "drivers/pinctrl/qcom/pinctrl-lagoon.c", "Lagoon TLMM pin controller"),
-    ("driver", "drivers/soc/qcom/llcc-lagoon.c", "Lagoon last-level cache data"),
 ]
 
 PROBES = {
@@ -35,8 +34,8 @@ PROBES = {
         "symbol": "CONFIG_PINCTRL_LAGOON",
     },
     "llcc-lagoon": {
-        "target": "drivers/soc/qcom/llcc-lagoon.o",
-        "symbol": "CONFIG_QCOM_LAGOON_LLCC",
+        "target": "drivers/soc/qcom/llcc-qcom.o",
+        "symbol": "CONFIG_QCOM_LLCC",
     },
 }
 
@@ -60,23 +59,78 @@ config PINCTRL_LAGOON
 	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
 '''.strip()
 
-LLCC_KCONFIG = r'''
-config QCOM_LAGOON_LLCC
-	tristate "Qualcomm Lagoon LLCC driver"
-	depends on QCOM_LLCC
-	help
-	  Compile-probe support for the Qualcomm Lagoon last-level cache data.
-	  This entry is part of the A52xq 5.10 bring-up tree and is not upstream-ready.
-'''.strip()
-
 CONFIG_FRAGMENT = [
     "# A52xq Lagoon phase-1 compile-probe fragment",
     "# Non-flashable bring-up input.",
     "CONFIG_SDM_GCC_LAGOON=y",
     "CONFIG_PINCTRL_LAGOON=y",
     "CONFIG_QCOM_LLCC=y",
-    "CONFIG_QCOM_LAGOON_LLCC=y",
 ]
+
+LAGOON_LLCC_DATA = r'''
+/* A52xq Lagoon LLCC data ported from the downstream Linux 4.19 driver. */
+static const struct llcc_slice_config lagoon_data[] = {
+	{
+		.usecase_id = LLCC_CPUSS,
+		.slice_id = 1,
+		.max_cap = 768,
+		.priority = 1,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+		.activate_on_init = true,
+	}, {
+		.usecase_id = LLCC_MDM,
+		.slice_id = 8,
+		.max_cap = 512,
+		.priority = 2,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	}, {
+		.usecase_id = LLCC_GPUHTW,
+		.slice_id = 11,
+		.max_cap = 256,
+		.priority = 1,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	}, {
+		.usecase_id = LLCC_GPU,
+		.slice_id = 12,
+		.max_cap = 512,
+		.priority = 1,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	}, {
+		.usecase_id = LLCC_MDMPNG,
+		.slice_id = 21,
+		.max_cap = 768,
+		.fixed_size = true,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	}, {
+		.usecase_id = 23, /* downstream LLCC_NPU */
+		.slice_id = 23,
+		.max_cap = 768,
+		.priority = 1,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	}, {
+		.usecase_id = 29, /* downstream LLCC_MODEMVPE */
+		.slice_id = 29,
+		.max_cap = 64,
+		.priority = 1,
+		.fixed_size = true,
+		.bonus_ways = 0xfff,
+		.retain_on_pc = true,
+	},
+};
+
+static const struct qcom_llcc_config lagoon_cfg = {
+	.sct_data = lagoon_data,
+	.size = ARRAY_SIZE(lagoon_data),
+	.need_llcc_cfg = true,
+	.reg_offset = llcc_v1_reg_offset,
+};
+'''.strip()
 
 
 def sha256(path: Path) -> str:
@@ -118,6 +172,66 @@ def insert_before_last(path: Path, token: str, marker: str, block: str) -> None:
     path.write_text(text[:index].rstrip() + "\n\n" + block.rstrip() + "\n\n" + text[index:])
 
 
+def replace_required(path: Path, old: str, new: str) -> None:
+    text = path.read_text(errors="replace")
+    if old not in text:
+        raise SystemExit(f"required text not found in {path}: {old}")
+    path.write_text(text.replace(old, new, 1))
+
+
+def adapt_vdd_header(path: Path) -> None:
+    replace_required(
+        path,
+        "#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>",
+        "#include <dt-bindings/power/qcom-rpmpd.h>",
+    )
+
+
+def adapt_pinctrl_driver(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    unsupported_fields = (
+        ".dir_conn_reg =",
+        ".egpio_enable =",
+        ".egpio_present =",
+        ".dir_conn_en_bit =",
+        ".wake_reg =",
+        ".wake_bit =",
+        ".dir_conn =",
+    )
+    lines = [
+        line for line in text.splitlines()
+        if not any(field in line for field in unsupported_fields)
+    ]
+    text = "\n".join(lines) + "\n"
+    text, count = re.subn(
+        r"\nstatic struct msm_dir_conn lagoon_dir_conn\[\] = \{.*?\n\};\n",
+        "\n",
+        text,
+        flags=re.DOTALL,
+    )
+    if count != 1:
+        raise SystemExit("expected exactly one downstream msm_dir_conn table")
+    path.write_text(text)
+
+
+def integrate_llcc(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    if "static const struct llcc_slice_config lagoon_data[]" not in text:
+        anchor = "static const struct qcom_llcc_config sc7180_cfg = {"
+        if anchor not in text:
+            raise SystemExit("could not locate the first GKI LLCC configuration")
+        text = text.replace(anchor, LAGOON_LLCC_DATA + "\n\n" + anchor, 1)
+
+    match = '{ .compatible = "lagoon-llcc-v1", .data = &lagoon_cfg },'
+    if match not in text:
+        anchor = "static const struct of_device_id qcom_llcc_of_match[] = {"
+        if anchor not in text:
+            raise SystemExit("could not locate the GKI LLCC OF match table")
+        text = text.replace(anchor, anchor + "\n\t" + match, 1)
+
+    path.write_text(text)
+
+
 def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
@@ -150,6 +264,10 @@ def stage(args: argparse.Namespace) -> None:
         before = sha256(dst) if dst.is_file() else "<absent>"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        if rel == "drivers/clk/qcom/vdd-level-lagoon.h":
+            adapt_vdd_header(dst)
+        elif rel == "drivers/pinctrl/qcom/pinctrl-lagoon.c":
+            adapt_pinctrl_driver(dst)
         rows.append(
             {
                 "kind": kind,
@@ -160,6 +278,23 @@ def stage(args: argparse.Namespace) -> None:
                 "gki_after_sha256": sha256(dst),
             }
         )
+
+    llcc_source = touchgrass / "drivers/soc/qcom/llcc-lagoon.c"
+    llcc_target = gki / "drivers/soc/qcom/llcc-qcom.c"
+    if not llcc_source.is_file():
+        raise SystemExit("missing downstream Lagoon LLCC source")
+    llcc_before = sha256(llcc_target)
+    integrate_llcc(llcc_target)
+    rows.append(
+        {
+            "kind": "integration",
+            "relative_path": "drivers/soc/qcom/llcc-qcom.c",
+            "purpose": "Lagoon LLCC slice data integrated into the GKI core driver",
+            "source_sha256": sha256(llcc_source),
+            "gki_before_sha256": llcc_before,
+            "gki_after_sha256": sha256(llcc_target),
+        }
+    )
 
     append_once(
         gki / "drivers/clk/qcom/Kconfig",
@@ -182,17 +317,6 @@ def stage(args: argparse.Namespace) -> None:
         "pinctrl-lagoon.o",
         "obj-$(CONFIG_PINCTRL_LAGOON) += pinctrl-lagoon.o",
     )
-    insert_before_last(
-        gki / "drivers/soc/qcom/Kconfig",
-        "endmenu",
-        "config QCOM_LAGOON_LLCC",
-        LLCC_KCONFIG,
-    )
-    append_once(
-        gki / "drivers/soc/qcom/Makefile",
-        "llcc-lagoon.o",
-        "obj-$(CONFIG_QCOM_LAGOON_LLCC) += llcc-lagoon.o",
-    )
 
     (out / "lagoon-phase1.fragment").write_text("\n".join(CONFIG_FRAGMENT) + "\n")
     shutil.copy2(seed_config, out / "workflow52-resolved.config")
@@ -209,8 +333,9 @@ def stage(args: argparse.Namespace) -> None:
         rows,
     )
 
+    new_paths = [rel for _, rel, _ in STAGED_FILES]
     subprocess.run(
-        ["git", "-C", str(gki), "add", "-N", "--", *[rel for _, rel, _ in STAGED_FILES]],
+        ["git", "-C", str(gki), "add", "-N", "--", *new_paths],
         check=True,
     )
     patch = subprocess.check_output(
@@ -228,6 +353,7 @@ def stage(args: argparse.Namespace) -> None:
         f"touchgrass_kernel_version={kernel_version(touchgrass)}",
         f"staged_files={len(rows)}",
         f"planned_probes={len(PROBES)}",
+        "llcc_integration=drivers/soc/qcom/llcc-qcom.c",
     ]
     (out / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 

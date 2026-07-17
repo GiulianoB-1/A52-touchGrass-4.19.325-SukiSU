@@ -259,9 +259,9 @@ jobs:
 
           run_probe \
             llcc-lagoon \
-            drivers/soc/qcom/llcc-lagoon.o \
-            CONFIG_QCOM_LAGOON_LLCC \
-            CONFIG_QCOM_LLCC CONFIG_QCOM_LAGOON_LLCC
+            drivers/soc/qcom/llcc-qcom.o \
+            CONFIG_QCOM_LLCC \
+            CONFIG_QCOM_LLCC
 
           column -ts $'\t' "$STATUS" || cat "$STATUS"
 

@@ -1,0 +1,315 @@
+name: 55 - A52 Linux 4.19.206 ReSukiSU SUSFS inline build
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/55-a52-linux-4.19.206-resukisu-susfs-inline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-linux-4.19.206-resukisu-susfs-inline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build-repack:
+    name: Build and repack Linux 4.19.206 + ReSukiSU + SUSFS inline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out pinned ReSukiSU integration project
+        uses: actions/checkout@v4
+        with:
+          ref: rebase/resukisu-linux-4.19.325
+
+      - name: Hydrate pinned boot-image validation and repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-linux-4.19.206-resukisu-susfs-inline-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.206-resukisu-susfs-inline-${{ runner.os }}-
+            a52xq-linux-4.19.200-susfs-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.206-no-root-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source through Linux 4.19.200
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Derive and apply official Linux 4.19.206 merge
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_merge_linux_4.19.210.sh scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          sed -i \
+            -e 's/TO_TAG=v4.19.210/TO_TAG=v4.19.206/' \
+            -e '/^TARGET_COMMIT=/d' \
+            -e '/test "$to_sha" = "$TARGET_COMMIT"/d' \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.206
+
+      - name: Apply reviewed Linux 4.19.206 merge-shape repairs
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_fix_linux_4.19.210_compile.sh scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          sed -i 's/TARGET_VERSION=4.19.210/TARGET_VERSION=4.19.206/' \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_fix_linux_4.19.206.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('workspace/touchgrass-a52xq')
+
+          header = (root / 'include/linux/timerqueue.h').read_text()
+          path = root / 'drivers/soc/qcom/event_timer.c'
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          wants_newer = 'struct rb_root_cached rb_root;' in header
+          desired = newer if wants_newer else older
+          obsolete = older if wants_newer else newer
+          if desired not in text:
+              if obsolete not in text:
+                  raise SystemExit('event_timer initializer shape is unrecognized')
+              path.write_text(text.replace(obsolete, desired, 1))
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              path.write_text(text.replace(anchor, helper + anchor, 1))
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing after generic repair')
+          PY
+
+      - name: Restore the working A52 hardware and touchscreen configuration
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          DEFCONFIG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          "$KERNEL/scripts/config" --file "$DEFCONFIG" \
+            -e TOUCHSCREEN_STM_FTS5CU56A \
+            -e PRINTK -e PRINTK_TIME -e IKCONFIG -e IKCONFIG_PROC \
+            -e DEBUG_KERNEL -e FRAME_POINTER -e PANIC_ON_OOPS \
+            -e PSTORE -e PSTORE_RAM -e PSTORE_CONSOLE -e PSTORE_PMSG \
+            -e SERIAL_MSM_GENI -e SERIAL_MSM_GENI_CONSOLE \
+            -e ARCH_QCOM -e ARCH_LAGOON \
+            -e QCOM_SCM -e QCOM_RPMH -e QCOM_SMEM -e QCOM_SMP2P \
+            -e QCOM_COMMAND_DB -e COMMON_CLK_QCOM -e SDM_GCC_LAGOON \
+            -e PINCTRL -e PINCTRL_MSM -e PINCTRL_LAGOON \
+            -e REGULATOR -e REGULATOR_QCOM_RPMH \
+            -e IOMMU_SUPPORT -e ARM_SMMU -e QTI_IOMMU_SUPPORT \
+            -e SCSI -e SCSI_UFSHCD -e SCSI_UFSHCD_PLATFORM -e SCSI_UFS_QCOM \
+            -e PHY_QCOM_UFS \
+            -e BLK_DEV_INITRD -e DEVTMPFS -e DEVTMPFS_MOUNT \
+            -e EXT4_FS -e F2FS_FS -e FS_ENCRYPTION \
+            -e SECURITY -e SECURITY_SELINUX -e ANDROID_BINDER_IPC \
+            -e INPUT -e INPUT_TOUCHSCREEN -e INPUT_MISC -e INPUT_QPNP_POWER_ON \
+            -e DRM -e QCOM_KGSL -e QCOM_KGSL_IOMMU \
+            -e MEDIA_SUPPORT -e SOUND -e SND \
+            -e WLAN -e CFG80211 -e MAC80211 -e BT
+          "$KERNEL/scripts/config" --file "$DEFCONFIG" --set-val PANIC_TIMEOUT 10
+
+      - name: Integrate pinned ReSukiSU and SUSFS with inline hooks, then build
+        run: |
+          set -Eeuo pipefail
+          set -o pipefail
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.206 susfs \
+            2>&1 | tee artifacts/linux-4.19.206-resukisu-susfs-inline.log
+
+      - name: Enforce root, hook, hardware, and safety invariants
+        run: |
+          set -Eeuo pipefail
+          IMAGE=artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-safe
+          CONFIG=artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-safe
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$CONFIG"
+          grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
+          grep -Fxq 'CONFIG_KSU_SUSFS=y' "$CONFIG"
+          grep -Fxq 'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y' "$CONFIG"
+          grep -Fxq '# CONFIG_KSU_MANUAL_HOOK is not set' "$CONFIG"
+          grep -Fxq '# CONFIG_KSU_TRACEPOINT_HOOK is not set' "$CONFIG"
+          grep -Fxq '# CONFIG_KPROBES is not set' "$CONFIG"
+          grep -Fxq 'CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y' "$CONFIG"
+          grep -Fxq 'CONFIG_ARCH_LAGOON=y' "$CONFIG"
+          grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$CONFIG"
+          grep -Fxq 'CONFIG_QCOM_KGSL=y' "$CONFIG"
+          grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' "$KERNEL/fs/read_write.c"
+          grep -Fq 'ksu_handle_input_handle_event(&type, &code, &value);' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'ksu_handle_setresuid(ruid, euid, suid);' "$KERNEL/kernel/sys.c"
+          grep -Fq 'static bool ksu_kernel_umount_enabled = false;' "$KERNEL/KernelSU/kernel/feature/kernel_umount.c"
+          grep -Fq 'default_non_root_profile.umount_modules = false;' "$KERNEL/KernelSU/kernel/policy/allowlist.c"
+          grep -Fxq 'v4.1.0-2206a7dd-dirty@ReSukiSU' \
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-safe.strings.txt
+          {
+            echo 'status=build-passed'
+            echo 'hardware_validated=no'
+            echo 'kernel_version=4.19.206-touchGrassKernel+'
+            echo 'resukisu=v4.1.0-2206a7dd'
+            echo 'susfs=1.4.2-kernel-4.19'
+            echo 'hook_mode=susfs-inline'
+            echo 'manual_hook=off'
+            echo 'tracepoint_hook=off'
+            echo 'kernel_unmount_default=off'
+            echo 'module_unmount_default=off'
+            echo 'touchscreen=stm-fts-enabled'
+            echo "image_sha256=$(sha256sum "$IMAGE" | awk '{print $1}')"
+          } | tee artifacts/linux-4.19.206-resukisu-susfs-inline-metadata.txt
+
+      - name: Download and validate checksum-locked original boot image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/a52xq-linux-4.19.206-resukisu-susfs-inline-boot
+          ASSET_LINE="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+            --jq '.[] | .assets[] | select(.name | endswith(".img")) | [.id, .name, .created_at] | @tsv' | head -n 1)"
+          test -n "$ASSET_LINE"
+          IFS=$'\t' read -r ASSET_ID ASSET_NAME ASSET_CREATED <<< "$ASSET_LINE"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            --output intake/boot.img
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/a52xq-linux-4.19.206-resukisu-susfs-inline-boot/source-validation.json
+          printf 'source_asset=%s\nsource_created=%s\n' "$ASSET_NAME" "$ASSET_CREATED" \
+            > artifacts/a52xq-linux-4.19.206-resukisu-susfs-inline-boot/source-asset.txt
+
+      - name: Repack and audit experimental rooted boot image
+        run: |
+          set -Eeuo pipefail
+          IMAGE=artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-safe
+          CONFIG=artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-safe
+          OUT=artifacts/a52xq-linux-4.19.206-resukisu-susfs-inline-boot
+          gzip -n -9 -c "$IMAGE" > "$OUT/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+          cp "$CONFIG" "$OUT/final.config"
+          cp artifacts/linux-4.19.206-resukisu-susfs-inline-metadata.txt "$OUT/metadata.txt"
+          cat > "$OUT/NOTICE.txt" <<'EOF'
+          EXPERIMENTAL A52XQ LINUX 4.19.206 ROOTED BOOT IMAGE
+
+          ReSukiSU v4.1.0 and SUSFS v1.4.2 are enabled.
+          Hook mode: SUSFS inline hook. ReSukiSU manual and tracepoint hooks are disabled.
+          The STM FTS touchscreen and the working A52 hardware configuration are retained.
+          Kernel and module unmount defaults are disabled.
+
+          This build passed compilation and repack audits only. It has not been validated on
+          physical hardware. Back up boot and data before testing, and keep the known-working
+          4.19.206 boot image available for immediate rollback.
+          EOF
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS"
+
+      - name: Record source state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          if [ -d workspace/touchgrass-a52xq/KernelSU/.git ]; then
+            git -C workspace/touchgrass-a52xq/KernelSU rev-parse HEAD > artifacts/resukisu-head.txt || true
+          fi
+
+      - name: Upload experimental boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Linux-4.19.206-ReSukiSU-v4.1.0-SUSFS-v1.4.2-INLINE-EXPERIMENTAL-${{ github.run_number }}
+          path: artifacts/a52xq-linux-4.19.206-resukisu-susfs-inline-boot
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.206-resukisu-susfs-inline-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,253 @@
+name: 60 - A52 GKI 5.10 Android storage-stack compile probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/60-a52-gki-5.10-android-storage-stack-probe.yml
+      - scripts/60_probe_a52xq_android_storage_stack.py
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-android-storage-stack-probe
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SEED_ARTIFACT_ID: '8413697551'
+  SEED_CONFIG_SHA256: b4da88c027cb7d3efad948b0f0986ee24d968dedcf14499d360f4e0c623cf01a
+
+jobs:
+  probe:
+    name: Compile-probe Android filesystems and device mapper
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Publish direct run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 36 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 60 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Commit: \`${GITHUB_SHA}\`
+          Event: \`${GITHUB_EVENT_NAME}\`"
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install compile-probe dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio lz4 file dwarves
+
+      - name: Restore pinned official GKI 5.10 source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Validate and clean GKI source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          test -x gki/common/scripts/config
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+      - name: Obtain Workflow 52 resolved configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/workflow52-seed artifacts/logs
+          ZIP=workspace/workflow52-seed/seed.zip
+          curl -fL --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o "$ZIP" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEED_ARTIFACT_ID}/zip"
+          unzip -p "$ZIP" a52xq-5.10-resolved.config \
+            > workspace/workflow52-seed/a52xq-5.10-resolved.config
+          test -s workspace/workflow52-seed/a52xq-5.10-resolved.config
+          printf '%s  %s\n' "$SEED_CONFIG_SHA256" \
+            workspace/workflow52-seed/a52xq-5.10-resolved.config | sha256sum -c -
+
+      - name: Inventory Android storage-stack probes
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-android-storage-stack-probe
+          rm -rf "$OUT" workspace/gki-android-storage-stack-out
+          mkdir -p "$OUT/logs" "$OUT/configs" workspace/gki-android-storage-stack-out
+          python3 scripts/60_probe_a52xq_android_storage_stack.py stage \
+            --gki gki/common \
+            --output "$OUT"
+          test -s "$OUT/probe-plan.tsv"
+          test -s "$OUT/analysis-metadata.txt"
+          test "$(tail -n +2 "$OUT/probe-plan.tsv" | wc -l)" -eq 6
+
+      - name: Resolve configurations and compile each storage-stack object
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-android-storage-stack-probe"
+          BASE="$PWD/workspace/workflow52-seed/a52xq-5.10-resolved.config"
+          STATUS="$PWD/workspace/workflow60-compile-status.tsv"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+
+          printf 'probe\ttarget\tconfig_symbol\tresolved_value\tresult\texit_code\tobject_produced\n' > "$STATUS"
+
+          config_value() {
+            local file="$1" symbol="$2"
+            if grep -Fxq "${symbol}=y" "$file"; then printf y
+            elif grep -Fxq "${symbol}=m" "$file"; then printf m
+            else printf n
+            fi
+          }
+
+          missing_sources() {
+            local probe="$1"
+            awk -F '\t' -v probe="$probe" 'NR > 1 && $1 == probe { print $7 }' \
+              "$OUT/probe-plan.tsv" | tr -d '\r'
+          }
+
+          run_probe() {
+            local probe="$1" target="$2" config_symbol="$3"
+            shift 3
+            local probe_out="$PWD/workspace/gki-android-storage-stack-out/$probe"
+            local log="$OUT/logs/$probe.log"
+            local missing
+            rm -rf "$probe_out"
+            mkdir -p "$probe_out"
+            cp "$BASE" "$probe_out/.config"
+            gki/common/scripts/config --file "$probe_out/.config" --disable TRIM_UNUSED_KSYMS
+            gki/common/scripts/config --file "$probe_out/.config" --set-str UNUSED_KSYMS_WHITELIST ''
+            for symbol in "$@"; do
+              gki/common/scripts/config --file "$probe_out/.config" --enable "${symbol#CONFIG_}"
+            done
+            make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+              >> "$log" 2>&1
+            cp "$probe_out/.config" "$OUT/configs/$probe.config"
+
+            local resolved result rc produced=no
+            resolved="$(config_value "$probe_out/.config" "$config_symbol")"
+            missing="$(missing_sources "$probe")"
+            if test -n "$missing"; then
+              result=source-missing
+              rc=0
+              printf 'Missing source files: %s\n' "$missing" >> "$log"
+            elif test "$resolved" = n; then
+              result=config-blocked
+              rc=0
+            else
+              local object_target object_rc
+              local -a targets
+              IFS=',' read -r -a targets <<< "$target"
+              rc=0
+              produced=yes
+              for object_target in "${targets[@]}"; do
+                set +e
+                make -C gki/common O="$probe_out" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+                  "$object_target" >> "$log" 2>&1
+                object_rc=$?
+                set -e
+                if test "$object_rc" -ne 0; then rc=$object_rc; fi
+                if ! test -s "$probe_out/$object_target"; then produced=no; fi
+              done
+              if test "$rc" -eq 0 && test "$produced" = yes; then
+                result=compiled
+              else
+                result=compile-failed
+              fi
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$probe" "$target" "$config_symbol" "$resolved" "$result" "$rc" "$produced" \
+              >> "$STATUS"
+          }
+
+          run_probe erofs \
+            "fs/erofs/super.o,fs/erofs/inode.o,fs/erofs/data.o,fs/erofs/namei.o,fs/erofs/dir.o,fs/erofs/utils.o,fs/erofs/pcpubuf.o,fs/erofs/xattr.o,fs/erofs/decompressor.o,fs/erofs/zmap.o,fs/erofs/zdata.o" \
+            CONFIG_EROFS_FS CONFIG_EROFS_FS CONFIG_EROFS_FS_XATTR CONFIG_EROFS_FS_ZIP
+          run_probe f2fs \
+            "fs/f2fs/dir.o,fs/f2fs/file.o,fs/f2fs/inode.o,fs/f2fs/namei.o,fs/f2fs/hash.o,fs/f2fs/super.o,fs/f2fs/inline.o,fs/f2fs/checkpoint.o,fs/f2fs/gc.o,fs/f2fs/data.o,fs/f2fs/node.o,fs/f2fs/segment.o,fs/f2fs/recovery.o,fs/f2fs/shrinker.o,fs/f2fs/extent_cache.o,fs/f2fs/sysfs.o,fs/f2fs/xattr.o,fs/f2fs/acl.o,fs/f2fs/verity.o,fs/f2fs/compress.o" \
+            CONFIG_F2FS_FS CONFIG_F2FS_FS CONFIG_F2FS_FS_XATTR \
+            CONFIG_F2FS_FS_POSIX_ACL CONFIG_FS_ENCRYPTION \
+            CONFIG_FS_ENCRYPTION_INLINE_CRYPT CONFIG_FS_VERITY \
+            CONFIG_F2FS_FS_COMPRESSION
+          run_probe dm-core \
+            "drivers/md/dm.o,drivers/md/dm-table.o,drivers/md/dm-target.o,drivers/md/dm-linear.o,drivers/md/dm-stripe.o,drivers/md/dm-ioctl.o,drivers/md/dm-io.o,drivers/md/dm-kcopyd.o,drivers/md/dm-sysfs.o,drivers/md/dm-stats.o,drivers/md/dm-rq.o,drivers/md/dm-init.o,drivers/md/dm-uevent.o" \
+            CONFIG_BLK_DEV_DM CONFIG_BLK_DEV_DM CONFIG_BLK_DEV_DM_BUILTIN \
+            CONFIG_DM_INIT CONFIG_DM_UEVENT
+          run_probe dm-verity \
+            "drivers/md/dm-verity-target.o,drivers/md/dm-verity-fec.o" \
+            CONFIG_DM_VERITY CONFIG_BLK_DEV_DM CONFIG_DM_VERITY CONFIG_DM_VERITY_FEC
+          run_probe dm-crypt drivers/md/dm-crypt.o \
+            CONFIG_DM_CRYPT CONFIG_BLK_DEV_DM CONFIG_CRYPTO CONFIG_DM_CRYPT
+          run_probe dm-default-key drivers/md/dm-default-key.o \
+            CONFIG_DM_DEFAULT_KEY CONFIG_BLK_DEV_DM CONFIG_BLK_INLINE_ENCRYPTION \
+            CONFIG_DM_DEFAULT_KEY
+
+          cat "$STATUS"
+          python3 scripts/60_probe_a52xq_android_storage_stack.py finalize \
+            --output "$OUT" --status-file "$STATUS"
+
+      - name: Enforce Android storage-stack probe invariants
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-android-storage-stack-probe
+          test -s "$OUT/PORTING-PROBE-REPORT.md"
+          test -s "$OUT/compile-status.tsv"
+          test -s "$OUT/probe-plan.tsv"
+          test -s "$OUT/analysis-metadata.txt"
+          test -s "$OUT/SHA256SUMS"
+          test "$(tail -n +2 "$OUT/compile-status.tsv" | wc -l)" -eq 6
+          grep -Fxq \
+            'artifact_type=a52xq-gki-5.10-android-storage-stack-compile-probe-not-flashable' \
+            "$OUT/analysis-metadata.txt"
+          ! find "$OUT" -type f \( -name Image -o -name boot.img -o -name '*.dtb' \) | grep -q .
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          cat "$OUT/analysis-metadata.txt"
+          sed -n '1,520p' "$OUT/PORTING-PROBE-REPORT.md"
+
+      - name: Upload non-flashable Android storage-stack probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-android-storage-stack-probe-${{ github.run_number }}-NOT-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-android-storage-stack-probe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Workflow 60 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-android-storage-stack-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-android-storage-stack-probe/
+            workspace/workflow60-compile-status.tsv
+            workspace/gki-android-storage-stack-out/*/.config
+          if-no-files-found: warn
+          retention-days: 7

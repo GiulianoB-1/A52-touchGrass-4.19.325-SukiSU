@@ -205,7 +205,8 @@ jobs:
             CONFIG_PINCTRL CONFIG_GPIOLIB CONFIG_PINCTRL_QCOM_SPMI_PMIC
           run_probe spmi-temp-alarm \
             "drivers/thermal/qcom/qcom-spmi-temp-alarm.o" CONFIG_QCOM_SPMI_TEMP_ALARM \
-            CONFIG_ARCH_QCOM CONFIG_OF CONFIG_SPMI CONFIG_THERMAL CONFIG_QCOM_SPMI_TEMP_ALARM
+            CONFIG_ARCH_QCOM CONFIG_OF CONFIG_SPMI CONFIG_THERMAL CONFIG_QCOM_TSENS \
+            CONFIG_QCOM_SPMI_TEMP_ALARM
           run_probe spmi-adc5 \
             "drivers/iio/adc/qcom-vadc-common.o,drivers/iio/adc/qcom-spmi-adc5.o" \
             CONFIG_QCOM_SPMI_ADC5 CONFIG_ARCH_QCOM CONFIG_OF CONFIG_SPMI CONFIG_IIO \

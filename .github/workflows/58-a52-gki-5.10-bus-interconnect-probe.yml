@@ -206,14 +206,14 @@ jobs:
             drivers/interconnect/qcom/icc-bcm-voter.o \
             CONFIG_INTERCONNECT_QCOM_BCM_VOTER \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM_BCM_VOTER
+            CONFIG_INTERCONNECT_QCOM CONFIG_INTERCONNECT_QCOM_SC7180
 
           run_probe qcom-icc-rpmh \
             drivers/interconnect/qcom/icc-rpmh.c \
             drivers/interconnect/qcom/icc-rpmh.o \
             CONFIG_INTERCONNECT_QCOM_RPMH \
             CONFIG_INTERCONNECT CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-            CONFIG_INTERCONNECT_QCOM_BCM_VOTER CONFIG_INTERCONNECT_QCOM_RPMH
+            CONFIG_INTERCONNECT_QCOM CONFIG_INTERCONNECT_QCOM_SC7180
 
           run_probe qcom-sc7180 \
             drivers/interconnect/qcom/sc7180.c \

@@ -61,7 +61,6 @@ jobs:
           fetch_file scripts/checkpoint_resolve_linux_4.19.200.py
           fetch_file scripts/checkpoint_fix_linux_4.19.200_compile.sh
           fetch_file scripts/checkpoint_fix_linux_4.19.200_noinstr.sh
-          fetch_file scripts/05_merge_linux_4.19.325.py
           chmod +x scripts/*.sh scripts/*.py
 
           test "$(grep '^TOUCHGRASS_COMMIT=' sources.lock | cut -d= -f2)" = "${TOUCHGRASS_COMMIT}"
@@ -177,8 +176,16 @@ jobs:
             configure_toolchain
             printf 'touchgrass_cc=%s\n' "$CC"
             printf 'touchgrass_cross_compile=%s\n' "$CROSS_COMPILE"
-            "$CC" --version | head -n 1
+
+            read -r -a TG_CC_CMD <<< "$CC"
+            test "${#TG_CC_CMD[@]}" -gt 0
+            command -v "${TG_CC_CMD[0]}"
+            if test "${#TG_CC_CMD[@]}" -gt 1; then
+              test -x "${TG_CC_CMD[1]}"
+            fi
+            "${TG_CC_CMD[@]}" --version | head -n 1
             "${CROSS_COMPILE}gcc" --version | head -n 1
+
             make -C "$TG" O="$TG_OUT" ARCH=arm64 \
               DTC_EXT="$TG/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
               a52xq_defconfig

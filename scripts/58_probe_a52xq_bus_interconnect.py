@@ -27,14 +27,14 @@ PROBES = {
     ),
     "qcom-bcm-voter": (
         "drivers/interconnect/qcom/bcm-voter.c",
-        "drivers/interconnect/qcom/bcm-voter.o",
-        "CONFIG_INTERCONNECT_QCOM",
+        "drivers/interconnect/qcom/icc-bcm-voter.o",
+        "CONFIG_INTERCONNECT_QCOM_BCM_VOTER",
         "Qualcomm BCM voter",
     ),
     "qcom-icc-rpmh": (
         "drivers/interconnect/qcom/icc-rpmh.c",
         "drivers/interconnect/qcom/icc-rpmh.o",
-        "CONFIG_INTERCONNECT_QCOM",
+        "CONFIG_INTERCONNECT_QCOM_RPMH",
         "Qualcomm RPMh interconnect helper",
     ),
     "qcom-sc7180": (

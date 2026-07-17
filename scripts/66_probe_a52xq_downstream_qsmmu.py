@@ -39,6 +39,15 @@ def append_once(path: Path, marker: str, line: str) -> None:
         path.write_text(text.rstrip() + "\n" + line.rstrip() + "\n")
 
 
+def copy_normalized_source(source: Path, target: Path) -> int:
+    lines = source.read_text(errors="replace").splitlines()
+    normalized = [line.rstrip(" \t") for line in lines]
+    changed = sum(before != after for before, after in zip(lines, normalized))
+    target.write_text("\n".join(normalized) + "\n")
+    target.chmod(0o644)
+    return changed
+
+
 def stage(args: argparse.Namespace) -> None:
     gki = args.gki.resolve()
     touchgrass = args.touchgrass.resolve()
@@ -53,6 +62,7 @@ def stage(args: argparse.Namespace) -> None:
     destination = gki / DEST_DIR
     destination.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, str]] = []
+    normalized_lines = 0
     for relative in SOURCE_FILES:
         source = touchgrass / relative
         if not source.is_file():
@@ -61,12 +71,14 @@ def stage(args: argparse.Namespace) -> None:
         if name == "arm-smmu.c":
             name = "arm-smmu-downstream.c"
         target = destination / name
-        shutil.copy2(source, target)
+        changed = copy_normalized_source(source, target)
+        normalized_lines += changed
         rows.append({
             "source_path": relative,
             "staged_path": target.relative_to(gki).as_posix(),
             "bytes": str(target.stat().st_size),
             "sha256": sha256(target),
+            "normalized_trailing_whitespace_lines": str(changed),
         })
 
     (destination / "Makefile").write_text(
@@ -81,7 +93,10 @@ def stage(args: argparse.Namespace) -> None:
     with (artifact / "staged-files.tsv").open("w", newline="") as stream:
         writer = csv.DictWriter(
             stream,
-            fieldnames=["source_path", "staged_path", "bytes", "sha256"],
+            fieldnames=[
+                "source_path", "staged_path", "bytes", "sha256",
+                "normalized_trailing_whitespace_lines",
+            ],
             delimiter="\t",
         )
         writer.writeheader()
@@ -99,6 +114,8 @@ def stage(args: argparse.Namespace) -> None:
         f"touchgrass_commit={tg_head}",
         f"compile_target={TARGET}",
         f"staged_source_count={len(rows)}",
+        f"normalized_trailing_whitespace_lines={normalized_lines}",
+        "normalization_policy=line-endings-trailing-horizontal-whitespace-and-file-mode-only",
         "staging_policy=isolated-parallel-driver-no-replacement-of-gki-arm-smmu",
         "link_test=no",
         "flashable=no",

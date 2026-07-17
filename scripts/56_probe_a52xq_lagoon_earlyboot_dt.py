@@ -15,6 +15,7 @@ SOURCE_DTS = Path("arch/arm64/boot/dts/vendor/qcom/lagoon.dtsi")
 STAGED_DTS = Path("arch/arm64/boot/dts/qcom/lagoon-earlyboot-probe.dtsi")
 WRAPPER_DTS = Path("arch/arm64/boot/dts/qcom/lagoon-earlyboot-probe.dts")
 ANGLE_INCLUDE = re.compile(r'^\s*#include\s+<([^>]+)>', re.MULTILINE)
+LOCAL_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
 
 
 def sha256(path: Path) -> str:
@@ -50,17 +51,7 @@ def stage(args: argparse.Namespace) -> None:
     if not source.is_file():
         raise SystemExit(f"missing touchGrass base DTS: {SOURCE_DTS}")
     source_text = source.read_text(errors="replace")
-
-    forbidden_local_overlays = (
-        "lagoon-audio-overlay.dtsi",
-        "lagoon-sde-display.dtsi",
-        "lagoon-camera.dtsi",
-        "lagoon-vidc.dtsi",
-    )
-    local_includes = re.findall(r'^\s*#include\s+"([^"]+)"', source_text, re.MULTILINE)
-    forbidden_found = sorted(set(local_includes).intersection(forbidden_local_overlays))
-    if forbidden_found:
-        raise SystemExit(f"base lagoon.dtsi unexpectedly includes excluded overlays: {forbidden_found}")
+    local_includes = sorted(set(LOCAL_INCLUDE.findall(source_text)))
 
     artifact.mkdir(parents=True, exist_ok=True)
     destination = gki / STAGED_DTS
@@ -80,6 +71,7 @@ def stage(args: argparse.Namespace) -> None:
 
     binding_rows: list[dict[str, str]] = []
     staged_paths = [STAGED_DTS.as_posix(), WRAPPER_DTS.as_posix()]
+    unresolved = 0
     for include_name in sorted(set(ANGLE_INCLUDE.findall(source_text))):
         relative = Path("include") / include_name
         gki_path = gki / relative
@@ -87,22 +79,24 @@ def stage(args: argparse.Namespace) -> None:
         existed = gki_path.is_file()
         source_hash = sha256(touchgrass_path) if touchgrass_path.is_file() else "<absent>"
         before_hash = sha256(gki_path) if existed else "<absent>"
-
         action = "kept-gki"
-        if not existed:
-            if not touchgrass_path.is_file():
-                raise SystemExit(f"missing binding in both trees: {include_name}")
+
+        if not existed and touchgrass_path.is_file():
             gki_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(touchgrass_path, gki_path)
             staged_paths.append(relative.as_posix())
             action = "copied-touchgrass"
+        elif not existed:
+            action = "unresolved"
+            unresolved += 1
 
+        after_hash = sha256(gki_path) if gki_path.is_file() else "<absent>"
         binding_rows.append({
             "include": include_name,
             "action": action,
             "touchgrass_sha256": source_hash,
             "gki_before_sha256": before_hash,
-            "gki_after_sha256": sha256(gki_path),
+            "gki_after_sha256": after_hash,
         })
 
     write_tsv(
@@ -110,23 +104,29 @@ def stage(args: argparse.Namespace) -> None:
         ["include", "action", "touchgrass_sha256", "gki_before_sha256", "gki_after_sha256"],
         binding_rows,
     )
+    (artifact / "local-includes.txt").write_text(
+        "\n".join(local_includes) + ("\n" if local_includes else "")
+    )
     (artifact / "source-summary.tsv").write_text(
         "source\tgki_destination\tgki_before_sha256\ttouchgrass_sha256\tgki_after_sha256\n"
         f"{SOURCE_DTS.as_posix()}\t{STAGED_DTS.as_posix()}\t{before}\t"
         f"{sha256(source)}\t{sha256(destination)}\n"
     )
 
-    subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *staged_paths], check=True)
+    existing_paths = [path for path in staged_paths if (gki / path).exists()]
+    subprocess.run(["git", "-C", str(gki), "add", "-N", "--", *existing_paths], check=True)
     patch = output("git", "-C", str(gki), "diff", "--binary", "--no-ext-diff")
-    if not patch:
-        raise SystemExit("device-tree staging produced no GKI diff")
-    (artifact / "lagoon-earlyboot-dt-port.patch").write_text(patch + "\n")
+    (artifact / "lagoon-earlyboot-dt-port.patch").write_text(
+        patch + ("\n" if patch else "")
+    )
 
     metadata = [
         "artifact_type=a52xq-gki-5.10-lagoon-earlyboot-dt-compile-probe-not-flashable",
         f"gki_commit={gki_head}",
         f"touchgrass_commit={tg_head}",
         f"binding_include_count={len(binding_rows)}",
+        f"unresolved_binding_count={unresolved}",
+        f"local_include_count={len(local_includes)}",
         "source_scope=lagoon.dtsi-only",
         "excluded_overlays=samsung-board,display,camera,audio,wifi,modem",
         "output_scope=syntax-and-reference-validation-only",

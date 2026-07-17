@@ -86,6 +86,8 @@ if text.count(line) != 1:
     raise SystemExit('ReSukiSU susfs_extra_works anchor mismatch')
 umount.write_text(text.replace(line, '', 1))
 SUSFSCOMPATPY
+python3 "$PROJECT_DIR/scripts/55_apply_susfs_resukisu_compat.py" \
+  "$KERNEL_DIR" "$RESUKISU_DIR" "$PROJECT_DIR/scripts/55_susfs_resukisu_compat.c"
 """
 
 CONFIG_EXTENSION = r"""    safe_susfs_config = new_config + (' \\\n'

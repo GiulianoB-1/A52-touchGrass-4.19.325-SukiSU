@@ -39,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment 26 --repo "$GITHUB_REPOSITORY" --body \
+          gh issue comment 27 --repo "$GITHUB_REPOSITORY" --body \
             "Workflow 54 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
           Commit: \`${GITHUB_SHA}\`

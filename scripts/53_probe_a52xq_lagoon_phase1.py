@@ -123,11 +123,16 @@ static const struct llcc_slice_config lagoon_data[] = {
 \t},
 };
 
+static const u32 lagoon_reg_offset[] = {
+\t[LLCC_COMMON_HW_INFO] = 0x00030000,
+\t[LLCC_COMMON_STATUS0] = 0x0003000c,
+};
+
 static const struct qcom_llcc_config lagoon_cfg = {
 \t.sct_data = lagoon_data,
 \t.size = ARRAY_SIZE(lagoon_data),
 \t.need_llcc_cfg = true,
-\t.reg_offset = llcc_v1_2_reg_offset,
+\t.reg_offset = lagoon_reg_offset,
 };
 '''.strip()
 
@@ -190,6 +195,15 @@ def adapt_gcc_driver(path: Path) -> None:
             i += 1
             continue
 
+        if ".enable_safe_config =" in line:
+            i += 1
+            continue
+
+        if "&clk_branch2_hw_ctl_ops" in line:
+            out.append(line.replace("&clk_branch2_hw_ctl_ops", "&clk_branch2_ops"))
+            i += 1
+            continue
+
         if ".vdd_class =" in line:
             i += 1
             if i < len(lines) and ".num_rate_max =" in lines[i]:
@@ -241,10 +255,12 @@ def adapt_gcc_driver(path: Path) -> None:
         "vdd_cx.regulator",
         "vdd_cx_ao.regulator",
         '"vdd-level-lagoon.h"',
+        ".enable_safe_config =",
+        "clk_branch2_hw_ctl_ops",
     )
     leftovers = [token for token in forbidden if token in text]
     if leftovers:
-        raise SystemExit(f"GCC VDD adaptation left unsupported tokens: {leftovers}")
+        raise SystemExit(f"GCC adaptation left unsupported tokens: {leftovers}")
     path.write_text(text)
 
 

@@ -19,6 +19,8 @@ ROOT_DEST = Path("lagoon-earlyboot-probe.dtsi")
 WRAPPER_DTS = Path("lagoon-earlyboot-probe.dts")
 ANGLE_INCLUDE = re.compile(r'^\s*#include\s+<([^>]+)>', re.MULTILINE)
 LOCAL_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
+DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\b')
+INCLUDE_GUARD = re.compile(r'^\s*#ifndef\s+([A-Za-z_][A-Za-z0-9_]*)\b', re.MULTILINE)
 REFERENCE_ONLY_PREFIXES = ("camera/", "lagoon-audio", "lagoon-sde", "lagoon-vidc")
 
 
@@ -47,6 +49,65 @@ def normalize_local_include(source_root: Path, current: Path, include_name: str)
         return candidate.relative_to(source_root.resolve())
     except ValueError:
         return None
+
+
+def define_blocks(text: str) -> list[tuple[str, str]]:
+    """Return complete one- or multi-line #define blocks in source order."""
+    lines = text.splitlines()
+    blocks: list[tuple[str, str]] = []
+    index = 0
+    while index < len(lines):
+        match = DEFINE.match(lines[index])
+        if not match:
+            index += 1
+            continue
+        block = [lines[index]]
+        while block[-1].rstrip().endswith("\\") and index + 1 < len(lines):
+            index += 1
+            block.append(lines[index])
+        blocks.append((match.group(1), "\n".join(block)))
+        index += 1
+    return blocks
+
+
+def merge_binding_header(gki_path: Path, touchgrass_path: Path) -> tuple[str, int]:
+    """Preserve GKI IDs and append definitions that exist only downstream.
+
+    Binding headers can also be consumed by GKI C drivers. Replacing them with
+    downstream versions can renumber or remove IDs required by those drivers.
+    Existing GKI definitions therefore stay authoritative while Lagoon-only
+    names are appended for the downstream device tree.
+    """
+    if not gki_path.is_file():
+        gki_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(touchgrass_path, gki_path)
+        return "copied-touchgrass", len(define_blocks(touchgrass_path.read_text(errors="replace")))
+
+    gki_text = gki_path.read_text(errors="replace")
+    downstream_text = touchgrass_path.read_text(errors="replace")
+    if gki_text == downstream_text:
+        return "matched-touchgrass", 0
+
+    guards = set(INCLUDE_GUARD.findall(gki_text)) | set(INCLUDE_GUARD.findall(downstream_text))
+    gki_names = {name for name, _ in define_blocks(gki_text)}
+    additions = [
+        block for name, block in define_blocks(downstream_text)
+        if name not in gki_names and name not in guards
+    ]
+    if not additions:
+        return "kept-gki-all-defines-present", 0
+
+    endif_matches = list(re.finditer(r'(?m)^\s*#endif(?:\s*/\*.*\*/)?\s*$', gki_text))
+    if not endif_matches:
+        raise SystemExit(f"binding header has no closing #endif: {gki_path}")
+    insert_at = endif_matches[-1].start()
+    compatibility = (
+        "\n/* Downstream Lagoon-only binding IDs merged without replacing GKI IDs. */\n"
+        + "\n".join(additions)
+        + "\n\n"
+    )
+    gki_path.write_text(gki_text[:insert_at].rstrip() + compatibility + gki_text[insert_at:])
+    return "merged-touchgrass-missing-defines", len(additions)
 
 
 def stage(args: argparse.Namespace) -> None:
@@ -85,13 +146,9 @@ def stage(args: argparse.Namespace) -> None:
         if not source.is_file():
             unresolved_local += 1
             local_rows.append({
-                "relative_path": relative.as_posix(),
-                "included_from": included_from,
-                "action": "unresolved",
-                "scope": "unknown",
-                "source_sha256": "<absent>",
-                "gki_before_sha256": "<absent>",
-                "gki_after_sha256": "<absent>",
+                "relative_path": relative.as_posix(), "included_from": included_from,
+                "action": "unresolved", "scope": "unknown", "source_sha256": "<absent>",
+                "gki_before_sha256": "<absent>", "gki_after_sha256": "<absent>",
             })
             continue
 
@@ -106,13 +163,9 @@ def stage(args: argparse.Namespace) -> None:
         scope = "reference-only" if relative_text.startswith(REFERENCE_ONLY_PREFIXES) else "early-boot"
         reference_only += int(scope == "reference-only")
         local_rows.append({
-            "relative_path": relative_text,
-            "included_from": included_from,
-            "action": "copied-touchgrass",
-            "scope": scope,
-            "source_sha256": sha256(source),
-            "gki_before_sha256": before,
-            "gki_after_sha256": sha256(destination),
+            "relative_path": relative_text, "included_from": included_from,
+            "action": "copied-touchgrass", "scope": scope, "source_sha256": sha256(source),
+            "gki_before_sha256": before, "gki_after_sha256": sha256(destination),
         })
 
         text = source.read_text(errors="replace")
@@ -122,12 +175,9 @@ def stage(args: argparse.Namespace) -> None:
             if child is None:
                 unresolved_local += 1
                 local_rows.append({
-                    "relative_path": include_name,
-                    "included_from": relative_text,
-                    "action": "outside-source-root",
-                    "scope": "unknown",
-                    "source_sha256": "<unresolved>",
-                    "gki_before_sha256": "<unresolved>",
+                    "relative_path": include_name, "included_from": relative_text,
+                    "action": "outside-source-root", "scope": "unknown",
+                    "source_sha256": "<unresolved>", "gki_before_sha256": "<unresolved>",
                     "gki_after_sha256": "<unresolved>",
                 })
             else:
@@ -135,18 +185,16 @@ def stage(args: argparse.Namespace) -> None:
 
     wrapper = dest_root / WRAPPER_DTS
     wrapper.write_text(
-        '/dts-v1/;\n\n'
-        '#include "lagoon-earlyboot-probe.dtsi"\n\n'
-        '/ {\n'
-        '\tmodel = "Samsung A52xq Lagoon early-boot compile probe";\n'
-        '\tcompatible = "qcom,lagoon-mtp", "qcom,lagoon";\n'
-        '};\n'
+        '/dts-v1/;\n\n#include "lagoon-earlyboot-probe.dtsi"\n\n'
+        '/ {\n\tmodel = "Samsung A52xq Lagoon early-boot compile probe";\n'
+        '\tcompatible = "qcom,lagoon-mtp", "qcom,lagoon";\n};\n'
     )
     staged_paths.append((DEST_ROOT / WRAPPER_DTS).as_posix())
 
     binding_rows: list[dict[str, str]] = []
     unresolved_binding = 0
-    overlaid_binding = 0
+    merged_binding = 0
+    added_binding_defines = 0
     for include_name in sorted(angle_includes):
         relative = Path("include") / include_name
         gki_path = gki / relative
@@ -156,16 +204,12 @@ def stage(args: argparse.Namespace) -> None:
 
         if touchgrass_path.is_file():
             source_hash = sha256(touchgrass_path)
-            gki_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(touchgrass_path, gki_path)
-            staged_paths.append(relative.as_posix())
-            if existed and before == source_hash:
-                action = "matched-touchgrass"
-            elif existed:
-                action = "overlaid-touchgrass"
-                overlaid_binding += 1
-            else:
-                action = "copied-touchgrass"
+            action, additions = merge_binding_header(gki_path, touchgrass_path)
+            if action in {"copied-touchgrass", "merged-touchgrass-missing-defines"}:
+                staged_paths.append(relative.as_posix())
+            if action == "merged-touchgrass-missing-defines":
+                merged_binding += 1
+            added_binding_defines += additions
         elif existed:
             source_hash = "<absent>"
             action = "kept-gki-no-touchgrass-source"
@@ -175,10 +219,8 @@ def stage(args: argparse.Namespace) -> None:
             unresolved_binding += 1
 
         binding_rows.append({
-            "include": include_name,
-            "action": action,
-            "touchgrass_sha256": source_hash,
-            "gki_before_sha256": before,
+            "include": include_name, "action": action,
+            "touchgrass_sha256": source_hash, "gki_before_sha256": before,
             "gki_after_sha256": sha256(gki_path) if gki_path.is_file() else "<absent>",
         })
 
@@ -198,7 +240,7 @@ def stage(args: argparse.Namespace) -> None:
         "unresolved_local_include_count\tbinding_include_count\toverlaid_binding_count\t"
         "unresolved_binding_count\n"
         f"recursive-lagoon-base-include-graph\t{len(visited)}\t{reference_only}\t"
-        f"{unresolved_local}\t{len(binding_rows)}\t{overlaid_binding}\t{unresolved_binding}\n"
+        f"{unresolved_local}\t{len(binding_rows)}\t{merged_binding}\t{unresolved_binding}\n"
     )
 
     existing_paths = sorted({path for path in staged_paths if (gki / path).exists()})
@@ -208,15 +250,13 @@ def stage(args: argparse.Namespace) -> None:
 
     metadata = [
         "artifact_type=a52xq-gki-5.10-lagoon-earlyboot-dt-compile-probe-not-flashable",
-        f"gki_commit={gki_head}",
-        f"touchgrass_commit={tg_head}",
-        f"local_file_count={len(visited)}",
-        f"reference_only_file_count={reference_only}",
+        f"gki_commit={gki_head}", f"touchgrass_commit={tg_head}",
+        f"local_file_count={len(visited)}", f"reference_only_file_count={reference_only}",
         f"unresolved_local_include_count={unresolved_local}",
-        f"binding_include_count={len(binding_rows)}",
-        f"overlaid_binding_count={overlaid_binding}",
+        f"binding_include_count={len(binding_rows)}", f"merged_binding_count={merged_binding}",
+        f"added_downstream_binding_define_count={added_binding_defines}",
         f"unresolved_binding_count={unresolved_binding}",
-        "binding_policy=prefer-pinned-touchgrass-headers-for-downstream-dt",
+        "binding_policy=preserve-gki-definitions-and-append-missing-pinned-touchgrass-definitions",
         "source_scope=recursive-lagoon-base-include-graph",
         "reference_only_subsystems=camera,display,audio,video",
         "output_scope=syntax-and-reference-validation-only",
@@ -258,7 +298,7 @@ def finalize(args: argparse.Namespace) -> None:
         "## Scope", "",
         "- Root source: `lagoon.dtsi`",
         "- Its local include graph is staged recursively for reference resolution.",
-        "- Pinned touchGrass binding headers are preferred for this downstream DT compile probe.",
+        "- Existing GKI binding definitions are preserved; missing pinned touchGrass definitions are appended.",
         "- Camera, display, audio, and video files are reference-only and are not driver-port approvals.",
         "- The generated DTB is a compile probe and is not flashable.", "",
         "## Result", "",

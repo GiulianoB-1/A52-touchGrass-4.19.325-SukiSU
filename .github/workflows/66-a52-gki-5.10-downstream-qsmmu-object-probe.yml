@@ -152,9 +152,17 @@ jobs:
             > "$OUT/logs/olddefconfig.log" 2>&1
           cp "$BUILD/.config" "$OUT/resolved.config"
 
+          {
+            grep -nE 'enum iommu_attr|struct iommu_fwspec|dev_iommu_(fwspec|priv)|struct iommu_iotlb_gather' \
+              gki/common/include/linux/iommu.h || true
+            grep -nE 'struct iommu_flush_ops|struct io_pgtable_cfg|tlb_flush|tlb_add' \
+              gki/common/include/linux/io-pgtable.h || true
+          } > "$OUT/logs/gki-iommu-api-index.log"
+
           rc=0
           make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
-            "$TARGET" > "$OUT/logs/downstream-qsmmu.log" 2>&1 || rc=$?
+            KCFLAGS=-ferror-limit=0 "$TARGET" \
+            > "$OUT/logs/downstream-qsmmu.log" 2>&1 || rc=$?
           result=compile-failed
           produced=no
           if test "$rc" -eq 0 && test -s "$BUILD/$TARGET"; then
@@ -195,12 +203,13 @@ jobs:
             "$OUT/analysis-metadata.txt"
           grep -Fxq 'staging_policy=isolated-parallel-driver-no-replacement-of-gki-arm-smmu' \
             "$OUT/analysis-metadata.txt"
+          grep -Fxq 'compiler_error_limit=unlimited' "$OUT/analysis-metadata.txt"
           grep -Fxq 'link_test=no' "$OUT/analysis-metadata.txt"
           grep -Fxq 'flashable=no' "$OUT/analysis-metadata.txt"
           ! find "$OUT" -type f \( -name Image -o -name boot.img -o -name '*.dtb' \) | grep -q .
           (cd "$OUT" && sha256sum -c SHA256SUMS)
           cat "$OUT/analysis-metadata.txt"
-          sed -n '1,500p' "$OUT/PORTING-PROBE-REPORT.md"
+          sed -n '1,1000p' "$OUT/PORTING-PROBE-REPORT.md"
 
       - name: Upload non-flashable isolated downstream QSMMU probe
         uses: actions/upload-artifact@v4

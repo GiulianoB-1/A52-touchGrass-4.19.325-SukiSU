@@ -16,7 +16,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/init.h>
-#include <linux/memremap.h>
+#include <linux/io.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/sizes.h>
@@ -158,6 +158,7 @@ def main() -> int:
         "device_initcall": "device_initcall(a52_ramoops_device_init);" in SOURCE,
         "fixed_physical_range": "A52_RAMOOPS_PHYS 0xB1B00000ULL" in SOURCE,
         "fixed_one_mib_size": "A52_RAMOOPS_SIZE SZ_1M" in SOURCE,
+        "linux_io_header": "#include <linux/io.h>" in SOURCE,
         "memremap_wb": "memremap(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE, MEMREMAP_WB)" in SOURCE,
         "no_ioremap": "ioremap(" not in SOURCE and "ioremap_wc(" not in SOURCE,
         "read_only_file_operations": ".read = a52_ramoops_read" in SOURCE and ".write" not in SOURCE,

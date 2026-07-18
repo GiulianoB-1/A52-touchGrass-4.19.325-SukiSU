@@ -22,6 +22,15 @@ parent=$(git -C "$WORK/donor" rev-parse "${resolved}^")
 git -C "$WORK/donor" diff --binary --full-index "$parent" "$resolved" -- kernel/bpf/ringbuf.c > "$PATCH"
 test -s "$PATCH" || fail "Android ring-buffer overrun fix patch is empty"
 
+# Hydrate the exact patch preimage and result blobs in the shallow vendor
+# repository so git apply --3way can perform a real content merge.
+for tree in "$parent" "$resolved"; do
+  expected=$(git -C "$WORK/donor" rev-parse "$tree:kernel/bpf/ringbuf.c")
+  actual=$(git -C "$WORK/donor" show "$tree:kernel/bpf/ringbuf.c" \
+    | git -C "$KERNEL_DIR" hash-object -w --stdin)
+  [[ "$actual" == "$expected" ]] || fail "Overrun-fix donor blob hash mismatch"
+done
+
 if git -C "$KERNEL_DIR" apply --check "$PATCH"; then
   git -C "$KERNEL_DIR" apply --index "$PATCH"
   result=applied

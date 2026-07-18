@@ -1,5 +1,5 @@
-Linux 4.19.206 BPF ring-buffer backport validation — attempt 2
+Linux 4.19.206 BPF ring-buffer backport validation — attempt 3
 
 Baseline: hardware-tested Linux 4.19.206 + ReSukiSU manual hooks + SUSFS detection API.
 Change under test: complete Android 4.19 BPF ring-buffer ABI and required security fixes.
-Donor ref: refs/heads/deprecated/android-4.19-stable.
+Donor history root: a8bf86a0e0fa05070897a210d706d5c4d83c26ac.

@@ -67,13 +67,110 @@ def main() -> None:
         "safe SUSFS mount visibility default",
     )
 
-    fdinfo = kernel / "fs/notify/fdinfo.c"
+    stat = kernel / "fs/stat.c"
     replace_once(
-        fdinfo,
-        "out_seq_printf:\n#endif",
-        "out_seq_printf:\n\t;\n#endif",
-        "SUSFS fdinfo label statement",
+        stat,
+        """#ifdef CONFIG_KSU
+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+#endif
+#endif
+""",
+        """#ifdef CONFIG_KSU
+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+#endif
+#ifdef CONFIG_KSU_SUSFS
+extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);
+#endif
+""",
+        "ReSukiSU SUSFS fstat declaration",
     )
+    replace_once(
+        stat,
+        """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+{
+	struct kstat stat;
+	int error = vfs_fstat(fd, &stat);
+
+	if (!error)
+		error = cp_new_stat(&stat, statbuf);
+#ifdef CONFIG_KSU
+	if (!error)
+		ksu_handle_newfstat_ret(&fd, &statbuf);
+#endif
+
+	return error;
+}
+""",
+        """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+{
+	struct kstat stat;
+	int error = vfs_fstat(fd, &stat);
+
+#ifdef CONFIG_KSU_SUSFS
+	if (!error)
+		ksu_handle_vfs_fstat((int)fd, &stat.size);
+#endif
+	if (!error)
+		error = cp_new_stat(&stat, statbuf);
+
+	return error;
+}
+""",
+        "ReSukiSU SUSFS newfstat hook",
+    )
+    replace_once(
+        stat,
+        """SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+{
+	struct kstat stat;
+	int error = vfs_fstat(fd, &stat);
+
+	if (!error)
+		error = cp_new_stat64(&stat, statbuf);
+#ifdef CONFIG_KSU
+	if (!error)
+		ksu_handle_fstat64_ret(&fd, &statbuf);
+#endif
+
+	return error;
+}
+""",
+        """SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+{
+	struct kstat stat;
+	int error = vfs_fstat(fd, &stat);
+
+#ifdef CONFIG_KSU_SUSFS
+	if (!error)
+		ksu_handle_vfs_fstat((int)fd, &stat.size);
+#endif
+	if (!error)
+		error = cp_new_stat64(&stat, statbuf);
+
+	return error;
+}
+""",
+        "ReSukiSU SUSFS fstat64 hook",
+    )
+
+    fdinfo = kernel / "fs/notify/fdinfo.c"
+    text = fdinfo.read_text()
+    newer_inotify_helper = "inotify_mark_user_mask(mark)"
+    if text.count(newer_inotify_helper) != 2:
+        raise SystemExit(
+            "SUSFS fdinfo inotify helper: expected two matches, "
+            f"found {text.count(newer_inotify_helper)}"
+        )
+    text = text.replace(newer_inotify_helper, "(mark->mask & IN_ALL_EVENTS)")
+    label = "out_seq_printf:\n#endif"
+    if text.count(label) != 1:
+        raise SystemExit(
+            f"SUSFS fdinfo label statement: expected one match, found {text.count(label)}"
+        )
+    fdinfo.write_text(text.replace(label, "out_seq_printf:\n\t;\n#endif", 1))
 
     dispatch = resukisu / "kernel/supercall/dispatch.c"
     text = dispatch.read_text()
@@ -156,7 +253,11 @@ void susfs_compat_show_version(void __user **user_info);
             "CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING",
         ],
         proc_namespace: ["susfs_hide_sus_mnts_for_all_procs = false;"],
-        fdinfo: ["out_seq_printf:\n\t;"],
+        stat: [
+            "extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);",
+            "ksu_handle_vfs_fstat((int)fd, &stat.size);",
+        ],
+        fdinfo: ["out_seq_printf:\n\t;", "(mark->mask & IN_ALL_EVENTS)"],
         dispatch: [
             "susfs_compat_add_sus_kstat(arg, false);",
             "susfs_compat_add_sus_kstat(arg, true);",
@@ -168,6 +269,13 @@ void susfs_compat_show_version(void __user **user_info);
         for needle in needles:
             if needle not in content:
                 raise SystemExit(f"compatibility verification failed: {path}: {needle}")
+
+    stat_text = stat.read_text()
+    for forbidden in ("ksu_handle_newfstat_ret", "ksu_handle_fstat64_ret"):
+        if forbidden in stat_text:
+            raise SystemExit(f"obsolete manual-hook symbol remains in fs/stat.c: {forbidden}")
+    if "inotify_mark_user_mask" in fdinfo.read_text():
+        raise SystemExit("newer inotify helper remains in Linux 4.19 fdinfo.c")
 
 
 if __name__ == "__main__":

@@ -96,6 +96,23 @@ CONFIG_EXTENSION = r"""    safe_susfs_config = new_config + (' \\\n'
         '  -d KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS -d KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \\\n'
         '  -d KSU_SUSFS_OPEN_REDIRECT -d KSU_SUSFS_SUS_MAP')
     text = text.replace(new_config, safe_susfs_config, 1)
+
+    host_finalize_anchor = (
+        'stat.write_text(text)\n'
+        'PY\n\n'
+        'info "Adapting ReSukiSU to Linux 4.19 and disabling unmount defaults"\n'
+    )
+    host_finalize_replacement = (
+        'stat.write_text(text)\n'
+        'PY\n\n'
+        'info "Finalizing ReSukiSU SUSFS fstat hooks for Linux 4.19"\n'
+        'python3 "$PROJECT_DIR/scripts/55_apply_susfs_resukisu_compat.py" '
+        '--finalize-host-hooks "$KERNEL_DIR"\n\n'
+        'info "Adapting ReSukiSU to Linux 4.19 and disabling unmount defaults"\n'
+    )
+    if text.count(host_finalize_anchor) != 1:
+        raise SystemExit('ReSukiSU host fstat finalization anchor mismatch')
+    text = text.replace(host_finalize_anchor, host_finalize_replacement, 1)
 """
 
 

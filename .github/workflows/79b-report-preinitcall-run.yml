@@ -1,0 +1,37 @@
+name: 79b - Report latest pre-initcall run
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/79b-report-preinitcall-run.yml'
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish latest Workflow 79 run in issue body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          RUN_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/79-a52-gki-5.10-preinitcall-ramoops.yml/runs?per_page=1")"
+          RUN_ID="$(jq -r '.workflow_runs[0].id' <<<"$RUN_JSON")"
+          STATUS="$(jq -r '.workflow_runs[0].status' <<<"$RUN_JSON")"
+          CONCLUSION="$(jq -r '.workflow_runs[0].conclusion // "pending"' <<<"$RUN_JSON")"
+          HEAD_SHA="$(jq -r '.workflow_runs[0].head_sha' <<<"$RUN_JSON")"
+          test -n "$RUN_ID"
+          test "$RUN_ID" != null
+          gh issue edit 45 --repo "$GITHUB_REPOSITORY" --body "Latest Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}
+
+Status: ${STATUS}
+Conclusion: ${CONCLUSION}
+Head SHA: ${HEAD_SHA}
+
+Purpose: register ramoops after driver_init and before every normal initcall level."

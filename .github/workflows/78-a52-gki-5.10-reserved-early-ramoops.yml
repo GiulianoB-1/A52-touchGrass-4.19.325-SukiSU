@@ -1,0 +1,363 @@
+name: 78 - A52 GKI 5.10 reserved early ramoops
+
+run-name: Build A52 GKI 5.10 reserved early ramoops candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/78-a52-gki-5.10-reserved-early-ramoops.yml'
+      - 'scripts/76_repack_a52_boot_with_dtb.py'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-reserved-early-ramoops
+  cancel-in-progress: true
+
+env:
+  WORKFLOW75_ARTIFACT_ID: '8428249310'
+
+jobs:
+  build:
+    name: Build reserved early ramoops boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 78 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Purpose: combine a DT-reserved 1 MiB persistent-memory region with early parameter-based ramoops registration, while preserving the watchdog-validated kernel and ROM ramdisk.
+          Commit: \`${GITHUB_SHA}\`"
+
+      - name: Install tools and verify Workflow 75 candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl unzip python3 device-tree-compiler file
+          mkdir -p workflow75/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW75_ARTIFACT_ID}/zip" \
+            --output workflow75/artifact.zip
+          unzip -q workflow75/artifact.zip -d workflow75/extracted
+          (cd workflow75/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow75/extracted/boot.img
+          test -s workflow75/extracted/Image.gz
+          test -s workflow75/extracted/diagnostic.config
+          grep -Fxq 'CONFIG_QCOM_WDT=y' workflow75/extracted/diagnostic.config
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' workflow75/extracted/diagnostic.config
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' workflow75/extracted/diagnostic.config
+
+      - name: Extract and audit original boot DTB
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-reserved-early-ramoops"
+          mkdir -p "$OUT"
+          python3 - <<'PY'
+          import collections
+          import importlib.util
+          import json
+          import struct
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          boot = module.parse_boot(Path("workflow75/extracted/boot.img").read_bytes())
+          dtb = boot["dtb"]
+          Path("artifacts/a52xq-gki-5.10-reserved-early-ramoops/original.dtb").write_bytes(dtb)
+
+          header = struct.unpack_from(">10I", dtb, 0)
+          magic, total, off_struct, off_strings, _, _, _, _, size_strings, size_struct = header
+          if magic != 0xD00DFEED or total != len(dtb):
+              raise SystemExit("invalid source DTB")
+
+          strings = dtb[off_strings:off_strings + size_strings]
+          pos = off_struct
+          stack = []
+          nodes = collections.OrderedDict()
+          while pos < off_struct + size_struct:
+              token = struct.unpack_from(">I", dtb, pos)[0]
+              pos += 4
+              if token == 1:
+                  end = dtb.index(b"\0", pos)
+                  name = dtb[pos:end].decode("ascii", "replace")
+                  pos = (end + 4) & ~3
+                  stack.append(name)
+                  nodes.setdefault("/" + "/".join(x for x in stack if x), {})
+              elif token == 2:
+                  stack.pop()
+              elif token == 3:
+                  length, nameoff = struct.unpack_from(">II", dtb, pos)
+                  pos += 8
+                  value = dtb[pos:pos + length]
+                  pos = (pos + length + 3) & ~3
+                  end = strings.index(b"\0", nameoff)
+                  prop = strings[nameoff:end].decode("ascii")
+                  path = "/" + "/".join(x for x in stack if x)
+                  nodes.setdefault(path, {})[prop] = value
+              elif token == 4:
+                  continue
+              elif token == 9:
+                  break
+              else:
+                  raise SystemExit(f"unexpected FDT token {token}")
+
+          def cells(value):
+              if len(value) % 4:
+                  raise SystemExit("unaligned FDT property")
+              return list(struct.unpack(">" + "I" * (len(value) // 4), value))
+
+          parent = nodes.get("/reserved-memory")
+          if parent is None:
+              raise SystemExit("source DTB lacks /reserved-memory")
+          if cells(parent.get("#address-cells", b"")) != [2]:
+              raise SystemExit("unexpected reserved-memory #address-cells")
+          if cells(parent.get("#size-cells", b"")) != [2]:
+              raise SystemExit("unexpected reserved-memory #size-cells")
+
+          target_start = 0xB1B00000
+          target_end = target_start + 0x100000
+          conflicts = []
+          regions = []
+          for path, props in nodes.items():
+              if not path.startswith("/reserved-memory/") or path.count("/") != 2:
+                  continue
+              reg = props.get("reg")
+              if not reg:
+                  continue
+              values = cells(reg)
+              if len(values) != 4:
+                  continue
+              start = (values[0] << 32) | values[1]
+              size = (values[2] << 32) | values[3]
+              end = start + size
+              row = {"path": path, "start": hex(start), "size": hex(size), "end": hex(end)}
+              regions.append(row)
+              if start < target_end and target_start < end:
+                  conflicts.append(row)
+
+          if conflicts:
+              raise SystemExit("persistent-memory range conflicts: " + json.dumps(conflicts))
+
+          report = {
+              "target_start": hex(target_start),
+              "target_size": hex(target_end - target_start),
+              "target_conflicts": conflicts,
+              "existing_regions": regions,
+          }
+          Path("artifacts/a52xq-gki-5.10-reserved-early-ramoops/reserved-memory-audit.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Add reservation-only persistent RAM node
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-reserved-early-ramoops"
+          dtc -I dtb -O dtb -p 8192 -o "$OUT/reserved.dtb" "$OUT/original.dtb" \
+            2> "$OUT/dtc-roundtrip-warnings.txt"
+          fdtput -c "$OUT/reserved.dtb" /reserved-memory/a52-ramoops-reserved@b1b00000
+          fdtput -t x "$OUT/reserved.dtb" /reserved-memory/a52-ramoops-reserved@b1b00000 reg \
+            0x0 0xb1b00000 0x0 0x00100000
+          dtc -I dtb -O dts -o "$OUT/reserved.dts" "$OUT/reserved.dtb" \
+            2> "$OUT/dtc-reserved-warnings.txt"
+
+          test "$(fdtget -t x "$OUT/reserved.dtb" /reserved-memory/a52-ramoops-reserved@b1b00000 reg)" = \
+            '0 b1b00000 0 100000'
+          if fdtget "$OUT/reserved.dtb" /reserved-memory/a52-ramoops-reserved@b1b00000 compatible >/dev/null 2>&1; then
+            echo 'reservation-only node unexpectedly has a compatible property' >&2
+            exit 1
+          fi
+
+      - name: Repack watchdog image with reserved DTB
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-reserved-early-ramoops"
+          python3 scripts/76_repack_a52_boot_with_dtb.py \
+            --source workflow75/extracted/boot.img \
+            --kernel workflow75/extracted/Image.gz \
+            --dtb "$OUT/reserved.dtb" \
+            --output "$OUT/intermediate-boot.img" \
+            --report "$OUT/dtb-repack-report.json"
+
+      - name: Add early ramoops boot parameters and audit
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-reserved-early-ramoops"
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import importlib.util
+          import json
+          import struct
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path("workflow75/extracted/boot.img")
+          intermediate_path = Path("artifacts/a52xq-gki-5.10-reserved-early-ramoops/intermediate-boot.img")
+          output_path = Path("artifacts/a52xq-gki-5.10-reserved-early-ramoops/boot.img")
+
+          original = module.parse_boot(source_path.read_bytes())
+          intermediate_bytes = bytearray(intermediate_path.read_bytes())
+          intermediate = module.parse_boot(bytes(intermediate_bytes))
+
+          params = [
+              "ramoops.mem_address=0xB1B00000",
+              "ramoops.mem_size=0x00100000",
+              "ramoops.mem_type=0",
+              "ramoops.record_size=0x00040000",
+              "ramoops.console_size=0x00040000",
+              "ramoops.ftrace_size=0x00040000",
+              "ramoops.pmsg_size=0x00040000",
+              "ramoops.dump_oops=1",
+              "pstore.backend=ramoops",
+          ]
+
+          new_cmdline = intermediate["cmdline"]
+          for param in params:
+              key = param.split("=", 1)[0] + "="
+              if not any(word.startswith(key) for word in new_cmdline.split()):
+                  new_cmdline += " " + param
+
+          encoded = new_cmdline.encode("ascii")
+          if len(encoded) > 1536:
+              raise SystemExit(f"command line too long: {len(encoded)} > 1536")
+
+          intermediate_bytes[64:576] = b"\0" * 512
+          intermediate_bytes[608:1632] = b"\0" * 1024
+          intermediate_bytes[64:64 + min(len(encoded), 512)] = encoded[:512]
+          if len(encoded) > 512:
+              intermediate_bytes[608:608 + len(encoded) - 512] = encoded[512:]
+
+          output_path.write_bytes(intermediate_bytes)
+          final = module.parse_boot(output_path.read_bytes())
+
+          checks = {
+              "partition_size_preserved": output_path.stat().st_size == source_path.stat().st_size,
+              "watchdog_kernel_unchanged": final["kernel"] == original["kernel"],
+              "rom_ramdisk_unchanged": final["ramdisk"] == original["ramdisk"],
+              "second_unchanged": final["second"] == original["second"],
+              "reserved_dtb_used": final["dtb"] == intermediate["dtb"] and final["dtb"] != original["dtb"],
+              "boot_id_valid_after_dtb_repack": final["id"] == intermediate["id"],
+              "early_ramoops_parameters_present": all(param in final["cmdline"] for param in params),
+              "watchdog_diagnostics_preserved": all(
+                  token in final["cmdline"]
+                  for token in [
+                      "initcall_debug",
+                      "pstore.compress=none",
+                      "watchdog.handle_boot_enabled=1",
+                  ]
+              ),
+              "qsmmuv500_contract_preserved": b"qcom,qsmmu-v500\0" in final["dtb"],
+              "msm_watchdog_node_preserved": b"qcom,msm-watchdog\0" in final["dtb"],
+              "reservation_node_present": b"a52-ramoops-reserved@b1b00000\0" in final["dtb"],
+              "no_duplicate_ramoops_compatible": b"ramoops\0" not in final["dtb"],
+          }
+
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit("combined diagnostic audit failed: " + ", ".join(failed))
+
+          report = {
+              "status": "reserved-early-ramoops-repacked-audited",
+              "hardware_validated": False,
+              "source_boot_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+              "output_boot_sha256": hashlib.sha256(output_path.read_bytes()).hexdigest(),
+              "output_bytes": output_path.stat().st_size,
+              "new_cmdline": final["cmdline"],
+              "checks": checks,
+              "interpretation": (
+                  "The DTB reserves the persistent RAM range without creating a late DT ramoops device. "
+                  "The built-in ramoops parameters register the backend during postcore init."
+              ),
+          }
+          Path("artifacts/a52xq-gki-5.10-reserved-early-ramoops/repack-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Finalize audited combined candidate
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-reserved-early-ramoops"
+          rm -f "$OUT/intermediate-boot.img"
+          cp workflow75/extracted/Image.gz "$OUT/Image.gz"
+          cp workflow75/extracted/diagnostic.config "$OUT/diagnostic.config"
+          cp workflow75/extracted/watchdog-bridge/patched-qcom-wdt.c "$OUT/patched-qcom-wdt.c"
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 RESERVED + EARLY RAMOOPS DIAGNOSTIC
+
+          The watchdog-enabled kernel and ROM ramdisk are unchanged from Workflow 75.
+
+          This candidate combines both requirements for reliable early persistent logging:
+
+            1. The DTB reserves 0xB1B00000-0xB1BFFFFF so normal memory allocation
+               cannot overwrite the persistent log area.
+            2. Built-in ramoops parameters register the backend during postcore init,
+               before DT-created platform devices would normally appear.
+
+          The reservation-only DT node deliberately has no ramoops compatible property,
+          preventing a duplicate late platform device.
+
+          Test once, leave it running for at least two minutes, force restart only if it
+          remains stuck, enter OrangeFox immediately, and run the pstore collector.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'watchdog-kernel-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'rom-ramdisk-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'persistent-memory-reserved-in-dtb\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'early-ramoops-params-added\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'duplicate-dt-ramoops-device-avoided\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'flash-performed\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+          grep -Fxq $'persistent-memory-reserved-in-dtb\tyes' "$OUT/candidate-status.tsv"
+          grep -Fxq $'early-ramoops-params-added\tyes' "$OUT/candidate-status.tsv"
+
+      - name: Upload reserved early ramoops candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-reserved-early-ramoops-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-reserved-early-ramoops
+          if-no-files-found: error
+          retention-days: 14

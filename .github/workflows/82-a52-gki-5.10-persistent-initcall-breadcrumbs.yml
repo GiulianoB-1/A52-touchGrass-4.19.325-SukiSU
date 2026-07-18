@@ -1,0 +1,355 @@
+name: 82 - A52 GKI 5.10 persistent initcall breadcrumbs
+
+run-name: Build A52 GKI 5.10 direct persistent breadcrumb candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/82-a52-gki-5.10-persistent-initcall-breadcrumbs.yml'
+      - 'scripts/82_stage_a52xq_persistent_breadcrumbs.py'
+      - 'scripts/75_stage_a52xq_msm_watchdog.py'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-persistent-initcall-breadcrumbs
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
+  WORKFLOW78_ARTIFACT_ID: '8428992052'
+
+jobs:
+  build:
+    name: Build persistent initcall breadcrumb boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish directly traceable run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY="Workflow 82 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Status: in_progress
+          Conclusion: pending
+          Head SHA: ${GITHUB_SHA}
+
+          Purpose: write uncached persistent BEGIN/END breadcrumbs for every normal initcall without relying on the standard pstore console."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/5010467537" \
+            -f body="$BODY"
+
+      - name: Prepare runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip file dwarves device-tree-compiler
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Replay proven integrated A52 port
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          mkdir -p workflow68
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          git -C gki/common apply --check "$PWD/workflow68/extracted/integrated-port.patch"
+          git -C gki/common apply "$PWD/workflow68/extracted/integrated-port.patch"
+          grep -Fq 'qcom,qsmmu-v500' gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-impl.c
+
+      - name: Stage watchdog and persistent breadcrumb bridges
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-persistent-breadcrumbs
+          mkdir -p "$OUT/logs" "$OUT/watchdog-bridge" "$OUT/persistent-breadcrumbs"
+
+          python3 scripts/75_stage_a52xq_msm_watchdog.py \
+            --gki gki/common \
+            --output "$OUT/watchdog-bridge"
+          python3 scripts/82_stage_a52xq_persistent_breadcrumbs.py \
+            --gki gki/common \
+            --output "$OUT/persistent-breadcrumbs"
+
+          git -C gki/common diff --check
+          grep -Fq 'qcom,msm-watchdog' gki/common/drivers/watchdog/qcom-wdt.c
+          grep -Fq 'fixed_rate = 32765' gki/common/drivers/watchdog/qcom-wdt.c
+          grep -Fq 'set_bit(WDOG_HW_RUNNING' gki/common/drivers/watchdog/qcom-wdt.c
+          grep -Fq 'A52DIAG READY phys=0x%llx' gki/common/fs/pstore/ram.c
+          grep -Fq 'A52DIAG BEGIN %pS' gki/common/init/main.c
+          grep -Fq 'A52DIAG END %pS ret=%d' gki/common/init/main.c
+          grep -Fq '1, PRZ_FLAG_ZAP_OLD' gki/common/fs/pstore/ram.c
+          ! grep -Fq 'postcore_initcall(ramoops_init);' gki/common/fs/pstore/ram.c
+
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/full-integrated-persistent-breadcrumbs.patch"
+          test -s "$OUT/full-integrated-persistent-breadcrumbs.patch"
+
+      - name: Configure integrated diagnostic kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-persistent-breadcrumbs"
+          BUILD="$PWD/workspace/gki-persistent-breadcrumbs-out"
+          mkdir -p "$BUILD"
+          cp workflow68/extracted/integrated.config "$BUILD/.config"
+
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_CORE
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_HANDLE_BOOT_ENABLED
+          gki/common/scripts/config --file "$BUILD/.config" --enable QCOM_WDT
+          gki/common/scripts/config --file "$BUILD/.config" --enable PRINTK_TIME
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_RAM
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_CONSOLE
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_PMSG
+          gki/common/scripts/config --file "$BUILD/.config" --disable TRIM_UNUSED_KSYMS
+          gki/common/scripts/config --file "$BUILD/.config" --set-str UNUSED_KSYMS_WHITELIST ''
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/diagnostic.config"
+
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' "$BUILD/.config"
+
+      - name: Build persistent breadcrumb Image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-persistent-breadcrumbs"
+          BUILD="$PWD/workspace/gki-persistent-breadcrumbs-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            2>&1 | tee "$OUT/logs/Image.log"
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/Image"
+          grep -aFq 'qcom,msm-watchdog' "$OUT/Image"
+          grep -aFq 'qcom,qsmmu-v500' "$OUT/Image"
+          grep -aFq 'A52DIAG READY phys=0x%llx' "$OUT/Image"
+          grep -aFq 'A52DIAG BEGIN %pS' "$OUT/Image"
+          grep -aFq 'A52DIAG END %pS ret=%d' "$OUT/Image"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+          gzip -dc "$OUT/Image.gz" > "$OUT/Image.verify"
+          cmp "$OUT/Image.verify" "$OUT/Image"
+          rm "$OUT/Image.verify"
+
+      - name: Upload compiled-kernel checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-persistent-breadcrumb-kernel-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/Image.gz
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/diagnostic.config
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/full-integrated-persistent-breadcrumbs.patch
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/persistent-breadcrumbs
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/watchdog-bridge
+            artifacts/a52xq-gki-5.10-persistent-breadcrumbs/logs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Download and verify reserved persistent-memory boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow78/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW78_ARTIFACT_ID}/zip" \
+            --output workflow78/artifact.zip
+          unzip -q workflow78/artifact.zip -d workflow78/extracted
+          (cd workflow78/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow78/extracted/boot.img
+          grep -Fxq $'early-ramoops-params-added\tyes' workflow78/extracted/candidate-status.tsv
+          grep -Fxq $'persistent-memory-reserved-in-dtb\tyes' workflow78/extracted/candidate-status.tsv
+
+      - name: Repack and audit breadcrumb diagnostic boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-persistent-breadcrumbs
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source workflow78/extracted/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path("workflow78/extracted/boot.img")
+          output_path = Path("artifacts/a52xq-gki-5.10-persistent-breadcrumbs/boot.img")
+          image_path = Path("artifacts/a52xq-gki-5.10-persistent-breadcrumbs/Image.gz")
+          src = module.parse_boot(source_path.read_bytes())
+          new = module.parse_boot(output_path.read_bytes())
+
+          required_cmdline = [
+              "panic=0",
+              "initcall_debug",
+              "watchdog.handle_boot_enabled=1",
+              "ramoops.mem_address=0xB1B00000",
+              "ramoops.mem_size=0x00100000",
+              "ramoops.console_size=0x00040000",
+          ]
+          checks = {
+              "partition_size_preserved": output_path.stat().st_size == source_path.stat().st_size == 100663296,
+              "replacement_kernel_used": hashlib.sha256(new["kernel"]).digest() == hashlib.sha256(image_path.read_bytes()).digest(),
+              "rom_ramdisk_preserved": new["ramdisk"] == src["ramdisk"],
+              "second_preserved": new["second"] == src["second"],
+              "reserved_dtb_preserved": new["dtb"] == src["dtb"],
+              "diagnostic_cmdline_preserved": new["cmdline"] == src["cmdline"],
+              "required_cmdline_present": all(token in new["cmdline"] for token in required_cmdline),
+              "reservation_node_present": b"a52-ramoops-reserved@b1b00000" in new["dtb"],
+              "qsmmuv500_present": b"qcom,qsmmu-v500" in new["dtb"],
+              "watchdog_node_present": b"qcom,msm-watchdog" in new["dtb"],
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit("final audit failed: " + ", ".join(failed))
+
+          Path("artifacts/a52xq-gki-5.10-persistent-breadcrumbs/final-audit.json").write_text(
+              json.dumps(
+                  {
+                      "status": "persistent-initcall-breadcrumbs-repacked-audited",
+                      "hardware_validated": False,
+                      "console_zone": {
+                          "physical_address": "0xB1B40000",
+                          "size": "0x00040000",
+                          "memory_type": "uncached",
+                          "recovery_record": "console-ramoops-0",
+                      },
+                      "checks": checks,
+                      "interpretation": (
+                          "Every normal initcall writes a durable BEGIN marker before execution "
+                          "and an END marker after return. The last marker identifies a blocking "
+                          "or crashing initcall without depending on the standard pstore console."
+                      ),
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+
+      - name: Finalize audited candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-persistent-breadcrumbs
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 PERSISTENT INITCALL BREADCRUMB DIAGNOSTIC
+
+          This candidate preserves the watchdog bridge, ROM ramdisk, reserved
+          1 MiB persistent-memory range, QSMMUv500 contract and diagnostic
+          command line.
+
+          New diagnostic mechanism:
+            - directly maps the console quarter at 0xB1B40000, size 0x40000
+            - uses an uncached mapping so hard-reset markers reach DRAM
+            - writes A52DIAG BEGIN <function> before every normal initcall
+            - writes A52DIAG END <function> after every returning initcall
+            - also attempts full printk backlog capture through a custom console
+
+          OrangeFox should expose the result as console-ramoops-0.
+          This image is not hardware-validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'watchdog-bridge-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'rom-ramdisk-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'persistent-memory-reserved-in-dtb\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'uncached-console-zone\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'initcall-begin-end-breadcrumbs\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'standard-ramoops-backend-disabled\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'flash-performed\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+          grep -Fxq $'initcall-begin-end-breadcrumbs\tyes' "$OUT/candidate-status.tsv"
+
+      - name: Upload final persistent breadcrumb candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-persistent-initcall-breadcrumbs-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-persistent-breadcrumbs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish final run status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_STATUS: ${{ job.status }}
+        run: |
+          BODY="Workflow 82 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Status: completed
+          Conclusion: ${FINAL_STATUS}
+          Head SHA: ${GITHUB_SHA}
+
+          Purpose: write uncached persistent BEGIN/END breadcrumbs for every normal initcall without relying on the standard pstore console."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/5010467537" \
+            -f body="$BODY"

@@ -164,6 +164,10 @@ printf 'normalized_source_modes=%s\n' "${#normalized_mode_paths[@]}" \
 intro_patch=$(fetch_commit_patch "$ANDROID_COMMON_REPO" "$INTRO_COMMIT" android-4.19-ringbuf-introduction "${feature_paths[@]}")
 inject_donor_blobs "$WORK/donor-android-4.19-ringbuf-introduction" "${feature_paths[@]}"
 apply_patch_safely "$intro_patch" android-4.19-ringbuf-introduction
+python3 "$PROJECT_DIR/scripts/58_apply_vendor_ringbuf_followups.py" "$KERNEL_DIR" \
+  | tee "$ARTIFACTS_DIR/bpf-ringbuf-vendor-followups.log"
+git -C "$KERNEL_DIR" add -A
+git -C "$KERNEL_DIR" commit -m 'Integrate vendor-safe ringbuf follow-up fixes' >/dev/null || true
 '''
 text = text.replace(intro_anchor, intro_replacement, 1)
 
@@ -171,7 +175,37 @@ text = text.replace(intro_anchor, intro_replacement, 1)
 fix_anchor = '''  patch=$(fetch_commit_patch "$TORVALDS_REPO" "$sha" "$name" "$@")
   apply_patch_safely "$patch" "$name"
 '''
-fix_replacement = '''  patch=$(fetch_commit_patch "$TORVALDS_REPO" "$sha" "$name" "$@")
+fix_replacement = '''  case "$name" in
+    ringbuf-power-of-two)
+      marker='!is_power_of_2(attr->max_entries)'
+      file="$KERNEL_DIR/kernel/bpf/ringbuf.c"
+      ;;
+    ringbuf-ptr-to-mem-spilling)
+      marker='ringbuf PTR_TO_MEM spill support'
+      file="$KERNEL_DIR/kernel/bpf/verifier.c"
+      ;;
+    ringbuf-reservation-size-bound)
+      marker='reject reservation larger than ringbuf'
+      file="$KERNEL_DIR/kernel/bpf/ringbuf.c"
+      ;;
+    ringbuf-helper-map-compatibility)
+      marker='ringbuf helper-to-map compatibility'
+      file="$KERNEL_DIR/kernel/bpf/verifier.c"
+      ;;
+    ringbuf-null-pointer-arithmetic)
+      marker='reject ringbuf nullable pointer arithmetic'
+      file="$KERNEL_DIR/kernel/bpf/verifier.c"
+      ;;
+    *)
+      marker=
+      file=
+      ;;
+  esac
+  if [[ -n "$marker" ]] && grep -Fq "$marker" "$file"; then
+    printf '%s=already-present-vendor\n' "$name" >> "$REPORT"
+    return
+  fi
+  patch=$(fetch_commit_patch "$TORVALDS_REPO" "$sha" "$name" "$@")
   inject_donor_blobs "$WORK/donor-$name" "$@"
   apply_patch_safely "$patch" "$name"
 '''

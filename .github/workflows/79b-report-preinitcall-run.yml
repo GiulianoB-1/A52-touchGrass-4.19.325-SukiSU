@@ -16,12 +16,11 @@ jobs:
   report:
     runs-on: ubuntu-22.04
     steps:
-      - name: Publish latest Workflow 79 run in issue body
+      - name: Publish latest Workflow 79 run in first issue comment
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          # This second commit intentionally triggers the reporter after creation.
           RUN_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/79-a52-gki-5.10-preinitcall-ramoops.yml/runs?per_page=1")"
           RUN_ID="$(jq -r '.workflow_runs[0].id' <<<"$RUN_JSON")"
           STATUS="$(jq -r '.workflow_runs[0].status' <<<"$RUN_JSON")"
@@ -29,10 +28,13 @@ jobs:
           HEAD_SHA="$(jq -r '.workflow_runs[0].head_sha' <<<"$RUN_JSON")"
           test -n "$RUN_ID"
           test "$RUN_ID" != null
-          gh issue edit 45 --repo "$GITHUB_REPOSITORY" --body "Latest Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}
+          BODY="Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}
 
 Status: ${STATUS}
 Conclusion: ${CONCLUSION}
 Head SHA: ${HEAD_SHA}
 
 Purpose: register ramoops after driver_init and before every normal initcall level."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/5010467537" \
+            -f body="$BODY"

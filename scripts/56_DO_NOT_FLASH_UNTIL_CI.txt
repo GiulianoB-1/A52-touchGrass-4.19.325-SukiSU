@@ -1,0 +1,1 @@
+Do not flash any artifact from this branch until the workflow succeeds and the resulting AnyKernel package has been inspected.

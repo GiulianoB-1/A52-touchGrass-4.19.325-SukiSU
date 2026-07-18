@@ -1,1 +1,0 @@
-Hardware-baseline experiment: Linux 4.19.200, ReSukiSU manual auto-hooks retained, SUSFS core enabled, all SUSFS features disabled. Do not treat the generated package as hardware validated until the phone boots successfully.

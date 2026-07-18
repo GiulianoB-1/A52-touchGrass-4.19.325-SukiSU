@@ -1,1 +1,0 @@
-Intent: validate that SUSFS core can coexist with the exact hardware-booted ReSukiSU manual-hook configuration before enabling any SUSFS feature or changing the Linux stable version.

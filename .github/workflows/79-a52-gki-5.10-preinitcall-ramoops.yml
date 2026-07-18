@@ -172,6 +172,20 @@ jobs:
           gzip -t "$OUT/Image.gz"
           gzip -dc "$OUT/Image.gz" | cmp - "$OUT/Image"
 
+      - name: Upload compiled-kernel checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-preinitcall-kernel-checkpoint-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/Image.gz
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/diagnostic.config
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/full-integrated-preinitcall.patch
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/preinitcall-ramoops
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/watchdog-bridge
+            artifacts/a52xq-gki-5.10-preinitcall-ramoops/logs
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Download and verify reserved early ramoops source image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -186,8 +200,8 @@ jobs:
           unzip -q workflow78/artifact.zip -d workflow78/extracted
           (cd workflow78/extracted && sha256sum -c SHA256SUMS)
           test -s workflow78/extracted/boot.img
-          grep -Fq 'early-ramoops-registration=yes' workflow78/extracted/candidate-status.tsv
-          grep -Fq 'dt-memory-reservation=yes' workflow78/extracted/candidate-status.tsv
+          grep -Fxq $'early-ramoops-registration\tyes' workflow78/extracted/candidate-status.tsv
+          grep -Fxq $'dt-memory-reservation\tyes' workflow78/extracted/candidate-status.tsv
 
       - name: Repack pre-initcall kernel into reserved diagnostic boot image
         run: |

@@ -167,9 +167,9 @@ def apply_early_compat(kernel: Path, resukisu: Path, compat_source: Path) -> Non
     text = fdinfo.read_text()
     newer_inotify_helper = "inotify_mark_user_mask(mark)"
     helper_count = text.count(newer_inotify_helper)
-    if helper_count != 2:
+    if helper_count not in (1, 2):
         raise SystemExit(
-            "SUSFS fdinfo inotify helper: expected two matches, "
+            "SUSFS fdinfo inotify helper: expected one or two matches, "
             f"found {helper_count}"
         )
     text = text.replace(newer_inotify_helper, "(mark->mask & IN_ALL_EVENTS)")

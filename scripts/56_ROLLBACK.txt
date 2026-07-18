@@ -1,1 +1,0 @@
-Rollback: restore the uploaded known-working 4.19.200 boot image with SHA-256 41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554. Do not wipe data for a kernel boot failure.

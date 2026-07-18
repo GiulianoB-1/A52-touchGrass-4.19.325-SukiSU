@@ -16,7 +16,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Verify the archived Android 4.19 branch still resolves to the reviewed head.
 resolved=$(git ls-remote "$ANDROID_COMMON_REPO" "$ARCHIVED_REF" | awk 'NR==1 {print $1}')
 test "$resolved" = "$ARCHIVED_HEAD" || {
   echo "ERROR: archived Android 4.19 head changed: ${resolved:-missing}" >&2
@@ -26,10 +25,6 @@ test "$resolved" = "$ARCHIVED_HEAD" || {
 curl --fail --location --retry 3 --silent --show-error \
   "$RAW_URL" --output "$GENERATED"
 
-# Gitiles path-history requests for the archived branch are rate-limited and
-# occasionally return 401/429. The Android common mirror confirms that the
-# feature entered its history as the original immutable upstream commit, so
-# replace only the discovery block and keep the reviewed patch/apply logic.
 python3 - "$GENERATED" "$RINGBUF_INTRO" "$ARCHIVED_HEAD" <<'PY'
 from pathlib import Path
 import sys
@@ -63,6 +58,32 @@ cp "$INTRO_META" "$ARTIFACTS_DIR/android-4.19-ringbuf-introduction.json"
 '''
 text = text[:start] + replacement + text[end:]
 text = text.replace('refs/heads/android-4.19-stable', archived_head)
+
+anchor = 'intro_patch=$(fetch_commit_patch "$ANDROID_COMMON_REPO" "$INTRO_COMMIT" android-4.19-ringbuf-introduction "${feature_paths[@]}")\n'
+if text.count(anchor) != 1:
+    raise SystemExit('ringbuf introduction patch anchor mismatch')
+hydration = '''info "Hydrating donor base blobs for a real three-way merge"
+git -C "$KERNEL_DIR" fetch --quiet --depth=2 "$ANDROID_COMMON_REPO" "$INTRO_COMMIT"
+
+generated_mode_paths=()
+for rel in "${feature_paths[@]}"; do
+  if [[ -f "$KERNEL_DIR/$rel" ]]; then
+    chmod 0644 "$KERNEL_DIR/$rel"
+    generated_mode_paths+=("$rel")
+  fi
+done
+if (( ${#generated_mode_paths[@]} )); then
+  git -C "$KERNEL_DIR" add --chmod=-x -- "${generated_mode_paths[@]}"
+  git -C "$KERNEL_DIR" commit -m 'Normalize BPF source modes before ringbuf merge' >/dev/null || true
+fi
+{
+  echo "donor_commit=$INTRO_COMMIT"
+  echo "donor_objects_hydrated=yes"
+  echo "normalized_source_modes=${#generated_mode_paths[@]}"
+} > "$ARTIFACTS_DIR/bpf-ringbuf-donor-hydration.txt"
+
+'''
+text = text.replace(anchor, hydration + anchor, 1)
 path.write_text(text)
 PY
 chmod +x "$GENERATED"

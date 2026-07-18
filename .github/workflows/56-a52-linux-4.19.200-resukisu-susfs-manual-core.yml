@@ -1,17 +1,18 @@
-name: 56 - A52 Linux 4.19.200 ReSukiSU manual hooks plus SUSFS core
+name: 57 - A52 Linux 4.19.206 ReSukiSU manual hooks plus SUSFS detection
 
 on:
   pull_request:
     paths:
       - '.github/workflows/56-a52-linux-4.19.200-resukisu-susfs-manual-core.yml'
       - 'scripts/56_*'
+      - 'scripts/57_*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-4.19.200-resukisu-susfs-manual-core-${{ github.ref }}
+  group: a52-4.19.206-resukisu-susfs-manual-detection-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -19,11 +20,11 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 5G
   ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
-  LABEL: touchgrass-4.19.200-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
 
 jobs:
   build:
-    name: Build hardware-baseline 4.19.200 plus SUSFS core
+    name: Build Linux 4.19.206 from hardware-tested SUSFS detection baseline
     runs-on: ubuntu-22.04
     timeout-minutes: 300
 
@@ -49,8 +50,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: a52xq-4.19.200-manual-susfs-core-${{ runner.os }}-${{ github.run_id }}
+          key: a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
+            a52xq-4.19.200-manual-susfs-core-${{ runner.os }}-
             a52xq-linux-4.19.200-susfs-minimal-ccache-${{ runner.os }}-
             a52xq-linux-4.19.200-ccache-${{ runner.os }}-
 
@@ -89,21 +91,24 @@ jobs:
       - name: Resolve reviewed Linux 4.19.200 vendor collisions
         run: ./scripts/checkpoint_resolve_linux_4.19.200.sh
 
+      - name: Update Linux 4.19.200 to 4.19.206
+        run: ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+
       - name: Replace legacy exec dispatch with working manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh
 
-      - name: Build ReSukiSU manual hooks plus SUSFS core
+      - name: Build ReSukiSU manual hooks plus SUSFS detection API
         run: |
           set -o pipefail
-          ./scripts/56_build_resukisu_susfs_manual_core.sh \
-            2>&1 | tee artifacts/linux-4.19.200-resukisu-susfs-manual-core.log
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/linux-4.19.206-resukisu-susfs-manual-detection.log
 
-      - name: Compare final config with hardware-booted baseline
+      - name: Compare final config with hardware-tested baseline
         run: |
           python3 scripts/56_compare_config_to_working_baseline.py \
             "artifacts/config-${LABEL}" \
-            artifacts/manual-core-config-comparison.txt
-          cat artifacts/manual-core-config-comparison.txt
+            artifacts/manual-detection-config-comparison.txt
+          cat artifacts/manual-detection-config-comparison.txt
 
       - name: Check out pinned AnyKernel3
         uses: actions/checkout@v4
@@ -115,20 +120,20 @@ jobs:
 
       - name: Package kernel-only rollback-friendly test ZIP
         run: |
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-manual-susfs-core.sh
-          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-manual-susfs-core.sh
-          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-manual-susfs-core.sh
-          sed -i 's/susfs=disabled/susfs=core-only-manual-hooks/' scripts/.package-manual-susfs-core.sh
-          sed -i 's/SUSFS: disabled/SUSFS: core only, manual hooks retained, all feature toggles disabled/' scripts/.package-manual-susfs-core.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-CORE-TEST.zip/' scripts/.package-manual-susfs-core.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0 + SUSFS core/' scripts/.package-manual-susfs-core.sh
-          chmod +x scripts/.package-manual-susfs-core.sh
-          ./scripts/.package-manual-susfs-core.sh \
-            4.19.200 \
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-manual-susfs-detection.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-manual-susfs-detection.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-manual-susfs-detection.sh
+          sed -i 's/susfs=disabled/susfs=core-only-manual-hooks-detection-api/' scripts/.package-manual-susfs-detection.sh
+          sed -i 's/SUSFS: disabled/SUSFS: v1.4.2 core with detection API, manual hooks retained/' scripts/.package-manual-susfs-detection.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-DETECTION-TEST.zip/' scripts/.package-manual-susfs-detection.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0 + SUSFS detection/' scripts/.package-manual-susfs-detection.sh
+          chmod +x scripts/.package-manual-susfs-detection.sh
+          ./scripts/.package-manual-susfs-detection.sh \
+            4.19.206 \
             "artifacts/Image-${LABEL}" \
             packaging/AnyKernel3 \
             release
-          rm -f scripts/.package-manual-susfs-core.sh
+          rm -f scripts/.package-manual-susfs-detection.sh
 
       - name: Record source diagnostics
         if: always()
@@ -142,7 +147,7 @@ jobs:
           raw_sha256=d2c21f394ec477a975ce96f59959fa265acde60a4a28ef4d200c9912dfb624d1
           non_susfs_canonical_sha256=494a12a758bec9a7500b3370c4059c989254a468aaf895d43a8e6ea9a0441b92
           non_susfs_symbol_count=5427
-          source=hardware-booted-user-dump
+          source=hardware-tested-linux-4.19.200-manual-susfs-detection
           EOF
           if [ -d workspace/touchgrass-a52xq/.git ]; then
             git -C workspace/touchgrass-a52xq status --short \
@@ -160,7 +165,7 @@ jobs:
       - name: Upload kernel-only test ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.200-ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-CORE-TEST-${{ github.run_number }}
+          name: A52XQ-4.19.206-ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-DETECTION-TEST-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14
@@ -169,7 +174,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-4.19.200-resukisu-susfs-manual-core-${{ github.run_number }}-diagnostics
+          name: a52xq-4.19.206-resukisu-susfs-manual-detection-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

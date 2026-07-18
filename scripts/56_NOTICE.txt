@@ -1,0 +1,1 @@
+This branch is a controlled SUSFS core experiment. It preserves the known-working ReSukiSU manual hook path and disables every SUSFS subfeature. The output must not be called hardware validated before a successful phone boot.

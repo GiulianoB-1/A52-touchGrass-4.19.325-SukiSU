@@ -1,0 +1,65 @@
+name: 74 - A52 GKI 5.10 QCOM watchdog source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/74-a52-gki-5.10-qcom-wdt-source-audit.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-qcom-wdt-source-audit
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 74 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Purpose: capture the exact pinned 5.10 qcom-wdt driver before adding the A52 vendor-DT compatibility bridge.
+          Commit: \`${GITHUB_SHA}\`"
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Capture exact watchdog source and contract
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          OUT=artifacts/a52xq-qcom-wdt-source-audit
+          mkdir -p "$OUT"
+          cp gki/common/drivers/watchdog/qcom-wdt.c "$OUT/qcom-wdt.c"
+          cp gki/common/drivers/watchdog/Kconfig "$OUT/watchdog-Kconfig"
+          git -C gki/common log -1 --format='commit=%H%nsubject=%s' > "$OUT/source.txt"
+          grep -n -E 'qcom_wdt_probe|devm_clk_get|clk_get_rate|qcom_wdt_of_table|qcom,kpss|qcom,scss|match_data' \
+            "$OUT/qcom-wdt.c" > "$OUT/relevant-lines.txt"
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS"
+
+      - name: Upload watchdog source audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-qcom-wdt-source-audit
+          path: artifacts/a52xq-qcom-wdt-source-audit
+          if-no-files-found: error
+          retention-days: 14

@@ -9,5 +9,6 @@ test -f "$FINAL_SCRIPT" || { echo "ERROR: generated build script not found: $FIN
 
 python3 "$SCRIPT_DIR/56_patch_resukisu_susfs_manual_core.py" "$FINAL_SCRIPT"
 python3 "$SCRIPT_DIR/56_patch_manage_mark_for_manual_susfs.py" "$FINAL_SCRIPT"
+python3 "$SCRIPT_DIR/56_patch_susfs_detection_api.py" "$FINAL_SCRIPT"
 bash -n "$FINAL_SCRIPT"
 exec bash "$FINAL_SCRIPT"

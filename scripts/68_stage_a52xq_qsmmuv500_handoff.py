@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 
@@ -35,11 +36,13 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 
 
 def normalize_modified_text(gki: Path) -> int:
-    """Remove only trailing horizontal whitespace from staged text files.
+    """Normalize whitespace in all staged text files before diff validation.
 
-    Earlier proven Lagoon port phases intentionally preserve downstream source.
-    Some of those files contain legacy trailing whitespace, so the integrated
-    workflow records the normalization instead of failing before compilation.
+    The replayed Lagoon phases intentionally preserve downstream sources. Some
+    of those files carry trailing whitespace, mixed space-before-tab indentation,
+    or extra blank lines at EOF. Git rejects those through ``git diff --check``
+    before the integrated compile can start, so normalize only files already
+    changed by the staged port and leave the pinned base tree untouched.
     """
     raw = subprocess.check_output(
         ["git", "-C", str(gki), "diff", "--name-only", "-z"]
@@ -55,15 +58,24 @@ def normalize_modified_text(gki: Path) -> int:
         if b"\0" in data:
             continue
 
-        normalized: list[bytes] = []
-        for line in data.splitlines(keepends=True):
-            if line.endswith(b"\r\n"):
-                normalized.append(line[:-2].rstrip(b" \t") + b"\r\n")
-            elif line.endswith(b"\n"):
-                normalized.append(line[:-1].rstrip(b" \t") + b"\n")
-            else:
-                normalized.append(line.rstrip(b" \t"))
-        updated = b"".join(normalized)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+
+        normalized: list[str] = []
+        for line in text.splitlines():
+            line = line.rstrip(" \t")
+            indent_match = re.match(r"[ \t]*", line)
+            if indent_match:
+                indent = re.sub(r" +\t", "\t", indent_match.group(0))
+                line = indent + line[indent_match.end():]
+            normalized.append(line)
+
+        while normalized and not normalized[-1]:
+            normalized.pop()
+
+        updated = ("\n".join(normalized) + "\n").encode("utf-8")
         if updated != data:
             path.write_bytes(updated)
             changed += 1

@@ -1,3 +1,0 @@
-branch_ready=yes
-workflow_ready=yes
-hardware_validated=no

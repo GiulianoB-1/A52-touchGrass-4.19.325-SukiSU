@@ -5,6 +5,7 @@ import argparse
 import csv
 import hashlib
 import re
+import shutil
 import subprocess
 from collections import deque
 from pathlib import Path
@@ -275,13 +276,14 @@ def stage(args: argparse.Namespace) -> None:
         "header_policy=preserve-existing-gki-copy-only-downstream-headers-absent-from-gki",
         "normalization_policy=line-endings-trailing-horizontal-whitespace-and-file-mode-only",
         "staging_policy=isolated-parallel-driver-no-replacement-of-gki-arm-smmu",
+        "compiler_error_limit=unlimited",
         "link_test=no",
         "flashable=no",
     ]
     (artifact / "analysis-metadata.txt").write_text("\n".join(metadata) + "\n")
 
 
-def diagnostics(path: Path, limit: int = 80) -> list[str]:
+def diagnostics(path: Path, limit: int = 240) -> list[str]:
     if not path.is_file():
         return ["log missing"]
     patterns = (
@@ -324,14 +326,14 @@ def finalize(args: argparse.Namespace) -> None:
         f"- result: **{row['result']}**",
         f"- exit code: `{row['exit_code']}`",
         f"- object produced: `{row['object_produced']}`", "",
-        "## First diagnostics", "",
+        "## Compiler diagnostics", "",
     ]
     report.extend(
         f"- `{line.replace('`', chr(39))}`"
         for line in diagnostics(artifact / "logs" / "downstream-qsmmu.log")
     )
     report.extend(["", "## Interpretation", "",
-        "The diagnostics classify the first concrete API surface that must be replaced, backported, or removed before the QSMMU/TBU model can be integrated into GKI 5.10.",
+        "The compiler runs without Clang's default error-count cap, so this report inventories the complete visible 4.19-to-5.10 API boundary for the isolated QSMMU object.",
     ])
     (artifact / "PORTING-PROBE-REPORT.md").write_text("\n".join(report) + "\n")
 

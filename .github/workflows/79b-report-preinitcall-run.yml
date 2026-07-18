@@ -21,6 +21,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+          # This second commit intentionally triggers the reporter after creation.
           RUN_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/79-a52-gki-5.10-preinitcall-ramoops.yml/runs?per_page=1")"
           RUN_ID="$(jq -r '.workflow_runs[0].id' <<<"$RUN_JSON")"
           STATUS="$(jq -r '.workflow_runs[0].status' <<<"$RUN_JSON")"

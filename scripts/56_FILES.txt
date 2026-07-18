@@ -1,5 +1,0 @@
-scripts/56_build_resukisu_susfs_manual_core.sh
-scripts/56_patch_and_run_resukisu_susfs_manual_core.sh
-scripts/56_patch_resukisu_susfs_manual_core.py
-scripts/56_compare_config_to_working_baseline.py
-.github/workflows/56-a52-linux-4.19.200-resukisu-susfs-manual-core.yml

@@ -1,0 +1,82 @@
+name: 89 - Fix Workflow 84 safely
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/89-fix-workflow84-backslash-safe.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply minimal safe patch
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/84-a52-recovery-ramoops-raw-exporter.yml')
+          lines = path.read_text().splitlines()
+          out = []
+          removed_misc = 0
+          changed_config = 0
+          added_debugfs = 0
+          slash = chr(92)
+
+          for line in lines:
+              if '-e MISC_DEVICES -e IKCONFIG -e IKCONFIG_PROC' in line:
+                  out.append(line.replace('-e MISC_DEVICES ', ''))
+                  changed_config += 1
+                  continue
+
+              if '-e PSTORE -e PSTORE_RAM -e PSTORE_CONSOLE -e PSTORE_PMSG' in line:
+                  if not line.rstrip().endswith(slash):
+                      line = line + ' ' + slash
+                  out.append(line)
+                  indent = line[:len(line) - len(line.lstrip())]
+                  out.append(indent + '-d DEVMEM -d PROC_KCORE -d DEBUG_FS')
+                  changed_config += 1
+                  continue
+
+              if "grep -Fxq 'CONFIG_MISC_DEVICES=y'" in line:
+                  removed_misc += 1
+                  continue
+
+              out.append(line)
+              if "grep -Fxq '# CONFIG_PROC_KCORE is not set'" in line:
+                  indent = line[:len(line) - len(line.lstrip())]
+                  out.append(indent + "grep -Fxq '# CONFIG_DEBUG_FS is not set' \"$OUT/final.config\"")
+                  added_debugfs += 1
+
+          if changed_config != 2:
+              raise SystemExit(f'expected 2 config edits, got {changed_config}')
+          if removed_misc != 1:
+              raise SystemExit(f'expected 1 removed misc assertion, got {removed_misc}')
+          if added_debugfs != 1:
+              raise SystemExit(f'expected 1 debugfs assertion, got {added_debugfs}')
+
+          path.write_text('\n'.join(out) + '\n')
+          PY
+
+          git diff --check
+          grep -Fq -- '-d DEVMEM -d PROC_KCORE -d DEBUG_FS' .github/workflows/84-a52-recovery-ramoops-raw-exporter.yml
+          ! grep -Fq "CONFIG_MISC_DEVICES=y" .github/workflows/84-a52-recovery-ramoops-raw-exporter.yml
+          grep -Fq "# CONFIG_DEBUG_FS is not set" .github/workflows/84-a52-recovery-ramoops-raw-exporter.yml
+
+      - name: Commit corrected Workflow 84
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/84-a52-recovery-ramoops-raw-exporter.yml
+          git commit -m 'Fix recovery exporter post-build policy checks'
+          git push origin HEAD:main

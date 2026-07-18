@@ -16,10 +16,11 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/init.h>
-#include <linux/io.h>
+#include <linux/memremap.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/sizes.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 
@@ -31,7 +32,7 @@ static int a52_snapshot_error = -ENODATA;
 
 static int __init a52_ramoops_snapshot_init(void)
 {
-	void __iomem *mapping;
+	void *mapping;
 
 	a52_ramoops_snapshot = vmalloc(A52_RAMOOPS_SIZE);
 	if (!a52_ramoops_snapshot) {
@@ -40,19 +41,25 @@ static int __init a52_ramoops_snapshot_init(void)
 		return 0;
 	}
 
-	mapping = ioremap_wc(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE);
-	if (!mapping)
-		mapping = ioremap(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE);
+	/*
+	 * The ramoops carveout is reserved DRAM, not MMIO. On arm64,
+	 * ioremap() rejects normal-RAM PFNs. MEMREMAP_WB returns the existing
+	 * linear-map address for System RAM and matches persistent-RAM users.
+	 */
+	mapping = memremap(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE, MEMREMAP_WB);
 	if (!mapping) {
 		vfree(a52_ramoops_snapshot);
 		a52_ramoops_snapshot = NULL;
 		a52_snapshot_error = -EIO;
-		pr_err("a52_ramoops_raw: physical mapping failed\n");
+		pr_err("a52_ramoops_raw: memremap WB failed for 0x%llx-0x%llx\n",
+			(unsigned long long)A52_RAMOOPS_PHYS,
+			(unsigned long long)(A52_RAMOOPS_PHYS +
+					     A52_RAMOOPS_SIZE - 1));
 		return 0;
 	}
 
-	memcpy_fromio(a52_ramoops_snapshot, mapping, A52_RAMOOPS_SIZE);
-	iounmap(mapping);
+	memcpy(a52_ramoops_snapshot, mapping, A52_RAMOOPS_SIZE);
+	memunmap(mapping);
 	a52_snapshot_error = 0;
 	pr_info("a52_ramoops_raw: captured 0x%llx-0x%llx before ramoops init\n",
 		(unsigned long long)A52_RAMOOPS_PHYS,
@@ -151,6 +158,8 @@ def main() -> int:
         "device_initcall": "device_initcall(a52_ramoops_device_init);" in SOURCE,
         "fixed_physical_range": "A52_RAMOOPS_PHYS 0xB1B00000ULL" in SOURCE,
         "fixed_one_mib_size": "A52_RAMOOPS_SIZE SZ_1M" in SOURCE,
+        "memremap_wb": "memremap(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE, MEMREMAP_WB)" in SOURCE,
+        "no_ioremap": "ioremap(" not in SOURCE and "ioremap_wc(" not in SOURCE,
         "read_only_file_operations": ".read = a52_ramoops_read" in SOURCE and ".write" not in SOURCE,
         "capability_gate": "CAP_SYS_RAWIO" in SOURCE and "CAP_SYS_ADMIN" in SOURCE,
         "root_read_only_mode": ".mode = 0400" in SOURCE,
@@ -168,6 +177,7 @@ def main() -> int:
                 "physical_address": "0xB1B00000",
                 "size": "0x00100000",
                 "device": "/dev/a52_ramoops_raw",
+                "mapping": "memremap(MEMREMAP_WB)",
                 "checks": checks,
             },
             indent=2,

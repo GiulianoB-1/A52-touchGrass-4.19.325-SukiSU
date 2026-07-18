@@ -1,0 +1,233 @@
+name: 81 - Package A52 pre-initcall checkpoint fixed
+
+run-name: Package A52 GKI 5.10 pre-initcall ramoops candidate fixed
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/81-a52-gki-5.10-package-preinitcall-checkpoint-fixed.yml'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-package-preinitcall-checkpoint-fixed
+  cancel-in-progress: true
+
+env:
+  CHECKPOINT_ARTIFACT_ID: '8429810829'
+  WORKFLOW78_ARTIFACT_ID: '8428992052'
+
+jobs:
+  package:
+    name: Package validated pre-initcall kernel checkpoint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 81 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Purpose: package the already-compiled pre-initcall ramoops checkpoint with binary-safe verification and no kernel rebuild.
+          Commit: \`${GITHUB_SHA}\`"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl unzip python3 file
+
+      - name: Download and verify compiled checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow79/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CHECKPOINT_ARTIFACT_ID}/zip" \
+            --output workflow79/artifact.zip
+          unzip -q workflow79/artifact.zip -d workflow79/extracted
+
+          test -s workflow79/extracted/Image.gz
+          test -s workflow79/extracted/diagnostic.config
+          test -s workflow79/extracted/full-integrated-preinitcall.patch
+          test -s workflow79/extracted/preinitcall-ramoops/patched-init-main.c
+          test -s workflow79/extracted/preinitcall-ramoops/patched-ram.c
+          test -s workflow79/extracted/watchdog-bridge/patched-qcom-wdt.c
+
+          gzip -t workflow79/extracted/Image.gz
+          gzip -dc workflow79/extracted/Image.gz > workflow79/extracted/Image
+          test -s workflow79/extracted/Image
+          grep -aFq 'qcom,msm-watchdog' workflow79/extracted/Image
+          grep -aFq 'qcom,qsmmu-v500' workflow79/extracted/Image
+          grep -aFq 'A52 pre-initcall ramoops registration complete' workflow79/extracted/Image
+          grep -Fxq 'CONFIG_QCOM_WDT=y' workflow79/extracted/diagnostic.config
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' workflow79/extracted/diagnostic.config
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' workflow79/extracted/diagnostic.config
+
+          printf 'checkpoint_artifact_id=%s\n' "$CHECKPOINT_ARTIFACT_ID" > workflow79/source.txt
+          sha256sum workflow79/extracted/Image.gz workflow79/extracted/Image \
+            > workflow79/checkpoint-sha256.txt
+
+      - name: Download and verify reserved early ramoops source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow78/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW78_ARTIFACT_ID}/zip" \
+            --output workflow78/artifact.zip
+          unzip -q workflow78/artifact.zip -d workflow78/extracted
+          (cd workflow78/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow78/extracted/boot.img
+          grep -Fxq $'early-ramoops-params-added\tyes' workflow78/extracted/candidate-status.tsv
+          grep -Fxq $'persistent-memory-reserved-in-dtb\tyes' workflow78/extracted/candidate-status.tsv
+
+      - name: Repack and audit diagnostic boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-preinitcall-ramoops
+          mkdir -p "$OUT"
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source workflow78/extracted/boot.img \
+            --kernel workflow79/extracted/Image.gz \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path("workflow78/extracted/boot.img")
+          output_path = Path("artifacts/a52xq-gki-5.10-preinitcall-ramoops/boot.img")
+          image_path = Path("workflow79/extracted/Image.gz")
+          src = module.parse_boot(source_path.read_bytes())
+          new = module.parse_boot(output_path.read_bytes())
+
+          required_cmdline = [
+              "panic=0",
+              "initcall_debug",
+              "pstore.compress=none",
+              "watchdog.handle_boot_enabled=1",
+              "ramoops.mem_address=0xB1B00000",
+              "ramoops.mem_size=0x00100000",
+              "ramoops.record_size=0x00040000",
+              "ramoops.console_size=0x00040000",
+              "ramoops.ftrace_size=0x00040000",
+              "ramoops.pmsg_size=0x00040000",
+          ]
+          checks = {
+              "partition_size_preserved": output_path.stat().st_size == source_path.stat().st_size == 100663296,
+              "replacement_kernel_used": hashlib.sha256(new["kernel"]).digest() == hashlib.sha256(image_path.read_bytes()).digest(),
+              "rom_ramdisk_preserved": new["ramdisk"] == src["ramdisk"],
+              "second_preserved": new["second"] == src["second"],
+              "reserved_dtb_preserved": new["dtb"] == src["dtb"],
+              "diagnostic_cmdline_preserved": new["cmdline"] == src["cmdline"],
+              "required_cmdline_present": all(token in new["cmdline"] for token in required_cmdline),
+              "reservation_node_present": b"a52-ramoops-reserved@b1b00000" in new["dtb"],
+              "qsmmuv500_present": b"qcom,qsmmu-v500" in new["dtb"],
+              "watchdog_node_present": b"qcom,msm-watchdog" in new["dtb"],
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit("final audit failed: " + ", ".join(failed))
+
+          Path("artifacts/a52xq-gki-5.10-preinitcall-ramoops/final-audit.json").write_text(
+              json.dumps(
+                  {
+                      "status": "pre-initcall-ramoops-repacked-audited",
+                      "hardware_validated": False,
+                      "checkpoint_artifact_id": 8429810829,
+                      "checks": checks,
+                      "interpretation": (
+                          "Ramoops is registered directly after driver_init and before all normal "
+                          "initcall levels. The watchdog bridge, ROM ramdisk, reserved persistent "
+                          "memory, and diagnostic command line remain preserved."
+                      ),
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+
+      - name: Finalize package
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-preinitcall-ramoops
+          cp workflow79/extracted/Image.gz "$OUT/Image.gz"
+          cp workflow79/extracted/diagnostic.config "$OUT/diagnostic.config"
+          cp workflow79/extracted/full-integrated-preinitcall.patch "$OUT/full-integrated-preinitcall.patch"
+          cp -a workflow79/extracted/preinitcall-ramoops "$OUT/"
+          cp -a workflow79/extracted/watchdog-bridge "$OUT/"
+          cp workflow79/source.txt "$OUT/source-checkpoint.txt"
+          cp workflow79/checkpoint-sha256.txt "$OUT/checkpoint-sha256.txt"
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 PRE-INITCALL RAMOOPS DIAGNOSTIC
+
+          This candidate preserves the watchdog bridge that removed the former
+          approximately 15-second reset, the ROM ramdisk, the reserved 1 MiB
+          persistent-memory range, and the ramoops boot parameters.
+
+          New kernel change:
+            ramoops is registered directly after driver_init(), before every normal
+            pure/core/postcore initcall. CON_PRINTBUFFER should copy the existing
+            printk backlog into persistent RAM when the console registers.
+
+          This image is not hardware-validated. Flash Boot only, test once, enter
+          OrangeFox immediately after the forced restart, and run the pstore collector.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'watchdog-bridge-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'rom-ramdisk-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'persistent-memory-reserved-in-dtb\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'ramoops-params-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'ramoops-before-normal-initcalls\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'compiled-checkpoint-reused\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'flash-performed\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+          grep -Fxq $'ramoops-before-normal-initcalls\tyes' "$OUT/candidate-status.tsv"
+
+      - name: Upload final candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-preinitcall-ramoops-fixed-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-preinitcall-ramoops
+          if-no-files-found: error
+          retention-days: 14

@@ -14,59 +14,7 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
-def main() -> None:
-    if len(sys.argv) != 4:
-        raise SystemExit(
-            "usage: 55_apply_susfs_resukisu_compat.py KERNEL_DIR RESUKISU_DIR COMPAT_C"
-        )
-
-    kernel = Path(sys.argv[1])
-    resukisu = Path(sys.argv[2])
-    compat_source = Path(sys.argv[3])
-
-    if not compat_source.is_file():
-        raise SystemExit(f"compatibility source missing: {compat_source}")
-
-    compat_target = kernel / "fs/susfs_resukisu_compat.c"
-    shutil.copyfile(compat_source, compat_target)
-
-    makefile = kernel / "fs/Makefile"
-    text = makefile.read_text()
-    anchor = "obj-$(CONFIG_KSU_SUSFS) += susfs.o\n"
-    compat_line = "obj-$(CONFIG_KSU_SUSFS) += susfs_resukisu_compat.o\n"
-    if compat_line not in text:
-        if text.count(anchor) != 1:
-            raise SystemExit("SUSFS fs/Makefile anchor mismatch")
-        makefile.write_text(text.replace(anchor, anchor + compat_line, 1))
-
-    susfs_def = kernel / "include/linux/susfs_def.h"
-    text = susfs_def.read_text()
-    final_guard = "#endif // #ifndef KSU_SUSFS_DEF_H\n"
-    command_compat = """
-#ifndef SUSFS_MAGIC
-#define SUSFS_MAGIC 0xFAFAFAFA
-#endif
-#ifndef CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS
-#define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
-#endif
-#ifndef CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING
-#define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x60010
-#endif
-
-"""
-    if "SUSFS_MAGIC" not in text:
-        if text.count(final_guard) != 1:
-            raise SystemExit("SUSFS definition final guard mismatch")
-        susfs_def.write_text(text.replace(final_guard, command_compat + final_guard, 1))
-
-    proc_namespace = kernel / "fs/proc_namespace.c"
-    replace_once(
-        proc_namespace,
-        "bool susfs_hide_sus_mnts_for_all_procs = true;",
-        "bool susfs_hide_sus_mnts_for_all_procs = false;",
-        "safe SUSFS mount visibility default",
-    )
-
+def patch_host_fstat_hooks(kernel: Path) -> None:
     stat = kernel / "fs/stat.c"
     replace_once(
         stat,
@@ -156,13 +104,73 @@ extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);
         "ReSukiSU SUSFS fstat64 hook",
     )
 
+    stat_text = stat.read_text()
+    required = (
+        "extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);",
+        "ksu_handle_vfs_fstat((int)fd, &stat.size);",
+    )
+    for needle in required:
+        if needle not in stat_text:
+            raise SystemExit(f"SUSFS fstat finalization verification failed: {needle}")
+    if stat_text.count("ksu_handle_vfs_fstat((int)fd, &stat.size);") != 2:
+        raise SystemExit("SUSFS fstat finalization expected two syscall hooks")
+    for forbidden in ("ksu_handle_newfstat_ret", "ksu_handle_fstat64_ret"):
+        if forbidden in stat_text:
+            raise SystemExit(f"obsolete manual-hook symbol remains in fs/stat.c: {forbidden}")
+
+
+def apply_early_compat(kernel: Path, resukisu: Path, compat_source: Path) -> None:
+    if not compat_source.is_file():
+        raise SystemExit(f"compatibility source missing: {compat_source}")
+
+    compat_target = kernel / "fs/susfs_resukisu_compat.c"
+    shutil.copyfile(compat_source, compat_target)
+
+    makefile = kernel / "fs/Makefile"
+    text = makefile.read_text()
+    anchor = "obj-$(CONFIG_KSU_SUSFS) += susfs.o\n"
+    compat_line = "obj-$(CONFIG_KSU_SUSFS) += susfs_resukisu_compat.o\n"
+    if compat_line not in text:
+        if text.count(anchor) != 1:
+            raise SystemExit("SUSFS fs/Makefile anchor mismatch")
+        makefile.write_text(text.replace(anchor, anchor + compat_line, 1))
+
+    susfs_def = kernel / "include/linux/susfs_def.h"
+    text = susfs_def.read_text()
+    final_guard = "#endif // #ifndef KSU_SUSFS_DEF_H\n"
+    command_compat = """
+#ifndef SUSFS_MAGIC
+#define SUSFS_MAGIC 0xFAFAFAFA
+#endif
+#ifndef CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS
+#define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
+#endif
+#ifndef CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING
+#define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x60010
+#endif
+
+"""
+    if "SUSFS_MAGIC" not in text:
+        if text.count(final_guard) != 1:
+            raise SystemExit("SUSFS definition final guard mismatch")
+        susfs_def.write_text(text.replace(final_guard, command_compat + final_guard, 1))
+
+    proc_namespace = kernel / "fs/proc_namespace.c"
+    replace_once(
+        proc_namespace,
+        "bool susfs_hide_sus_mnts_for_all_procs = true;",
+        "bool susfs_hide_sus_mnts_for_all_procs = false;",
+        "safe SUSFS mount visibility default",
+    )
+
     fdinfo = kernel / "fs/notify/fdinfo.c"
     text = fdinfo.read_text()
     newer_inotify_helper = "inotify_mark_user_mask(mark)"
-    if text.count(newer_inotify_helper) != 2:
+    helper_count = text.count(newer_inotify_helper)
+    if helper_count != 2:
         raise SystemExit(
             "SUSFS fdinfo inotify helper: expected two matches, "
-            f"found {text.count(newer_inotify_helper)}"
+            f"found {helper_count}"
         )
     text = text.replace(newer_inotify_helper, "(mark->mask & IN_ALL_EVENTS)")
     label = "out_seq_printf:\n#endif"
@@ -253,10 +261,6 @@ void susfs_compat_show_version(void __user **user_info);
             "CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING",
         ],
         proc_namespace: ["susfs_hide_sus_mnts_for_all_procs = false;"],
-        stat: [
-            "extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);",
-            "ksu_handle_vfs_fstat((int)fd, &stat.size);",
-        ],
         fdinfo: ["out_seq_printf:\n\t;", "(mark->mask & IN_ALL_EVENTS)"],
         dispatch: [
             "susfs_compat_add_sus_kstat(arg, false);",
@@ -270,12 +274,21 @@ void susfs_compat_show_version(void __user **user_info);
             if needle not in content:
                 raise SystemExit(f"compatibility verification failed: {path}: {needle}")
 
-    stat_text = stat.read_text()
-    for forbidden in ("ksu_handle_newfstat_ret", "ksu_handle_fstat64_ret"):
-        if forbidden in stat_text:
-            raise SystemExit(f"obsolete manual-hook symbol remains in fs/stat.c: {forbidden}")
     if "inotify_mark_user_mask" in fdinfo.read_text():
         raise SystemExit("newer inotify helper remains in Linux 4.19 fdinfo.c")
+
+
+def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--finalize-host-hooks":
+        patch_host_fstat_hooks(Path(sys.argv[2]))
+        return
+    if len(sys.argv) == 4:
+        apply_early_compat(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))
+        return
+    raise SystemExit(
+        "usage: 55_apply_susfs_resukisu_compat.py KERNEL_DIR RESUKISU_DIR COMPAT_C\n"
+        "   or: 55_apply_susfs_resukisu_compat.py --finalize-host-hooks KERNEL_DIR"
+    )
 
 
 if __name__ == "__main__":

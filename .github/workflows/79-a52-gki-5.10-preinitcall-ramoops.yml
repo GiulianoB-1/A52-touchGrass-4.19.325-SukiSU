@@ -35,15 +35,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish run link
+      - name: Publish directly traceable run status
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
-            "Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          BODY="Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
-          Purpose: register built-in ramoops immediately after driver_init and before all normal initcall levels, while preserving the validated watchdog bridge, reserved DT memory, ROM ramdisk, and early ramoops parameters.
-          Commit: \`${GITHUB_SHA}\`"
+          Status: in_progress
+          Conclusion: pending
+          Head SHA: ${GITHUB_SHA}
+
+          Purpose: register ramoops after driver_init and before every normal initcall level."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/5010467537" \
+            -f body="$BODY"
 
       - name: Prepare runner
         run: |
@@ -299,3 +304,20 @@ jobs:
           path: artifacts/a52xq-gki-5.10-preinitcall-ramoops
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish final run status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_STATUS: ${{ job.status }}
+        run: |
+          BODY="Workflow 79 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Status: completed
+          Conclusion: ${FINAL_STATUS}
+          Head SHA: ${GITHUB_SHA}
+
+          Purpose: register ramoops after driver_init and before every normal initcall level."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/5010467537" \
+            -f body="$BODY"

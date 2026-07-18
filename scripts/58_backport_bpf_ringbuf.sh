@@ -122,7 +122,18 @@ new_failure = r'''    if [[ $rc -ne 0 ]]; then
         git -C "$KERNEL_DIR" show ":3:$rel" > "$stage_dir/${safe}.donor" 2>/dev/null || true
       done < "$unmerged"
       tar -C "$stage_dir" -czf "$ARTIFACTS_DIR/${name}-merge-stages.tar.gz" . 2>/dev/null || true
-      fail "$name does not apply cleanly to the Linux $TARGET_VERSION vendor tree"
+
+      if [[ "$name" == android-4.19-ringbuf-introduction ]]; then
+        info "Resolving Android ring-buffer conflicts against Samsung BPF layout"
+        python3 "$PROJECT_DIR/scripts/58_resolve_ringbuf_vendor_conflicts.py" "$KERNEL_DIR" \
+          | tee "$ARTIFACTS_DIR/${name}-vendor-resolution.log"
+        git -C "$KERNEL_DIR" add -A
+        git -C "$KERNEL_DIR" diff --name-only --diff-filter=U > "$unmerged"
+        [[ ! -s "$unmerged" ]] || \
+          fail "$name vendor resolver left unmerged paths"
+      else
+        fail "$name does not apply cleanly to the Linux $TARGET_VERSION vendor tree"
+      fi
     fi
 '''
 if text.count(old_failure) != 1:

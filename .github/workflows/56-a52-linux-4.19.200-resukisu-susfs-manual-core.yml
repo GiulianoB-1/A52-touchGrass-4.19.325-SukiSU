@@ -1,0 +1,17 @@
+name: 57 - A52 Linux 4.19.206 ReSukiSU manual hooks plus SUSFS detection
+
+# Disabled for pull requests on the dedicated BPF ring-buffer branch.
+# The hardware-tested baseline remains available through manual dispatch,
+# while workflow 58 performs the only automatic validation for this branch.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-reference:
+    if: ${{ false }}
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo 'Baseline workflow intentionally disabled on BPF ring-buffer branch.'

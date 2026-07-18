@@ -13,7 +13,8 @@ REPORT="$ARTIFACTS_DIR/resukisu-v4.1.0-exec-hook.txt"
    "$TARGET_SERIES".*) ;;
    *) fail "Expected Linux $TARGET_SERIES.x, found $current_version" ;;
  esac
- test "$(git -C "$KERNEL_DIR" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT" || fail "Unexpected touchGrass commit"
+ git -C "$KERNEL_DIR" merge-base --is-ancestor "$TOUCHGRASS_COMMIT" HEAD \
+   || fail "The prepared kernel no longer descends from the pinned touchGrass commit"
  test -f "$EXEC_C" || fail "fs/exec.c is missing"
 
 info "Replacing legacy SukiSU exec dispatch with the ReSukiSU manual hook"
@@ -91,6 +92,7 @@ sha256sum "$PATCH_OUT" > "$PATCH_OUT.sha256"
   printf 'kernel_version=%s\n' "$current_version"
   printf 'target_series=%s.x\n' "$TARGET_SERIES"
   printf 'touchgrass_commit=%s\n' "$TOUCHGRASS_COMMIT"
+  printf 'source_lineage=verified-ancestor\n'
   printf 'hook_guard=CONFIG_KSU_MANUAL_HOOK\n'
   printf 'native_execve=ksu_handle_execveat\n'
   printf 'compat_execve=ksu_handle_execveat\n'

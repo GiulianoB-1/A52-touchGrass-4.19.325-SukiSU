@@ -1,0 +1,6 @@
+Linux 4.19.206 BPF ring-buffer backport validation — attempt 6
+
+Baseline: hardware-tested Linux 4.19.206 + ReSukiSU manual hooks + SUSFS detection API.
+Change under test: complete Android 4.19 BPF ring-buffer ABI and required security fixes.
+Integration: donor base blobs hydrated; BPF source modes normalized for three-way merge.
+Validation intent: retrigger workflow 58 and capture the first failing integration gate, if any.

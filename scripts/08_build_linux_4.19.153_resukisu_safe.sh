@@ -22,7 +22,8 @@ require_absent() {
 
 test -d "$KERNEL_DIR/.git" || fail "Kernel source is missing"
 test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VERSION"
-test "$(git -C "$KERNEL_DIR" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT" || fail "Unexpected touchGrass commit"
+git -C "$KERNEL_DIR" merge-base --is-ancestor "$TOUCHGRASS_COMMIT" HEAD \
+  || fail "The prepared kernel no longer descends from the pinned touchGrass commit"
 test -x "$KERNEL_DIR/scripts/config" || fail "Kernel scripts/config is missing"
 test -f "$DEFCONFIG" || fail "a52xq defconfig is missing"
 

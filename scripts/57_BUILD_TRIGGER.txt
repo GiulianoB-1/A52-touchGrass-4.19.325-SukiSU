@@ -1,0 +1,4 @@
+Linux 4.19.206 hardware-test build
+
+Baseline: hardware-tested Linux 4.19.200 + ReSukiSU manual hooks + SUSFS v1.4.2 detection API.
+Change under test: Linux stable level only, 4.19.200 -> 4.19.206.

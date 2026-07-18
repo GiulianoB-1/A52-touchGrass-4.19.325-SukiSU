@@ -34,6 +34,42 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
+def normalize_modified_text(gki: Path) -> int:
+    """Remove only trailing horizontal whitespace from staged text files.
+
+    Earlier proven Lagoon port phases intentionally preserve downstream source.
+    Some of those files contain legacy trailing whitespace, so the integrated
+    workflow records the normalization instead of failing before compilation.
+    """
+    raw = subprocess.check_output(
+        ["git", "-C", str(gki), "diff", "--name-only", "-z"]
+    )
+    changed = 0
+    for item in raw.split(b"\0"):
+        if not item:
+            continue
+        path = gki / item.decode()
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if b"\0" in data:
+            continue
+
+        normalized: list[bytes] = []
+        for line in data.splitlines(keepends=True):
+            if line.endswith(b"\r\n"):
+                normalized.append(line[:-2].rstrip(b" \t") + b"\r\n")
+            elif line.endswith(b"\n"):
+                normalized.append(line[:-1].rstrip(b" \t") + b"\n")
+            else:
+                normalized.append(line.rstrip(b" \t"))
+        updated = b"".join(normalized)
+        if updated != data:
+            path.write_bytes(updated)
+            changed += 1
+    return changed
+
+
 def stage(args: argparse.Namespace) -> None:
     gki = args.gki.resolve()
     artifact = args.output.resolve()
@@ -88,42 +124,36 @@ def stage(args: argparse.Namespace) -> None:
     )
     replace_once(source, dt_anchor, dt_replacement, "QSMMUv500 DT property parsing")
 
-    reset_open_anchor = (
+    reset_anchor = (
+        "\t/*\n"
+        "\t * Reset stream mapping groups: Initial values mark all SMRn as\n"
+        "\t * invalid and all S2CRn as bypass unless overridden.\n"
+        "\t */\n"
         "\tfor (i = 0; i < smmu->num_mapping_groups; ++i)\n"
         "\t\tarm_smmu_write_sme(smmu, i);\n\n"
-        "\t/* Make sure all context banks are disabled and clear CB_FSR  */"
+        "\t/* Make sure all context banks are disabled and clear CB_FSR  */\n"
+        "\tfor (i = 0; i < smmu->num_context_banks; ++i) {\n"
+        "\t\tarm_smmu_write_context_bank(smmu, i);\n"
+        "\t\tarm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);\n"
+        "\t}\n"
     )
-    reset_open_replacement = (
+    reset_replacement = (
+        "\t/*\n"
+        "\t * Preserve firmware stream mappings and context banks when the\n"
+        "\t * downstream DT explicitly declares qcom,skip-init.\n"
+        "\t */\n"
         "\tif (!smmu->skip_init) {\n"
         "\t\tfor (i = 0; i < smmu->num_mapping_groups; ++i)\n"
         "\t\t\tarm_smmu_write_sme(smmu, i);\n\n"
-        "\t\t/* Make sure all context banks are disabled and clear CB_FSR  */"
-    )
-    replace_once(
-        source,
-        reset_open_anchor,
-        reset_open_replacement,
-        "QSMMUv500 skip-init reset guard opening",
-    )
-
-    reset_close_anchor = (
-        "\t\tarm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);\n"
-        "\t}\n\n"
-        "\t/* Invalidate the TLB, just in case */"
-    )
-    reset_close_replacement = (
+        "\t\t/* Disable context banks and clear their fault status. */\n"
+        "\t\tfor (i = 0; i < smmu->num_context_banks; ++i) {\n"
+        "\t\t\tarm_smmu_write_context_bank(smmu, i);\n"
         "\t\t\tarm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR,\n"
         "\t\t\t\t\t  ARM_SMMU_FSR_FAULT);\n"
         "\t\t}\n"
-        "\t}\n\n"
-        "\t/* Invalidate the TLB, just in case */"
+        "\t}\n"
     )
-    replace_once(
-        source,
-        reset_close_anchor,
-        reset_close_replacement,
-        "QSMMUv500 skip-init reset guard closing",
-    )
+    replace_once(source, reset_anchor, reset_replacement, "QSMMUv500 skip-init reset guard")
 
     impl_reset_anchor = (
         "\tif (smmu->impl && smmu->impl->reset)\n"
@@ -159,6 +189,8 @@ def stage(args: argparse.Namespace) -> None:
         "QSMMUv500 three-level page-table limit",
     )
 
+    normalized_files = normalize_modified_text(gki)
+
     patch = command_output(
         "git", "-C", str(gki), "diff", "--binary", "--no-ext-diff", "--",
         ARM_SMMU_C.as_posix(), ARM_SMMU_H.as_posix(),
@@ -175,6 +207,7 @@ def stage(args: argparse.Namespace) -> None:
         "skip_init_scope=preserve-firmware-smr-s2cr-context-banks-and-implementation-state",
         "three_level_tables=ported",
         "stage1_iova_limit_bits=39",
+        f"normalized_modified_text_file_count={normalized_files}",
         "actlr_table=deferred-multimedia-stream-tuning",
         "tbu_children=deferred-debug-and-ecats-support",
         "source_strategy=extend-native-gki-arm-smmu",

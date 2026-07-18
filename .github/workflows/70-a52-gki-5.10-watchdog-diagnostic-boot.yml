@@ -1,0 +1,333 @@
+name: 70 - A52 GKI 5.10 watchdog diagnostic boot
+
+run-name: Build A52 GKI 5.10 watchdog diagnostic candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/70-a52-gki-5.10-watchdog-diagnostic-boot.yml'
+      - 'scripts/37_validate_a52_p1_boot_source.py'
+      - 'scripts/38_repack_a52_p1_boot.py'
+      - 'projects/a52-p1-boot-image/boot-source.lock'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: a52-gki-5.10-watchdog-diagnostic-boot
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
+  DIAG_CMDLINE: >-
+    panic=0 loglevel=8 ignore_loglevel initcall_debug printk.time=1
+    pstore.backend=ramoops pstore.compress=none
+    ramoops.mem_address=0xB1B00000 ramoops.mem_size=0x100000
+    ramoops.record_size=0x40000 ramoops.console_size=0x40000
+    ramoops.ftrace_size=0x40000 ramoops.pmsg_size=0x40000
+    ramoops.dump_oops=1 ramoops.ecc=0
+
+jobs:
+  build:
+    name: Build watchdog-enabled diagnostic boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Publish direct run link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 70 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Purpose: enable the built-in Qualcomm watchdog and produce an uncompressed-pstore diagnostic boot candidate.
+          Commit: \`${GITHUB_SHA}\`"
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build and audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip file dwarves
+
+      - name: Restore pinned official GKI 5.10 source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Validate and clean GKI source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+      - name: Download and verify Workflow 68 integrated port
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow68
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow68/extracted/integrated-port.patch
+          test -s workflow68/extracted/integrated.config
+          grep -Fxq 'image_result=built' workflow68/extracted/analysis-metadata.txt
+
+      - name: Apply proven A52 integrated source port
+        run: |
+          set -Eeuo pipefail
+          git -C gki/common apply --check "$PWD/workflow68/extracted/integrated-port.patch"
+          git -C gki/common apply "$PWD/workflow68/extracted/integrated-port.patch"
+          git -C gki/common diff --check
+          strings gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c | grep -Fq 'qcom,qsmmu-v500'
+
+      - name: Resolve watchdog diagnostic configuration
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-watchdog-diagnostic"
+          BUILD="$PWD/workspace/gki-watchdog-diagnostic-out"
+          mkdir -p "$OUT/logs" "$BUILD"
+          cp workflow68/extracted/integrated.config "$BUILD/.config"
+
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_CORE
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_HANDLE_BOOT_ENABLED
+          gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_SYSFS
+          gki/common/scripts/config --file "$BUILD/.config" --enable QCOM_WDT
+          gki/common/scripts/config --file "$BUILD/.config" --enable PRINTK_TIME
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_CONSOLE
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_PMSG
+          gki/common/scripts/config --file "$BUILD/.config" --enable PSTORE_RAM
+
+          for symbol in \
+            PSTORE_DEFLATE_COMPRESS PSTORE_LZO_COMPRESS \
+            PSTORE_LZ4_COMPRESS PSTORE_LZ4HC_COMPRESS \
+            PSTORE_842_COMPRESS PSTORE_ZSTD_COMPRESS; do
+            gki/common/scripts/config --file "$BUILD/.config" --disable "$symbol"
+          done
+
+          gki/common/scripts/config --file "$BUILD/.config" --disable TRIM_UNUSED_KSYMS
+          gki/common/scripts/config --file "$BUILD/.config" --set-str UNUSED_KSYMS_WHITELIST ''
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            > "$OUT/logs/olddefconfig.log" 2>&1
+          cp "$BUILD/.config" "$OUT/diagnostic.config"
+
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_PSTORE_DEFLATE_COMPRESS is not set' "$BUILD/.config"
+
+      - name: Build watchdog-enabled GKI Image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-watchdog-diagnostic"
+          BUILD="$PWD/workspace/gki-watchdog-diagnostic-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/Image.log" 2>&1
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/Image"
+          strings "$OUT/Image" | grep -Fq 'qcom,msm-watchdog'
+          strings "$OUT/Image" | grep -Fq 'qcom,qsmmu-v500'
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+          gzip -dc "$OUT/Image.gz" | cmp - "$OUT/Image"
+
+      - name: Download checksum-locked A52 boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake
+          ASSET_LINE="$({
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+              --jq '.[] | .assets[] | select(.name | endswith(".img")) | [.id, .name, .created_at] | @tsv'
+          } | head -n 1)"
+          test -n "$ASSET_LINE"
+          IFS=$'\t' read -r ASSET_ID ASSET_NAME ASSET_CREATED <<< "$ASSET_LINE"
+          printf 'source_asset_id=%s\nsource_asset_name=%s\nsource_asset_created=%s\n' \
+            "$ASSET_ID" "$ASSET_NAME" "$ASSET_CREATED" \
+            > artifacts/a52xq-gki-5.10-watchdog-diagnostic/source-asset.txt
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            --output intake/boot.img
+          test -s intake/boot.img
+
+      - name: Validate source and create diagnostic boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-watchdog-diagnostic
+          python3 scripts/37_validate_a52_p1_boot_source.py \
+            intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/source-validation.json"
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/base-repack-report.json"
+
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          path = Path("artifacts/a52xq-gki-5.10-watchdog-diagnostic/boot.img")
+          data = bytearray(path.read_bytes())
+          before = module.parse_boot(bytes(data))
+          addition = os.environ["DIAG_CMDLINE"].strip()
+          diagnostic = (before["cmdline"] + " " + addition).strip()
+          encoded = diagnostic.encode("ascii")
+          if len(encoded) > 1534:
+              raise SystemExit(f"diagnostic command line too long: {len(encoded)}")
+
+          data[64:576] = b"\0" * 512
+          data[608:1632] = b"\0" * 1024
+          first = encoded[:511]
+          second = encoded[511:]
+          data[64:64 + len(first)] = first
+          data[608:608 + len(second)] = second
+          path.write_bytes(data)
+
+          source = module.parse_boot(Path("intake/boot.img").read_bytes())
+          after = module.parse_boot(path.read_bytes())
+          checks = {
+              "partition_size_preserved": path.stat().st_size == Path("intake/boot.img").stat().st_size,
+              "header_version_preserved": after["header_version"] == source["header_version"],
+              "page_size_preserved": after["page_size"] == source["page_size"],
+              "ramdisk_preserved": after["ramdisk"] == source["ramdisk"],
+              "dtb_preserved": after["dtb"] == source["dtb"],
+              "diagnostic_cmdline_present": addition in after["cmdline"],
+              "qcom_watchdog_cmdline_not_disabled": "nowatchdog" not in after["cmdline"],
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit("diagnostic audit failed: " + ", ".join(failed))
+
+          report = {
+              "status": "watchdog-diagnostic-repacked-audited",
+              "hardware_validated": False,
+              "previous_observation": "Samsung logo for about 15 seconds followed by hard PS_HOLD reset",
+              "root_cause_hypothesis": "bootloader watchdog enabled while CONFIG_QCOM_WDT was disabled",
+              "source_cmdline": source["cmdline"],
+              "diagnostic_cmdline": after["cmdline"],
+              "checks": checks,
+          }
+          Path("artifacts/a52xq-gki-5.10-watchdog-diagnostic/diagnostic-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Finalize and audit artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-watchdog-diagnostic
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 WATCHDOG DIAGNOSTIC CANDIDATE
+
+          The previous candidate reached kernel execution but reset after about
+          15 seconds. Bootloader logs show that the hardware watchdog was enabled,
+          while the previous integrated configuration had CONFIG_QCOM_WDT disabled.
+
+          This candidate enables the built-in Qualcomm watchdog driver and uses
+          uncompressed ramoops plus verbose initcall logging. It is not yet proven
+          to boot Android. Keep OrangeFox and the known-working boot image ready.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          cat > "$OUT/candidate-status.tsv" <<'EOF'
+          check	result
+          qcom-watchdog-built-in	yes
+          boot-watchdog-handling-enabled	yes
+          pstore-console-built-in	yes
+          pstore-deflate-disabled	yes
+          diagnostic-cmdline-present	yes
+          rom-ramdisk-preserved	yes
+          rom-dtb-preserved	yes
+          partition-size-preserved	yes
+          hardware-validated	no
+          flash-performed	no
+          EOF
+
+          cat > "$OUT/analysis-metadata.txt" <<EOF
+          artifact_type=a52xq-gki-5.10-watchdog-diagnostic-boot-candidate
+          gki_commit=${GKI_COMMON_SHA}
+          workflow68_artifact_id=${WORKFLOW68_ARTIFACT_ID}
+          qcom_wdt=enabled-built-in
+          watchdog_boot_handoff=enabled
+          pstore_compression=disabled
+          panic_timeout=0
+          hardware_validated=no
+          flash_performed=no
+          EOF
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$OUT/diagnostic.config"
+          grep -Fxq '# CONFIG_PSTORE_DEFLATE_COMPRESS is not set' "$OUT/diagnostic.config"
+          grep -Fxq $'qcom-watchdog-built-in\tyes' "$OUT/candidate-status.tsv"
+          grep -Fxq $'hardware-validated\tno' "$OUT/candidate-status.tsv"
+
+      - name: Upload watchdog diagnostic candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-watchdog-diagnostic-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-watchdog-diagnostic
+          if-no-files-found: error
+          retention-days: 14

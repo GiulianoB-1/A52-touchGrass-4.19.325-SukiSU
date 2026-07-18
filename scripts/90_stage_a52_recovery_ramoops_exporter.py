@@ -43,7 +43,7 @@ static int __init a52_ramoops_snapshot_init(void)
 
 	/*
 	 * The ramoops carveout is reserved DRAM, not MMIO. On arm64,
-	 * ioremap() rejects normal-RAM PFNs. MEMREMAP_WB returns the existing
+	 * legacy I/O mappings reject normal-RAM PFNs. MEMREMAP_WB returns the existing
 	 * linear-map address for System RAM and matches persistent-RAM users.
 	 */
 	mapping = memremap(A52_RAMOOPS_PHYS, A52_RAMOOPS_SIZE, MEMREMAP_WB);

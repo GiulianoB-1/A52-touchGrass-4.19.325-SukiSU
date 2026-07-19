@@ -10,19 +10,29 @@ from pathlib import Path
 from a52_diag94_common import declare_helper, triplet
 
 
-def _function_span(text: str, anchor: str, label: str) -> tuple[int, int, int]:
-    """Return function start, opening brace and end, skipping prototypes."""
-    search = 0
-    while True:
-        start = text.find(anchor, search)
-        if start < 0:
-            raise SystemExit(f"{label}: function definition anchor not found")
-        brace = text.find("{", start)
-        semicolon = text.find(";", start)
-        if brace >= 0 and (semicolon < 0 or brace < semicolon):
-            break
-        search = start + len(anchor)
+def _try_function_span(
+    text: str, anchors: tuple[str, ...]
+) -> tuple[str, int, int, int] | None:
+    """Find the first real function definition, skipping calls and prototypes."""
+    best: tuple[str, int, int] | None = None
+    for anchor in anchors:
+        search = 0
+        while True:
+            start = text.find(anchor, search)
+            if start < 0:
+                break
+            brace = text.find("{", start)
+            semicolon = text.find(";", start)
+            if brace >= 0 and (semicolon < 0 or brace < semicolon):
+                if best is None or start < best[1]:
+                    best = (anchor, start, brace)
+                break
+            search = start + len(anchor)
 
+    if best is None:
+        return None
+
+    anchor, start, brace = best
     depth = 0
     for pos in range(brace, len(text)):
         if text[pos] == "{":
@@ -30,8 +40,19 @@ def _function_span(text: str, anchor: str, label: str) -> tuple[int, int, int]:
         elif text[pos] == "}":
             depth -= 1
             if depth == 0:
-                return start, brace, pos + 1
-    raise SystemExit(f"{label}: function closing brace not found")
+                return anchor, start, brace, pos + 1
+    raise SystemExit(f"{anchor}: function closing brace not found")
+
+
+def _require_function_span(
+    text: str, anchors: tuple[str, ...], label: str
+) -> tuple[str, int, int, int]:
+    result = _try_function_span(text, anchors)
+    if result is None:
+        raise SystemExit(
+            f"{label}: no function definition found for {', '.join(anchors)}"
+        )
+    return result
 
 
 def _normalized_line_spans(
@@ -66,9 +87,13 @@ def _one_line(
     return spans[0]
 
 
-def _function_body_insertion_point(text: str, brace: int) -> int:
+def _body_insertion_point(text: str, brace: int) -> int:
     newline = text.find("\n", brace)
     return brace + 1 if newline < 0 else newline + 1
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
 
 
 def instrument_qmp_phy(phy: str) -> str:
@@ -84,7 +109,7 @@ def instrument_qmp_phy(phy: str) -> str:
         "bridge Samsung downstream QMP-v3 UFS PHY compatible",
     )
     compat_line = phy[compat_start:compat_end]
-    indentation = compat_line[: len(compat_line) - len(compat_line.lstrip())]
+    indentation = _indent(compat_line)
     bridge = (
         indentation + '.compatible = "qcom,ufs-phy-qmp-v3",\n'
         + indentation + ".data = &sdm845_ufsphy_cfg,\n"
@@ -92,13 +117,12 @@ def instrument_qmp_phy(phy: str) -> str:
     )
     phy = phy[:compat_start] + bridge + compat_line + phy[compat_end:]
 
-    cfg_candidates = (
-        "qmp->cfg = of_device_get_match_data(dev);",
-        "cfg = of_device_get_match_data(dev);",
-    )
     cfg_start, cfg_end = _one_line(
         phy,
-        cfg_candidates,
+        (
+            "qmp->cfg = of_device_get_match_data(dev);",
+            "cfg = of_device_get_match_data(dev);",
+        ),
         "instrument QMP PHY match-data selection",
     )
     cfg_line = phy[cfg_start:cfg_end]
@@ -108,13 +132,75 @@ def instrument_qmp_phy(phy: str) -> str:
         'dev_name(dev), dev->of_node ? dev->of_node->full_name : "<none>", '
         'dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
         f"{cfg_expression}, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
-        cfg_line[: len(cfg_line) - len(cfg_line.lstrip())],
+        _indent(cfg_line),
         prefix="A52PHY",
     ) + phy[cfg_end:]
     return phy
 
 
-def instrument_device_core(dd: str) -> str:
+def _add_probe_callback_trace(dd: str) -> tuple[str, str]:
+    modern = _try_function_span(dd, ("call_driver_probe(",))
+    if modern is not None:
+        _, start, _, end = modern
+        _, declaration_end = _one_line(
+            dd,
+            ("int ret = 0;", "int ret;"),
+            "instrument call_driver_probe entry",
+            start,
+            end,
+        )
+        location = "call_driver_probe"
+    else:
+        _, start, _, end = _require_function_span(
+            dd,
+            ("really_probe(",),
+            "locate legacy really_probe path",
+        )
+        _, declaration_end = _one_line(
+            dd,
+            ("atomic_inc(&probe_count);",),
+            "instrument really_probe entry",
+            start,
+            end,
+        )
+        location = "really_probe"
+
+    call_trace = (
+        "\tif (a52_storage_probe_device(dev)) {\n"
+        + triplet(
+            "CALL dev=%s driver=%s",
+            "dev_name(dev), drv->name",
+            "\t\t",
+            prefix="A52DEV",
+        )
+        + "\t}\n"
+    )
+    dd = dd[:declaration_end] + call_trace + dd[declaration_end:]
+
+    _, start, _, end = _require_function_span(
+        dd,
+        (("call_driver_probe(" if location == "call_driver_probe" else "really_probe("),),
+        f"relocate {location} after entry trace",
+    )
+    returns = _normalized_line_spans(dd, ("return ret;",), start, end)
+    if not returns:
+        raise SystemExit(f"instrument {location} return: return ret not found")
+    return_start, _ = returns[-1]
+    ret_trace = (
+        "\tif (a52_storage_probe_device(dev)) {\n"
+        + triplet(
+            "RET dev=%s driver=%s ret=%d",
+            "dev_name(dev), drv->name, ret",
+            "\t\t",
+            prefix="A52DEV",
+        )
+        + "\t}\n"
+    )
+    dd = dd[:return_start] + ret_trace + dd[return_start:]
+    return dd, location
+
+
+def instrument_device_core(dd: str) -> tuple[str, str]:
     dd = declare_helper(
         dd,
         ("#include <linux/device.h>\n", "#include <linux/module.h>\n"),
@@ -123,7 +209,9 @@ def instrument_device_core(dd: str) -> str:
     if "#include <linux/string.h>\n" not in dd:
         include_anchor = "#include <linux/device.h>\n"
         if include_anchor not in dd:
-            raise SystemExit("declare string helper in drivers/base/dd.c: include anchor missing")
+            raise SystemExit(
+                "declare string helper in drivers/base/dd.c: include anchor missing"
+            )
         dd = dd.replace(
             include_anchor,
             include_anchor + "#include <linux/string.h>\n",
@@ -143,15 +231,14 @@ def instrument_device_core(dd: str) -> str:
 }
 
 '''
-
-    deferred_start, deferred_brace, _ = _function_span(
+    _, deferred_start, deferred_brace, _ = _require_function_span(
         dd,
-        "driver_deferred_probe_add(",
+        ("driver_deferred_probe_add(",),
         "locate deferred-probe helper",
     )
     dd = dd[:deferred_start] + storage_helper + dd[deferred_start:]
     deferred_brace += len(storage_helper)
-    insert_at = _function_body_insertion_point(dd, deferred_brace)
+    insert_at = _body_insertion_point(dd, deferred_brace)
     defer_trace = (
         "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
@@ -164,65 +251,15 @@ def instrument_device_core(dd: str) -> str:
     )
     dd = dd[:insert_at] + defer_trace + dd[insert_at:]
 
-    probe_start, _, probe_end = _function_span(
-        dd,
-        "call_driver_probe(",
-        "locate call_driver_probe helper",
-    )
-    ret_decl_start, ret_decl_end = _one_line(
-        dd,
-        ("int ret = 0;", "int ret;"),
-        "instrument storage driver callback entry",
-        probe_start,
-        probe_end,
-    )
-    del ret_decl_start
-    call_trace = (
-        "\tif (a52_storage_probe_device(dev)) {\n"
-        + triplet(
-            "CALL dev=%s driver=%s",
-            "dev_name(dev), drv->name",
-            "\t\t",
-            prefix="A52DEV",
-        )
-        + "\t}\n"
-    )
-    dd = dd[:ret_decl_end] + call_trace + dd[ret_decl_end:]
+    dd, callback_location = _add_probe_callback_trace(dd)
 
-    probe_start, _, probe_end = _function_span(
+    reason_spans = _normalized_line_spans(
         dd,
-        "call_driver_probe(",
-        "locate call_driver_probe return",
+        ('dev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, "%pV", vaf);',),
     )
-    return_spans = _normalized_line_spans(
-        dd,
-        ("return ret;",),
-        probe_start,
-        probe_end,
-    )
-    if not return_spans:
-        raise SystemExit("instrument storage driver callback return: return ret not found")
-    return_start, _ = return_spans[-1]
-    ret_trace = (
-        "\tif (a52_storage_probe_device(dev)) {\n"
-        + triplet(
-            "RET dev=%s driver=%s ret=%d",
-            "dev_name(dev), drv->name, ret",
-            "\t\t",
-            prefix="A52DEV",
-        )
-        + "\t}\n"
-    )
-    dd = dd[:return_start] + ret_trace + dd[return_start:]
-
-    reason_candidates = (
-        'dev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, "%pV", vaf);',
-    )
-    reason_spans = _normalized_line_spans(dd, reason_candidates)
     if len(reason_spans) == 1:
         reason_start, reason_end = reason_spans[0]
-        reason_line = dd[reason_start:reason_end]
-        indentation = reason_line[: len(reason_line) - len(reason_line.lstrip())]
+        indentation = _indent(dd[reason_start:reason_end])
         reason_trace = (
             indentation + "if (a52_storage_probe_device(dev)) {\n"
             + triplet(
@@ -234,7 +271,7 @@ def instrument_device_core(dd: str) -> str:
             + indentation + "}\n"
         )
         dd = dd[:reason_end] + reason_trace + dd[reason_end:]
-    return dd
+    return dd, callback_location
 
 
 def main() -> int:
@@ -258,7 +295,9 @@ def main() -> int:
         raise SystemExit("pinned QMP PHY or device-core source is missing")
 
     phy = instrument_qmp_phy(phy_path.read_text(encoding="utf-8"))
-    dd = instrument_device_core(dd_path.read_text(encoding="utf-8"))
+    dd, callback_location = instrument_device_core(
+        dd_path.read_text(encoding="utf-8")
+    )
 
     checks = {
         "phy_compatible_bridge": phy.count('"qcom,ufs-phy-qmp-v3"') == 1
@@ -296,7 +335,7 @@ def main() -> int:
                     "from": "qcom,ufs-phy-qmp-v3",
                     "to_configuration": "sdm845_ufsphy_cfg",
                 },
-                "callback_trace_location": "inside call_driver_probe",
+                "callback_trace_location": callback_location,
                 "redundancy": 3,
                 "checks": checks,
             },

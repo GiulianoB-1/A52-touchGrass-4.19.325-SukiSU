@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 2: capture the function-scoped SCSI recorder run.
+# Refresh 3: capture the layout-independent SCSI recorder run.
 on:
   push:
     branches: [main]

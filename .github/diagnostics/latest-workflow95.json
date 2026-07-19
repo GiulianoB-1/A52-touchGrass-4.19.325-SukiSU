@@ -1,14 +1,23 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "created_at": "2026-07-19T19:30:33Z",
+      "expired": false,
+      "expires_at": "2026-08-02T19:30:32Z",
+      "id": 8446360629,
+      "name": "a52xq-ufs-bridge-flight-recorder-failure-15",
+      "size_in_bytes": 252958
+    }
+  ],
   "jobs": [
     {
-      "completed_at": null,
-      "conclusion": null,
-      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29700632469/job/88228982470",
-      "id": 88228982470,
+      "completed_at": "2026-07-19T19:30:35Z",
+      "conclusion": "failure",
+      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29700671391/job/88229098698",
+      "id": 88229098698,
       "name": "Build UFS PHY bridge and storage flight recorder boot image",
-      "started_at": "2026-07-19T19:27:30Z",
-      "status": "in_progress",
+      "started_at": "2026-07-19T19:28:46Z",
+      "status": "completed",
       "steps": [
         {
           "conclusion": "success",
@@ -23,93 +32,109 @@
           "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "success",
           "name": "Prepare runner",
           "number": 3,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "success",
           "name": "Restore pinned GKI source",
           "number": 4,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "success",
           "name": "Replay proven integrated A52 port",
           "number": 5,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "failure",
           "name": "Stage full storage recorder and PHY bridge",
           "number": 6,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Configure diagnostic kernel",
           "number": 7,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Build bridge flight recorder Image",
           "number": 8,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Download and verify reserved-memory boot source",
           "number": 9,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Repack and audit bridge flight recorder boot image",
           "number": 10,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Finalize audited candidate",
           "number": 11,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "skipped",
           "name": "Upload bridge flight recorder candidate",
           "number": 12,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "success",
           "name": "Upload diagnostic logs on failure",
           "number": 13,
-          "status": "pending"
+          "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "success",
           "name": "Post Check out diagnostic project",
           "number": 26,
-          "status": "pending"
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 27,
+          "status": "completed"
         }
       ]
+    },
+    {
+      "completed_at": null,
+      "conclusion": null,
+      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29700671391/job/88229270297",
+      "id": 88229270297,
+      "name": "Report Workflow 95 status",
+      "started_at": "2026-07-19T19:30:35Z",
+      "status": "queued",
+      "steps": []
     }
   ],
   "run": {
     "conclusion": null,
-    "created_at": "2026-07-19T19:27:26Z",
+    "created_at": "2026-07-19T19:28:31Z",
     "event": "push",
     "head_branch": "main",
-    "head_sha": "d31d2f2c56bc9aa0969a14cabffb4c33d77f0892",
-    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29700632469",
-    "id": 29700632469,
+    "head_sha": "5cb4826341e95b21c60447fc8dfa9f7babd995ee",
+    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29700671391",
+    "id": 29700671391,
     "run_attempt": 1,
-    "run_number": 14,
-    "run_started_at": "2026-07-19T19:27:26Z",
-    "status": "in_progress",
-    "updated_at": "2026-07-19T19:27:31Z"
+    "run_number": 15,
+    "run_started_at": "2026-07-19T19:28:31Z",
+    "status": "queued",
+    "updated_at": "2026-07-19T19:30:35Z"
   },
   "workflow": "95-a52-gki-5.10-ufs-bridge-flight-recorder.yml"
 }

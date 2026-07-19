@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 3: capture the layout-independent SCSI recorder run.
+# Refresh 4: capture the vprintk-scoped recorder run.
 on:
   push:
     branches: [main]

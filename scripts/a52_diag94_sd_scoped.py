@@ -5,6 +5,7 @@ from a52_diag94_common import declare_helper, triplet
 
 
 def _function_bounds(text: str, anchor: str, label: str) -> tuple[int, int]:
+    """Return one function definition, skipping matching prototypes."""
     search = 0
     while True:
         start = text.find(anchor, search)
@@ -27,13 +28,15 @@ def _function_bounds(text: str, anchor: str, label: str) -> tuple[int, int]:
     raise SystemExit(f"{label}: function closing brace not found")
 
 
-def _line_span(
+def _normalized_line_spans(
     text: str,
-    function_anchor: str,
     candidates: tuple[str, ...],
-    label: str,
-) -> tuple[int, int]:
-    start, end = _function_bounds(text, function_anchor, label)
+    start: int = 0,
+    end: int | None = None,
+) -> list[tuple[int, int]]:
+    """Find statement lines while ignoring indentation and trailing whitespace."""
+    if end is None:
+        end = len(text)
     wanted = {candidate.strip() for candidate in candidates}
     matches: list[tuple[int, int]] = []
     cursor = start
@@ -42,6 +45,17 @@ def _line_span(
         if line.strip() in wanted:
             matches.append((cursor, line_end))
         cursor = line_end
+    return matches
+
+
+def _line_span_in_function(
+    text: str,
+    function_anchor: str,
+    candidates: tuple[str, ...],
+    label: str,
+) -> tuple[int, int]:
+    start, end = _function_bounds(text, function_anchor, label)
+    matches = _normalized_line_spans(text, candidates, start, end)
     if len(matches) != 1:
         raise SystemExit(
             f"{label}: expected one normalized statement in function, found {len(matches)}"
@@ -49,26 +63,15 @@ def _line_span(
     return matches[0]
 
 
-def _insert_after(
-    text: str,
-    function_anchor: str,
-    candidates: tuple[str, ...],
-    insertion: str,
-    label: str,
-) -> str:
-    _, end = _line_span(text, function_anchor, candidates, label)
-    return text[:end] + insertion + text[end:]
-
-
-def _insert_before(
-    text: str,
-    function_anchor: str,
-    candidates: tuple[str, ...],
-    insertion: str,
-    label: str,
-) -> str:
-    start, _ = _line_span(text, function_anchor, candidates, label)
-    return text[:start] + insertion + text[start:]
+def _global_line_span(
+    text: str, candidates: tuple[str, ...], label: str
+) -> tuple[int, int]:
+    matches = _normalized_line_spans(text, candidates)
+    if len(matches) != 1:
+        raise SystemExit(
+            f"{label}: expected one normalized statement in file, found {len(matches)}"
+        )
+    return matches[0]
 
 
 def instrument_sd(sd: str) -> str:
@@ -82,84 +85,43 @@ def instrument_sd(sd: str) -> str:
         "declare persistent diagnostic helper in sd.c",
     )
 
-    sd = _insert_after(
+    probe_start, probe_end = _line_span_in_function(
         sd,
         "sd_probe(",
         ("struct scsi_device *sdp = to_scsi_device(dev);",),
-        triplet(
-            "SD stage=probe dev=%s host=%d channel=%u id=%u lun=%llu type=%d",
-            "dev_name(dev), sdp->host->host_no, sdp->channel, sdp->id, "
-            "(unsigned long long)sdp->lun, sdp->type",
-            "\t",
-        ),
         "instrument SCSI disk probe",
     )
+    del probe_start
+    sd = sd[:probe_end] + triplet(
+        "SD stage=probe dev=%s host=%d channel=%u id=%u lun=%llu type=%d",
+        "dev_name(dev), sdp->host->host_no, sdp->channel, sdp->id, "
+        "(unsigned long long)sdp->lun, sdp->type",
+        "\t",
+    ) + sd[probe_end:]
 
-    sd = _insert_after(
-        sd,
-        "sd_probe_async(",
-        ("index = sdkp->index;",),
-        triplet(
-            "SD stage=async_begin host=%d lun=%llu disk=%s index=%u",
-            "sdp->host->host_no, (unsigned long long)sdp->lun, gd->disk_name, index",
-            "\t",
-        ),
-        "instrument async SCSI disk setup",
-    )
-
-    if "sd_revalidate_disk(gd);" in sd:
-        sd = _insert_after(
-            sd,
-            "sd_probe_async(",
-            ("sd_revalidate_disk(gd);",),
-            triplet(
-                "SD stage=revalidate disk=%s capacity=%llu sector_size=%u",
-                "gd->disk_name, (unsigned long long)get_capacity(gd), sdp->sector_size",
-                "\t",
-            ),
-            "instrument SCSI disk revalidation",
-        )
-
+    # Android common revisions move disk setup between sd_probe() and a separate
+    # asynchronous helper. The single device_add_disk() call is the stable event
+    # required by the recorder, so instrument that normalized line directly.
     add_candidates = (
         "device_add_disk(dev, gd, NULL);",
         "device_add_disk(dev, gd);",
     )
-    sd = _insert_before(
-        sd,
-        "sd_probe_async(",
-        add_candidates,
-        triplet(
-            "SD stage=before_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
-            "gd->disk_name, gd->major, gd->first_minor, "
-            "(unsigned long long)get_capacity(gd)",
-            "\t",
-        ),
-        "instrument SCSI disk pre-registration",
+    add_start, add_end = _global_line_span(
+        sd, add_candidates, "instrument SCSI disk registration"
     )
-    sd = _insert_after(
-        sd,
-        "sd_probe_async(",
-        add_candidates,
-        triplet(
-            "SD stage=device_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
-            "gd->disk_name, gd->major, gd->first_minor, "
-            "(unsigned long long)get_capacity(gd)",
-            "\t",
-        ),
-        "instrument SCSI disk registration",
+    actual_add_line = sd[add_start:add_end]
+    before = triplet(
+        "SD stage=before_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
+        "gd->disk_name, gd->major, gd->first_minor, "
+        "(unsigned long long)get_capacity(gd)",
+        "\t",
     )
-
-    if "scsi_autopm_put_device(sdp);" in sd:
-        sd = _insert_before(
-            sd,
-            "sd_probe_async(",
-            ("scsi_autopm_put_device(sdp);",),
-            triplet(
-                "SD stage=attached disk=%s capacity=%llu sector_size=%u",
-                "gd->disk_name, (unsigned long long)get_capacity(gd), sdp->sector_size",
-                "\t",
-            ),
-            "instrument attached SCSI disk",
-        )
+    after = triplet(
+        "SD stage=device_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
+        "gd->disk_name, gd->major, gd->first_minor, "
+        "(unsigned long long)get_capacity(gd)",
+        "\t",
+    )
+    sd = sd[:add_start] + before + actual_add_line + after + sd[add_end:]
 
     return sd

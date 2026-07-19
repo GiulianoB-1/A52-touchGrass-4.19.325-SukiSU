@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 9: capture the call_driver_probe recorder run.
+# Refresh 10: capture the dual-layout device-probe recorder run.
 on:
   push:
     branches: [main]

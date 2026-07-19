@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import traceback
 from pathlib import Path
 
 from a52_diag94_common import instrument_platform_glue, instrument_qcom, replace_once
@@ -181,5 +183,21 @@ def main() -> int:
     return 0
 
 
+def write_failure_trace() -> None:
+    output: Path | None = None
+    for index, value in enumerate(sys.argv[:-1]):
+        if value == "--output":
+            output = Path(sys.argv[index + 1]).resolve()
+            break
+    if output is None:
+        return
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "stage-error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BaseException:
+        write_failure_trace()
+        raise

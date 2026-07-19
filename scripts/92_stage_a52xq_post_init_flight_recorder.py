@@ -20,11 +20,29 @@ def triplet(message: str, indent: str = "\t") -> str:
     )
 
 
+def mark_statement(
+    text: str,
+    statement: str,
+    label: str,
+    *,
+    before: bool = True,
+    after: bool = True,
+    indent: str = "\t",
+) -> str:
+    replacement = ""
+    if before:
+        replacement += triplet(f"before {label}", indent)
+    replacement += statement
+    if after:
+        replacement += triplet(f"after {label}", indent)
+    return replace_once(text, statement, replacement, f"instrument {label}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Extend the A52 persistent boot trace beyond do_initcalls through "
-            "rootfs setup, init-memory finalization, and userspace exec."
+            "rootfs setup, init-memory finalization, userspace exec and panic."
         )
     )
     parser.add_argument("--gki", type=Path, required=True)
@@ -43,140 +61,88 @@ def main() -> int:
     text = main_path.read_text(encoding="utf-8")
     panic = panic_path.read_text(encoding="utf-8")
 
-    # do_basic_setup() is already fully traced by Workflow 83. Add the first
-    # marker immediately after it and continue through the remaining
-    # kernel_init_freeable() stages.
-    old = "\tdo_basic_setup();\n\n\tkunit_run_all_tests();\n\n\tconsole_on_rootfs();\n"
-    new = (
-        "\tdo_basic_setup();\n"
-        + triplet("after do_basic_setup")
-        + "\n"
-        + triplet("before kunit_run_all_tests")
-        + "\tkunit_run_all_tests();\n"
-        + triplet("after kunit_run_all_tests")
-        + "\n"
-        + triplet("before console_on_rootfs")
-        + "\tconsole_on_rootfs();\n"
-        + triplet("after console_on_rootfs")
-    )
-    text = replace_once(text, old, new, "instrument post-do_basic_setup stages")
+    # Use individual statements rather than one large formatting-sensitive block.
+    text = mark_statement(text, "\tdo_basic_setup();\n", "do_basic_setup")
+    text = mark_statement(text, "\tkunit_run_all_tests();\n", "kunit_run_all_tests")
+    text = mark_statement(text, "\tconsole_on_rootfs();\n", "console_on_rootfs")
 
-    old = (
-        "\tif (init_eaccess(ramdisk_execute_command) != 0) {\n"
-        "\t\tramdisk_execute_command = NULL;\n"
-        "\t\tprepare_namespace();\n"
-        "\t}\n"
+    # Trace the initramfs/root-device decision without rewriting the conditional.
+    init_access = "\tif (init_eaccess(ramdisk_execute_command) != 0) {\n"
+    text = replace_once(
+        text,
+        init_access,
+        triplet("before init_eaccess") + init_access,
+        "instrument init_eaccess entry",
     )
-    new = (
-        triplet("before init_eaccess")
-        + "\tif (init_eaccess(ramdisk_execute_command) != 0) {\n"
-        + triplet("init_eaccess failed", "\t\t")
-        + "\t\tramdisk_execute_command = NULL;\n"
-        + triplet("before prepare_namespace", "\t\t")
-        + "\t\tprepare_namespace();\n"
-        + triplet("after prepare_namespace", "\t\t")
-        + "\t} else {\n"
-        + triplet("init_eaccess succeeded", "\t\t")
-        + "\t}\n"
-        + triplet("after init_eaccess branch")
+    text = replace_once(
+        text,
+        "\t\tramdisk_execute_command = NULL;\n",
+        triplet("init_eaccess failed", "\t\t")
+        + "\t\tramdisk_execute_command = NULL;\n",
+        "instrument init_eaccess failure",
     )
-    text = replace_once(text, old, new, "instrument initramfs and namespace decision")
+    text = mark_statement(
+        text,
+        "\t\tprepare_namespace();\n",
+        "prepare_namespace",
+        indent="\t\t",
+    )
+    text = mark_statement(text, "\tintegrity_load_keys();\n", "integrity_load_keys")
 
-    old = "\tintegrity_load_keys();\n}\n\nstatic int __ref kernel_init(void *unused)\n"
-    new = (
-        triplet("before integrity_load_keys")
-        + "\tintegrity_load_keys();\n"
-        + triplet("after integrity_load_keys")
-        + "}\n\nstatic int __ref kernel_init(void *unused)\n"
-    )
-    text = replace_once(text, old, new, "instrument integrity key loading")
+    # Trace kernel_init() finalization statement by statement. This is resilient to
+    # comments and blank-line differences between Android 5.10 revisions.
+    for statement, label in (
+        ("\tkernel_init_freeable();\n", "kernel_init_freeable"),
+        ("\tasync_synchronize_full();\n", "async_synchronize_full"),
+        ("\tkprobe_free_init_mem();\n", "kprobe_free_init_mem"),
+        ("\tftrace_free_init_mem();\n", "ftrace_free_init_mem"),
+        ("\tkgdb_free_init_mem();\n", "kgdb_free_init_mem"),
+        ("\tfree_initmem();\n", "free_initmem"),
+        ("\tmark_readonly();\n", "mark_readonly"),
+        ("\tpti_finalize();\n", "pti_finalize"),
+        ("\tnuma_default_policy();\n", "numa_default_policy"),
+        ("\trcu_end_inkernel_boot();\n", "rcu_end_inkernel_boot"),
+        ("\tdo_sysctl_args();\n", "do_sysctl_args"),
+    ):
+        text = mark_statement(text, statement, label)
 
-    old = (
-        "\tkernel_init_freeable();\n"
-        "\t/* need to finish all async __init code before freeing the memory */\n"
-        "\tasync_synchronize_full();\n"
-        "\tkprobe_free_init_mem();\n"
-        "\tftrace_free_init_mem();\n"
-        "\tkgdb_free_init_mem();\n"
-        "\tfree_initmem();\n"
-        "\tmark_readonly();\n"
+    state_statement = "\tsystem_state = SYSTEM_RUNNING;\n"
+    text = replace_once(
+        text,
+        state_statement,
+        triplet("before system_state_running")
+        + state_statement
+        + triplet("after system_state_running"),
+        "instrument SYSTEM_RUNNING transition",
     )
-    new = (
-        triplet("before kernel_init_freeable")
-        + "\tkernel_init_freeable();\n"
-        + triplet("after kernel_init_freeable")
-        + "\t/* need to finish all async __init code before freeing the memory */\n"
-        + triplet("before async_synchronize_full")
-        + "\tasync_synchronize_full();\n"
-        + triplet("after async_synchronize_full")
-        + triplet("before kprobe_free_init_mem")
-        + "\tkprobe_free_init_mem();\n"
-        + triplet("after kprobe_free_init_mem")
-        + triplet("before ftrace_free_init_mem")
-        + "\tftrace_free_init_mem();\n"
-        + triplet("after ftrace_free_init_mem")
-        + triplet("before kgdb_free_init_mem")
-        + "\tkgdb_free_init_mem();\n"
-        + triplet("after kgdb_free_init_mem")
-        + triplet("before free_initmem")
-        + "\tfree_initmem();\n"
-        + triplet("after free_initmem")
-        + triplet("before mark_readonly")
-        + "\tmark_readonly();\n"
-        + triplet("after mark_readonly")
-    )
-    text = replace_once(text, old, new, "instrument init-memory finalization")
 
-    old = (
-        "\tpti_finalize();\n\n"
-        "\tsystem_state = SYSTEM_RUNNING;\n"
-        "\tnuma_default_policy();\n\n"
-        "\trcu_end_inkernel_boot();\n\n"
-        "\tdo_sysctl_args();\n"
-    )
-    new = (
-        triplet("before pti_finalize")
-        + "\tpti_finalize();\n"
-        + triplet("after pti_finalize")
-        + "\n"
-        + triplet("before system_state_running")
-        + "\tsystem_state = SYSTEM_RUNNING;\n"
-        + triplet("after system_state_running")
-        + "\tnuma_default_policy();\n"
-        + triplet("after numa_default_policy")
-        + "\n"
-        + "\trcu_end_inkernel_boot();\n"
-        + triplet("after rcu_end_inkernel_boot")
-        + "\n"
-        + triplet("before do_sysctl_args")
-        + "\tdo_sysctl_args();\n"
-        + triplet("after do_sysctl_args")
-    )
-    text = replace_once(text, old, new, "instrument final kernel transition")
-
-    # Capture every attempted userspace executable centrally. Preserve the
-    # existing argument/environment debug output and report kernel_execve's
-    # return value if control comes back to the kernel.
-    old = (
+    # Capture every userspace executable attempt and the exact return value when
+    # exec fails and control returns to the kernel.
+    function_head = (
         "static int run_init_process(const char *init_filename)\n"
         "{\n"
         "\tconst char *const *p;\n\n"
         "\targv_init[0] = init_filename;\n"
     )
-    new = (
+    function_replacement = (
         "static int run_init_process(const char *init_filename)\n"
         "{\n"
         "\tconst char *const *p;\n"
         "\tint a52_exec_ret;\n\n"
-        + "\ta52_persistent_diag_mark(\"A52POST copy=1 exec begin path=%s\\n\", init_filename);\n"
-        + "\ta52_persistent_diag_mark(\"A52POST copy=2 exec begin path=%s\\n\", init_filename);\n"
-        + "\ta52_persistent_diag_mark(\"A52POST copy=3 exec begin path=%s\\n\", init_filename);\n"
-        + "\targv_init[0] = init_filename;\n"
+        "\ta52_persistent_diag_mark(\"A52POST copy=1 exec begin path=%s\\n\", init_filename);\n"
+        "\ta52_persistent_diag_mark(\"A52POST copy=2 exec begin path=%s\\n\", init_filename);\n"
+        "\ta52_persistent_diag_mark(\"A52POST copy=3 exec begin path=%s\\n\", init_filename);\n"
+        "\targv_init[0] = init_filename;\n"
     )
-    text = replace_once(text, old, new, "declare userspace exec result and entry markers")
+    text = replace_once(
+        text,
+        function_head,
+        function_replacement,
+        "instrument run_init_process entry",
+    )
 
-    old = "\treturn kernel_execve(init_filename, argv_init, envp_init);\n}\n"
-    new = (
+    exec_return = "\treturn kernel_execve(init_filename, argv_init, envp_init);\n}\n"
+    exec_replacement = (
         "\ta52_exec_ret = kernel_execve(init_filename, argv_init, envp_init);\n"
         "\ta52_persistent_diag_mark(\"A52POST copy=1 exec returned path=%s ret=%d\\n\", init_filename, a52_exec_ret);\n"
         "\ta52_persistent_diag_mark(\"A52POST copy=2 exec returned path=%s ret=%d\\n\", init_filename, a52_exec_ret);\n"
@@ -184,40 +150,29 @@ def main() -> int:
         "\treturn a52_exec_ret;\n"
         "}\n"
     )
-    text = replace_once(text, old, new, "instrument kernel_execve return")
+    text = replace_once(
+        text,
+        exec_return,
+        exec_replacement,
+        "instrument kernel_execve return",
+    )
 
-    # A fixed panic breadcrumb is intentionally format-independent and safe even
-    # when panic formatting itself is what failed. The persistent helper is a
-    # no-op before its ring has been initialized. Android 5.10 panic.c does not
-    # include linux/panic_notifier.h or linux/kernel.h, so use a verified include
-    # that exists in the pinned source rather than assuming either header exists.
+    # Panic trace. Use a header known to exist in the pinned Android 5.10 tree.
     declaration = "extern void a52_persistent_diag_mark(const char *fmt, ...);\n"
     if declaration not in panic:
-        include_anchors = (
-            "#include <linux/panic_notifier.h>\n",
+        panic = replace_once(
+            panic,
             "#include <linux/debug_locks.h>\n",
+            "#include <linux/debug_locks.h>\n" + declaration,
+            "declare persistent helper in panic.c",
         )
-        for include_anchor in include_anchors:
-            if include_anchor in panic:
-                panic = replace_once(
-                    panic,
-                    include_anchor,
-                    include_anchor + declaration,
-                    "declare persistent helper in panic.c",
-                )
-                break
-        else:
-            raise SystemExit(
-                "declare persistent helper in panic.c: no verified include anchor found"
-            )
 
     panic_anchor = "void panic(const char *fmt, ...)\n{\n"
     panic_replacement = (
-        "void panic(const char *fmt, ...)\n"
-        "{\n"
-        "\ta52_persistent_diag_mark(\"A52POST copy=1 panic entered\\n\");\n"
-        "\ta52_persistent_diag_mark(\"A52POST copy=2 panic entered\\n\");\n"
-        "\ta52_persistent_diag_mark(\"A52POST copy=3 panic entered\\n\");\n"
+        panic_anchor
+        + "\ta52_persistent_diag_mark(\"A52POST copy=1 panic entered\\n\");\n"
+        + "\ta52_persistent_diag_mark(\"A52POST copy=2 panic entered\\n\");\n"
+        + "\ta52_persistent_diag_mark(\"A52POST copy=3 panic entered\\n\");\n"
     )
     panic = replace_once(panic, panic_anchor, panic_replacement, "instrument panic entry")
 
@@ -225,8 +180,8 @@ def main() -> int:
         "post_basic_setup": "A52POST copy=1 after do_basic_setup" in text,
         "console_rootfs": "A52POST copy=1 after console_on_rootfs" in text,
         "namespace_branch": (
-            "A52POST copy=1 before prepare_namespace" in text
-            and "A52POST copy=1 init_eaccess succeeded" in text
+            "A52POST copy=1 before init_eaccess" in text
+            and "A52POST copy=1 before prepare_namespace" in text
         ),
         "kernel_init_freeable_boundary": (
             "A52POST copy=1 before kernel_init_freeable" in text
@@ -242,11 +197,17 @@ def main() -> int:
         ),
         "panic_helper_declared": declaration in panic,
         "panic_triplet": panic.count("panic entered") == 3,
-        "triple_redundancy": text.count("A52POST copy=1") == text.count("A52POST copy=2") == text.count("A52POST copy=3"),
+        "triple_redundancy": (
+            text.count("A52POST copy=1")
+            == text.count("A52POST copy=2")
+            == text.count("A52POST copy=3")
+        ),
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
-        raise SystemExit("post-init flight recorder staging audit failed: " + ", ".join(failed))
+        raise SystemExit(
+            "post-init flight recorder staging audit failed: " + ", ".join(failed)
+        )
 
     main_path.write_text(text, encoding="utf-8")
     panic_path.write_text(panic, encoding="utf-8")
@@ -258,6 +219,7 @@ def main() -> int:
                 "status": "staged",
                 "trace_scope": "post-do_initcalls through userspace exec and panic",
                 "redundancy": 3,
+                "staging_strategy": "statement-by-statement resilient anchors",
                 "checks": checks,
             },
             indent=2,

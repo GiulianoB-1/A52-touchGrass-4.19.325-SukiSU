@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 14: capture the newest runtime-delay Workflow 95 run.
+# Refresh 15: capture the Workflow 95 run with the runtime-delay helper wired in.
 on:
   push:
     branches: [main]

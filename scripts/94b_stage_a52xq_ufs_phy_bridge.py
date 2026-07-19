@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Workflow 95 trigger: use the prototype-safe scoped UFS parser from the latest main.
+
 import argparse
 import json
 from pathlib import Path

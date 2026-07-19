@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-# Workflow 95 trigger: use layout-independent SCSI disk registration tracing.
-
 import argparse
 import json
 import sys
@@ -14,6 +12,26 @@ from a52_diag94_core_scoped import instrument_ufshcd
 from a52_diag94_extra import build_live_source
 from a52_diag94_printk import instrument_printk
 from a52_diag94_sd_scoped import instrument_sd
+
+
+def make_live_source_compile_time_safe(source: str) -> str:
+    old = (
+        "\tstatic const unsigned long delays[] = {\n"
+        "\t\tmsecs_to_jiffies(1500),\n"
+        "\t\tmsecs_to_jiffies(4000),\n"
+        "\t};\n"
+    )
+    new = (
+        "\tstatic const unsigned long delays[] = {\n"
+        "\t\t(3 * HZ) / 2,\n"
+        "\t\t4 * HZ,\n"
+        "\t};\n"
+    )
+    if source.count(old) != 1:
+        raise SystemExit(
+            "make live recorder delays constant: expected one delay table"
+        )
+    return source.replace(old, new, 1)
 
 
 def main() -> int:
@@ -54,7 +72,7 @@ def main() -> int:
     core = instrument_ufshcd(paths["core"].read_text(encoding="utf-8"))
     sd = instrument_sd(paths["sd"].read_text(encoding="utf-8"))
     printk = instrument_printk(paths["printk"].read_text(encoding="utf-8"))
-    live_source = build_live_source()
+    live_source = make_live_source_compile_time_safe(build_live_source())
 
     makefile = paths["makefile"].read_text(encoding="utf-8")
     make_anchor = "obj-$(CONFIG_SCSI_UFS_QCOM) += ufs_qcom.o\n"
@@ -121,6 +139,8 @@ def main() -> int:
                 "delayed-500ms",
                 "delayed-2s",
                 "delayed-6s",
+                "(3 * HZ) / 2",
+                "4 * HZ",
             )
         ),
         "makefile_object": make_line in makefile,
@@ -200,7 +220,8 @@ def write_failure_trace() -> None:
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
+        result = main()
     except BaseException:
         write_failure_trace()
         raise
+    raise SystemExit(result)

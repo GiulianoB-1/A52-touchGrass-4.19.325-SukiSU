@@ -85,19 +85,20 @@ def instrument_sd(sd: str) -> str:
         "declare persistent diagnostic helper in sd.c",
     )
 
-    probe_start, probe_end = _line_span_in_function(
+    # Keep all declarations at the beginning of sd_probe(). The pinned kernel is
+    # built as GNU89 with declaration-after-statement treated as an error.
+    _, probe_insert = _line_span_in_function(
         sd,
         "sd_probe(",
-        ("struct scsi_device *sdp = to_scsi_device(dev);",),
-        "instrument SCSI disk probe",
+        ("int error;",),
+        "instrument SCSI disk probe after declarations",
     )
-    del probe_start
-    sd = sd[:probe_end] + triplet(
+    sd = sd[:probe_insert] + triplet(
         "SD stage=probe dev=%s host=%d channel=%u id=%u lun=%llu type=%d",
         "dev_name(dev), sdp->host->host_no, sdp->channel, sdp->id, "
         "(unsigned long long)sdp->lun, sdp->type",
         "\t",
-    ) + sd[probe_end:]
+    ) + sd[probe_insert:]
 
     # Android common revisions move disk setup between sd_probe() and a separate
     # asynchronous helper. The single device_add_disk() call is the stable event

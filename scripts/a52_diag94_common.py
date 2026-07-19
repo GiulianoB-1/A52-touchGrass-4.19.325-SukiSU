@@ -193,19 +193,28 @@ def instrument_platform_glue(pltfrm: str) -> str:
         "instrument generic UFS initialization",
     )
 
+    # The source contains more than one `out: return err` tail. Select the one
+    # that occurs after ufshcd_init() inside ufshcd_pltfrm_init().
     return_anchor = "out:\n\treturn err;\n"
-    if return_anchor in pltfrm:
-        pltfrm = replace_once(
-            pltfrm,
-            return_anchor,
-            "out:\n"
-            + triplet(
-                "PLTFRM stage=return ret=%d dev=%s",
-                "err, dev_name(dev)",
-                "\t",
-            )
-            + "\treturn err;\n",
-            "instrument platform glue final return",
+    search_start = pltfrm.index(init_anchor)
+    return_pos = pltfrm.find(return_anchor, search_start)
+    if return_pos < 0:
+        raise SystemExit(
+            "instrument platform glue final return: no out/return tail after ufshcd_init"
         )
+    return_replacement = (
+        "out:\n"
+        + triplet(
+            "PLTFRM stage=return ret=%d dev=%s",
+            "err, dev_name(dev)",
+            "\t",
+        )
+        + "\treturn err;\n"
+    )
+    pltfrm = (
+        pltfrm[:return_pos]
+        + return_replacement
+        + pltfrm[return_pos + len(return_anchor):]
+    )
 
     return pltfrm

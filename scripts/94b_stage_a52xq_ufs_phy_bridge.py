@@ -92,17 +92,22 @@ def instrument_qmp_phy(phy: str) -> str:
     )
     phy = phy[:compat_start] + bridge + compat_line + phy[compat_end:]
 
+    cfg_candidates = (
+        "qmp->cfg = of_device_get_match_data(dev);",
+        "cfg = of_device_get_match_data(dev);",
+    )
     cfg_start, cfg_end = _one_line(
         phy,
-        ("qmp->cfg = of_device_get_match_data(dev);",),
+        cfg_candidates,
         "instrument QMP PHY match-data selection",
     )
     cfg_line = phy[cfg_start:cfg_end]
+    cfg_expression = "qmp->cfg" if "qmp->cfg" in cfg_line else "cfg"
     phy = phy[:cfg_end] + triplet(
         "MATCH dev=%s node=%s compat=%s cfg=%p children=%u",
         'dev_name(dev), dev->of_node ? dev->of_node->full_name : "<none>", '
         'dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
-        "qmp->cfg, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
+        f"{cfg_expression}, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
         cfg_line[: len(cfg_line) - len(cfg_line.lstrip())],
         prefix="A52PHY",
     ) + phy[cfg_end:]
@@ -185,8 +190,8 @@ def instrument_device_core(dd: str) -> str:
     )
     reason_spans = _normalized_line_spans(dd, reason_candidates)
     if len(reason_spans) == 1:
-        _, reason_end = reason_spans[0]
-        reason_line = dd[reason_spans[0][0]:reason_end]
+        reason_start, reason_end = reason_spans[0]
+        reason_line = dd[reason_start:reason_end]
         indentation = reason_line[: len(reason_line) - len(reason_line.lstrip())]
         reason_trace = (
             indentation + "if (a52_storage_probe_device(dev)) {\n"

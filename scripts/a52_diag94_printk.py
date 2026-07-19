@@ -1,7 +1,55 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from a52_diag94_common import replace_first_supported, replace_once
+from a52_diag94_common import replace_once
+
+
+def _function_bounds(text: str, anchor: str, label: str) -> tuple[int, int]:
+    """Return one function definition matching anchor, skipping prototypes."""
+    search = 0
+    while True:
+        start = text.find(anchor, search)
+        if start < 0:
+            raise SystemExit(f"{label}: function definition anchor not found")
+        brace = text.find("{", start)
+        semicolon = text.find(";", start)
+        if brace >= 0 and (semicolon < 0 or brace < semicolon):
+            break
+        search = start + len(anchor)
+
+    depth = 0
+    for pos in range(brace, len(text)):
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, pos + 1
+    raise SystemExit(f"{label}: function closing brace not found")
+
+
+def _insert_before_in_function(
+    text: str,
+    function_anchor: str,
+    statement: str,
+    insertion: str,
+    label: str,
+) -> str:
+    start, end = _function_bounds(text, function_anchor, label)
+    positions: list[int] = []
+    cursor = start
+    while True:
+        pos = text.find(statement, cursor, end)
+        if pos < 0:
+            break
+        positions.append(pos)
+        cursor = pos + len(statement)
+    if len(positions) != 1:
+        raise SystemExit(
+            f"{label}: expected one statement in function, found {len(positions)}"
+        )
+    pos = positions[0]
+    return text[:pos] + insertion + text[pos:]
 
 
 def instrument_printk(printk: str) -> str:
@@ -39,28 +87,12 @@ def instrument_printk(printk: str) -> str:
             "add storage printk mirror helper",
         )
 
-    declaration_candidates = (
-        "\tint printed_len;\n\tbool in_sched = false;\n\tunsigned long flags;\n",
-        "\tint printed_len;\n\tbool in_sched = false;\n",
+    locals_code = (
+        "\tva_list a52_args;\n"
+        "\tchar a52_line[192];\n"
+        "\tint a52_len;\n"
+        "\tint a52_i;\n\n"
     )
-
-    def add_locals(anchor: str) -> str:
-        return (
-            anchor
-            + "\tva_list a52_args;\n"
-            + "\tchar a52_line[192];\n"
-            + "\tint a52_len;\n"
-            + "\tint a52_i;\n"
-        )
-
-    printk = replace_first_supported(
-        printk,
-        declaration_candidates,
-        add_locals,
-        "add vprintk storage mirror locals",
-    )
-
-    suppress_anchor = "\t/* Suppress unimportant messages after panic happens */\n"
     capture = (
         "\tif (unlikely(a52_storage_kmsg_count < 128)) {\n"
         "\t\tva_copy(a52_args, args);\n"
@@ -77,10 +109,12 @@ def instrument_printk(printk: str) -> str:
         "\t\t}\n"
         "\t}\n\n"
     )
-    printk = replace_once(
+    suppress_anchor = "\t/* Suppress unimportant messages after panic happens */\n"
+    printk = _insert_before_in_function(
         printk,
+        "vprintk_emit(",
         suppress_anchor,
-        capture + suppress_anchor,
-        "mirror storage-related kernel printk messages",
+        locals_code + capture,
+        "instrument vprintk storage mirror",
     )
     return printk

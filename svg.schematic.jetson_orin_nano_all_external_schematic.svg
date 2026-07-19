@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.2" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <g id="schematic">
+    <rect x="250" y="25" width="500" height="900" rx="10" fill="#fff" stroke="#111" stroke-width="4"/>
+    <text x="500" y="55" font-size="24" font-weight="bold" text-anchor="middle" font-family="Arial">NVIDIA JETSON ORIN NANO DEV KIT</text>
+    <text x="500" y="82" font-size="16" text-anchor="middle" font-family="Arial">J12 40-pin header and external connectors</text>
+
+    <g stroke="#111" stroke-width="3" fill="#fff">
+      <circle id="connector0pin" cx="220" cy="110" r="5"/><line x1="225" y1="110" x2="250" y2="110"/>
+      <circle id="connector1pin" cx="780" cy="110" r="5"/><line x1="750" y1="110" x2="775" y2="110"/>
+      <circle id="connector2pin" cx="220" cy="140" r="5"/><line x1="225" y1="140" x2="250" y2="140"/>
+      <circle id="connector3pin" cx="780" cy="140" r="5"/><line x1="750" y1="140" x2="775" y2="140"/>
+      <circle id="connector4pin" cx="220" cy="170" r="5"/><line x1="225" y1="170" x2="250" y2="170"/>
+      <circle id="connector5pin" cx="780" cy="170" r="5"/><line x1="750" y1="170" x2="775" y2="170"/>
+      <circle id="connector6pin" cx="220" cy="200" r="5"/><line x1="225" y1="200" x2="250" y2="200"/>
+      <circle id="connector7pin" cx="780" cy="200" r="5"/><line x1="750" y1="200" x2="775" y2="200"/>
+      <circle id="connector8pin" cx="220" cy="230" r="5"/><line x1="225" y1="230" x2="250" y2="230"/>
+      <circle id="connector9pin" cx="780" cy="230" r="5"/><line x1="750" y1="230" x2="775" y2="230"/>
+      <circle id="connector10pin" cx="220" cy="260" r="5"/><line x1="225" y1="260" x2="250" y2="260"/>
+      <circle id="connector11pin" cx="780" cy="260" r="5"/><line x1="750" y1="260" x2="775" y2="260"/>
+      <circle id="connector12pin" cx="220" cy="290" r="5"/><line x1="225" y1="290" x2="250" y2="290"/>
+      <circle id="connector13pin" cx="780" cy="290" r="5"/><line x1="750" y1="290" x2="775" y2="290"/>
+      <circle id="connector14pin" cx="220" cy="320" r="5"/><line x1="225" y1="320" x2="250" y2="320"/>
+      <circle id="connector15pin" cx="780" cy="320" r="5"/><line x1="750" y1="320" x2="775" y2="320"/>
+      <circle id="connector16pin" cx="220" cy="350" r="5"/><line x1="225" y1="350" x2="250" y2="350"/>
+      <circle id="connector17pin" cx="780" cy="350" r="5"/><line x1="750" y1="350" x2="775" y2="350"/>
+      <circle id="connector18pin" cx="220" cy="380" r="5"/><line x1="225" y1="380" x2="250" y2="380"/>
+      <circle id="connector19pin" cx="780" cy="380" r="5"/><line x1="750" y1="380" x2="775" y2="380"/>
+      <circle id="connector20pin" cx="220" cy="410" r="5"/><line x1="225" y1="410" x2="250" y2="410"/>
+      <circle id="connector21pin" cx="780" cy="410" r="5"/><line x1="750" y1="410" x2="775" y2="410"/>
+      <circle id="connector22pin" cx="220" cy="440" r="5"/><line x1="225" y1="440" x2="250" y2="440"/>
+      <circle id="connector23pin" cx="780" cy="440" r="5"/><line x1="750" y1="440" x2="775" y2="440"/>
+      <circle id="connector24pin" cx="220" cy="470" r="5"/><line x1="225" y1="470" x2="250" y2="470"/>
+      <circle id="connector25pin" cx="780" cy="470" r="5"/><line x1="750" y1="470" x2="775" y2="470"/>
+      <circle id="connector26pin" cx="220" cy="500" r="5"/><line x1="225" y1="500" x2="250" y2="500"/>
+      <circle id="connector27pin" cx="780" cy="500" r="5"/><line x1="750" y1="500" x2="775" y2="500"/>
+      <circle id="connector28pin" cx="220" cy="530" r="5"/><line x1="225" y1="530" x2="250" y2="530"/>
+      <circle id="connector29pin" cx="780" cy="530" r="5"/><line x1="750" y1="530" x2="775" y2="530"/>
+      <circle id="connector30pin" cx="220" cy="560" r="5"/><line x1="225" y1="560" x2="250" y2="560"/>
+      <circle id="connector31pin" cx="780" cy="560" r="5"/><line x1="750" y1="560" x2="775" y2="560"/>
+      <circle id="connector32pin" cx="220" cy="590" r="5"/><line x1="225" y1="590" x2="250" y2="590"/>
+      <circle id="connector33pin" cx="780" cy="590" r="5"/><line x1="750" y1="590" x2="775" y2="590"/>
+      <circle id="connector34pin" cx="220" cy="620" r="5"/><line x1="225" y1="620" x2="250" y2="620"/>
+      <circle id="connector35pin" cx="780" cy="620" r="5"/><line x1="750" y1="620" x2="775" y2="620"/>
+      <circle id="connector36pin" cx="220" cy="650" r="5"/><line x1="225" y1="650" x2="250" y2="650"/>
+      <circle id="connector37pin" cx="780" cy="650" r="5"/><line x1="750" y1="650" x2="775" y2="650"/>
+      <circle id="connector38pin" cx="220" cy="680" r="5"/><line x1="225" y1="680" x2="250" y2="680"/>
+      <circle id="connector39pin" cx="780" cy="680" r="5"/><line x1="750" y1="680" x2="775" y2="680"/>
+    </g>
+
+    <g font-size="13" font-family="Arial" fill="#111">
+      <text x="260" y="115">1  3.3V</text><text x="740" y="115" text-anchor="end">5.0V  2</text>
+      <text x="260" y="145">3  I2C5_DAT</text><text x="740" y="145" text-anchor="end">5.0V  4</text>
+      <text x="260" y="175">5  I2C5_CLK</text><text x="740" y="175" text-anchor="end">GND  6</text>
+      <text x="260" y="205">7  MCLK05</text><text x="740" y="205" text-anchor="end">UART1_TX  8</text>
+      <text x="260" y="235">9  GND</text><text x="740" y="235" text-anchor="end">UART1_RX  10</text>
+      <text x="260" y="265">11  UART1_RTS</text><text x="740" y="265" text-anchor="end">I2S2_CLK  12</text>
+      <text x="260" y="295">13  GPIO32</text><text x="740" y="295" text-anchor="end">GND  14</text>
+      <text x="260" y="325">15  GPIO27</text><text x="740" y="325" text-anchor="end">GPIO08  16</text>
+      <text x="260" y="355">17  3.3V</text><text x="740" y="355" text-anchor="end">GPIO35  18</text>
+      <text x="260" y="385">19  SPI1_MOSI</text><text x="740" y="385" text-anchor="end">GND  20</text>
+      <text x="260" y="415">21  SPI1_MISO</text><text x="740" y="415" text-anchor="end">GPIO17  22</text>
+      <text x="260" y="445">23  SPI1_SCK</text><text x="740" y="445" text-anchor="end">SPI1_CS0_N  24</text>
+      <text x="260" y="475">25  GND</text><text x="740" y="475" text-anchor="end">SPI1_CS1_N  26</text>
+      <text x="260" y="505">27  I2C2_DAT</text><text x="740" y="505" text-anchor="end">I2C2_CLK  28</text>
+      <text x="260" y="535">29  CAN0_DIN</text><text x="740" y="535" text-anchor="end">GND  30</text>
+      <text x="260" y="565">31  CAN0_DOUT</text><text x="740" y="565" text-anchor="end">GPIO09  32</text>
+      <text x="260" y="595">33  CAN1_DOUT</text><text x="740" y="595" text-anchor="end">GND  34</text>
+      <text x="260" y="625">35  I2S_FS</text><text x="740" y="625" text-anchor="end">UART1_CTS  36</text>
+      <text x="260" y="655">37  CAN1_DIN</text><text x="740" y="655" text-anchor="end">I2S_SDIN  38</text>
+      <text x="260" y="685">39  GND</text><text x="740" y="685" text-anchor="end">I2S_SDOUT  40</text>
+    </g>
+
+    <line x1="250" y1="715" x2="750" y2="715" stroke="#111" stroke-width="3"/>
+    <text x="500" y="742" font-size="17" font-weight="bold" text-anchor="middle" font-family="Arial">EXTERNAL CONNECTORS</text>
+
+    <g stroke="#111" stroke-width="3" fill="#fff">
+      <circle id="connector40pin" cx="220" cy="770" r="5"/><line x1="225" y1="770" x2="250" y2="770"/>
+      <circle id="connector41pin" cx="220" cy="800" r="5"/><line x1="225" y1="800" x2="250" y2="800"/>
+      <circle id="connector42pin" cx="220" cy="830" r="5"/><line x1="225" y1="830" x2="250" y2="830"/>
+      <circle id="connector43pin" cx="220" cy="860" r="5"/><line x1="225" y1="860" x2="250" y2="860"/>
+      <circle id="connector44pin" cx="220" cy="890" r="5"/><line x1="225" y1="890" x2="250" y2="890"/>
+      <circle id="connector45pin" cx="220" cy="920" r="5"/><line x1="225" y1="920" x2="250" y2="920"/>
+      <circle id="connector46pin" cx="780" cy="770" r="5"/><line x1="750" y1="770" x2="775" y2="770"/>
+      <circle id="connector47pin" cx="780" cy="800" r="5"/><line x1="750" y1="800" x2="775" y2="800"/>
+      <circle id="connector48pin" cx="780" cy="830" r="5"/><line x1="750" y1="830" x2="775" y2="830"/>
+      <circle id="connector49pin" cx="780" cy="860" r="5"/><line x1="750" y1="860" x2="775" y2="860"/>
+      <circle id="connector50pin" cx="780" cy="890" r="5"/><line x1="750" y1="890" x2="775" y2="890"/>
+      <circle id="connector51pin" cx="780" cy="920" r="5"/><line x1="750" y1="920" x2="775" y2="920"/>
+    </g>
+    <g font-size="14" font-family="Arial" fill="#111">
+      <text x="260" y="775">microSD card slot</text>
+      <text x="260" y="805">USB-C data port</text>
+      <text x="260" y="835">USB-A port 1</text>
+      <text x="260" y="865">USB-A port 2</text>
+      <text x="260" y="895">USB-A port 3</text>
+      <text x="260" y="925">USB-A port 4</text>
+      <text x="740" y="775" text-anchor="end">Gigabit Ethernet</text>
+      <text x="740" y="805" text-anchor="end">DisplayPort</text>
+      <text x="740" y="835" text-anchor="end">DC power VIN</text>
+      <text x="740" y="865" text-anchor="end">DC power GND</text>
+      <text x="740" y="895" text-anchor="end">MIPI CSI camera 0</text>
+      <text x="740" y="925" text-anchor="end">MIPI CSI camera 1</text>
+    </g>
+  </g>
+</svg>

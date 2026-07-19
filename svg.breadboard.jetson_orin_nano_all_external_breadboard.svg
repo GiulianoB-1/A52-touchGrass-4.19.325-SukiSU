@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.2" width="1000" height="700" viewBox="0 0 1000 700">
+  <title>NVIDIA Jetson Orin Nano Developer Kit breadboard view</title>
+  <g id="breadboard">
+    <rect x="40" y="35" width="920" height="630" rx="24" fill="#1e1e1e" stroke="#050505" stroke-width="8"/>
+    <circle cx="75" cy="70" r="16" fill="#e6e6e6"/><circle cx="925" cy="70" r="16" fill="#e6e6e6"/>
+    <circle cx="75" cy="630" r="16" fill="#e6e6e6"/><circle cx="925" cy="630" r="16" fill="#e6e6e6"/>
+
+    <rect x="110" y="75" width="410" height="330" rx="12" fill="#080808" stroke="#555" stroke-width="4"/>
+    <circle cx="315" cy="230" r="122" fill="#171717" stroke="#6d6d6d" stroke-width="5"/>
+    <circle cx="315" cy="230" r="58" fill="#3a3a3a"/>
+    <g fill="#060606">
+      <path d="M315 108 L345 178 L315 172 Z"/><path d="M390 135 L363 203 L350 175 Z"/>
+      <path d="M437 212 L369 231 L382 205 Z"/><path d="M410 287 L350 257 L380 252 Z"/>
+      <path d="M335 352 L315 282 L345 294 Z"/><path d="M260 325 L287 257 L300 285 Z"/>
+      <path d="M193 248 L261 229 L248 255 Z"/><path d="M220 173 L280 203 L250 208 Z"/>
+    </g>
+    <text x="315" y="118" fill="#d9d9d9" font-size="28" text-anchor="middle" font-family="Arial">NVIDIA</text>
+    <text x="315" y="445" fill="#ffffff" font-size="28" font-weight="bold" text-anchor="middle" font-family="Arial">JETSON ORIN NANO</text>
+    <text x="315" y="475" fill="#bdbdbd" font-size="18" text-anchor="middle" font-family="Arial">Developer Kit</text>
+
+    <rect x="585" y="65" width="100" height="505" rx="8" fill="#121212" stroke="#666" stroke-width="3"/>
+    <text x="635" y="50" fill="#ffffff" font-size="18" text-anchor="middle" font-family="Arial">40-PIN J12</text>
+
+    <g fill="#d8a84e" stroke="#111" stroke-width="2">
+      <circle id="connector0pin" cx="610" cy="90" r="8"/><circle id="connector1pin" cx="660" cy="90" r="8"/>
+      <circle id="connector2pin" cx="610" cy="114" r="8"/><circle id="connector3pin" cx="660" cy="114" r="8"/>
+      <circle id="connector4pin" cx="610" cy="138" r="8"/><circle id="connector5pin" cx="660" cy="138" r="8"/>
+      <circle id="connector6pin" cx="610" cy="162" r="8"/><circle id="connector7pin" cx="660" cy="162" r="8"/>
+      <circle id="connector8pin" cx="610" cy="186" r="8"/><circle id="connector9pin" cx="660" cy="186" r="8"/>
+      <circle id="connector10pin" cx="610" cy="210" r="8"/><circle id="connector11pin" cx="660" cy="210" r="8"/>
+      <circle id="connector12pin" cx="610" cy="234" r="8"/><circle id="connector13pin" cx="660" cy="234" r="8"/>
+      <circle id="connector14pin" cx="610" cy="258" r="8"/><circle id="connector15pin" cx="660" cy="258" r="8"/>
+      <circle id="connector16pin" cx="610" cy="282" r="8"/><circle id="connector17pin" cx="660" cy="282" r="8"/>
+      <circle id="connector18pin" cx="610" cy="306" r="8"/><circle id="connector19pin" cx="660" cy="306" r="8"/>
+      <circle id="connector20pin" cx="610" cy="330" r="8"/><circle id="connector21pin" cx="660" cy="330" r="8"/>
+      <circle id="connector22pin" cx="610" cy="354" r="8"/><circle id="connector23pin" cx="660" cy="354" r="8"/>
+      <circle id="connector24pin" cx="610" cy="378" r="8"/><circle id="connector25pin" cx="660" cy="378" r="8"/>
+      <circle id="connector26pin" cx="610" cy="402" r="8"/><circle id="connector27pin" cx="660" cy="402" r="8"/>
+      <circle id="connector28pin" cx="610" cy="426" r="8"/><circle id="connector29pin" cx="660" cy="426" r="8"/>
+      <circle id="connector30pin" cx="610" cy="450" r="8"/><circle id="connector31pin" cx="660" cy="450" r="8"/>
+      <circle id="connector32pin" cx="610" cy="474" r="8"/><circle id="connector33pin" cx="660" cy="474" r="8"/>
+      <circle id="connector34pin" cx="610" cy="498" r="8"/><circle id="connector35pin" cx="660" cy="498" r="8"/>
+      <circle id="connector36pin" cx="610" cy="522" r="8"/><circle id="connector37pin" cx="660" cy="522" r="8"/>
+      <circle id="connector38pin" cx="610" cy="546" r="8"/><circle id="connector39pin" cx="660" cy="546" r="8"/>
+    </g>
+    <g fill="#d7d7d7" font-size="10" font-family="Arial" text-anchor="middle">
+      <text x="592" y="94">1</text><text x="678" y="94">2</text><text x="592" y="118">3</text><text x="678" y="118">4</text>
+      <text x="592" y="142">5</text><text x="678" y="142">6</text><text x="592" y="166">7</text><text x="678" y="166">8</text>
+      <text x="592" y="190">9</text><text x="678" y="190">10</text><text x="592" y="214">11</text><text x="678" y="214">12</text>
+      <text x="592" y="238">13</text><text x="678" y="238">14</text><text x="592" y="262">15</text><text x="678" y="262">16</text>
+      <text x="592" y="286">17</text><text x="678" y="286">18</text><text x="592" y="310">19</text><text x="678" y="310">20</text>
+      <text x="592" y="334">21</text><text x="678" y="334">22</text><text x="592" y="358">23</text><text x="678" y="358">24</text>
+      <text x="592" y="382">25</text><text x="678" y="382">26</text><text x="592" y="406">27</text><text x="678" y="406">28</text>
+      <text x="592" y="430">29</text><text x="678" y="430">30</text><text x="592" y="454">31</text><text x="678" y="454">32</text>
+      <text x="592" y="478">33</text><text x="678" y="478">34</text><text x="592" y="502">35</text><text x="678" y="502">36</text>
+      <text x="592" y="526">37</text><text x="678" y="526">38</text><text x="592" y="550">39</text><text x="678" y="550">40</text>
+    </g>
+
+    <rect id="connector40pin" x="45" y="175" width="42" height="120" rx="4" fill="#c9c9c9" stroke="#555" stroke-width="3"/>
+    <text x="65" y="165" fill="#fff" font-size="15" text-anchor="middle" font-family="Arial">microSD</text>
+
+    <rect id="connector41pin" x="916" y="165" width="38" height="95" rx="8" fill="#cfcfcf" stroke="#555" stroke-width="3"/>
+    <text x="898" y="150" fill="#fff" font-size="15" text-anchor="middle" font-family="Arial">USB-C DATA</text>
+
+    <rect id="connector46pin" x="790" y="285" width="145" height="90" rx="5" fill="#bdbdbd" stroke="#555" stroke-width="4"/>
+    <rect x="810" y="310" width="105" height="45" fill="#202020"/>
+    <text x="862" y="278" fill="#fff" font-size="16" text-anchor="middle" font-family="Arial">GIGABIT ETHERNET</text>
+
+    <g fill="#c9c9c9" stroke="#555" stroke-width="4">
+      <rect id="connector42pin" x="700" y="405" width="88" height="70" rx="5"/>
+      <rect id="connector43pin" x="800" y="405" width="88" height="70" rx="5"/>
+      <rect id="connector44pin" x="700" y="490" width="88" height="70" rx="5"/>
+      <rect id="connector45pin" x="800" y="490" width="88" height="70" rx="5"/>
+    </g>
+    <g fill="#202020">
+      <rect x="714" y="423" width="60" height="34"/><rect x="814" y="423" width="60" height="34"/>
+      <rect x="714" y="508" width="60" height="34"/><rect x="814" y="508" width="60" height="34"/>
+    </g>
+    <text x="794" y="397" fill="#fff" font-size="16" text-anchor="middle" font-family="Arial">USB 3.2 TYPE-A ×4</text>
+
+    <rect id="connector47pin" x="470" y="590" width="135" height="45" rx="5" fill="#c9c9c9" stroke="#555" stroke-width="4"/>
+    <text x="537" y="583" fill="#fff" font-size="16" text-anchor="middle" font-family="Arial">DISPLAYPORT</text>
+
+    <rect x="820" y="575" width="110" height="60" rx="8" fill="#111" stroke="#555" stroke-width="4"/>
+    <circle id="connector49pin" cx="845" cy="605" r="14" fill="#888" stroke="#ccc" stroke-width="3"/>
+    <circle id="connector48pin" cx="900" cy="605" r="14" fill="#d8a84e" stroke="#ccc" stroke-width="3"/>
+    <text x="875" y="567" fill="#fff" font-size="16" text-anchor="middle" font-family="Arial">DC IN 9–20 V</text>
+    <text x="845" y="610" fill="#111" font-size="15" text-anchor="middle" font-family="Arial">−</text>
+    <text x="900" y="610" fill="#111" font-size="15" text-anchor="middle" font-family="Arial">+</text>
+
+    <rect id="connector50pin" x="120" y="600" width="135" height="20" rx="3" fill="#d6d6d6" stroke="#666" stroke-width="3"/>
+    <rect id="connector51pin" x="285" y="600" width="135" height="20" rx="3" fill="#d6d6d6" stroke="#666" stroke-width="3"/>
+    <text x="187" y="592" fill="#fff" font-size="14" text-anchor="middle" font-family="Arial">MIPI CSI CAM0</text>
+    <text x="352" y="592" fill="#fff" font-size="14" text-anchor="middle" font-family="Arial">MIPI CSI CAM1</text>
+  </g>
+</svg>

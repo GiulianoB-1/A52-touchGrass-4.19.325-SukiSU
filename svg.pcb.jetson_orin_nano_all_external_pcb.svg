@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.2" width="1000" height="700" viewBox="0 0 1000 700">
+  <g id="silkscreen" fill="none" stroke="#ffffff" stroke-width="4">
+    <rect x="40" y="35" width="920" height="630" rx="20"/>
+    <rect x="575" y="60" width="120" height="520" rx="8"/>
+    <rect x="105" y="75" width="420" height="335" rx="10"/>
+    <rect x="790" y="280" width="145" height="95" rx="5"/>
+    <rect x="690" y="400" width="205" height="170" rx="8"/>
+    <rect x="465" y="585" width="145" height="55" rx="5"/>
+    <rect x="815" y="570" width="120" height="70" rx="8"/>
+    <text x="315" y="445" fill="#ffffff" stroke="none" font-size="28" font-family="Arial" text-anchor="middle">JETSON ORIN NANO</text>
+    <text x="635" y="52" fill="#ffffff" stroke="none" font-size="16" font-family="Arial" text-anchor="middle">J12 2×20</text>
+    <text x="860" y="273" fill="#ffffff" stroke="none" font-size="14" font-family="Arial" text-anchor="middle">ETHERNET</text>
+    <text x="790" y="395" fill="#ffffff" stroke="none" font-size="14" font-family="Arial" text-anchor="middle">USB-A ×4</text>
+  </g>
+  <g id="copper1">
+    <g id="copper0" fill="none" stroke="#f7bd13" stroke-width="6">
+      <circle id="connector0pin" cx="610" cy="90" r="9"/><circle id="connector1pin" cx="660" cy="90" r="9"/>
+      <circle id="connector2pin" cx="610" cy="114" r="9"/><circle id="connector3pin" cx="660" cy="114" r="9"/>
+      <circle id="connector4pin" cx="610" cy="138" r="9"/><circle id="connector5pin" cx="660" cy="138" r="9"/>
+      <circle id="connector6pin" cx="610" cy="162" r="9"/><circle id="connector7pin" cx="660" cy="162" r="9"/>
+      <circle id="connector8pin" cx="610" cy="186" r="9"/><circle id="connector9pin" cx="660" cy="186" r="9"/>
+      <circle id="connector10pin" cx="610" cy="210" r="9"/><circle id="connector11pin" cx="660" cy="210" r="9"/>
+      <circle id="connector12pin" cx="610" cy="234" r="9"/><circle id="connector13pin" cx="660" cy="234" r="9"/>
+      <circle id="connector14pin" cx="610" cy="258" r="9"/><circle id="connector15pin" cx="660" cy="258" r="9"/>
+      <circle id="connector16pin" cx="610" cy="282" r="9"/><circle id="connector17pin" cx="660" cy="282" r="9"/>
+      <circle id="connector18pin" cx="610" cy="306" r="9"/><circle id="connector19pin" cx="660" cy="306" r="9"/>
+      <circle id="connector20pin" cx="610" cy="330" r="9"/><circle id="connector21pin" cx="660" cy="330" r="9"/>
+      <circle id="connector22pin" cx="610" cy="354" r="9"/><circle id="connector23pin" cx="660" cy="354" r="9"/>
+      <circle id="connector24pin" cx="610" cy="378" r="9"/><circle id="connector25pin" cx="660" cy="378" r="9"/>
+      <circle id="connector26pin" cx="610" cy="402" r="9"/><circle id="connector27pin" cx="660" cy="402" r="9"/>
+      <circle id="connector28pin" cx="610" cy="426" r="9"/><circle id="connector29pin" cx="660" cy="426" r="9"/>
+      <circle id="connector30pin" cx="610" cy="450" r="9"/><circle id="connector31pin" cx="660" cy="450" r="9"/>
+      <circle id="connector32pin" cx="610" cy="474" r="9"/><circle id="connector33pin" cx="660" cy="474" r="9"/>
+      <circle id="connector34pin" cx="610" cy="498" r="9"/><circle id="connector35pin" cx="660" cy="498" r="9"/>
+      <circle id="connector36pin" cx="610" cy="522" r="9"/><circle id="connector37pin" cx="660" cy="522" r="9"/>
+      <circle id="connector38pin" cx="610" cy="546" r="9"/><circle id="connector39pin" cx="660" cy="546" r="9"/>
+
+      <circle id="connector40pin" cx="65" cy="235" r="15"/>
+      <circle id="connector41pin" cx="930" cy="212" r="15"/>
+      <circle id="connector42pin" cx="720" cy="435" r="15"/>
+      <circle id="connector43pin" cx="860" cy="435" r="15"/>
+      <circle id="connector44pin" cx="720" cy="525" r="15"/>
+      <circle id="connector45pin" cx="860" cy="525" r="15"/>
+      <circle id="connector46pin" cx="860" cy="330" r="18"/>
+      <circle id="connector47pin" cx="535" cy="612" r="18"/>
+      <circle id="connector48pin" cx="900" cy="605" r="18"/>
+      <circle id="connector49pin" cx="845" cy="605" r="18"/>
+      <circle id="connector50pin" cx="190" cy="610" r="18"/>
+      <circle id="connector51pin" cx="355" cy="610" r="18"/>
+    </g>
+  </g>
+</svg>

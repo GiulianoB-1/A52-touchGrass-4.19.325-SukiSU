@@ -1,0 +1,38 @@
+name: 93b - Report A52 PID1 exit workflow status
+
+on:
+  workflow_run:
+    workflows:
+      - 93 - A52 GKI 5.10 PID1 exit trace
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Post run status to issue 45
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const body = [
+              `Workflow 93 run: ${run.html_url}`,
+              '',
+              `Status: ${run.status}`,
+              `Conclusion: ${run.conclusion}`,
+              `Run ID: ${run.id}`,
+              `Head SHA: ${run.head_sha}`,
+              '',
+              'Purpose: identify the exact exit status or fatal signal that kills Android PID 1 after /init exec.'
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 45,
+              body,
+            });

@@ -134,15 +134,13 @@ def instrument_device_core(dd: str) -> str:
 }
 
 '''
-    deferred_start, deferred_brace, deferred_end = _function_span(
+    deferred_start, deferred_brace, _ = _function_span(
         dd,
         "driver_deferred_probe_add(",
         "locate deferred-probe helper",
     )
     dd = dd[:deferred_start] + storage_helper + dd[deferred_start:]
-    shift = len(storage_helper)
-    deferred_brace += shift
-    deferred_end += shift
+    deferred_brace += len(storage_helper)
     insert_at = _function_body_insertion_point(dd, deferred_brace)
     defer_trace = (
         "\tif (a52_storage_probe_device(dev)) {\n"
@@ -156,34 +154,56 @@ def instrument_device_core(dd: str) -> str:
     )
     dd = dd[:insert_at] + defer_trace + dd[insert_at:]
 
-    call_start, call_end = _one_line(
+    probe_start, _, probe_end = _function_span(
         dd,
-        ("ret = call_driver_probe(dev, drv);",),
-        "instrument storage driver callback",
+        "really_probe(",
+        "locate legacy driver probe function",
     )
-    call_line = dd[call_start:call_end]
-    indentation = call_line[: len(call_line) - len(call_line.lstrip())]
-    before = (
-        indentation + "if (a52_storage_probe_device(dev)) {\n"
+    entry_start, entry_end = _one_line(
+        dd,
+        ("atomic_inc(&probe_count);",),
+        "instrument legacy driver probe entry",
+        probe_start,
+        probe_end,
+    )
+    del entry_start
+    call_trace = (
+        "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "CALL dev=%s driver=%s",
             "dev_name(dev), drv->name",
-            indentation + "\t",
+            "\t\t",
             prefix="A52DEV",
         )
-        + indentation + "}\n"
+        + "\t}\n"
     )
-    after = (
-        indentation + "if (a52_storage_probe_device(dev)) {\n"
+    dd = dd[:entry_end] + call_trace + dd[entry_end:]
+
+    probe_start, _, probe_end = _function_span(
+        dd,
+        "really_probe(",
+        "relocate legacy driver probe function after entry trace",
+    )
+    return_spans = _normalized_line_spans(
+        dd,
+        ("return ret;",),
+        probe_start,
+        probe_end,
+    )
+    if not return_spans:
+        raise SystemExit("instrument legacy driver probe return: return ret not found")
+    return_start, _ = return_spans[-1]
+    return_trace = (
+        "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "RET dev=%s driver=%s ret=%d",
             "dev_name(dev), drv->name, ret",
-            indentation + "\t",
+            "\t\t",
             prefix="A52DEV",
         )
-        + indentation + "}\n"
+        + "\t}\n"
     )
-    dd = dd[:call_start] + before + call_line + after + dd[call_end:]
+    dd = dd[:return_start] + return_trace + dd[return_start:]
 
     reason_candidates = (
         'dev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, "%pV", vaf);',

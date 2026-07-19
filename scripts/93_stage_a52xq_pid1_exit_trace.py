@@ -67,7 +67,7 @@ def main() -> int:
     entry_markers = triplet(
         "ENTRY pid=%d tgid=%d comm=%s code=0x%08lx group=0x%08x flags=0x%lx",
         "task_pid_nr(tsk), task_tgid_nr(tsk), tsk->comm, code, "
-        "tsk->signal->group_exit_code, tsk->flags",
+        "(unsigned int)tsk->signal->group_exit_code, tsk->flags",
         "\t\t",
     )
     entry_replacement = (
@@ -88,8 +88,10 @@ def main() -> int:
     group_anchor = "\tBUG_ON(exit_code & 0x80); /* core dumps don't get here */\n"
     group_markers = triplet(
         "GROUP pid=%d tgid=%d comm=%s requested=0x%08x existing=0x%08x sigflags=0x%x",
-        "task_pid_nr(current), task_tgid_nr(current), current->comm, exit_code, "
-        "current->signal->group_exit_code, current->signal->flags",
+        "task_pid_nr(current), task_tgid_nr(current), current->comm, "
+        "(unsigned int)exit_code, "
+        "(unsigned int)current->signal->group_exit_code, "
+        "(unsigned int)current->signal->flags",
         "\t\t",
     )
     group_replacement = (
@@ -124,9 +126,11 @@ def main() -> int:
     final_markers = triplet(
         "FINAL pid=%d tgid=%d comm=%s code=0x%08lx group=0x%08x effective=0x%08x status=%u signal=%u core=%u",
         "task_pid_nr(tsk), task_tgid_nr(tsk), tsk->comm, code, "
-        "tsk->signal->group_exit_code, "
-        f"{effective}, ({effective} >> 8) & 0xff, {effective} & 0x7f, "
-        f"!!({effective} & 0x80)",
+        "(unsigned int)tsk->signal->group_exit_code, "
+        f"(unsigned int){effective}, "
+        f"(unsigned int)(({effective} >> 8) & 0xff), "
+        f"(unsigned int)({effective} & 0x7f), "
+        f"(unsigned int)!!({effective} & 0x80)",
         "\t\t\t",
     )
     final_replacement = (
@@ -136,7 +140,14 @@ def main() -> int:
         + "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
         + "\t\t}\n"
     )
-    text, substitutions = panic_pattern.subn(final_replacement, text, count=1)
+    # A replacement callback preserves the C string's literal backslash-n.
+    # Passing final_replacement directly to re.subn() would interpret \\n in the
+    # replacement template and generate invalid multi-line C string literals.
+    text, substitutions = panic_pattern.subn(
+        lambda _match: final_replacement,
+        text,
+        count=1,
+    )
     if substitutions != 1:
         raise SystemExit(
             f"instrument PID 1 final exit: expected one substitution, got {substitutions}"
@@ -155,6 +166,8 @@ def main() -> int:
         and text.count("A52EXIT copy=3 FINAL") == 1,
         "original_pid1_panic_preserved": "Attempted to kill init! exitcode=0x%08x" in text,
         "wait_status_fields": "status=%u signal=%u core=%u" in text,
+        "literal_newlines_preserved": 'core=%u\\n",' in text
+        and 'kill init! exitcode=0x%08x\\n",' in text,
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
@@ -173,7 +186,7 @@ def main() -> int:
                     "pre-panic final status",
                 ],
                 "redundancy": 3,
-                "staging_strategy": "statement and regex anchors for Android 5.10",
+                "staging_strategy": "statement and regex anchors with literal replacement callback",
                 "checks": checks,
             },
             indent=2,

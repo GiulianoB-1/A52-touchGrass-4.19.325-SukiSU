@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 7: capture the local-QMP-cfg bridge run.
+# Refresh 8: capture the legacy really_probe recorder run.
 on:
   push:
     branches: [main]

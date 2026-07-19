@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 8: capture the legacy really_probe recorder run.
+# Refresh 9: capture the call_driver_probe recorder run.
 on:
   push:
     branches: [main]

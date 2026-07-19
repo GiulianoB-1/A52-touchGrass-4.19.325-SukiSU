@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 10: capture the dual-layout device-probe recorder run.
+# Refresh 11: capture the declaration-line helper fix run.
 on:
   push:
     branches: [main]

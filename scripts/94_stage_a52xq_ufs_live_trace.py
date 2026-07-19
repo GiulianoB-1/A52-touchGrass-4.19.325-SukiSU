@@ -5,26 +5,17 @@ import argparse
 import json
 from pathlib import Path
 
-
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{label}: expected exactly one match, found {count}")
-    return text.replace(old, new, 1)
-
-
-def triplet(fmt: str, args: str, indent: str, prefix: str = "A52UFS") -> str:
-    return "".join(
-        f'{indent}a52_persistent_diag_mark("{prefix} copy={copy} {fmt}\\n", {args});\n'
-        for copy in (1, 2, 3)
-    )
+from a52_diag94_common import instrument_platform_glue, instrument_qcom, replace_once
+from a52_diag94_core import instrument_ufshcd
+from a52_diag94_extra import build_live_source, instrument_printk, instrument_sd
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Record the live UFS device-tree state and Qualcomm UFS probe result "
-            "after Android init reported that all required partitions were missing."
+            "Build a single-shot persistent UFS/storage flight recorder covering "
+            "live DT, dependencies, platform/core probe stages, kernel logs, SCSI "
+            "disk registration, block devices, Android init kmsg, and PID 1 exit."
         )
     )
     parser.add_argument("--gki", type=Path, required=True)
@@ -35,154 +26,31 @@ def main() -> int:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    qcom_path = gki / "drivers/scsi/ufs/ufs-qcom.c"
-    makefile_path = gki / "drivers/scsi/ufs/Makefile"
-    live_path = gki / "drivers/scsi/ufs/a52-ufs-live-trace.c"
-    if not qcom_path.is_file() or not makefile_path.is_file():
-        raise SystemExit("pinned UFS Qualcomm source or Makefile is missing")
-
-    declaration = "extern void a52_persistent_diag_mark(const char *fmt, ...);\n"
-    qcom = qcom_path.read_text(encoding="utf-8")
-
-    if declaration not in qcom:
-        include_anchors = (
-            '#include "ufs_quirks.h"\n',
-            '#include "ufshci.h"\n',
-            '#include "ufs-qcom.h"\n',
-        )
-        for anchor in include_anchors:
-            if anchor in qcom:
-                qcom = replace_once(
-                    qcom,
-                    anchor,
-                    anchor + declaration,
-                    "declare persistent diagnostic helper in ufs-qcom.c",
-                )
-                break
-        else:
-            raise SystemExit("no verified include anchor found in ufs-qcom.c")
-
-    dev_anchor = "\tstruct device *dev = &pdev->dev;\n"
-    declarations = (
-        dev_anchor
-        + '\tconst char *a52_status = "<absent>";\n'
-        + '\tconst char *a52_compat = "<absent>";\n'
-        + "\tint a52_available = 0;\n"
-    )
-    qcom = replace_once(
-        qcom,
-        dev_anchor,
-        declarations,
-        "add UFS probe diagnostic locals",
-    )
-
-    probe_anchor = "\t/* Perform generic probe */\n"
-    begin_markers = triplet(
-        "PROBE_BEGIN dev=%s node=%s avail=%d status=%s compat=%s",
-        "dev_name(dev), dev->of_node ? dev->of_node->full_name : \"<none>\", "
-        "a52_available, a52_status, a52_compat",
-        "\t",
-    )
-    begin_block = (
-        "\tif (dev->of_node) {\n"
-        "\t\ta52_available = of_device_is_available(dev->of_node);\n"
-        "\t\tof_property_read_string(dev->of_node, \"status\", &a52_status);\n"
-        "\t\tof_property_read_string(dev->of_node, \"compatible\", &a52_compat);\n"
-        "\t}\n"
-        + begin_markers
-        + "\n"
-        + probe_anchor
-    )
-    qcom = replace_once(
-        qcom,
-        probe_anchor,
-        begin_block,
-        "instrument UFS Qualcomm probe entry",
-    )
-
-    init_anchor = "\terr = ufshcd_pltfrm_init(pdev, &ufs_hba_qcom_vops);\n"
-    end_markers = triplet(
-        "PROBE_END dev=%s ret=%d drvdata=%s",
-        "dev_name(dev), err, platform_get_drvdata(pdev) ? \"present\" : \"none\"",
-        "\t",
-    )
-    qcom = replace_once(
-        qcom,
-        init_anchor,
-        init_anchor + end_markers,
-        "instrument UFS Qualcomm probe result",
-    )
-
-    live_source = r'''// SPDX-License-Identifier: GPL-2.0-only
-#include <linux/device.h>
-#include <linux/init.h>
-#include <linux/of.h>
-#include <linux/of_platform.h>
-#include <linux/platform_device.h>
-
-extern void a52_persistent_diag_mark(const char *fmt, ...);
-
-static void __init a52_ufs_trace_node(const char *tag, const char *path,
-                                     const char *fallback_compatible)
-{
-    struct device_node *np;
-    struct platform_device *pdev;
-    const char *status = "<absent>";
-    const char *compatible = "<absent>";
-    const char *driver = "<unbound>";
-    int available;
-
-    np = of_find_node_by_path(path);
-    if (!np && fallback_compatible)
-        np = of_find_compatible_node(NULL, NULL, fallback_compatible);
-
-    if (!np) {
-        a52_persistent_diag_mark("A52UFS copy=1 LIVE tag=%s node=missing path=%s\n", tag, path);
-        a52_persistent_diag_mark("A52UFS copy=2 LIVE tag=%s node=missing path=%s\n", tag, path);
-        a52_persistent_diag_mark("A52UFS copy=3 LIVE tag=%s node=missing path=%s\n", tag, path);
-        return;
+    paths = {
+        "qcom": gki / "drivers/scsi/ufs/ufs-qcom.c",
+        "pltfrm": gki / "drivers/scsi/ufs/ufshcd-pltfrm.c",
+        "core": gki / "drivers/scsi/ufs/ufshcd.c",
+        "sd": gki / "drivers/scsi/sd.c",
+        "printk": gki / "kernel/printk/printk.c",
+        "makefile": gki / "drivers/scsi/ufs/Makefile",
+        "live": gki / "drivers/scsi/ufs/a52-ufs-live-trace.c",
     }
+    missing = [
+        str(path)
+        for key, path in paths.items()
+        if key != "live" and not path.is_file()
+    ]
+    if missing:
+        raise SystemExit("required pinned source files are missing: " + ", ".join(missing))
 
-    available = of_device_is_available(np);
-    of_property_read_string(np, "status", &status);
-    of_property_read_string(np, "compatible", &compatible);
-    pdev = of_find_device_by_node(np);
-    if (pdev && pdev->dev.driver)
-        driver = pdev->dev.driver->name;
+    qcom = instrument_qcom(paths["qcom"].read_text(encoding="utf-8"))
+    pltfrm = instrument_platform_glue(paths["pltfrm"].read_text(encoding="utf-8"))
+    core = instrument_ufshcd(paths["core"].read_text(encoding="utf-8"))
+    sd = instrument_sd(paths["sd"].read_text(encoding="utf-8"))
+    printk = instrument_printk(paths["printk"].read_text(encoding="utf-8"))
+    live_source = build_live_source()
 
-    a52_persistent_diag_mark("A52UFS copy=1 LIVE tag=%s node=%s avail=%d status=%s compat=%s pdev=%s driver=%s\n",
-                             tag, np->full_name, available, status, compatible,
-                             pdev ? "present" : "none", driver);
-    a52_persistent_diag_mark("A52UFS copy=2 LIVE tag=%s node=%s avail=%d status=%s compat=%s pdev=%s driver=%s\n",
-                             tag, np->full_name, available, status, compatible,
-                             pdev ? "present" : "none", driver);
-    a52_persistent_diag_mark("A52UFS copy=3 LIVE tag=%s node=%s avail=%d status=%s compat=%s pdev=%s driver=%s\n",
-                             tag, np->full_name, available, status, compatible,
-                             pdev ? "present" : "none", driver);
-
-    if (pdev)
-        put_device(&pdev->dev);
-    of_node_put(np);
-}
-
-static int __init a52_ufs_live_trace_init(void)
-{
-    a52_persistent_diag_mark("A52UFS copy=1 LIVE_SCAN begin\n");
-    a52_persistent_diag_mark("A52UFS copy=2 LIVE_SCAN begin\n");
-    a52_persistent_diag_mark("A52UFS copy=3 LIVE_SCAN begin\n");
-
-    a52_ufs_trace_node("host", "/soc/ufshc@1d84000", "qcom,ufshc");
-    a52_ufs_trace_node("phy", "/soc/ufsphy_mem@1d87000", NULL);
-
-    a52_persistent_diag_mark("A52UFS copy=1 LIVE_SCAN end\n");
-    a52_persistent_diag_mark("A52UFS copy=2 LIVE_SCAN end\n");
-    a52_persistent_diag_mark("A52UFS copy=3 LIVE_SCAN end\n");
-    return 0;
-}
-late_initcall_sync(a52_ufs_live_trace_init);
-'''
-
-    makefile = makefile_path.read_text(encoding="utf-8")
+    makefile = paths["makefile"].read_text(encoding="utf-8")
     make_anchor = "obj-$(CONFIG_SCSI_UFS_QCOM) += ufs_qcom.o\n"
     make_line = "obj-$(CONFIG_SCSI_UFS_QCOM) += a52-ufs-live-trace.o\n"
     if make_line not in makefile:
@@ -194,47 +62,113 @@ late_initcall_sync(a52_ufs_live_trace_init);
         )
 
     checks = {
-        "helper_declared": declaration in qcom,
-        "probe_begin_triplet": all(
-            qcom.count(f"A52UFS copy={copy} PROBE_BEGIN") == 1 for copy in (1, 2, 3)
+        "qcom_probe_triplets": all(
+            qcom.count(f"A52UFS copy={copy} PROBE_BEGIN") == 1
+            and qcom.count(f"A52UFS copy={copy} PROBE_END") == 1
+            for copy in (1, 2, 3)
         ),
-        "probe_end_triplet": all(
-            qcom.count(f"A52UFS copy={copy} PROBE_END") == 1 for copy in (1, 2, 3)
+        "platform_stage_markers": all(
+            marker in pltfrm
+            for marker in (
+                "stage=mmio",
+                "stage=irq",
+                "stage=alloc_host",
+                "stage=parse_clocks",
+                "stage=parse_regulators",
+                "stage=ufshcd_init",
+            )
         ),
-        "generic_probe_preserved": init_anchor in qcom,
-        "live_host_path": "/soc/ufshc@1d84000" in live_source,
-        "live_phy_path": "/soc/ufsphy_mem@1d87000" in live_source,
-        "live_triplets": all(
-            f"A52UFS copy={copy} LIVE" in live_source for copy in (1, 2, 3)
+        "core_stage_markers": all(
+            marker in core
+            for marker in (
+                "stage=init_begin",
+                "stage=hba_init",
+                "stage=capabilities",
+                "stage=dma_mask",
+                "stage=memory_alloc",
+                "stage=request_irq",
+                "stage=scsi_add_host",
+                "stage=hba_enable",
+                "stage=link_startup",
+                "stage=verify_dev_init",
+                "stage=complete_dev_init",
+                "stage=device_params",
+                "stage=config_pwr_mode",
+                "stage=scsi_scan_begin",
+                "stage=async_scan_end",
+                "stage=init_fail",
+            )
+        ),
+        "sd_markers": "A52UFS copy=1 SD stage=probe" in sd
+        and "A52UFS copy=1 SD stage=device_add_disk" in sd,
+        "storage_printk_mirror": "A52LOG seq=%u" in printk
+        and "a52_storage_kmsg_count < 128" in printk,
+        "live_snapshots": all(
+            marker in live_source
+            for marker in (
+                "SNAPSHOT begin",
+                "PROPS1",
+                "PROPS2",
+                "SUPPLY",
+                "PLATFORM scan=",
+                "BLOCK scan=",
+                "delayed-500ms",
+                "delayed-2s",
+                "delayed-6s",
+            )
         ),
         "makefile_object": make_line in makefile,
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
-        raise SystemExit("UFS live/probe staging audit failed: " + ", ".join(failed))
+        raise SystemExit(
+            "single-shot UFS recorder staging audit failed: " + ", ".join(failed)
+        )
 
-    qcom_path.write_text(qcom, encoding="utf-8")
-    live_path.write_text(live_source, encoding="utf-8")
-    makefile_path.write_text(makefile, encoding="utf-8")
+    paths["qcom"].write_text(qcom, encoding="utf-8")
+    paths["pltfrm"].write_text(pltfrm, encoding="utf-8")
+    paths["core"].write_text(core, encoding="utf-8")
+    paths["sd"].write_text(sd, encoding="utf-8")
+    paths["printk"].write_text(printk, encoding="utf-8")
+    paths["live"].write_text(live_source, encoding="utf-8")
+    paths["makefile"].write_text(makefile, encoding="utf-8")
 
-    (output / "patched-ufs-qcom.c").write_text(qcom, encoding="utf-8")
-    (output / "a52-ufs-live-trace.c").write_text(live_source, encoding="utf-8")
-    (output / "patched-ufs-Makefile").write_text(makefile, encoding="utf-8")
+    outputs = {
+        "patched-ufs-qcom.c": qcom,
+        "patched-ufshcd-pltfrm.c": pltfrm,
+        "patched-ufshcd.c": core,
+        "patched-scsi-sd.c": sd,
+        "patched-printk.c": printk,
+        "a52-ufs-live-trace.c": live_source,
+        "patched-ufs-Makefile": makefile,
+    }
+    for name, content in outputs.items():
+        (output / name).write_text(content, encoding="utf-8")
+
     (output / "stage-report.json").write_text(
         json.dumps(
             {
                 "status": "staged",
                 "purpose": (
-                    "distinguish disabled/missing live UFS DT nodes from a Qualcomm "
-                    "UFS platform probe failure after Android init exit 127"
+                    "single-shot diagnosis of missing UFS partitions with live DT, "
+                    "dependency/resource snapshots, qcom/platform/core stage returns, "
+                    "storage-related printk capture, SCSI disk registration, block "
+                    "device enumeration, Android init kmsg and PID 1 exit"
                 ),
                 "trace_points": [
-                    "late-init live UFS host node state",
-                    "late-init live UFS PHY node state",
-                    "Qualcomm UFS probe entry",
-                    "ufshcd_pltfrm_init return code",
+                    "Qualcomm UFS platform probe entry and return",
+                    "platform MMIO, IRQ, host allocation, clocks and regulators",
+                    "UFS core capability, DMA, IRQ, SCSI host and HBA enable stages",
+                    "link startup, device verification, descriptor and power-mode stages",
+                    "async scan and SCSI logical-unit scan",
+                    "SCSI sd probe and block-disk registration",
+                    "storage-related kernel printk mirror, capped at 128 compact messages",
+                    "live UFS host/PHY DT properties and resource lengths",
+                    "relevant platform-device enumeration",
+                    "block-device enumeration at late init, 0.5 s, 2 s and 6 s",
                 ],
-                "redundancy": 3,
+                "critical_marker_redundancy": 3,
+                "verbose_marker_redundancy": 1,
                 "checks": checks,
             },
             indent=2,

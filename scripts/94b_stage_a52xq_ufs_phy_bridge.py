@@ -11,7 +11,7 @@ from a52_diag94_common import declare_helper, triplet
 
 
 def _function_span(text: str, anchor: str, label: str) -> tuple[int, int, int]:
-    """Return function start, opening brace, and end, skipping prototypes."""
+    """Return function start, opening brace and end, skipping prototypes."""
     search = 0
     while True:
         start = text.find(anchor, search)
@@ -120,6 +120,15 @@ def instrument_device_core(dd: str) -> str:
         ("#include <linux/device.h>\n", "#include <linux/module.h>\n"),
         "declare persistent helper in drivers/base/dd.c",
     )
+    if "#include <linux/string.h>\n" not in dd:
+        include_anchor = "#include <linux/device.h>\n"
+        if include_anchor not in dd:
+            raise SystemExit("declare string helper in drivers/base/dd.c: include anchor missing")
+        dd = dd.replace(
+            include_anchor,
+            include_anchor + "#include <linux/string.h>\n",
+            1,
+        )
 
     storage_helper = r'''static bool a52_storage_probe_device(const struct device *dev)
 {
@@ -134,6 +143,7 @@ def instrument_device_core(dd: str) -> str:
 }
 
 '''
+
     deferred_start, deferred_brace, _ = _function_span(
         dd,
         "driver_deferred_probe_add(",
@@ -156,17 +166,17 @@ def instrument_device_core(dd: str) -> str:
 
     probe_start, _, probe_end = _function_span(
         dd,
-        "really_probe(",
-        "locate legacy driver probe function",
+        "call_driver_probe(",
+        "locate call_driver_probe helper",
     )
-    entry_start, entry_end = _one_line(
+    ret_decl_start, ret_decl_end = _one_line(
         dd,
-        ("atomic_inc(&probe_count);",),
-        "instrument legacy driver probe entry",
+        ("int ret = 0;", "int ret;"),
+        "instrument storage driver callback entry",
         probe_start,
         probe_end,
     )
-    del entry_start
+    del ret_decl_start
     call_trace = (
         "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
@@ -177,12 +187,12 @@ def instrument_device_core(dd: str) -> str:
         )
         + "\t}\n"
     )
-    dd = dd[:entry_end] + call_trace + dd[entry_end:]
+    dd = dd[:ret_decl_end] + call_trace + dd[ret_decl_end:]
 
     probe_start, _, probe_end = _function_span(
         dd,
-        "really_probe(",
-        "relocate legacy driver probe function after entry trace",
+        "call_driver_probe(",
+        "locate call_driver_probe return",
     )
     return_spans = _normalized_line_spans(
         dd,
@@ -191,9 +201,9 @@ def instrument_device_core(dd: str) -> str:
         probe_end,
     )
     if not return_spans:
-        raise SystemExit("instrument legacy driver probe return: return ret not found")
+        raise SystemExit("instrument storage driver callback return: return ret not found")
     return_start, _ = return_spans[-1]
-    return_trace = (
+    ret_trace = (
         "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "RET dev=%s driver=%s ret=%d",
@@ -203,7 +213,7 @@ def instrument_device_core(dd: str) -> str:
         )
         + "\t}\n"
     )
-    dd = dd[:return_start] + return_trace + dd[return_start:]
+    dd = dd[:return_start] + ret_trace + dd[return_start:]
 
     reason_candidates = (
         'dev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, "%pV", vaf);',
@@ -286,6 +296,7 @@ def main() -> int:
                     "from": "qcom,ufs-phy-qmp-v3",
                     "to_configuration": "sdm845_ufsphy_cfg",
                 },
+                "callback_trace_location": "inside call_driver_probe",
                 "redundancy": 3,
                 "checks": checks,
             },

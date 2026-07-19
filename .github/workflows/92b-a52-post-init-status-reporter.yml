@@ -1,0 +1,38 @@
+name: 92b - Report A52 post-init workflow status
+
+on:
+  workflow_run:
+    workflows:
+      - 92 - A52 GKI 5.10 post-init flight recorder
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Post run status to issue 45
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const body = [
+              `Workflow 92 run: ${run.html_url}`,
+              '',
+              `Status: ${run.status}`,
+              `Conclusion: ${run.conclusion}`,
+              `Run ID: ${run.id}`,
+              `Head SHA: ${run.head_sha}`,
+              '',
+              'Purpose: build the A52 GKI 5.10 post-init userspace handoff flight recorder.'
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 45,
+              body,
+            });

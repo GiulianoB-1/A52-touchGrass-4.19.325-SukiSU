@@ -1,13 +1,74 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-# Workflow 95 trigger: use the prototype-safe scoped UFS parser from the latest main.
-
 import argparse
 import json
+import sys
+import traceback
 from pathlib import Path
 
-from a52_diag94_common import declare_helper, replace_first_supported, replace_once, triplet
+from a52_diag94_common import declare_helper, triplet
+
+
+def _function_span(text: str, anchor: str, label: str) -> tuple[int, int, int]:
+    """Return function start, opening brace, and end, skipping prototypes."""
+    search = 0
+    while True:
+        start = text.find(anchor, search)
+        if start < 0:
+            raise SystemExit(f"{label}: function definition anchor not found")
+        brace = text.find("{", start)
+        semicolon = text.find(";", start)
+        if brace >= 0 and (semicolon < 0 or brace < semicolon):
+            break
+        search = start + len(anchor)
+
+    depth = 0
+    for pos in range(brace, len(text)):
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, brace, pos + 1
+    raise SystemExit(f"{label}: function closing brace not found")
+
+
+def _normalized_line_spans(
+    text: str,
+    candidates: tuple[str, ...],
+    start: int = 0,
+    end: int | None = None,
+) -> list[tuple[int, int]]:
+    if end is None:
+        end = len(text)
+    wanted = {candidate.strip() for candidate in candidates}
+    spans: list[tuple[int, int]] = []
+    cursor = start
+    for line in text[start:end].splitlines(keepends=True):
+        line_end = cursor + len(line)
+        if line.strip() in wanted:
+            spans.append((cursor, line_end))
+        cursor = line_end
+    return spans
+
+
+def _one_line(
+    text: str,
+    candidates: tuple[str, ...],
+    label: str,
+    start: int = 0,
+    end: int | None = None,
+) -> tuple[int, int]:
+    spans = _normalized_line_spans(text, candidates, start, end)
+    if len(spans) != 1:
+        raise SystemExit(f"{label}: expected one normalized line, found {len(spans)}")
+    return spans[0]
+
+
+def _function_body_insertion_point(text: str, brace: int) -> int:
+    newline = text.find("\n", brace)
+    return brace + 1 if newline < 0 else newline + 1
 
 
 def instrument_qmp_phy(phy: str) -> str:
@@ -17,35 +78,34 @@ def instrument_qmp_phy(phy: str) -> str:
         "declare persistent helper in phy-qcom-qmp.c",
     )
 
-    compat_anchor = '\t\t.compatible = "qcom,sdm845-qmp-ufs-phy",\n'
-    bridge = (
-        '\t\t.compatible = "qcom,ufs-phy-qmp-v3",\n'
-        "\t\t.data = &sdm845_ufsphy_cfg,\n"
-        "\t}, {\n"
-        + compat_anchor
-    )
-    phy = replace_once(
+    compat_start, compat_end = _one_line(
         phy,
-        compat_anchor,
-        bridge,
+        ('.compatible = "qcom,sdm845-qmp-ufs-phy",',),
         "bridge Samsung downstream QMP-v3 UFS PHY compatible",
     )
+    compat_line = phy[compat_start:compat_end]
+    indentation = compat_line[: len(compat_line) - len(compat_line.lstrip())]
+    bridge = (
+        indentation + '.compatible = "qcom,ufs-phy-qmp-v3",\n'
+        + indentation + ".data = &sdm845_ufsphy_cfg,\n"
+        + "\t}, {\n"
+    )
+    phy = phy[:compat_start] + bridge + compat_line + phy[compat_end:]
 
-    cfg_anchor = "\tqmp->cfg = of_device_get_match_data(dev);\n"
-    phy = replace_once(
+    cfg_start, cfg_end = _one_line(
         phy,
-        cfg_anchor,
-        cfg_anchor
-        + triplet(
-            "MATCH dev=%s node=%s compat=%s cfg=%p children=%u",
-            'dev_name(dev), dev->of_node ? dev->of_node->full_name : "<none>", '
-            'dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
-            "qmp->cfg, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
-            "\t",
-            prefix="A52PHY",
-        ),
+        ("qmp->cfg = of_device_get_match_data(dev);",),
         "instrument QMP PHY match-data selection",
     )
+    cfg_line = phy[cfg_start:cfg_end]
+    phy = phy[:cfg_end] + triplet(
+        "MATCH dev=%s node=%s compat=%s cfg=%p children=%u",
+        'dev_name(dev), dev->of_node ? dev->of_node->full_name : "<none>", '
+        'dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
+        "qmp->cfg, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
+        cfg_line[: len(cfg_line) - len(cfg_line.lstrip())],
+        prefix="A52PHY",
+    ) + phy[cfg_end:]
     return phy
 
 
@@ -56,10 +116,6 @@ def instrument_device_core(dd: str) -> str:
         "declare persistent helper in drivers/base/dd.c",
     )
 
-    candidates = (
-        "static void driver_deferred_probe_add(struct device *dev)\n",
-        "void driver_deferred_probe_add(struct device *dev)\n",
-    )
     storage_helper = r'''static bool a52_storage_probe_device(const struct device *dev)
 {
 	const char *name;
@@ -73,73 +129,76 @@ def instrument_device_core(dd: str) -> str:
 }
 
 '''
-
-    dd = replace_first_supported(
+    deferred_start, deferred_brace, deferred_end = _function_span(
         dd,
-        candidates,
-        lambda anchor: storage_helper + anchor,
-        "add storage probe filter before deferred-probe helper",
+        "driver_deferred_probe_add(",
+        "locate deferred-probe helper",
     )
-
-    function_anchor = next(candidate for candidate in candidates if candidate in dd)
-    body_anchor = function_anchor + "{\n"
-    dd = replace_once(
-        dd,
-        body_anchor,
-        body_anchor
-        + "\tif (a52_storage_probe_device(dev)) {\n"
+    dd = dd[:deferred_start] + storage_helper + dd[deferred_start:]
+    shift = len(storage_helper)
+    deferred_brace += shift
+    deferred_end += shift
+    insert_at = _function_body_insertion_point(dd, deferred_brace)
+    defer_trace = (
+        "\tif (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "DEFER dev=%s driver=%s",
             'dev_name(dev), dev->driver ? dev->driver->name : "<none>"',
             "\t\t",
             prefix="A52DEV",
         )
-        + "\t}\n",
-        "instrument storage deferred-probe insertion",
+        + "\t}\n"
     )
+    dd = dd[:insert_at] + defer_trace + dd[insert_at:]
 
-    call_anchor = "\tret = call_driver_probe(dev, drv);\n"
-    dd = replace_once(
+    call_start, call_end = _one_line(
         dd,
-        call_anchor,
-        "\tif (a52_storage_probe_device(dev)) {\n"
+        ("ret = call_driver_probe(dev, drv);",),
+        "instrument storage driver callback",
+    )
+    call_line = dd[call_start:call_end]
+    indentation = call_line[: len(call_line) - len(call_line.lstrip())]
+    before = (
+        indentation + "if (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "CALL dev=%s driver=%s",
             "dev_name(dev), drv->name",
-            "\t\t",
+            indentation + "\t",
             prefix="A52DEV",
         )
-        + "\t}\n"
-        + call_anchor
-        + "\tif (a52_storage_probe_device(dev)) {\n"
+        + indentation + "}\n"
+    )
+    after = (
+        indentation + "if (a52_storage_probe_device(dev)) {\n"
         + triplet(
             "RET dev=%s driver=%s ret=%d",
             "dev_name(dev), drv->name, ret",
-            "\t\t",
+            indentation + "\t",
             prefix="A52DEV",
         )
-        + "\t}\n",
-        "instrument storage driver callback",
+        + indentation + "}\n"
     )
+    dd = dd[:call_start] + before + call_line + after + dd[call_end:]
 
-    reason_anchor = (
-        "\tdev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, \"%pV\", vaf);\n"
+    reason_candidates = (
+        'dev->p->deferred_probe_reason = kasprintf(GFP_KERNEL, "%pV", vaf);',
     )
-    if reason_anchor in dd:
-        dd = replace_once(
-            dd,
-            reason_anchor,
-            reason_anchor
-            + "\tif (a52_storage_probe_device(dev)) {\n"
+    reason_spans = _normalized_line_spans(dd, reason_candidates)
+    if len(reason_spans) == 1:
+        _, reason_end = reason_spans[0]
+        reason_line = dd[reason_spans[0][0]:reason_end]
+        indentation = reason_line[: len(reason_line) - len(reason_line.lstrip())]
+        reason_trace = (
+            indentation + "if (a52_storage_probe_device(dev)) {\n"
             + triplet(
                 "REASON dev=%s reason=%pV",
                 "dev_name(dev), vaf",
-                "\t\t",
+                indentation + "\t",
                 prefix="A52DEV",
             )
-            + "\t}\n",
-            "instrument storage deferred-probe reason",
+            + indentation + "}\n"
         )
+        dd = dd[:reason_end] + reason_trace + dd[reason_end:]
     return dd
 
 
@@ -214,5 +273,22 @@ def main() -> int:
     return 0
 
 
+def write_failure_trace() -> None:
+    output: Path | None = None
+    for index, value in enumerate(sys.argv[:-1]):
+        if value == "--output":
+            output = Path(sys.argv[index + 1]).resolve()
+            break
+    if output is None:
+        return
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "stage-error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        result = main()
+    except BaseException:
+        write_failure_trace()
+        raise
+    raise SystemExit(result)

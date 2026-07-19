@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Workflow 95 trigger: use layout-independent SCSI disk registration tracing.
+
 import argparse
 import json
 import sys

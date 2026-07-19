@@ -98,6 +98,12 @@ def instrument_qcom(qcom: str) -> str:
 
 
 def instrument_platform_glue(pltfrm: str) -> str:
+    """Instrument ufshcd-pltfrm.c using statement-level anchors.
+
+    Android common tags differ in whitespace and error-message formatting around
+    these calls. Anchoring only the call statements makes the recorder resilient
+    while still recording the return value before any error branch can jump away.
+    """
     pltfrm = declare_helper(
         pltfrm,
         (
@@ -108,75 +114,51 @@ def instrument_platform_glue(pltfrm: str) -> str:
         "declare persistent diagnostic helper in ufshcd-pltfrm.c",
     )
 
-    mmio_block = (
-        "\tmmio_base = devm_platform_ioremap_resource(pdev, 0);\n"
-        "\tif (IS_ERR(mmio_base)) {\n"
-        "\t\terr = PTR_ERR(mmio_base);\n"
-        "\t\tgoto out;\n"
-        "\t}\n"
-    )
+    mmio_anchor = "\tmmio_base = devm_platform_ioremap_resource(pdev, 0);\n"
     pltfrm = replace_once(
         pltfrm,
-        mmio_block,
-        mmio_block
+        mmio_anchor,
+        mmio_anchor
         + triplet(
-            "PLTFRM stage=mmio ret=0 dev=%s mmio=%p",
-            "dev_name(dev), mmio_base",
+            "PLTFRM stage=mmio ret=%ld dev=%s mmio=%p",
+            "IS_ERR(mmio_base) ? PTR_ERR(mmio_base) : 0L, dev_name(dev), mmio_base",
             "\t",
         ),
         "instrument platform MMIO mapping",
     )
 
-    irq_block = (
-        "\tirq = platform_get_irq(pdev, 0);\n"
-        "\tif (irq < 0) {\n"
-        "\t\terr = irq;\n"
-        "\t\tgoto out;\n"
-        "\t}\n"
-    )
+    irq_anchor = "\tirq = platform_get_irq(pdev, 0);\n"
     pltfrm = replace_once(
         pltfrm,
-        irq_block,
-        irq_block
+        irq_anchor,
+        irq_anchor
         + triplet(
-            "PLTFRM stage=irq ret=0 dev=%s irq=%d",
-            "dev_name(dev), irq",
+            "PLTFRM stage=irq ret=%d dev=%s irq=%d",
+            "irq < 0 ? irq : 0, dev_name(dev), irq",
             "\t",
         ),
         "instrument platform IRQ acquisition",
     )
 
-    alloc_block = (
-        "\terr = ufshcd_alloc_host(dev, &hba);\n"
-        "\tif (err) {\n"
-        '\t\tdev_err(&pdev->dev, "Allocation failed\\n");\n'
-        "\t\tgoto out;\n"
-        "\t}\n"
-    )
+    alloc_anchor = "\terr = ufshcd_alloc_host(dev, &hba);\n"
     pltfrm = replace_once(
         pltfrm,
-        alloc_block,
-        alloc_block
+        alloc_anchor,
+        alloc_anchor
         + triplet(
             "PLTFRM stage=alloc_host ret=%d dev=%s hba=%p host_no=%d",
-            "err, dev_name(dev), hba, hba->host ? hba->host->host_no : -1",
+            "err, dev_name(dev), err ? NULL : hba, "
+            "err ? -1 : (hba && hba->host ? hba->host->host_no : -1)",
             "\t",
         ),
         "instrument UFS host allocation",
     )
 
-    clock_block = (
-        "\terr = ufshcd_parse_clock_info(hba);\n"
-        "\tif (err) {\n"
-        '\t\tdev_err(&pdev->dev, "%s: clock parse failed %d\\n",\n'
-        "\t\t\t__func__, err);\n"
-        "\t\tgoto dealloc_host;\n"
-        "\t}\n"
-    )
+    clock_anchor = "\terr = ufshcd_parse_clock_info(hba);\n"
     pltfrm = replace_once(
         pltfrm,
-        clock_block,
-        clock_block
+        clock_anchor,
+        clock_anchor
         + triplet(
             "PLTFRM stage=parse_clocks ret=%d dev=%s",
             "err, dev_name(dev)",
@@ -185,18 +167,11 @@ def instrument_platform_glue(pltfrm: str) -> str:
         "instrument UFS clock parsing",
     )
 
-    regulator_block = (
-        "\terr = ufshcd_parse_regulator_info(hba);\n"
-        "\tif (err) {\n"
-        '\t\tdev_err(&pdev->dev, "%s: regulator init failed %d\\n",\n'
-        "\t\t\t__func__, err);\n"
-        "\t\tgoto dealloc_host;\n"
-        "\t}\n"
-    )
+    regulator_anchor = "\terr = ufshcd_parse_regulator_info(hba);\n"
     pltfrm = replace_once(
         pltfrm,
-        regulator_block,
-        regulator_block
+        regulator_anchor,
+        regulator_anchor
         + triplet(
             "PLTFRM stage=parse_regulators ret=%d dev=%s",
             "err, dev_name(dev)",
@@ -205,17 +180,11 @@ def instrument_platform_glue(pltfrm: str) -> str:
         "instrument UFS regulator parsing",
     )
 
-    init_block = (
-        "\terr = ufshcd_init(hba, mmio_base, irq);\n"
-        "\tif (err) {\n"
-        '\t\tdev_err(dev, "Initialization failed\\n");\n'
-        "\t\tgoto dealloc_host;\n"
-        "\t}\n"
-    )
+    init_anchor = "\terr = ufshcd_init(hba, mmio_base, irq);\n"
     pltfrm = replace_once(
         pltfrm,
-        init_block,
-        init_block
+        init_anchor,
+        init_anchor
         + triplet(
             "PLTFRM stage=ufshcd_init ret=%d dev=%s state=%d version=0x%x cap=0x%x",
             "err, dev_name(dev), hba->ufshcd_state, hba->ufs_version, hba->capabilities",
@@ -223,5 +192,20 @@ def instrument_platform_glue(pltfrm: str) -> str:
         ),
         "instrument generic UFS initialization",
     )
+
+    return_anchor = "out:\n\treturn err;\n"
+    if return_anchor in pltfrm:
+        pltfrm = replace_once(
+            pltfrm,
+            return_anchor,
+            "out:\n"
+            + triplet(
+                "PLTFRM stage=return ret=%d dev=%s",
+                "err, dev_name(dev)",
+                "\t",
+            )
+            + "\treturn err;\n",
+            "instrument platform glue final return",
+        )
 
     return pltfrm

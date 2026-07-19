@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 6: capture the layout-resilient PHY bridge run.
+# Refresh 7: capture the local-QMP-cfg bridge run.
 on:
   push:
     branches: [main]

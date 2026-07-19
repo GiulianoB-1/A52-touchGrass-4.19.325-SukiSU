@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 11: capture the declaration-line helper fix run.
+# Refresh 12: capture the compile-time jiffies delay fix run.
 on:
   push:
     branches: [main]

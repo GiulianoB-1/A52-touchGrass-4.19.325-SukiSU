@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -59,21 +60,21 @@ def main() -> int:
         else:
             raise SystemExit("no verified include anchor found in kernel/exit.c")
 
-    # Record the first entry into do_exit() for global PID 1 before exit_signals()
-    # mutates the task state. No new local declarations are introduced.
-    entry_anchor = "\tint group_dead;\n\n\tprofile_task_exit(tsk);\n"
+    # Record PID 1 before profile_task_exit(). This statement occurs after all
+    # do_exit() local declarations in Android 5.10, avoiding brittle assumptions
+    # about TASKS_RCU declarations and comments near the function prologue.
+    entry_anchor = "\tprofile_task_exit(tsk);\n"
     entry_markers = triplet(
         "ENTRY pid=%d tgid=%d comm=%s code=0x%08lx group=0x%08x flags=0x%lx",
         "task_pid_nr(tsk), task_tgid_nr(tsk), tsk->comm, code, "
         "tsk->signal->group_exit_code, tsk->flags",
-        "\t",
+        "\t\t",
     )
     entry_replacement = (
-        "\tint group_dead;\n\n"
         "\tif (unlikely(is_global_init(tsk))) {\n"
-        + entry_markers.replace("\t", "\t\t", 3)
+        + entry_markers
         + "\t}\n\n"
-        "\tprofile_task_exit(tsk);\n"
+        + entry_anchor
     )
     text = replace_once(
         text,
@@ -82,29 +83,20 @@ def main() -> int:
         "instrument PID 1 do_exit entry",
     )
 
-    # Capture explicit exit_group() and fatal-signal paths before do_exit().
-    group_anchor = (
-        "void\n"
-        "do_group_exit(int exit_code)\n"
-        "{\n"
-        "\tstruct signal_struct *sig = current->signal;\n\n"
-        "\tBUG_ON(exit_code & 0x80); /* core dumps don't get here */\n"
-    )
+    # Capture explicit exit_group() and fatal-signal paths after do_group_exit()
+    # has declared its signal_struct pointer, but before it mutates exit state.
+    group_anchor = "\tBUG_ON(exit_code & 0x80); /* core dumps don't get here */\n"
     group_markers = triplet(
         "GROUP pid=%d tgid=%d comm=%s requested=0x%08x existing=0x%08x sigflags=0x%x",
         "task_pid_nr(current), task_tgid_nr(current), current->comm, exit_code, "
-        "sig->group_exit_code, sig->flags",
+        "current->signal->group_exit_code, current->signal->flags",
         "\t\t",
     )
     group_replacement = (
-        "void\n"
-        "do_group_exit(int exit_code)\n"
-        "{\n"
-        "\tstruct signal_struct *sig = current->signal;\n\n"
         "\tif (unlikely(is_global_init(current))) {\n"
         + group_markers
         + "\t}\n\n"
-        "\tBUG_ON(exit_code & 0x80); /* core dumps don't get here */\n"
+        + group_anchor
     )
     text = replace_once(
         text,
@@ -113,26 +105,21 @@ def main() -> int:
         "instrument PID 1 do_group_exit",
     )
 
-    # The Workflow 92 capture reached panic() immediately after successful /init
-    # exec. Record Linux wait-status decoding immediately before that panic.
-    panic_variants = (
-        (
-            "\t\tif (unlikely(is_global_init(tsk)))\n"
-            "\t\t\tpanic(\"Attempted to kill init! exitcode=0x%08x\\n\",\n"
-            "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
-        ),
-        (
-            "\t\tif (unlikely(is_global_init(tsk)))\n"
-            "\t\t\tpanic(\"Attempted to kill init!exitcode=0x%08x\\n\",\n"
-            "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
-        ),
+    # Record Linux wait-status decoding immediately before the existing global
+    # init panic. Match whitespace and the optional space after 'init!' rather
+    # than depending on one exact source formatting variant.
+    panic_pattern = re.compile(
+        r"(?P<ifindent>\t\t)if \(unlikely\(is_global_init\(tsk\)\)\)\n"
+        r"(?P<panicindent>\t\t\t)panic\(\"Attempted to kill init! ?exitcode=0x%08x\\n\",\n"
+        r"(?P<argindent>\t\t\t\t)tsk->signal->group_exit_code \?: \(int\)code\);\n"
     )
-    matches = [variant for variant in panic_variants if variant in text]
+    matches = list(panic_pattern.finditer(text))
     if len(matches) != 1:
         raise SystemExit(
-            f"instrument PID 1 final exit: expected one supported panic block, found {len(matches)}"
+            "instrument PID 1 final exit: expected one supported panic block, "
+            f"found {len(matches)}"
         )
-    panic_anchor = matches[0]
+
     effective = "(tsk->signal->group_exit_code ?: (int)code)"
     final_markers = triplet(
         "FINAL pid=%d tgid=%d comm=%s code=0x%08lx group=0x%08x effective=0x%08x status=%u signal=%u core=%u",
@@ -146,15 +133,14 @@ def main() -> int:
         "\t\tif (unlikely(is_global_init(tsk))) {\n"
         + final_markers
         + "\t\t\tpanic(\"Attempted to kill init! exitcode=0x%08x\\n\",\n"
-        "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
-        "\t\t}\n"
+        + "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
+        + "\t\t}\n"
     )
-    text = replace_once(
-        text,
-        panic_anchor,
-        final_replacement,
-        "instrument PID 1 final exit status",
-    )
+    text, substitutions = panic_pattern.subn(final_replacement, text, count=1)
+    if substitutions != 1:
+        raise SystemExit(
+            f"instrument PID 1 final exit: expected one substitution, got {substitutions}"
+        )
 
     checks = {
         "helper_declared": declaration in text,
@@ -181,8 +167,13 @@ def main() -> int:
             {
                 "status": "staged",
                 "purpose": "decode Android PID 1 exit status or fatal signal",
-                "trace_points": ["do_exit entry", "do_group_exit entry", "pre-panic final status"],
+                "trace_points": [
+                    "do_exit before profile_task_exit",
+                    "do_group_exit before state mutation",
+                    "pre-panic final status",
+                ],
                 "redundancy": 3,
+                "staging_strategy": "statement and regex anchors for Android 5.10",
                 "checks": checks,
             },
             indent=2,

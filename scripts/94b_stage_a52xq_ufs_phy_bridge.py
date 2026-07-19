@@ -92,6 +92,11 @@ def _body_insertion_point(text: str, brace: int) -> int:
     return brace + 1 if newline < 0 else newline + 1
 
 
+def _line_start(text: str, position: int) -> int:
+    newline = text.rfind("\n", 0, position)
+    return 0 if newline < 0 else newline + 1
+
+
 def _indent(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
@@ -236,7 +241,8 @@ def instrument_device_core(dd: str) -> tuple[str, str]:
         ("driver_deferred_probe_add(",),
         "locate deferred-probe helper",
     )
-    dd = dd[:deferred_start] + storage_helper + dd[deferred_start:]
+    declaration_start = _line_start(dd, deferred_start)
+    dd = dd[:declaration_start] + storage_helper + dd[declaration_start:]
     deferred_brace += len(storage_helper)
     insert_at = _body_insertion_point(dd, deferred_brace)
     defer_trace = (

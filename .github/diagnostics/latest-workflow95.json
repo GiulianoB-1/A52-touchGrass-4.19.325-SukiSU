@@ -4,10 +4,10 @@
     {
       "completed_at": null,
       "conclusion": null,
-      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29702076335/job/88232673231",
-      "id": 88232673231,
+      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29702260518/job/88233197277",
+      "id": 88233197277,
       "name": "Build UFS PHY bridge and storage flight recorder boot image",
-      "started_at": "2026-07-19T20:12:38Z",
+      "started_at": "2026-07-19T20:18:52Z",
       "status": "in_progress",
       "steps": [
         {
@@ -23,40 +23,40 @@
           "status": "completed"
         },
         {
-          "conclusion": "success",
+          "conclusion": null,
           "name": "Prepare runner",
           "number": 3,
-          "status": "completed"
+          "status": "in_progress"
         },
         {
-          "conclusion": "success",
+          "conclusion": null,
           "name": "Restore pinned GKI source",
           "number": 4,
-          "status": "completed"
+          "status": "pending"
         },
         {
-          "conclusion": "success",
+          "conclusion": null,
           "name": "Replay proven integrated A52 port",
           "number": 5,
-          "status": "completed"
+          "status": "pending"
         },
         {
-          "conclusion": "success",
+          "conclusion": null,
           "name": "Stage full storage recorder and PHY bridge",
           "number": 6,
-          "status": "completed"
+          "status": "pending"
         },
         {
-          "conclusion": "success",
+          "conclusion": null,
           "name": "Configure diagnostic kernel",
           "number": 7,
-          "status": "completed"
+          "status": "pending"
         },
         {
           "conclusion": null,
           "name": "Build bridge flight recorder Image",
           "number": 8,
-          "status": "in_progress"
+          "status": "pending"
         },
         {
           "conclusion": null,
@@ -99,17 +99,17 @@
   ],
   "run": {
     "conclusion": null,
-    "created_at": "2026-07-19T20:12:35Z",
+    "created_at": "2026-07-19T20:18:27Z",
     "event": "push",
     "head_branch": "main",
-    "head_sha": "debc17cf46822d9ccef87a833382b906b5143cb7",
-    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29702076335",
-    "id": 29702076335,
+    "head_sha": "79309f7b520bcd2ee687569a1e463cb942c036de",
+    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29702260518",
+    "id": 29702260518,
     "run_attempt": 1,
-    "run_number": 18,
-    "run_started_at": "2026-07-19T20:12:35Z",
+    "run_number": 19,
+    "run_started_at": "2026-07-19T20:18:27Z",
     "status": "in_progress",
-    "updated_at": "2026-07-19T20:12:39Z"
+    "updated_at": "2026-07-19T20:18:53Z"
   },
   "workflow": "95-a52-gki-5.10-ufs-bridge-flight-recorder.yml"
 }

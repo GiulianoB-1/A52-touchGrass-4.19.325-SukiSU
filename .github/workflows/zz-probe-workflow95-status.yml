@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 15: capture the Workflow 95 run with the runtime-delay helper wired in.
+# Refresh 16: capture the declaration-order fix run.
 on:
   push:
     branches: [main]

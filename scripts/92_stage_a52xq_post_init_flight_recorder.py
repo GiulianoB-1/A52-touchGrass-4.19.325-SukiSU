@@ -188,23 +188,28 @@ def main() -> int:
 
     # A fixed panic breadcrumb is intentionally format-independent and safe even
     # when panic formatting itself is what failed. The persistent helper is a
-    # no-op before its ring has been initialized.
-    include_anchor = "#include <linux/panic_notifier.h>\n"
-    if include_anchor in panic:
-        panic = replace_once(
-            panic,
-            include_anchor,
-            include_anchor + "extern void a52_persistent_diag_mark(const char *fmt, ...);\n",
-            "declare persistent helper in panic.c",
+    # no-op before its ring has been initialized. Android 5.10 panic.c does not
+    # include linux/panic_notifier.h or linux/kernel.h, so use a verified include
+    # that exists in the pinned source rather than assuming either header exists.
+    declaration = "extern void a52_persistent_diag_mark(const char *fmt, ...);\n"
+    if declaration not in panic:
+        include_anchors = (
+            "#include <linux/panic_notifier.h>\n",
+            "#include <linux/debug_locks.h>\n",
         )
-    else:
-        first_include = "#include <linux/kernel.h>\n"
-        panic = replace_once(
-            panic,
-            first_include,
-            first_include + "extern void a52_persistent_diag_mark(const char *fmt, ...);\n",
-            "declare persistent helper in panic.c fallback",
-        )
+        for include_anchor in include_anchors:
+            if include_anchor in panic:
+                panic = replace_once(
+                    panic,
+                    include_anchor,
+                    include_anchor + declaration,
+                    "declare persistent helper in panic.c",
+                )
+                break
+        else:
+            raise SystemExit(
+                "declare persistent helper in panic.c: no verified include anchor found"
+            )
 
     panic_anchor = "void panic(const char *fmt, ...)\n{\n"
     panic_replacement = (
@@ -235,6 +240,7 @@ def main() -> int:
             "A52POST copy=1 exec begin path=%s" in text
             and "A52POST copy=1 exec returned path=%s ret=%d" in text
         ),
+        "panic_helper_declared": declaration in panic,
         "panic_triplet": panic.count("panic entered") == 3,
         "triple_redundancy": text.count("A52POST copy=1") == text.count("A52POST copy=2") == text.count("A52POST copy=3"),
     }

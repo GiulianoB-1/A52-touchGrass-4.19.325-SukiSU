@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 5: capture the latest run and failed build log tail.
+# Refresh 6: capture the layout-resilient PHY bridge run.
 on:
   push:
     branches: [main]
@@ -41,16 +41,10 @@ jobs:
               'User-Agent': 'workflow95-status-probe',
           }
 
-          def request(url):
-              return urllib.request.Request(url, headers=headers)
-
           def get(url):
-              with urllib.request.urlopen(request(url)) as response:
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
                   return json.load(response)
-
-          def get_text(url):
-              with urllib.request.urlopen(request(url)) as response:
-                  return response.read().decode('utf-8', errors='replace')
 
           base = f'https://api.github.com/repos/{repo}'
           runs = get(f'{base}/actions/workflows/{workflow}/runs?branch=main&per_page=5')
@@ -58,18 +52,6 @@ jobs:
           run_id = latest['id']
           jobs = get(f'{base}/actions/runs/{run_id}/jobs?per_page=100')['jobs']
           artifacts = get(f'{base}/actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
-
-          build_job = next(
-              (job for job in jobs if job.get('name', '').startswith('Build UFS PHY bridge')),
-              None,
-          )
-          log_tail = None
-          if build_job and build_job.get('status') == 'completed':
-              try:
-                  log_text = get_text(f"{base}/actions/jobs/{build_job['id']}/logs")
-                  log_tail = '\n'.join(log_text.splitlines()[-240:])
-              except Exception as exc:
-                  log_tail = f'log retrieval failed: {type(exc).__name__}: {exc}'
 
           payload = {
               'workflow': workflow,
@@ -113,7 +95,6 @@ jobs:
                   }
                   for artifact in artifacts
               ],
-              'build_log_tail': log_tail,
           }
           Path('.github/diagnostics/latest-workflow95.json').write_text(
               json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'

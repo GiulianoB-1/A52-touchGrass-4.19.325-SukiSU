@@ -167,7 +167,8 @@ def main() -> int:
         "instrument kernel_execve return",
     )
 
-    # Panic trace. Use a header known to exist in the pinned Android 5.10 tree.
+    # Panic trace. Keep all local declarations at the beginning of panic() to
+    # satisfy the kernel's C90 declaration-order warning policy.
     declaration = "extern void a52_persistent_diag_mark(const char *fmt, ...);\n"
     if declaration not in panic:
         panic = replace_once(
@@ -177,14 +178,15 @@ def main() -> int:
             "declare persistent helper in panic.c",
         )
 
-    panic_anchor = "void panic(const char *fmt, ...)\n{\n"
-    panic_replacement = (
-        panic_anchor
-        + "\ta52_persistent_diag_mark(\"A52POST copy=1 panic entered\\n\");\n"
-        + "\ta52_persistent_diag_mark(\"A52POST copy=2 panic entered\\n\");\n"
-        + "\ta52_persistent_diag_mark(\"A52POST copy=3 panic entered\\n\");\n"
+    panic_marker_anchor = (
+        "\tbool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;\n\n"
     )
-    panic = replace_once(panic, panic_anchor, panic_replacement, "instrument panic entry")
+    panic = replace_once(
+        panic,
+        panic_marker_anchor,
+        panic_marker_anchor + triplet("panic entered"),
+        "instrument panic after local declarations",
+    )
 
     checks = {
         "post_basic_setup": "A52POST copy=1 after do_basic_setup" in text,

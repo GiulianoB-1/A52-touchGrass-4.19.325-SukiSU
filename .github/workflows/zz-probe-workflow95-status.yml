@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 13: capture the active delay-fix run with a rebase-safe result push.
+# Refresh 14: capture the newest runtime-delay Workflow 95 run.
 on:
   push:
     branches: [main]

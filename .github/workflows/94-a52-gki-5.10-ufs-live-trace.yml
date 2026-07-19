@@ -1,0 +1,354 @@
+name: 94 - A52 GKI 5.10 UFS live DT and probe trace
+
+run-name: Build A52 GKI 5.10 live UFS device-tree and probe recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/94-a52-gki-5.10-ufs-live-trace.yml'
+      - 'scripts/94_stage_a52xq_ufs_live_trace.py'
+      - 'scripts/93_stage_a52xq_pid1_exit_trace.py'
+      - 'scripts/92_stage_a52xq_post_init_flight_recorder.py'
+      - 'scripts/91_stage_a52xq_first_irq_trace.py'
+      - 'scripts/83_stage_a52xq_early_start_kernel_breadcrumbs.py'
+      - 'scripts/75_stage_a52xq_msm_watchdog.py'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-ufs-live-trace
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
+  WORKFLOW78_ARTIFACT_ID: '8428992052'
+
+jobs:
+  build:
+    name: Build UFS live DT and probe recorder boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip file dwarves device-tree-compiler
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Replay proven integrated A52 port
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          mkdir -p workflow68/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          git -C gki/common apply --check "$PWD/workflow68/extracted/integrated-port.patch"
+          git -C gki/common apply "$PWD/workflow68/extracted/integrated-port.patch"
+          grep -Fq 'qcom,qsmmu-v500' gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-impl.c
+
+      - name: Stage persistent UFS diagnostics
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-live-trace
+          mkdir -p "$OUT/logs" "$OUT/watchdog-bridge" \
+            "$OUT/early-start-breadcrumbs" "$OUT/first-irq-trace" \
+            "$OUT/post-init-flight-recorder" "$OUT/pid1-exit-trace" \
+            "$OUT/ufs-live-trace"
+
+          python3 scripts/75_stage_a52xq_msm_watchdog.py \
+            --gki gki/common --output "$OUT/watchdog-bridge"
+          python3 scripts/83_stage_a52xq_early_start_kernel_breadcrumbs.py \
+            --gki gki/common --output "$OUT/early-start-breadcrumbs"
+          python3 scripts/91_stage_a52xq_first_irq_trace.py \
+            --gki gki/common --output "$OUT/first-irq-trace"
+          python3 scripts/92_stage_a52xq_post_init_flight_recorder.py \
+            --gki gki/common --output "$OUT/post-init-flight-recorder"
+          python3 scripts/93_stage_a52xq_pid1_exit_trace.py \
+            --gki gki/common --output "$OUT/pid1-exit-trace"
+          python3 scripts/94_stage_a52xq_ufs_live_trace.py \
+            --gki gki/common --output "$OUT/ufs-live-trace"
+
+          git -C gki/common diff --check
+          grep -Fq 'A52KMSG copy=1' gki/common/kernel/printk/printk.c
+          grep -Fq 'A52EXIT copy=1 FINAL' gki/common/kernel/exit.c
+          grep -Fq 'A52UFS copy=1 PROBE_BEGIN' gki/common/drivers/scsi/ufs/ufs-qcom.c
+          grep -Fq 'A52UFS copy=1 LIVE' gki/common/drivers/scsi/ufs/a52-ufs-live-trace.c
+          grep -Fq 'a52-ufs-live-trace.o' gki/common/drivers/scsi/ufs/Makefile
+
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/full-integrated-ufs-live-trace.patch"
+          test -s "$OUT/full-integrated-ufs-live-trace.patch"
+
+      - name: Configure diagnostic kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-ufs-live-trace"
+          BUILD="$PWD/workspace/gki-ufs-live-trace-out"
+          mkdir -p "$BUILD"
+          cp workflow68/extracted/integrated.config "$BUILD/.config"
+
+          for symbol in \
+            WATCHDOG WATCHDOG_CORE WATCHDOG_HANDLE_BOOT_ENABLED QCOM_WDT \
+            PRINTK_TIME PSTORE PSTORE_RAM PSTORE_CONSOLE PSTORE_PMSG \
+            SCSI BLK_DEV_SD SCSI_UFSHCD SCSI_UFSHCD_PLATFORM SCSI_UFS_QCOM \
+            GENERIC_PHY PHY_QCOM_QMP QCOM_SCM; do
+            gki/common/scripts/config --file "$BUILD/.config" --enable "$symbol"
+          done
+          gki/common/scripts/config --file "$BUILD/.config" --disable TRIM_UNUSED_KSYMS
+          gki/common/scripts/config --file "$BUILD/.config" --set-str UNUSED_KSYMS_WHITELIST ''
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/diagnostic.config"
+
+          grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_SCSI_UFSHCD_PLATFORM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_BLK_DEV_SD=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PHY_QCOM_QMP=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+
+      - name: Build UFS live trace Image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-ufs-live-trace"
+          BUILD="$PWD/workspace/gki-ufs-live-trace-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            2>&1 | tee "$OUT/logs/Image.log"
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 LIVE_SCAN begin' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 LIVE tag=%s' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 PROBE_BEGIN' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 PROBE_END' "$OUT/Image"
+          grep -aFq 'A52KMSG copy=1' "$OUT/Image"
+          grep -aFq 'A52EXIT copy=1 FINAL' "$OUT/Image"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+
+      - name: Download and verify reserved-memory boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow78/extracted
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW78_ARTIFACT_ID}/zip" \
+            --output workflow78/artifact.zip
+          unzip -q workflow78/artifact.zip -d workflow78/extracted
+          (cd workflow78/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow78/extracted/boot.img
+          grep -Fxq $'persistent-memory-reserved-in-dtb\tyes' \
+            workflow78/extracted/candidate-status.tsv
+
+      - name: Repack and audit UFS diagnostic boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-live-trace
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source workflow78/extracted/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path("workflow78/extracted/boot.img")
+          output_path = Path("artifacts/a52xq-gki-5.10-ufs-live-trace/boot.img")
+          image_path = Path("artifacts/a52xq-gki-5.10-ufs-live-trace/Image.gz")
+          src = module.parse_boot(source_path.read_bytes())
+          new = module.parse_boot(output_path.read_bytes())
+
+          required_cmdline = [
+              "panic=0",
+              "initcall_debug",
+              "watchdog.handle_boot_enabled=1",
+              "ramoops.mem_address=0xB1B00000",
+              "ramoops.mem_size=0x00100000",
+              "ramoops.console_size=0x00040000",
+          ]
+          checks = {
+              "partition_size_preserved": output_path.stat().st_size == source_path.stat().st_size == 100663296,
+              "replacement_kernel_used": hashlib.sha256(new["kernel"]).digest() == hashlib.sha256(image_path.read_bytes()).digest(),
+              "rom_ramdisk_preserved": new["ramdisk"] == src["ramdisk"],
+              "second_preserved": new["second"] == src["second"],
+              "reserved_dtb_preserved": new["dtb"] == src["dtb"],
+              "diagnostic_cmdline_preserved": new["cmdline"] == src["cmdline"],
+              "required_cmdline_present": all(token in new["cmdline"] for token in required_cmdline),
+              "reservation_node_present": b"a52-ramoops-reserved@b1b00000" in new["dtb"],
+              "ufs_host_node_present": b"ufshc@1d84000" in new["dtb"],
+              "ufs_phy_node_present": b"ufsphy_mem@1d87000" in new["dtb"],
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit("final audit failed: " + ", ".join(failed))
+
+          Path("artifacts/a52xq-gki-5.10-ufs-live-trace/final-audit.json").write_text(
+              json.dumps(
+                  {
+                      "status": "ufs-live-trace-repacked-audited",
+                      "hardware_validated": False,
+                      "prior_failure": "Android init could not find required UFS partitions and exited 127",
+                      "trace_scope": "live UFS DT availability, platform-device binding and Qualcomm UFS probe result",
+                      "marker_redundancy": 3,
+                      "checks": checks,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n"
+          )
+          PY
+
+      - name: Finalize audited candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-live-trace
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 LIVE UFS DEVICE-TREE AND PROBE RECORDER
+
+          The previous capture proved that Android first-stage init exits 127
+          because the required UFS partitions never appear. This image records
+          the live UFS host and PHY device-tree state, platform-device binding,
+          Qualcomm UFS probe entry, and ufshcd_pltfrm_init return code. It keeps
+          all prior IRQ, post-init, PID 1 exit and PID 1 /dev/kmsg tracing.
+
+          This image is not hardware-validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'android-init-exit127-storage-failure-confirmed\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'live-ufs-host-dt-trace\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'live-ufs-phy-dt-trace\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'ufs-qcom-probe-entry-trace\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'ufshcd-platform-init-return-trace\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'pid1-kmsg-and-exit-trace-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'persistent-memory-reserved-in-dtb\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'rom-ramdisk-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'flash-performed\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+      - name: Upload UFS live trace candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-ufs-live-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-ufs-live-trace
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostic logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-ufs-live-trace-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-ufs-live-trace
+            workspace/gki-ufs-live-trace-out/.config
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    name: Report Workflow 94 status
+    if: always()
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Post run status to issue 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ needs.build.result }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY' > payload.json
+          import json
+          import os
+
+          body = (
+              f"Workflow 94 run: {os.environ['RUN_URL']}\n\n"
+              f"Status: completed\n"
+              f"Conclusion: {os.environ['RESULT']}\n"
+              f"Head SHA: {os.environ['HEAD_SHA']}\n\n"
+              "Purpose: record the live UFS device-tree state and Qualcomm UFS "
+              "probe result after Android init could not find required partitions."
+          )
+          print(json.dumps({"body": body}))
+          PY
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/45/comments" \
+            --data-binary @payload.json

@@ -1,0 +1,37 @@
+name: Package Jetson Fritzing Part
+
+on:
+  push:
+    branches:
+      - chatgpt-temp-jetson-fritzing-download
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out temporary part branch
+        uses: actions/checkout@v4
+
+      - name: Build FZPZ archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -j NVIDIA_Jetson_Orin_Nano_All_External_Connectors.fzpz \
+            part.NVIDIA_Jetson_Orin_Nano_All_External_20260719.fzp \
+            svg.breadboard.jetson_orin_nano_all_external_breadboard.svg \
+            svg.icon.jetson_orin_nano_all_external_icon.svg \
+            svg.schematic.jetson_orin_nano_all_external_schematic.svg \
+            svg.pcb.jetson_orin_nano_all_external_pcb.svg
+          unzip -t NVIDIA_Jetson_Orin_Nano_All_External_Connectors.fzpz
+
+      - name: Upload Fritzing package
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetson-fritzing-package
+          path: NVIDIA_Jetson_Orin_Nano_All_External_Connectors.fzpz
+          if-no-files-found: error
+          compression-level: 0

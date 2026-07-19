@@ -84,7 +84,7 @@ def instrument_sd(sd: str) -> str:
 
     sd = _insert_after(
         sd,
-        "static int sd_probe(",
+        "sd_probe(",
         ("struct scsi_device *sdp = to_scsi_device(dev);",),
         triplet(
             "SD stage=probe dev=%s host=%d channel=%u id=%u lun=%llu type=%d",
@@ -97,7 +97,7 @@ def instrument_sd(sd: str) -> str:
 
     sd = _insert_after(
         sd,
-        "static void sd_probe_async(",
+        "sd_probe_async(",
         ("index = sdkp->index;",),
         triplet(
             "SD stage=async_begin host=%d lun=%llu disk=%s index=%u",
@@ -110,7 +110,7 @@ def instrument_sd(sd: str) -> str:
     if "sd_revalidate_disk(gd);" in sd:
         sd = _insert_after(
             sd,
-            "static void sd_probe_async(",
+            "sd_probe_async(",
             ("sd_revalidate_disk(gd);",),
             triplet(
                 "SD stage=revalidate disk=%s capacity=%llu sector_size=%u",
@@ -126,7 +126,7 @@ def instrument_sd(sd: str) -> str:
     )
     sd = _insert_before(
         sd,
-        "static void sd_probe_async(",
+        "sd_probe_async(",
         add_candidates,
         triplet(
             "SD stage=before_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
@@ -138,7 +138,7 @@ def instrument_sd(sd: str) -> str:
     )
     sd = _insert_after(
         sd,
-        "static void sd_probe_async(",
+        "sd_probe_async(",
         add_candidates,
         triplet(
             "SD stage=device_add_disk disk=%s major=%d first_minor=%d capacity=%llu",
@@ -152,7 +152,7 @@ def instrument_sd(sd: str) -> str:
     if "scsi_autopm_put_device(sdp);" in sd:
         sd = _insert_before(
             sd,
-            "static void sd_probe_async(",
+            "sd_probe_async(",
             ("scsi_autopm_put_device(sdp);",),
             triplet(
                 "SD stage=attached disk=%s capacity=%llu sector_size=%u",

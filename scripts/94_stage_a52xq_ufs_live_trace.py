@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Workflow 95 trigger: keep sd_probe tracing after all GNU89 declarations.
+
 import argparse
 import json
 import sys

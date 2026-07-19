@@ -9,8 +9,9 @@ from pathlib import Path
 
 from a52_diag94_common import instrument_platform_glue, instrument_qcom, replace_once
 from a52_diag94_core_scoped import instrument_ufshcd
-from a52_diag94_extra import build_live_source, instrument_sd
+from a52_diag94_extra import build_live_source
 from a52_diag94_printk import instrument_printk
+from a52_diag94_sd_scoped import instrument_sd
 
 
 def main() -> int:

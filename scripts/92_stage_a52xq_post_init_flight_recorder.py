@@ -100,20 +100,30 @@ def main() -> int:
         ("\tfree_initmem();\n", "free_initmem"),
         ("\tmark_readonly();\n", "mark_readonly"),
         ("\tpti_finalize();\n", "pti_finalize"),
-        ("\tnuma_default_policy();\n", "numa_default_policy"),
         ("\trcu_end_inkernel_boot();\n", "rcu_end_inkernel_boot"),
         ("\tdo_sysctl_args();\n", "do_sysctl_args"),
     ):
         text = mark_statement(text, statement, label)
 
-    state_statement = "\tsystem_state = SYSTEM_RUNNING;\n"
+    # numa_default_policy() appears in more than one function in this kernel.
+    # Instrument only the instance paired with the SYSTEM_RUNNING transition.
+    running_block = (
+        "\tsystem_state = SYSTEM_RUNNING;\n"
+        "\tnuma_default_policy();\n"
+    )
+    running_replacement = (
+        triplet("before system_state_running")
+        + "\tsystem_state = SYSTEM_RUNNING;\n"
+        + triplet("after system_state_running")
+        + triplet("before numa_default_policy")
+        + "\tnuma_default_policy();\n"
+        + triplet("after numa_default_policy")
+    )
     text = replace_once(
         text,
-        state_statement,
-        triplet("before system_state_running")
-        + state_statement
-        + triplet("after system_state_running"),
-        "instrument SYSTEM_RUNNING transition",
+        running_block,
+        running_replacement,
+        "instrument SYSTEM_RUNNING and NUMA policy transition",
     )
 
     # Capture every userspace executable attempt and the exact return value when
@@ -190,6 +200,10 @@ def main() -> int:
         "initmem_boundaries": (
             "A52POST copy=1 before free_initmem" in text
             and "A52POST copy=1 after mark_readonly" in text
+        ),
+        "running_transition": (
+            "A52POST copy=1 after system_state_running" in text
+            and "A52POST copy=1 after numa_default_policy" in text
         ),
         "userspace_exec": (
             "A52POST copy=1 exec begin path=%s" in text

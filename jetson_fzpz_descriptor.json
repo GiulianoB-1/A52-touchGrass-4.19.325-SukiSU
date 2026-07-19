@@ -1,0 +1,25 @@
+{
+  "suggestedFilename": "NVIDIA_Jetson_Orin_Nano_All_External_Connectors.fzpz",
+  "files": [
+    {
+      "url": "https://raw.githubusercontent.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/186ed1c28888b6fc0083cf2f5212892defff22d5/part.NVIDIA_Jetson_Orin_Nano_All_External_20260719.fzp",
+      "zipPath": "part.NVIDIA_Jetson_Orin_Nano_All_External_20260719.fzp"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/186ed1c28888b6fc0083cf2f5212892defff22d5/svg.breadboard.jetson_orin_nano_all_external_breadboard.svg",
+      "zipPath": "svg.breadboard.jetson_orin_nano_all_external_breadboard.svg"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/186ed1c28888b6fc0083cf2f5212892defff22d5/svg.icon.jetson_orin_nano_all_external_icon.svg",
+      "zipPath": "svg.icon.jetson_orin_nano_all_external_icon.svg"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/186ed1c28888b6fc0083cf2f5212892defff22d5/svg.schematic.jetson_orin_nano_all_external_schematic.svg",
+      "zipPath": "svg.schematic.jetson_orin_nano_all_external_schematic.svg"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/186ed1c28888b6fc0083cf2f5212892defff22d5/svg.pcb.jetson_orin_nano_all_external_pcb.svg",
+      "zipPath": "svg.pcb.jetson_orin_nano_all_external_pcb.svg"
+    }
+  ]
+}

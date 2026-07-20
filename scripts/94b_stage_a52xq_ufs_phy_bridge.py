@@ -58,7 +58,8 @@ def stage_rpmh_providers(gki: Path, output: Path) -> dict:
         raise SystemExit(f"RPMh provider staging script is missing: {script}")
 
     provider_output = output / "rpmh-provider-bridge"
-    subprocess.run(
+    provider_output.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
         [
             sys.executable,
             str(script),
@@ -67,8 +68,17 @@ def stage_rpmh_providers(gki: Path, output: Path) -> dict:
             "--output",
             str(provider_output),
         ],
-        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
     )
+    (provider_output / "stage-process.log").write_text(
+        result.stdout or "", encoding="utf-8"
+    )
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, result.args)
+
     report_path = provider_output / "stage-report.json"
     if not report_path.is_file():
         raise SystemExit("RPMh provider bridge did not produce its stage report")

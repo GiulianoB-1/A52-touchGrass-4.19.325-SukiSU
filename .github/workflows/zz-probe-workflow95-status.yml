@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 19: capture the one-shot first-IRQ run.
+# Refresh 20: capture the Samsung Lagoon RPMh provider bridge run.
 on:
   push:
     branches: [main]

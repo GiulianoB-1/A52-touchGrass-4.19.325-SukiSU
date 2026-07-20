@@ -4,10 +4,10 @@
     {
       "completed_at": null,
       "conclusion": null,
-      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29743953175/job/88357193968",
-      "id": 88357193968,
+      "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29744292880/job/88358330352",
+      "id": 88358330352,
       "name": "Build UFS PHY bridge and storage flight recorder boot image",
-      "started_at": "2026-07-20T12:53:36Z",
+      "started_at": "2026-07-20T12:58:36Z",
       "status": "in_progress",
       "steps": [
         {
@@ -99,17 +99,17 @@
   ],
   "run": {
     "conclusion": null,
-    "created_at": "2026-07-20T12:53:32Z",
+    "created_at": "2026-07-20T12:58:33Z",
     "event": "push",
     "head_branch": "main",
-    "head_sha": "068e26d7652bd50338118cc55d0ec6f7ba97fc5e",
-    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29743953175",
-    "id": 29743953175,
+    "head_sha": "9e875d7942834b53e7d32a5125b7eb92dec56d4c",
+    "html_url": "https://github.com/GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/actions/runs/29744292880",
+    "id": 29744292880,
     "run_attempt": 1,
-    "run_number": 26,
-    "run_started_at": "2026-07-20T12:53:32Z",
+    "run_number": 27,
+    "run_started_at": "2026-07-20T12:58:33Z",
     "status": "in_progress",
-    "updated_at": "2026-07-20T12:53:37Z"
+    "updated_at": "2026-07-20T12:58:37Z"
   },
   "workflow": "95-a52-gki-5.10-ufs-bridge-flight-recorder.yml"
 }

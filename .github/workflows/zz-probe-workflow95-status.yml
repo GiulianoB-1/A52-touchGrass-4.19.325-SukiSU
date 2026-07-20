@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 17: capture the exact QMP dependency deferral run.
+# Refresh 18: capture the IRQ-safe panic-reason run.
 on:
   push:
     branches: [main]

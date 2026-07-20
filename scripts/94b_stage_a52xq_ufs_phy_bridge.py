@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -14,20 +13,43 @@ import urllib.request
 from pathlib import Path
 
 
-# Replay the complete Run 30 staging implementation, then remove the remaining
-# compile-probe-only Lagoon auxiliary clock drivers exposed by the hardware boot.
-RUN30_STAGE_URL = (
+# Replay the complete Run 31 staging implementation, then restore the numeric
+# mode ABI used by Samsung's downstream DT and Qualcomm's downstream driver.
+RUN31_STAGE_URL = (
     "https://raw.githubusercontent.com/"
     "GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/"
-    "ba2bb9f2c44c6614dc5a6bd3264584e60a2eb9d7/"
+    "0da647b8b2112010e5d4db3304d815f9babf8a47/"
     "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 )
 PROVIDER_SCRIPT = "95_stage_a52xq_rpmh_provider_bridge.py"
-QUARANTINED_AUX_CLOCK_SYMBOLS = (
-    "CONFIG_NPU_CC_LAGOON",
-    "CONFIG_QCOM_CLK_DEBUG",
-    "CONFIG_DEBUG_CC_LAGOON",
-)
+
+DOWNSTREAM_MODE_ABI_BLOCK = r'''/*
+ * Samsung's shipped DTB was compiled against the downstream
+ * qcom,rpmh-regulator-levels.h ABI:
+ *
+ *   RET=0, LPM=1, HPM=2, AUTO=3, PASS=4
+ *
+ * The upstream qcom,rpmh-regulator.h header swaps HPM and AUTO.  This
+ * downstream compatibility driver must interpret the already-baked numeric DT
+ * cells using the downstream ABI, while the normal upstream driver keeps its
+ * native binding.
+ */
+#undef RPMH_REGULATOR_MODE_RET
+#undef RPMH_REGULATOR_MODE_LPM
+#undef RPMH_REGULATOR_MODE_AUTO
+#undef RPMH_REGULATOR_MODE_HPM
+#undef RPMH_REGULATOR_MODE_PASS
+#define RPMH_REGULATOR_MODE_RET		0
+#define RPMH_REGULATOR_MODE_LPM		1
+#define RPMH_REGULATOR_MODE_HPM		2
+#define RPMH_REGULATOR_MODE_AUTO	3
+#define RPMH_REGULATOR_MODE_PASS	4
+
+#if RPMH_REGULATOR_MODE_HPM != 2 || RPMH_REGULATOR_MODE_AUTO != 3
+#error "Samsung downstream RPMh regulator mode ABI mismatch"
+#endif
+
+'''
 
 
 def parse_paths() -> tuple[Path, Path]:
@@ -38,7 +60,7 @@ def parse_paths() -> tuple[Path, Path]:
     return args.gki.resolve(), args.output.resolve()
 
 
-def replay_run30_stage() -> None:
+def replay_run31_stage() -> None:
     scripts_dir = Path(__file__).resolve().parent
     provider = scripts_dir / PROVIDER_SCRIPT
     if not provider.is_file():
@@ -50,11 +72,11 @@ def replay_run30_stage() -> None:
         str(scripts_dir) if not existing else str(scripts_dir) + os.pathsep + existing
     )
 
-    with tempfile.TemporaryDirectory(prefix="a52-stage94b-run30-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="a52-stage94b-run31-") as tmp:
         tmpdir = Path(tmp)
-        previous = tmpdir / "stage94b-run30.py"
+        previous = tmpdir / "stage94b-run31.py"
         request = urllib.request.Request(
-            RUN30_STAGE_URL, headers={"User-Agent": "a52-stage94b-run31-wrapper"}
+            RUN31_STAGE_URL, headers={"User-Agent": "a52-stage94b-run32-wrapper"}
         )
         with urllib.request.urlopen(request, timeout=90) as response:
             previous.write_bytes(response.read())
@@ -67,64 +89,91 @@ def replay_run30_stage() -> None:
         )
 
 
-def quarantine_auxiliary_clock_probes(gki: Path, output: Path) -> dict:
-    """Remove remaining nonessential clock compile probes from the UFS test image."""
-    config_path = gki.parents[1] / "workflow68" / "extracted" / "integrated.config"
-    if not config_path.is_file():
+def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
+    """Interpret baked Samsung regulator mode cells with the downstream ABI."""
+    source_path = gki / "drivers/regulator/a52-rpmh-regulator-downstream.c"
+    if not source_path.is_file():
         raise SystemExit(
-            "Workflow 68 integrated configuration is missing; cannot quarantine "
-            "remaining compile-only Lagoon auxiliary clocks"
+            "Run 31 downstream RPMh compatibility regulator source is missing"
         )
 
-    text = config_path.read_text(encoding="utf-8")
-    checks: dict[str, bool] = {}
-    for symbol in QUARANTINED_AUX_CLOCK_SYMBOLS:
-        pattern = re.compile(
-            rf"(?m)^(?:{re.escape(symbol)}=.*|# {re.escape(symbol)} is not set)$"
+    text = source_path.read_text(encoding="utf-8")
+    include_anchor = '#include <dt-bindings/regulator/qcom,rpmh-regulator.h>\n\n'
+    if text.count(include_anchor) != 1:
+        raise SystemExit(
+            "downstream RPMh binding include: expected exactly one insertion anchor, "
+            f"found {text.count(include_anchor)}"
         )
-        matches = list(pattern.finditer(text))
-        if len(matches) != 1:
-            raise SystemExit(
-                f"quarantine {symbol}: expected exactly one config entry, "
-                f"found {len(matches)}"
-            )
-        text = pattern.sub(f"# {symbol} is not set", text, count=1)
-        checks[symbol] = f"# {symbol} is not set" in text
+    if "Samsung's shipped DTB was compiled against the downstream" in text:
+        raise SystemExit("downstream RPMh regulator mode ABI bridge already present")
 
-    config_path.write_text(text, encoding="utf-8")
-    snapshot = output / "workflow68-integrated-config-run31.config"
-    snapshot.write_text(text, encoding="utf-8")
+    text = text.replace(
+        include_anchor,
+        include_anchor + DOWNSTREAM_MODE_ABI_BLOCK,
+        1,
+    )
+
+    checks = {
+        "ret_is_0": "#define RPMH_REGULATOR_MODE_RET\t\t0" in text,
+        "lpm_is_1": "#define RPMH_REGULATOR_MODE_LPM\t\t1" in text,
+        "hpm_is_2": "#define RPMH_REGULATOR_MODE_HPM\t\t2" in text,
+        "auto_is_3": "#define RPMH_REGULATOR_MODE_AUTO\t3" in text,
+        "pass_is_4": "#define RPMH_REGULATOR_MODE_PASS\t4" in text,
+        "compile_time_guard": (
+            '#error "Samsung downstream RPMh regulator mode ABI mismatch"' in text
+        ),
+        "pmic5_ldo_hpm_mapping_retained": (
+            "[RPMH_REGULATOR_MODE_HPM] = {" in text
+            and "RPMH_REGULATOR_MODE_PMIC5_LDO_HPM" in text
+        ),
+    }
+    if not all(checks.values()):
+        failed = [name for name, passed in checks.items() if not passed]
+        raise SystemExit(
+            "downstream RPMh mode ABI audit failed: " + ", ".join(failed)
+        )
+
+    source_path.write_text(text, encoding="utf-8")
+    (output / "a52-rpmh-regulator-downstream-run32.c").write_text(
+        text, encoding="utf-8"
+    )
 
     return {
-        "status": "quarantined",
+        "status": "restored",
         "reason": (
-            "Run 30 hardware capture completed hundreds of initcalls, then "
-            "entered clk_debug_lagoon_init and raised Oops: Fatal exception "
-            "before UFS validation"
+            "Run 31 reached Android init but all storage remained absent. "
+            "Hardware logs showed PMIC5 LDO qcom,supported-modes element 0 = 2 "
+            "rejected as AUTO, although Samsung's downstream ABI encodes HPM as 2."
         ),
         "scope": (
-            "remaining nonessential Lagoon NPU and debug-clock compile probes; "
-            "SDM_GCC_LAGOON remains enabled"
+            "numeric mode interpretation inside the downstream compatibility "
+            "regulator only; the upstream RPMh regulator binding is unchanged"
         ),
-        "source_config": str(config_path),
-        "symbols": list(QUARANTINED_AUX_CLOCK_SYMBOLS),
+        "mapping": {
+            "RET": 0,
+            "LPM": 1,
+            "HPM": 2,
+            "AUTO": 3,
+            "PASS": 4,
+        },
+        "source": str(source_path),
         "checks": checks,
     }
 
 
-def merge_report(output: Path, quarantine_report: dict) -> None:
+def merge_report(output: Path, abi_report: dict) -> None:
     report_path = output / "stage-report.json"
     if not report_path.is_file():
-        raise SystemExit("Run 30 UFS bridge stage report is missing")
+        raise SystemExit("Run 31 UFS bridge stage report is missing")
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    checks = quarantine_report.get("checks", {})
-    report.setdefault("checks", {})["aux_clock_probes_quarantined"] = bool(
+    checks = abi_report.get("checks", {})
+    report.setdefault("checks", {})["downstream_regulator_mode_abi_restored"] = bool(
         checks and all(checks.values())
     )
-    report["aux_clock_probe_quarantine"] = quarantine_report
-    if not report["checks"]["aux_clock_probes_quarantined"]:
-        raise SystemExit("auxiliary clock-probe quarantine contains a failed audit")
+    report["downstream_regulator_mode_abi"] = abi_report
+    if not report["checks"]["downstream_regulator_mode_abi_restored"]:
+        raise SystemExit("downstream RPMh regulator mode ABI bridge audit failed")
 
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -134,9 +183,9 @@ def merge_report(output: Path, quarantine_report: dict) -> None:
 def main() -> int:
     gki, output = parse_paths()
     output.mkdir(parents=True, exist_ok=True)
-    replay_run30_stage()
-    quarantine_report = quarantine_auxiliary_clock_probes(gki, output)
-    merge_report(output, quarantine_report)
+    replay_run31_stage()
+    abi_report = restore_downstream_mode_abi(gki, output)
+    merge_report(output, abi_report)
     return 0
 
 
@@ -147,7 +196,7 @@ if __name__ == "__main__":
         try:
             _, output = parse_paths()
             output.mkdir(parents=True, exist_ok=True)
-            (output / "stage94b-run31-wrapper-error.txt").write_text(
+            (output / "stage94b-run32-wrapper-error.txt").write_text(
                 traceback.format_exc(), encoding="utf-8"
             )
         except BaseException:

@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 21: capture the RPMh provider run after QMP replay import fix.
+# Refresh 22: capture the RPMh provider traceback-preserving run.
 on:
   push:
     branches: [main]

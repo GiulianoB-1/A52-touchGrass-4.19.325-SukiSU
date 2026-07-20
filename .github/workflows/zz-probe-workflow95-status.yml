@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 18: capture the IRQ-safe panic-reason run.
+# Refresh 19: capture the one-shot first-IRQ run.
 on:
   push:
     branches: [main]

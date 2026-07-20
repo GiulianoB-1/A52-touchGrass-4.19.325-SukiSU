@@ -167,8 +167,9 @@ def main() -> int:
         "instrument kernel_execve return",
     )
 
-    # Panic trace. Keep all local declarations at the beginning of panic() to
-    # satisfy the kernel's C90 declaration-order warning policy.
+    # Panic trace. Declare the persistent helper without running it until panic()
+    # has disabled local interrupts. This avoids an interrupt flood before the
+    # panic path can format and preserve its reason.
     declaration = "extern void a52_persistent_diag_mark(const char *fmt, ...);\n"
     if declaration not in panic:
         panic = replace_once(
@@ -178,14 +179,28 @@ def main() -> int:
             "declare persistent helper in panic.c",
         )
 
-    panic_marker_anchor = (
-        "\tbool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;\n\n"
+    irq_off_anchor = "\tlocal_irq_disable();\n\tpreempt_disable_notrace();\n"
+    panic = replace_once(
+        panic,
+        irq_off_anchor,
+        irq_off_anchor + triplet("panic irq_off"),
+        "instrument panic after local IRQ disable",
+    )
+
+    reason_anchor = (
+        "\tif (len && buf[len - 1] == '\\n')\n"
+        "\t\tbuf[len - 1] = '\\0';\n\n"
+    )
+    reason_triplet = "".join(
+        f'\ta52_persistent_diag_mark("A52PANIC copy={copy} reason=%s cpu=%d irq_disabled=%d\\n", '
+        'buf, raw_smp_processor_id(), irqs_disabled());\n'
+        for copy in (1, 2, 3)
     )
     panic = replace_once(
         panic,
-        panic_marker_anchor,
-        panic_marker_anchor + triplet("panic entered"),
-        "instrument panic after local declarations",
+        reason_anchor,
+        reason_anchor + reason_triplet,
+        "instrument formatted panic reason",
     )
 
     checks = {
@@ -212,7 +227,9 @@ def main() -> int:
             and "A52POST copy=1 exec returned path=%s ret=%d" in text
         ),
         "panic_helper_declared": declaration in panic,
-        "panic_triplet": panic.count("panic entered") == 3,
+        "panic_irq_off_triplet": panic.count("panic irq_off") == 3,
+        "panic_reason_triplet": panic.count("A52PANIC copy=") == 3,
+        "panic_entry_marker_removed": "panic entered" not in panic,
         "triple_redundancy": (
             text.count("A52POST copy=1")
             == text.count("A52POST copy=2")
@@ -233,7 +250,10 @@ def main() -> int:
         json.dumps(
             {
                 "status": "staged",
-                "trace_scope": "post-do_initcalls through userspace exec and panic",
+                "trace_scope": (
+                    "post-do_initcalls through userspace exec plus IRQ-safe "
+                    "formatted panic reason"
+                ),
                 "redundancy": 3,
                 "staging_strategy": "statement-by-statement resilient anchors",
                 "checks": checks,

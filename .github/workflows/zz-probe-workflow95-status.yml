@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 23: capture the RPMh provider run after driver-name format fix.
+# Refresh 24: capture the RPMh provider run after whitespace normalization.
 on:
   push:
     branches: [main]

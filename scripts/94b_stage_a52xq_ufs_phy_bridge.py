@@ -14,7 +14,6 @@ from pathlib import Path
 
 # Replay the already-audited QMP bridge implementation byte-for-byte, then add
 # the provider compatibility stage identified by the Run 23 hardware capture.
-# Refresh: provider driver-name matching is now indentation-independent.
 ORIGINAL_URL = (
     "https://raw.githubusercontent.com/"
     "GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/"
@@ -53,6 +52,50 @@ def replay_proven_qmp_stage() -> None:
         )
 
 
+def prepare_provider_runner(script: Path, provider_output: Path) -> Path:
+    """Normalize one formatting-sensitive Python source anchor in a temp copy.
+
+    The imported downstream C source aligns `.name` and `=` with tabs. The
+    provider stage originally required one literal space. Replace only that
+    Python replacement block with a regex that still requires exactly one
+    qcom,rpmh-regulator driver-name field.
+    """
+    source = script.read_text(encoding="utf-8")
+    old = '''    text = replace_once(
+        text,
+        '.name = "qcom,rpmh-regulator",',
+        '.name = "a52-rpmh-regulator-downstream",',
+        "give downstream regulator driver a unique name",
+    )
+'''
+    new = '''    driver_name_matches = list(re.finditer(
+        r'(?m)^(?P<indent>\\s*)\\.name\\s*=\\s*"qcom,rpmh-regulator",\\s*$',
+        text,
+    ))
+    if len(driver_name_matches) != 1:
+        raise SystemExit(
+            "give downstream regulator driver a unique name: expected exactly "
+            f"one whitespace-normalized match, found {len(driver_name_matches)}"
+        )
+    driver_name = driver_name_matches[0]
+    text = (
+        text[:driver_name.start()]
+        + driver_name.group("indent")
+        + '.name = "a52-rpmh-regulator-downstream",'
+        + text[driver_name.end():]
+    )
+'''
+    if source.count(old) != 1:
+        raise SystemExit(
+            "provider runner normalization: expected one literal driver-name "
+            f"replacement block, found {source.count(old)}"
+        )
+    patched = source.replace(old, new, 1)
+    runner = provider_output / "provider-stage-runner.py"
+    runner.write_text(patched, encoding="utf-8")
+    return runner
+
+
 def stage_rpmh_providers(gki: Path, output: Path) -> dict:
     script = Path(__file__).resolve().with_name(PROVIDER_SCRIPT)
     if not script.is_file():
@@ -60,10 +103,11 @@ def stage_rpmh_providers(gki: Path, output: Path) -> dict:
 
     provider_output = output / "rpmh-provider-bridge"
     provider_output.mkdir(parents=True, exist_ok=True)
+    runner = prepare_provider_runner(script, provider_output)
     result = subprocess.run(
         [
             sys.executable,
-            str(script),
+            str(runner),
             "--gki",
             str(gki),
             "--output",

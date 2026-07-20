@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,12 @@ ORIGINAL_URL = (
     "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 )
 PROVIDER_SCRIPT = "95_stage_a52xq_rpmh_provider_bridge.py"
+QUARANTINED_CLOCK_SYMBOLS = (
+    "CONFIG_CAM_CC_LAGOON",
+    "CONFIG_DISP_CC_LAGOON",
+    "CONFIG_GPU_CC_LAGOON",
+    "CONFIG_VIDEO_CC_LAGOON",
+)
 
 
 def parse_paths() -> tuple[Path, Path]:
@@ -130,14 +137,67 @@ def stage_rpmh_providers(gki: Path, output: Path) -> dict:
     return json.loads(report_path.read_text(encoding="utf-8"))
 
 
-def merge_reports(output: Path, provider_report: dict) -> None:
+def quarantine_compile_only_clocks(gki: Path, output: Path) -> dict:
+    """Keep compile-probe-only peripheral clocks out of the storage test image.
+
+    Run 28 reached the newly working RPMh clock provider, then died immediately
+    in cam_cc_lagoon_init(). Camera, display, GPU and video clock controllers
+    were all imported by Workflow 54 as non-flashable compile probes using the
+    same compatibility adaptation. None is required to validate UFS, so force
+    the four symbols off in Workflow 68's source configuration before Workflow
+    95 copies it into the diagnostic build directory.
+    """
+    config_path = gki.parents[1] / "workflow68" / "extracted" / "integrated.config"
+    if not config_path.is_file():
+        raise SystemExit(
+            "Workflow 68 integrated configuration is missing; cannot quarantine "
+            "compile-only Lagoon peripheral clocks"
+        )
+
+    text = config_path.read_text(encoding="utf-8")
+    checks: dict[str, bool] = {}
+    for symbol in QUARANTINED_CLOCK_SYMBOLS:
+        pattern = re.compile(
+            rf"(?m)^(?:{re.escape(symbol)}=.*|# {re.escape(symbol)} is not set)$"
+        )
+        matches = list(pattern.finditer(text))
+        if len(matches) != 1:
+            raise SystemExit(
+                f"quarantine {symbol}: expected exactly one config entry, "
+                f"found {len(matches)}"
+            )
+        text = pattern.sub(f"# {symbol} is not set", text, count=1)
+        checks[symbol] = f"# {symbol} is not set" in text
+
+    config_path.write_text(text, encoding="utf-8")
+    snapshot = output / "workflow68-integrated-config-quarantined.config"
+    snapshot.write_text(text, encoding="utf-8")
+
+    return {
+        "status": "quarantined",
+        "reason": (
+            "Run 28 hardware capture entered cam_cc_lagoon_init and immediately "
+            "raised Oops: Fatal exception before UFS could bind"
+        ),
+        "scope": "compile-only Lagoon camera, display, GPU and video clock controllers",
+        "source_config": str(config_path),
+        "symbols": list(QUARANTINED_CLOCK_SYMBOLS),
+        "checks": checks,
+    }
+
+
+def merge_reports(output: Path, provider_report: dict, quarantine_report: dict) -> None:
     report_path = output / "stage-report.json"
     if not report_path.is_file():
         raise SystemExit("proven QMP bridge did not produce its stage report")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     provider_checks = provider_report.get("checks", {})
+    quarantine_checks = quarantine_report.get("checks", {})
     report.setdefault("checks", {})["rpmh_provider_bridge_staged"] = bool(
         provider_checks and all(provider_checks.values())
+    )
+    report["checks"]["compile_only_clocks_quarantined"] = bool(
+        quarantine_checks and all(quarantine_checks.values())
     )
     report["rpmh_provider_bridge"] = {
         "status": provider_report.get("status"),
@@ -150,8 +210,11 @@ def merge_reports(output: Path, provider_report: dict) -> None:
         ),
         "checks": provider_checks,
     }
+    report["compile_only_clock_quarantine"] = quarantine_report
     if not report["checks"]["rpmh_provider_bridge_staged"]:
         raise SystemExit("RPMh provider bridge report contains a failed audit")
+    if not report["checks"]["compile_only_clocks_quarantined"]:
+        raise SystemExit("compile-only Lagoon clock quarantine contains a failed audit")
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -162,7 +225,8 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     replay_proven_qmp_stage()
     provider_report = stage_rpmh_providers(gki, output)
-    merge_reports(output, provider_report)
+    quarantine_report = quarantine_compile_only_clocks(gki, output)
+    merge_reports(output, provider_report, quarantine_report)
     return 0
 
 

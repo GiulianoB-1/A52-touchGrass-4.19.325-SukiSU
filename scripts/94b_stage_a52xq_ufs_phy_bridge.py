@@ -14,6 +14,7 @@ from pathlib import Path
 
 # Replay the already-audited QMP bridge implementation byte-for-byte, then add
 # the provider compatibility stage identified by the Run 23 hardware capture.
+# Refresh: provider driver-name matching is now indentation-independent.
 ORIGINAL_URL = (
     "https://raw.githubusercontent.com/"
     "GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/"

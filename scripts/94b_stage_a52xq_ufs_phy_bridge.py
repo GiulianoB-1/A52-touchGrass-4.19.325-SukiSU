@@ -13,8 +13,9 @@ import urllib.request
 from pathlib import Path
 
 
-# Replay the complete Run 31 staging implementation, then restore the numeric
-# mode ABI used by Samsung's downstream DT and Qualcomm's downstream driver.
+# Replay the complete Run 31 staging implementation, then restore the exact
+# numeric mode ABI used by Samsung's downstream DT and Qualcomm's downstream
+# rpmh-regulator-levels.h binding.
 RUN31_STAGE_URL = (
     "https://raw.githubusercontent.com/"
     "GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/"
@@ -23,33 +24,35 @@ RUN31_STAGE_URL = (
 )
 PROVIDER_SCRIPT = "95_stage_a52xq_rpmh_provider_bridge.py"
 
-DOWNSTREAM_MODE_ABI_BLOCK = r'''/*
- * Samsung's shipped DTB was compiled against the downstream
+DOWNSTREAM_MODE_ABI_BLOCK = r"""/*
+ * Samsung's shipped DTB was compiled against Qualcomm's original downstream
  * qcom,rpmh-regulator-levels.h ABI:
  *
- *   RET=0, LPM=1, HPM=2, AUTO=3, PASS=4
+ *   PASS=0, RET=1, LPM=2, AUTO=3, HPM=4
  *
- * The upstream qcom,rpmh-regulator.h header swaps HPM and AUTO.  This
- * downstream compatibility driver must interpret the already-baked numeric DT
- * cells using the downstream ABI, while the normal upstream driver keeps its
- * native binding.
+ * The upstream qcom,rpmh-regulator.h header uses a different numbering:
+ * RET=0, LPM=1, AUTO=2, HPM=3 and has no PASS selector.  This compatibility
+ * driver must decode the already-baked Samsung cells with the downstream ABI,
+ * while the normal upstream RPMh regulator driver keeps its native binding.
  */
+#undef RPMH_REGULATOR_MODE_PASS
 #undef RPMH_REGULATOR_MODE_RET
 #undef RPMH_REGULATOR_MODE_LPM
 #undef RPMH_REGULATOR_MODE_AUTO
 #undef RPMH_REGULATOR_MODE_HPM
-#undef RPMH_REGULATOR_MODE_PASS
-#define RPMH_REGULATOR_MODE_RET		0
-#define RPMH_REGULATOR_MODE_LPM		1
-#define RPMH_REGULATOR_MODE_HPM		2
+#define RPMH_REGULATOR_MODE_PASS	0
+#define RPMH_REGULATOR_MODE_RET		1
+#define RPMH_REGULATOR_MODE_LPM		2
 #define RPMH_REGULATOR_MODE_AUTO	3
-#define RPMH_REGULATOR_MODE_PASS	4
+#define RPMH_REGULATOR_MODE_HPM		4
 
-#if RPMH_REGULATOR_MODE_HPM != 2 || RPMH_REGULATOR_MODE_AUTO != 3
+#if RPMH_REGULATOR_MODE_PASS != 0 || RPMH_REGULATOR_MODE_RET != 1 || \
+	RPMH_REGULATOR_MODE_LPM != 2 || RPMH_REGULATOR_MODE_AUTO != 3 || \
+	RPMH_REGULATOR_MODE_HPM != 4
 #error "Samsung downstream RPMh regulator mode ABI mismatch"
 #endif
 
-'''
+"""
 
 
 def parse_paths() -> tuple[Path, Path]:
@@ -76,7 +79,7 @@ def replay_run31_stage() -> None:
         tmpdir = Path(tmp)
         previous = tmpdir / "stage94b-run31.py"
         request = urllib.request.Request(
-            RUN31_STAGE_URL, headers={"User-Agent": "a52-stage94b-run32-wrapper"}
+            RUN31_STAGE_URL, headers={"User-Agent": "a52-stage94b-run33-wrapper"}
         )
         with urllib.request.urlopen(request, timeout=90) as response:
             previous.write_bytes(response.read())
@@ -90,7 +93,7 @@ def replay_run31_stage() -> None:
 
 
 def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
-    """Interpret baked Samsung regulator mode cells with the downstream ABI."""
+    'Interpret baked Samsung regulator mode cells with the downstream ABI.'
     source_path = gki / "drivers/regulator/a52-rpmh-regulator-downstream.c"
     if not source_path.is_file():
         raise SystemExit(
@@ -104,7 +107,7 @@ def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
             "downstream RPMh binding include: expected exactly one insertion anchor, "
             f"found {text.count(include_anchor)}"
         )
-    if "Samsung's shipped DTB was compiled against the downstream" in text:
+    if "Samsung's shipped DTB was compiled against Qualcomm's original downstream" in text:
         raise SystemExit("downstream RPMh regulator mode ABI bridge already present")
 
     text = text.replace(
@@ -114,13 +117,17 @@ def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
     )
 
     checks = {
-        "ret_is_0": "#define RPMH_REGULATOR_MODE_RET\t\t0" in text,
-        "lpm_is_1": "#define RPMH_REGULATOR_MODE_LPM\t\t1" in text,
-        "hpm_is_2": "#define RPMH_REGULATOR_MODE_HPM\t\t2" in text,
+        "pass_is_0": "#define RPMH_REGULATOR_MODE_PASS\t0" in text,
+        "ret_is_1": "#define RPMH_REGULATOR_MODE_RET\t\t1" in text,
+        "lpm_is_2": "#define RPMH_REGULATOR_MODE_LPM\t\t2" in text,
         "auto_is_3": "#define RPMH_REGULATOR_MODE_AUTO\t3" in text,
-        "pass_is_4": "#define RPMH_REGULATOR_MODE_PASS\t4" in text,
+        "hpm_is_4": "#define RPMH_REGULATOR_MODE_HPM\t\t4" in text,
         "compile_time_guard": (
             '#error "Samsung downstream RPMh regulator mode ABI mismatch"' in text
+        ),
+        "pmic5_ldo_lpm_mapping_retained": (
+            "[RPMH_REGULATOR_MODE_LPM] = {" in text
+            and "RPMH_REGULATOR_MODE_PMIC5_LDO_LPM" in text
         ),
         "pmic5_ldo_hpm_mapping_retained": (
             "[RPMH_REGULATOR_MODE_HPM] = {" in text
@@ -134,27 +141,28 @@ def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
         )
 
     source_path.write_text(text, encoding="utf-8")
-    (output / "a52-rpmh-regulator-downstream-run32.c").write_text(
+    (output / "a52-rpmh-regulator-downstream-run33.c").write_text(
         text, encoding="utf-8"
     )
 
     return {
         "status": "restored",
         "reason": (
-            "Run 31 reached Android init but all storage remained absent. "
-            "Hardware logs showed PMIC5 LDO qcom,supported-modes element 0 = 2 "
-            "rejected as AUTO, although Samsung's downstream ABI encodes HPM as 2."
+            "Run 31 rejected baked mode 2 because upstream interprets it as AUTO; "
+            "Run 32 then rejected baked mode 4 after an incorrect attempted ABI "
+            "restoration. Qualcomm's original downstream ABI encodes LPM as 2 "
+            "and HPM as 4."
         ),
         "scope": (
             "numeric mode interpretation inside the downstream compatibility "
             "regulator only; the upstream RPMh regulator binding is unchanged"
         ),
         "mapping": {
-            "RET": 0,
-            "LPM": 1,
-            "HPM": 2,
+            "PASS": 0,
+            "RET": 1,
+            "LPM": 2,
             "AUTO": 3,
-            "PASS": 4,
+            "HPM": 4,
         },
         "source": str(source_path),
         "checks": checks,
@@ -196,7 +204,7 @@ if __name__ == "__main__":
         try:
             _, output = parse_paths()
             output.mkdir(parents=True, exist_ok=True)
-            (output / "stage94b-run32-wrapper-error.txt").write_text(
+            (output / "stage94b-run33-wrapper-error.txt").write_text(
                 traceback.format_exc(), encoding="utf-8"
             )
         except BaseException:

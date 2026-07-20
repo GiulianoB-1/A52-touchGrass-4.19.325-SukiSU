@@ -101,6 +101,97 @@ def _indent(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
 
+def _insert_phy_triplet_after(
+    phy: str,
+    candidates: tuple[str, ...],
+    label: str,
+    message: str,
+    arguments: str,
+) -> str:
+    _, end = _one_line(phy, candidates, label)
+    line_start = phy.rfind("\n", 0, end - 1) + 1
+    indentation = _indent(phy[line_start:end])
+    return (
+        phy[:end]
+        + triplet(message, arguments, indentation, prefix="A52PHY")
+        + phy[end:]
+    )
+
+
+def _instrument_bulk_dependency_helpers(phy: str) -> str:
+    clk_return = "return devm_clk_bulk_get(dev, num, qmp->clks);"
+    clk_start, clk_end = _one_line(
+        phy,
+        (clk_return,),
+        "instrument QMP PHY clock dependency lookup",
+    )
+    clk_indent = _indent(phy[clk_start:clk_end])
+    clk_block = (
+        clk_indent + "{\n"
+        + clk_indent + "\tstruct clk *a52_clk;\n"
+        + clk_indent + "\tint a52_item_ret;\n"
+        + clk_indent + "\tint a52_ret;\n\n"
+        + clk_indent + "\ta52_ret = devm_clk_bulk_get(dev, num, qmp->clks);\n"
+        + triplet(
+            "CLK_BULK ret=%d count=%d",
+            "a52_ret, num",
+            clk_indent + "\t",
+            prefix="A52PHY",
+        )
+        + clk_indent + "\tif (a52_ret) {\n"
+        + clk_indent + "\t\tfor (i = 0; i < num; i++) {\n"
+        + clk_indent + "\t\t\ta52_clk = devm_clk_get(dev, cfg->clk_list[i]);\n"
+        + clk_indent + "\t\t\ta52_item_ret = IS_ERR(a52_clk) ? PTR_ERR(a52_clk) : 0;\n"
+        + triplet(
+            "CLK_ITEM index=%d name=%s ret=%d",
+            "i, cfg->clk_list[i], a52_item_ret",
+            clk_indent + "\t\t\t",
+            prefix="A52PHY",
+        )
+        + clk_indent + "\t\t}\n"
+        + clk_indent + "\t}\n"
+        + clk_indent + "\treturn a52_ret;\n"
+        + clk_indent + "}\n"
+    )
+    phy = phy[:clk_start] + clk_block + phy[clk_end:]
+
+    vreg_return = "return devm_regulator_bulk_get(dev, num, qmp->vregs);"
+    vreg_start, vreg_end = _one_line(
+        phy,
+        (vreg_return,),
+        "instrument QMP PHY regulator dependency lookup",
+    )
+    vreg_indent = _indent(phy[vreg_start:vreg_end])
+    vreg_block = (
+        vreg_indent + "{\n"
+        + vreg_indent + "\tstruct regulator *a52_vreg;\n"
+        + vreg_indent + "\tint a52_item_ret;\n"
+        + vreg_indent + "\tint a52_ret;\n\n"
+        + vreg_indent + "\ta52_ret = devm_regulator_bulk_get(dev, num, qmp->vregs);\n"
+        + triplet(
+            "VREG_BULK ret=%d count=%d",
+            "a52_ret, num",
+            vreg_indent + "\t",
+            prefix="A52PHY",
+        )
+        + vreg_indent + "\tif (a52_ret) {\n"
+        + vreg_indent + "\t\tfor (i = 0; i < num; i++) {\n"
+        + vreg_indent + "\t\t\ta52_vreg = devm_regulator_get(dev, cfg->vreg_list[i]);\n"
+        + vreg_indent + "\t\t\ta52_item_ret = IS_ERR(a52_vreg) ? PTR_ERR(a52_vreg) : 0;\n"
+        + triplet(
+            "VREG_ITEM index=%d name=%s ret=%d",
+            "i, cfg->vreg_list[i], a52_item_ret",
+            vreg_indent + "\t\t\t",
+            prefix="A52PHY",
+        )
+        + vreg_indent + "\t\t}\n"
+        + vreg_indent + "\t}\n"
+        + vreg_indent + "\treturn a52_ret;\n"
+        + vreg_indent + "}\n"
+    )
+    return phy[:vreg_start] + vreg_block + phy[vreg_end:]
+
+
 def instrument_qmp_phy(phy: str) -> str:
     phy = declare_helper(
         phy,
@@ -133,13 +224,63 @@ def instrument_qmp_phy(phy: str) -> str:
     cfg_line = phy[cfg_start:cfg_end]
     cfg_expression = "qmp->cfg" if "qmp->cfg" in cfg_line else "cfg"
     phy = phy[:cfg_end] + triplet(
-        "MATCH dev=%s node=%s compat=%s cfg=%p children=%u",
-        'dev_name(dev), dev->of_node ? dev->of_node->full_name : "<none>", '
-        'dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
+        "MATCH dev=%s compat=%s cfg=%p children=%u",
+        'dev_name(dev), dev->of_node ? of_get_property(dev->of_node, "compatible", NULL) : "<none>", '
         f"{cfg_expression}, dev->of_node ? of_get_available_child_count(dev->of_node) : 0",
         _indent(cfg_line),
         prefix="A52PHY",
     ) + phy[cfg_end:]
+
+    phy = _instrument_bulk_dependency_helpers(phy)
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("usb_serdes = serdes = devm_platform_ioremap_resource(pdev, 0);",),
+        "instrument QMP PHY primary resource mapping",
+        "STAGE map0 ret=%ld",
+        "IS_ERR(serdes) ? PTR_ERR(serdes) : 0L",
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("ret = qcom_qmp_phy_clk_init(dev, cfg);",),
+        "instrument QMP PHY clock stage",
+        "STAGE clocks ret=%d count=%d",
+        "ret, cfg->num_clks",
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("ret = qcom_qmp_phy_reset_init(dev, cfg);",),
+        "instrument QMP PHY reset stage",
+        "STAGE resets ret=%d count=%d",
+        "ret, cfg->num_resets",
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("ret = qcom_qmp_phy_vreg_init(dev, cfg);",),
+        "instrument QMP PHY regulator stage",
+        "STAGE vregs ret=%d count=%d",
+        "ret, cfg->num_vregs",
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("num = of_get_available_child_count(dev->of_node);",),
+        "instrument QMP PHY child count",
+        "STAGE children num=%d expected=%d",
+        "num, expected_phys",
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("ret = qcom_qmp_phy_create(dev, child, id, serdes, cfg);",),
+        "instrument QMP PHY lane creation",
+        "STAGE create id=%d node=%s ret=%d",
+        'id, child ? child->full_name : "<none>", ret',
+    )
+    phy = _insert_phy_triplet_after(
+        phy,
+        ("phy_provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);",),
+        "instrument QMP PHY provider registration",
+        "STAGE provider ret=%ld",
+        "PTR_ERR_OR_ZERO(phy_provider)",
+    )
     return phy
 
 
@@ -311,6 +452,22 @@ def main() -> int:
         "phy_match_triplet": all(
             phy.count(f"A52PHY copy={copy} MATCH") == 1 for copy in (1, 2, 3)
         ),
+        "phy_clock_bulk_triplet": all(
+            phy.count(f"A52PHY copy={copy} CLK_BULK") == 1 for copy in (1, 2, 3)
+        ),
+        "phy_clock_item_triplet": all(
+            phy.count(f"A52PHY copy={copy} CLK_ITEM") == 1 for copy in (1, 2, 3)
+        ),
+        "phy_vreg_bulk_triplet": all(
+            phy.count(f"A52PHY copy={copy} VREG_BULK") == 1 for copy in (1, 2, 3)
+        ),
+        "phy_vreg_item_triplet": all(
+            phy.count(f"A52PHY copy={copy} VREG_ITEM") == 1 for copy in (1, 2, 3)
+        ),
+        "phy_stage_triplets": all(
+            all(phy.count(f"A52PHY copy={copy} STAGE {stage}") == 1 for copy in (1, 2, 3))
+            for stage in ("map0", "clocks", "resets", "vregs", "children", "create", "provider")
+        ),
         "device_call_triplet": all(
             dd.count(f"A52DEV copy={copy} CALL") == 1 for copy in (1, 2, 3)
         ),
@@ -334,8 +491,9 @@ def main() -> int:
             {
                 "status": "staged",
                 "purpose": (
-                    "bridge qcom,ufs-phy-qmp-v3 to upstream QMP-v3 UFS support "
-                    "and capture driver calls, returns, deferrals and reasons"
+                    "bridge qcom,ufs-phy-qmp-v3 to upstream QMP-v3 UFS support, "
+                    "trace exact QMP dependency failures, and capture device-core "
+                    "calls, returns, deferrals and reasons"
                 ),
                 "compatibility_bridge": {
                     "from": "qcom,ufs-phy-qmp-v3",

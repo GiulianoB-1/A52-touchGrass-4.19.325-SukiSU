@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,12 @@ def parse_paths() -> tuple[Path, Path]:
 
 
 def replay_proven_qmp_stage() -> None:
+    scripts_dir = Path(__file__).resolve().parent
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(scripts_dir) if not existing else str(scripts_dir) + os.pathsep + existing
+    )
     with tempfile.TemporaryDirectory(prefix="a52-stage94b-") as tmp:
         original = Path(tmp) / "stage94b-original.py"
         request = urllib.request.Request(
@@ -38,7 +45,11 @@ def replay_proven_qmp_stage() -> None:
         )
         with urllib.request.urlopen(request, timeout=90) as response:
             original.write_bytes(response.read())
-        subprocess.run([sys.executable, str(original), *sys.argv[1:]], check=True)
+        subprocess.run(
+            [sys.executable, str(original), *sys.argv[1:]],
+            check=True,
+            env=env,
+        )
 
 
 def stage_rpmh_providers(gki: Path, output: Path) -> dict:

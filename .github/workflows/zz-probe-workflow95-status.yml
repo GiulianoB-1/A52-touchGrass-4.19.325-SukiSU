@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 16: capture the declaration-order fix run.
+# Refresh 17: capture the exact QMP dependency deferral run.
 on:
   push:
     branches: [main]

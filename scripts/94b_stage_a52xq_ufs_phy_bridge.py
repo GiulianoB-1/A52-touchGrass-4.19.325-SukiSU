@@ -302,6 +302,33 @@ def patch_ufs_host(gki: Path, output: Path) -> dict:
 '''
     text = replace_once(text, hce_old, hce_new, "propagate PHY power-up failure")
 
+    init_start, init_end = function_span(text, "static int ufs_qcom_init(struct ufs_hba *hba)", "UFS QCOM init")
+    init = text[init_start:init_end]
+    init = replace_once(
+        init,
+        "\tint err;\n\tstruct device *dev = hba->dev;\n",
+        "\tint err;\n\tstruct ufs_clk_info *clki;\n\tstruct device *dev = hba->dev;\n",
+        "declare UFS clock iterator",
+    )
+    clock_anchor = """\tufs_qcom_get_controller_revision(hba, &host->hw_ver.major,
+\t\t&host->hw_ver.minor, &host->hw_ver.step);
+
+"""
+    clock_block = clock_anchor + """\t/* Keep the UniPro core clock running while the UFS link is active. */
+\tlist_for_each_entry(clki, &hba->clk_list_head, list) {
+\t\tif (!strcmp(clki->name, \"core_clk_unipro\")) {
+\t\t\tclki->keep_link_active = true;
+\t\t\ta52_persistent_diag_mark(\"A52UFS copy=1 CLOCK_KEEP_ACTIVE name=core_clk_unipro\\n\");
+\t\t\ta52_persistent_diag_mark(\"A52UFS copy=2 CLOCK_KEEP_ACTIVE name=core_clk_unipro\\n\");
+\t\t\ta52_persistent_diag_mark(\"A52UFS copy=3 CLOCK_KEEP_ACTIVE name=core_clk_unipro\\n\");
+\t\t\tbreak;
+\t\t}
+\t}
+
+"""
+    init = replace_once(init, clock_anchor, clock_block, "keep UniPro core clock active")
+    text = text[:init_start] + init + text[init_end:]
+
     start, end = function_span(text, "static int ufs_qcom_device_reset(struct ufs_hba *hba)", "UFS device reset")
     new_func = r'''static int ufs_qcom_device_reset(struct ufs_hba *hba)
 {
@@ -358,6 +385,10 @@ out_put:
         "power_up_error_propagated": "err = ufs_qcom_power_up_sequence(hba);" in text and "if (err)\n\t\t\tbreak;" in text,
         "device_reset_pinctrl_assert": 'pinctrl_lookup_state(pinctrl, "dev-reset-assert")' in text,
         "device_reset_pinctrl_deassert": 'pinctrl_lookup_state(pinctrl, "dev-reset-deassert")' in text,
+        "unipro_core_clock_kept_active": (
+            'strcmp(clki->name, "core_clk_unipro")' in text
+            and "clki->keep_link_active = true;" in text
+        ),
         "gpio_reset_retained": "if (host->device_reset)" in new_func,
         "bootdevice_filter_retained": "androidboot.bootdevice=" in text,
     }

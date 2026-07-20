@@ -244,8 +244,8 @@ def patch_downstream_regulator(text: str) -> str:
     text = patch_arc_aux_reader(text)
     text = replace_once(
         text,
-        '\t\t.name = "qcom,rpmh-regulator",\n',
-        '\t\t.name = "a52-rpmh-regulator-downstream",\n',
+        '.name = "qcom,rpmh-regulator",',
+        '.name = "a52-rpmh-regulator-downstream",',
         "give downstream regulator driver a unique name",
     )
 

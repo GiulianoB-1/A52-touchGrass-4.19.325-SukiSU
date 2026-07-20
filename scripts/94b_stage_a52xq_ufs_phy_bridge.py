@@ -13,46 +13,21 @@ import urllib.request
 from pathlib import Path
 
 
-# Replay the complete Run 31 staging implementation, then restore the exact
-# numeric mode ABI used by Samsung's downstream DT and Qualcomm's downstream
-# rpmh-regulator-levels.h binding.
-RUN31_STAGE_URL = (
+# Replay the complete Run 33 staging implementation, then adapt only Samsung's
+# legacy qcom,ufs-phy-qmp-v3 clock-name ABI to the upstream QMP driver.
+RUN33_STAGE_URL = (
     "https://raw.githubusercontent.com/"
     "GiulianoB-1/A52-touchGrass-4.19.325-SukiSU/"
-    "0da647b8b2112010e5d4db3304d815f9babf8a47/"
+    "53a91f777fc132fc39c013f4c6bb8131d9ddd037/"
     "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 )
 PROVIDER_SCRIPT = "95_stage_a52xq_rpmh_provider_bridge.py"
 
-DOWNSTREAM_MODE_ABI_BLOCK = r"""/*
- * Samsung's shipped DTB was compiled against Qualcomm's original downstream
- * qcom,rpmh-regulator-levels.h ABI:
- *
- *   PASS=0, RET=1, LPM=2, AUTO=3, HPM=4
- *
- * The upstream qcom,rpmh-regulator.h header uses a different numbering:
- * RET=0, LPM=1, AUTO=2, HPM=3 and has no PASS selector.  This compatibility
- * driver must decode the already-baked Samsung cells with the downstream ABI,
- * while the normal upstream RPMh regulator driver keeps its native binding.
- */
-#undef RPMH_REGULATOR_MODE_PASS
-#undef RPMH_REGULATOR_MODE_RET
-#undef RPMH_REGULATOR_MODE_LPM
-#undef RPMH_REGULATOR_MODE_AUTO
-#undef RPMH_REGULATOR_MODE_HPM
-#define RPMH_REGULATOR_MODE_PASS	0
-#define RPMH_REGULATOR_MODE_RET		1
-#define RPMH_REGULATOR_MODE_LPM		2
-#define RPMH_REGULATOR_MODE_AUTO	3
-#define RPMH_REGULATOR_MODE_HPM		4
+LEGACY_CLOCK_LIST = '''static const char * const a52_lagoon_ufs_phy_clk_l[] = {
+	"ref_clk_src", "ref_clk", "ref_aux_clk",
+};
 
-#if RPMH_REGULATOR_MODE_PASS != 0 || RPMH_REGULATOR_MODE_RET != 1 || \
-	RPMH_REGULATOR_MODE_LPM != 2 || RPMH_REGULATOR_MODE_AUTO != 3 || \
-	RPMH_REGULATOR_MODE_HPM != 4
-#error "Samsung downstream RPMh regulator mode ABI mismatch"
-#endif
-
-"""
+'''
 
 
 def parse_paths() -> tuple[Path, Path]:
@@ -63,7 +38,7 @@ def parse_paths() -> tuple[Path, Path]:
     return args.gki.resolve(), args.output.resolve()
 
 
-def replay_run31_stage() -> None:
+def replay_run33_stage() -> None:
     scripts_dir = Path(__file__).resolve().parent
     provider = scripts_dir / PROVIDER_SCRIPT
     if not provider.is_file():
@@ -75,11 +50,11 @@ def replay_run31_stage() -> None:
         str(scripts_dir) if not existing else str(scripts_dir) + os.pathsep + existing
     )
 
-    with tempfile.TemporaryDirectory(prefix="a52-stage94b-run31-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="a52-stage94b-run33-") as tmp:
         tmpdir = Path(tmp)
-        previous = tmpdir / "stage94b-run31.py"
+        previous = tmpdir / "stage94b-run33.py"
         request = urllib.request.Request(
-            RUN31_STAGE_URL, headers={"User-Agent": "a52-stage94b-run33-wrapper"}
+            RUN33_STAGE_URL, headers={"User-Agent": "a52-stage94b-run34-wrapper"}
         )
         with urllib.request.urlopen(request, timeout=90) as response:
             previous.write_bytes(response.read())
@@ -92,96 +67,140 @@ def replay_run31_stage() -> None:
         )
 
 
-def restore_downstream_mode_abi(gki: Path, output: Path) -> dict:
-    'Interpret baked Samsung regulator mode cells with the downstream ABI.'
-    source_path = gki / "drivers/regulator/a52-rpmh-regulator-downstream.c"
+def initializer_span(text: str, anchor: str, label: str) -> tuple[int, int]:
+    start = text.find(anchor)
+    if start < 0:
+        raise SystemExit(f"{label}: anchor missing")
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"{label}: opening brace missing")
+    depth = 0
+    for pos in range(brace, len(text)):
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                end = text.find(";", pos)
+                if end < 0:
+                    raise SystemExit(f"{label}: initializer terminator missing")
+                return start, end + 1
+    raise SystemExit(f"{label}: closing brace missing")
+
+
+def bridge_legacy_phy_clock_names(gki: Path, output: Path) -> dict:
+    source_path = gki / "drivers/phy/qualcomm/phy-qcom-qmp.c"
     if not source_path.is_file():
-        raise SystemExit(
-            "Run 31 downstream RPMh compatibility regulator source is missing"
-        )
+        raise SystemExit("Run 33 patched QMP source is missing")
 
     text = source_path.read_text(encoding="utf-8")
-    include_anchor = '#include <dt-bindings/regulator/qcom,rpmh-regulator.h>\n\n'
-    if text.count(include_anchor) != 1:
-        raise SystemExit(
-            "downstream RPMh binding include: expected exactly one insertion anchor, "
-            f"found {text.count(include_anchor)}"
-        )
-    if "Samsung's shipped DTB was compiled against Qualcomm's original downstream" in text:
-        raise SystemExit("downstream RPMh regulator mode ABI bridge already present")
+    if "a52_lagoon_ufs_phy_clk_l" in text:
+        raise SystemExit("legacy Lagoon UFS PHY clock bridge already present")
 
-    text = text.replace(
-        include_anchor,
-        include_anchor + DOWNSTREAM_MODE_ABI_BLOCK,
+    clock_anchor = '''static const char * const sdm845_ufs_phy_clk_l[] = {
+	"ref", "ref_aux",
+};
+
+'''
+    if text.count(clock_anchor) != 1:
+        raise SystemExit(
+            "sdm845 UFS PHY clock-list anchor: expected exactly one match, "
+            f"found {text.count(clock_anchor)}"
+        )
+    text = text.replace(clock_anchor, clock_anchor + LEGACY_CLOCK_LIST, 1)
+
+    cfg_anchor = "static const struct qmp_phy_cfg sdm845_ufsphy_cfg = {"
+    cfg_start, cfg_end = initializer_span(text, cfg_anchor, "sdm845 UFS PHY config")
+    cfg = text[cfg_start:cfg_end]
+    legacy_cfg = cfg.replace(
+        "static const struct qmp_phy_cfg sdm845_ufsphy_cfg = {",
+        "static const struct qmp_phy_cfg a52_lagoon_ufsphy_cfg = {",
         1,
     )
+    legacy_cfg = legacy_cfg.replace(
+        ".clk_list\t\t= sdm845_ufs_phy_clk_l,",
+        ".clk_list\t\t= a52_lagoon_ufs_phy_clk_l,",
+        1,
+    )
+    legacy_cfg = legacy_cfg.replace(
+        ".num_clks\t\t= ARRAY_SIZE(sdm845_ufs_phy_clk_l),",
+        ".num_clks\t\t= ARRAY_SIZE(a52_lagoon_ufs_phy_clk_l),",
+        1,
+    )
+    if legacy_cfg == cfg:
+        raise SystemExit("legacy Lagoon UFS PHY config transformation made no changes")
+    if (
+        "a52_lagoon_ufsphy_cfg" not in legacy_cfg
+        or "a52_lagoon_ufs_phy_clk_l" not in legacy_cfg
+    ):
+        raise SystemExit("legacy Lagoon UFS PHY config transformation audit failed")
+    text = text[:cfg_end] + "\n\n" + legacy_cfg + text[cfg_end:]
+
+    old_match = '\t\t.compatible = "qcom,ufs-phy-qmp-v3",\n\t\t.data = &sdm845_ufsphy_cfg,'
+    new_match = '\t\t.compatible = "qcom,ufs-phy-qmp-v3",\n\t\t.data = &a52_lagoon_ufsphy_cfg,'
+    if text.count(old_match) != 1:
+        raise SystemExit(
+            "legacy compatible match entry: expected exactly one match, "
+            f"found {text.count(old_match)}"
+        )
+    text = text.replace(old_match, new_match, 1)
 
     checks = {
-        "pass_is_0": "#define RPMH_REGULATOR_MODE_PASS\t0" in text,
-        "ret_is_1": "#define RPMH_REGULATOR_MODE_RET\t\t1" in text,
-        "lpm_is_2": "#define RPMH_REGULATOR_MODE_LPM\t\t2" in text,
-        "auto_is_3": "#define RPMH_REGULATOR_MODE_AUTO\t3" in text,
-        "hpm_is_4": "#define RPMH_REGULATOR_MODE_HPM\t\t4" in text,
-        "compile_time_guard": (
-            '#error "Samsung downstream RPMh regulator mode ABI mismatch"' in text
+        "legacy_clock_list_present": LEGACY_CLOCK_LIST in text,
+        "legacy_ref_clk_src": '"ref_clk_src", "ref_clk", "ref_aux_clk"' in text,
+        "legacy_dedicated_config": (
+            "static const struct qmp_phy_cfg a52_lagoon_ufsphy_cfg" in text
+            and ".clk_list\t\t= a52_lagoon_ufs_phy_clk_l," in text
+            and ".num_clks\t\t= ARRAY_SIZE(a52_lagoon_ufs_phy_clk_l)," in text
         ),
-        "pmic5_ldo_lpm_mapping_retained": (
-            "[RPMH_REGULATOR_MODE_LPM] = {" in text
-            and "RPMH_REGULATOR_MODE_PMIC5_LDO_LPM" in text
-        ),
-        "pmic5_ldo_hpm_mapping_retained": (
-            "[RPMH_REGULATOR_MODE_HPM] = {" in text
-            and "RPMH_REGULATOR_MODE_PMIC5_LDO_HPM" in text
+        "legacy_compatible_uses_dedicated_config": new_match in text,
+        "upstream_sdm845_clock_names_unchanged": clock_anchor in text,
+        "upstream_sdm845_compatible_unchanged": (
+            '.compatible = "qcom,sdm845-qmp-ufs-phy",' in text
+            and ".data = &sdm845_ufsphy_cfg," in text
         ),
     }
     if not all(checks.values()):
         failed = [name for name, passed in checks.items() if not passed]
-        raise SystemExit(
-            "downstream RPMh mode ABI audit failed: " + ", ".join(failed)
-        )
+        raise SystemExit("legacy UFS PHY clock bridge audit failed: " + ", ".join(failed))
 
     source_path.write_text(text, encoding="utf-8")
-    (output / "a52-rpmh-regulator-downstream-run33.c").write_text(
-        text, encoding="utf-8"
-    )
+    (output / "patched-phy-qcom-qmp-run34.c").write_text(text, encoding="utf-8")
 
     return {
-        "status": "restored",
+        "status": "bridged",
         "reason": (
-            "Run 31 rejected baked mode 2 because upstream interprets it as AUTO; "
-            "Run 32 then rejected baked mode 4 after an incorrect attempted ABI "
-            "restoration. Qualcomm's original downstream ABI encodes LPM as 2 "
-            "and HPM as 4."
+            "Run 33 proved RPMh regulator registration but QMP probe failed with "
+            "-ENOENT while requesting upstream clock name ref. The shipped Samsung "
+            "node exposes three downstream names: ref_clk_src, ref_clk and ref_aux_clk."
         ),
         "scope": (
-            "numeric mode interpretation inside the downstream compatibility "
-            "regulator only; the upstream RPMh regulator binding is unchanged"
+            "qcom,ufs-phy-qmp-v3 only; native upstream sdm845-qmp-ufs-phy "
+            "clock names and configuration remain unchanged"
         ),
-        "mapping": {
-            "PASS": 0,
-            "RET": 1,
-            "LPM": 2,
-            "AUTO": 3,
-            "HPM": 4,
-        },
-        "source": str(source_path),
+        "compatible": "qcom,ufs-phy-qmp-v3",
+        "clock_names": ["ref_clk_src", "ref_clk", "ref_aux_clk"],
         "checks": checks,
     }
 
 
-def merge_report(output: Path, abi_report: dict) -> None:
+def merge_report(output: Path, clock_report: dict) -> None:
     report_path = output / "stage-report.json"
     if not report_path.is_file():
-        raise SystemExit("Run 31 UFS bridge stage report is missing")
+        raise SystemExit("Run 33 UFS bridge stage report is missing")
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    checks = abi_report.get("checks", {})
-    report.setdefault("checks", {})["downstream_regulator_mode_abi_restored"] = bool(
+    checks = clock_report.get("checks", {})
+    report.setdefault("checks", {})["legacy_ufs_phy_clock_names_bridged"] = bool(
         checks and all(checks.values())
     )
-    report["downstream_regulator_mode_abi"] = abi_report
-    if not report["checks"]["downstream_regulator_mode_abi_restored"]:
-        raise SystemExit("downstream RPMh regulator mode ABI bridge audit failed")
+    report["legacy_ufs_phy_clock_bridge"] = clock_report
+    report["compatibility_bridge"] = {
+        "from": "qcom,ufs-phy-qmp-v3",
+        "to_configuration": "a52_lagoon_ufsphy_cfg",
+    }
+    if not report["checks"]["legacy_ufs_phy_clock_names_bridged"]:
+        raise SystemExit("legacy UFS PHY clock-name bridge audit failed")
 
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -191,9 +210,9 @@ def merge_report(output: Path, abi_report: dict) -> None:
 def main() -> int:
     gki, output = parse_paths()
     output.mkdir(parents=True, exist_ok=True)
-    replay_run31_stage()
-    abi_report = restore_downstream_mode_abi(gki, output)
-    merge_report(output, abi_report)
+    replay_run33_stage()
+    clock_report = bridge_legacy_phy_clock_names(gki, output)
+    merge_report(output, clock_report)
     return 0
 
 
@@ -204,7 +223,7 @@ if __name__ == "__main__":
         try:
             _, output = parse_paths()
             output.mkdir(parents=True, exist_ok=True)
-            (output / "stage94b-run33-wrapper-error.txt").write_text(
+            (output / "stage94b-run34-wrapper-error.txt").write_text(
                 traceback.format_exc(), encoding="utf-8"
             )
         except BaseException:

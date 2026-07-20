@@ -1,6 +1,6 @@
 name: Probe latest Workflow 95 status
 
-# Refresh 22: capture the RPMh provider traceback-preserving run.
+# Refresh 23: capture the RPMh provider run after driver-name format fix.
 on:
   push:
     branches: [main]

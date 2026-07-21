@@ -222,7 +222,40 @@ def instrument_ufshcd(text: str) -> str:
     return text
 
 
+def instrument_sd(text: str) -> str:
+    text = _impl.add_include(
+        text,
+        "#include <linux/blkdev.h>\n",
+        "sd include",
+    )
+    probe_anchor = "static int sd_probe(struct device *dev)\n"
+    text = _impl.insert_after_fragment(
+        text,
+        probe_anchor,
+        'error = sd_format_disk_name("sd", index, gd->disk_name, DISK_NAME_LEN);\n',
+        "\tif (!error && sdp->host->by_ufs)\n"
+        "\t\ttgref_record(\"SD probe lun=%llu name=%s host_no=%d\",\n"
+        "\t\t\t     (unsigned long long)sdp->lun, gd->disk_name,\n"
+        "\t\t\t     sdp->host->host_no);\n",
+        "sd probe",
+    )
+
+    async_anchor = "static void sd_probe_async(void *data, async_cookie_t cookie)\n"
+    text = insert_after_regex(
+        text,
+        async_anchor,
+        r"\tdevice_add_disk\(dev,\s*gd(?:,\s*NULL)?\);\n",
+        "\tif (sdp->host->by_ufs)\n"
+        "\t\ttgref_record(\"SD add_disk name=%s capacity=%llu sectors host_no=%d\",\n"
+        "\t\t\t     gd->disk_name, (unsigned long long)get_capacity(gd),\n"
+        "\t\t\t     sdp->host->host_no);\n",
+        "sd add disk",
+    )
+    return text
+
+
 _impl.instrument_ufshcd = instrument_ufshcd
+_impl.instrument_sd = instrument_sd
 
 
 def requested_output() -> Path | None:

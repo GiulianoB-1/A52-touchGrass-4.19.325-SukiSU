@@ -1,0 +1,347 @@
+name: 96 - A52 TouchGrass 4.19.206 UFS reference recorder
+
+run-name: Build known-good TouchGrass UFS reference recorder with automatic data dump
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-ufs-reference-recorder
+    paths:
+      - '.github/workflows/96-a52-touchgrass-ufs-reference-recorder.yml'
+      - 'scripts/96_stage_touchgrass_ufs_reference_recorder.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-touchgrass-ufs-reference-recorder
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build:
+    name: Build and repack TouchGrass UFS reference recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out kernel project branch
+        uses: actions/checkout@v4
+        with:
+          ref: rebase/resukisu-linux-4.19.325
+
+      - name: Hydrate recorder, build and repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAG_REF: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+
+          fetch_file "$DIAG_REF" scripts/96_stage_touchgrass_ufs_reference_recorder.py
+          fetch_file main scripts/48_build_a52_linux_4.19.206_touchscreen.sh
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+
+          chmod +x \
+            scripts/96_stage_touchgrass_ufs_reference_recorder.py \
+            scripts/48_build_a52_linux_4.19.206_touchscreen.sh \
+            scripts/37_validate_a52_p1_boot_source.py \
+            scripts/38_repack_a52_p1_boot.py
+          python3 -m py_compile \
+            scripts/96_stage_touchgrass_ufs_reference_recorder.py \
+            scripts/37_validate_a52_p1_boot_source.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-touchgrass-ufs-reference-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.206-no-root-${{ runner.os }}-
+            a52xq-recovery-ramoops-exporter-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Prepare exact TouchGrass source through Linux 4.19.200
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Derive and apply official Linux 4.19.206 merge
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_merge_linux_4.19.210.sh \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          sed -i \
+            -e 's/TO_TAG=v4.19.210/TO_TAG=v4.19.206/' \
+            -e '/^TARGET_COMMIT=/d' \
+            -e '/test "$to_sha" = "$TARGET_COMMIT"/d' \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.206
+
+      - name: Apply conditional merge-shape repairs for 4.19.206
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_fix_linux_4.19.210_compile.sh \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          sed -i 's/TARGET_VERSION=4.19.210/TARGET_VERSION=4.19.206/' \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_fix_linux_4.19.206.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('workspace/touchgrass-a52xq')
+
+          header = (root / 'include/linux/timerqueue.h').read_text()
+          path = root / 'drivers/soc/qcom/event_timer.c'
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          wants_newer = 'struct rb_root_cached rb_root;' in header
+          desired = newer if wants_newer else older
+          obsolete = older if wants_newer else newer
+          if desired not in text:
+              if obsolete not in text:
+                  raise SystemExit('event_timer initializer shape is unrecognized')
+              path.write_text(text.replace(obsolete, desired, 1))
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              path.write_text(text.replace(anchor, helper + anchor, 1))
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing after generic repair')
+          PY
+
+      - name: Stage targeted UFS reference recorder and automatic dumper
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+          mkdir -p "$OUT"
+          python3 scripts/96_stage_touchgrass_ufs_reference_recorder.py \
+            --kernel workspace/touchgrass-a52xq \
+            --output "$OUT"
+
+          git -C workspace/touchgrass-a52xq diff --check
+          git -C workspace/touchgrass-a52xq diff --binary --no-ext-diff \
+            > "$OUT/touchgrass-ufs-reference-recorder.patch"
+          test -s "$OUT/touchgrass-ufs-reference-recorder.patch"
+
+          grep -Fq 'TGREF_DUMP_PATH "/data/local/tmp/tgref_ufs.log"' \
+            workspace/touchgrass-a52xq/drivers/scsi/ufs/tgref-recorder.c
+          grep -Fq 'DEV call device=%s driver=%s' \
+            workspace/touchgrass-a52xq/drivers/base/dd.c
+          grep -Fq 'UFS power_up_begin' \
+            workspace/touchgrass-a52xq/drivers/scsi/ufs/ufs-qcom.c
+          grep -Fq 'CORE link_startup' \
+            workspace/touchgrass-a52xq/drivers/scsi/ufs/ufshcd.c
+          grep -Fq 'SD add_disk' \
+            workspace/touchgrass-a52xq/drivers/scsi/sd.c
+
+      - name: Build known-good touchscreen configuration with recorder
+        run: |
+          set -Eeuo pipefail
+          ./scripts/48_build_a52_linux_4.19.206_touchscreen.sh
+
+          SRC=artifacts/a52xq-linux-4.19.206-touchscreen-kernel
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+          cp "$SRC/Image" "$OUT/Image"
+          cp "$SRC/Image.gz" "$OUT/Image.gz"
+          cp "$SRC/final.config" "$OUT/final.config"
+          cp "$SRC/System.map" "$OUT/System.map" 2>/dev/null || true
+          cp "$SRC/vmlinux" "$OUT/vmlinux" 2>/dev/null || true
+
+      - name: Audit recorder Image and no-root policy
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+
+          grep -aFq 'TGREF reference=touchGrass-4.19.206' "$OUT/Image"
+          grep -aFq '/data/local/tmp/tgref_ufs.log' "$OUT/Image"
+          grep -aFq 'DEV call device=%s driver=%s' "$OUT/Image"
+          grep -aFq 'PHY probe_begin device=%s' "$OUT/Image"
+          grep -aFq 'UFS power_up_begin lanes=%u gear4=%d' "$OUT/Image"
+          grep -aFq 'PLT parse_clocks ret=%d' "$OUT/Image"
+          grep -aFq 'CORE link_startup ret=%d' "$OUT/Image"
+          grep -aFq 'SD add_disk name=%s' "$OUT/Image"
+
+          grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$OUT/final.config"
+          grep -Fxq 'CONFIG_SCSI_UFSHCD_PLATFORM=y' "$OUT/final.config"
+          grep -Fxq 'CONFIG_PHY_QCOM_UFS=y' "$OUT/final.config"
+          grep -Fxq 'CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y' "$OUT/final.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$OUT/final.config"
+          ! grep -Eq '^CONFIG_KSU(=|_)' "$OUT/final.config"
+
+      - name: Download and validate checksum-locked original boot image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+
+          ASSET_LINE="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+            --jq '.[] | .assets[] | select(.name | endswith(".img")) |
+                  [.id, .name, .created_at] | @tsv' | head -n 1)"
+          test -n "$ASSET_LINE"
+          IFS=$'\t' read -r ASSET_ID ASSET_NAME ASSET_CREATED <<< "$ASSET_LINE"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            --output intake/boot.img
+
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/source-validation.json"
+
+          printf 'asset_id=%s\nasset_name=%s\nasset_created=%s\n' \
+            "$ASSET_ID" "$ASSET_NAME" "$ASSET_CREATED" \
+            > "$OUT/source-asset.txt"
+
+      - name: Repack and audit flashable diagnostic boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+      - name: Finalize recorder artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-touchgrass-ufs-reference-recorder
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G TOUCHGRASS 4.19.206 UFS REFERENCE RECORDER
+
+          Purpose:
+          Capture the known-good TouchGrass UFS initialization sequence for direct
+          comparison with the GKI 5.10 recorder.
+
+          Automatic collection:
+          The kernel keeps targeted TGREF breadcrumbs in a 128 KiB RAM buffer.
+          After /data/local/tmp appears, it waits 30 seconds and writes:
+
+              /data/local/tmp/tgref_ufs.log
+
+          No KernelSU or Android root application is included. The one-shot dumper
+          runs inside this diagnostic kernel and writes a root-owned, mode-0644 file.
+
+          After Android finishes booting, wait about 60 to 90 seconds, then run:
+
+              adb shell ls -l /data/local/tmp/tgref_ufs.log
+              adb pull /data/local/tmp/tgref_ufs.log
+
+          Each diagnostic boot overwrites the previous tgref_ufs.log.
+
+          This boot image is not hardware-validated yet.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/status.tsv"
+          printf 'kernel-version\t4.19.206\n' >> "$OUT/status.tsv"
+          printf 'known-good-touchscreen-config\tyes\n' >> "$OUT/status.tsv"
+          printf 'targeted-ufs-recorder\tyes\n' >> "$OUT/status.tsv"
+          printf 'automatic-data-dump\tyes\n' >> "$OUT/status.tsv"
+          printf 'dump-path\t/data/local/tmp/tgref_ufs.log\n' >> "$OUT/status.tsv"
+          printf 'android-root-required\tno\n' >> "$OUT/status.tsv"
+          printf 'kernel-root-integration\tnone\n' >> "$OUT/status.tsv"
+          printf 'flashable-candidate\tyes\n' >> "$OUT/status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 |
+              sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload TouchGrass UFS reference recorder
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-4.19.206-ufs-reference-recorder-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-touchgrass-ufs-reference-recorder
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-ufs-reference-recorder-failure-${{ github.run_number }}
+          path: |
+            artifacts/
+            workspace/touchgrass-a52xq/out/.config
+          if-no-files-found: warn
+          retention-days: 14

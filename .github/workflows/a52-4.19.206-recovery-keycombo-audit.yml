@@ -6,6 +6,10 @@ on:
     paths:
       - 'scripts/add_a52_recovery_keycombo.py'
       - '.github/workflows/a52-4.19.206-recovery-keycombo-audit.yml'
+  pull_request:
+    paths:
+      - 'scripts/add_a52_recovery_keycombo.py'
+      - '.github/workflows/a52-4.19.206-recovery-keycombo-audit.yml'
 
 permissions:
   contents: read

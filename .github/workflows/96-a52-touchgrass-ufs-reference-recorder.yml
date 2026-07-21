@@ -10,6 +10,12 @@ on:
     paths:
       - '.github/workflows/96-a52-touchgrass-ufs-reference-recorder.yml'
       - 'scripts/96_stage_touchgrass_ufs_reference_recorder.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/96-a52-touchgrass-ufs-reference-recorder.yml'
+      - 'scripts/96_stage_touchgrass_ufs_reference_recorder.py'
 
 permissions:
   contents: read

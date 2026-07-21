@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
+import traceback
 import types
 import urllib.request
 from pathlib import Path
@@ -223,5 +225,26 @@ def instrument_ufshcd(text: str) -> str:
 _impl.instrument_ufshcd = instrument_ufshcd
 
 
+def requested_output() -> Path | None:
+    try:
+        index = sys.argv.index("--output")
+        return Path(sys.argv[index + 1]).resolve()
+    except (ValueError, IndexError):
+        return None
+
+
+def main() -> int:
+    try:
+        return _impl.main()
+    except BaseException:
+        output = requested_output()
+        if output is not None:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "stage-error.txt").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
+        raise
+
+
 if __name__ == "__main__":
-    raise SystemExit(_impl.main())
+    raise SystemExit(main())

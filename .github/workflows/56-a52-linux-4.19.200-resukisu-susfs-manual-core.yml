@@ -1,4 +1,4 @@
-name: 57 - A52 Linux 4.19.206 ReSukiSU manual hooks plus SUSFS detection
+name: 58 - A52 Linux 4.19.206 recovery keycombo test
 
 on:
   pull_request:
@@ -6,13 +6,14 @@ on:
       - '.github/workflows/56-a52-linux-4.19.200-resukisu-susfs-manual-core.yml'
       - 'scripts/56_*'
       - 'scripts/57_*'
+      - 'scripts/58_*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-4.19.206-resukisu-susfs-manual-detection-${{ github.ref }}
+  group: a52-4.19.206-recovery-keycombo-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,11 +21,11 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 5G
   ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
-  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core-recovery-keycombo
 
 jobs:
   build:
-    name: Build Linux 4.19.206 from hardware-tested SUSFS detection baseline
+    name: Build tested 4.19.206 baseline with recovery keycombo
     runs-on: ubuntu-22.04
     timeout-minutes: 300
 
@@ -50,11 +51,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-${{ github.run_id }}
+          key: a52xq-4.19.206-recovery-keycombo-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
+            a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-
             a52xq-4.19.200-manual-susfs-core-${{ runner.os }}-
             a52xq-linux-4.19.200-susfs-minimal-ccache-${{ runner.os }}-
-            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
 
       - name: Prepare exact touchGrass source
         run: |
@@ -97,18 +98,30 @@ jobs:
       - name: Replace legacy exec dispatch with working manual hook
         run: ./scripts/07_patch_resukisu_exec_hook.sh
 
-      - name: Build ReSukiSU manual hooks plus SUSFS detection API
+      - name: Build ReSukiSU, SUSFS detection, and recovery keycombo
         run: |
           set -o pipefail
           ./scripts/57_build_resukisu_susfs_manual_detection.sh \
-            2>&1 | tee artifacts/linux-4.19.206-resukisu-susfs-manual-detection.log
+            2>&1 | tee artifacts/linux-4.19.206-recovery-keycombo.log
 
-      - name: Compare final config with hardware-tested baseline
+      - name: Compare config with hardware-tested baseline
         run: |
+          FINAL_CONFIG="artifacts/config-${LABEL}"
+          NORMALIZED_CONFIG="artifacts/config-${LABEL}.without-recovery-keycombo"
+          REPORT="artifacts/recovery-keycombo-config-comparison.txt"
+
+          grep -Fxq 'CONFIG_INPUT_RECOVERY_KEYCOMBO=y' "$FINAL_CONFIG"
+          grep -v '^CONFIG_INPUT_RECOVERY_KEYCOMBO=' "$FINAL_CONFIG" > "$NORMALIZED_CONFIG"
+
           python3 scripts/56_compare_config_to_working_baseline.py \
-            "artifacts/config-${LABEL}" \
-            artifacts/manual-detection-config-comparison.txt
-          cat artifacts/manual-detection-config-comparison.txt
+            "$NORMALIZED_CONFIG" \
+            "$REPORT"
+
+          {
+            echo 'allowed_non_baseline_symbol=CONFIG_INPUT_RECOVERY_KEYCOMBO=y'
+            echo "actual_final_config_sha256=$(sha256sum "$FINAL_CONFIG" | awk '{print $1}')"
+          } >> "$REPORT"
+          cat "$REPORT"
 
       - name: Check out pinned AnyKernel3
         uses: actions/checkout@v4
@@ -120,20 +133,20 @@ jobs:
 
       - name: Package kernel-only rollback-friendly test ZIP
         run: |
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-manual-susfs-detection.sh
-          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-manual-susfs-detection.sh
-          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-manual-susfs-detection.sh
-          sed -i 's/susfs=disabled/susfs=core-only-manual-hooks-detection-api/' scripts/.package-manual-susfs-detection.sh
-          sed -i 's/SUSFS: disabled/SUSFS: v1.4.2 core with detection API, manual hooks retained/' scripts/.package-manual-susfs-detection.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-DETECTION-TEST.zip/' scripts/.package-manual-susfs-detection.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux \$TARGET_VERSION + ReSukiSU v4.1.0 + SUSFS detection/' scripts/.package-manual-susfs-detection.sh
-          chmod +x scripts/.package-manual-susfs-detection.sh
-          ./scripts/.package-manual-susfs-detection.sh \
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-recovery-keycombo.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-recovery-keycombo.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-recovery-keycombo.sh
+          sed -i 's/susfs=disabled/susfs=core-only-manual-hooks-detection-api/' scripts/.package-recovery-keycombo.sh
+          sed -i 's/SUSFS: disabled/SUSFS: v1.4.2 core with detection API, manual hooks retained/' scripts/.package-recovery-keycombo.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-SUSFS-v1.4.2-RECOVERY-KEYCOMBO-TEST.zip/' scripts/.package-recovery-keycombo.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + SUSFS detection + recovery keycombo/' scripts/.package-recovery-keycombo.sh
+          chmod +x scripts/.package-recovery-keycombo.sh
+          ./scripts/.package-recovery-keycombo.sh \
             4.19.206 \
             "artifacts/Image-${LABEL}" \
             packaging/AnyKernel3 \
             release
-          rm -f scripts/.package-manual-susfs-detection.sh
+          rm -f scripts/.package-recovery-keycombo.sh
 
       - name: Record source diagnostics
         if: always()
@@ -148,6 +161,7 @@ jobs:
           non_susfs_canonical_sha256=494a12a758bec9a7500b3370c4059c989254a468aaf895d43a8e6ea9a0441b92
           non_susfs_symbol_count=5427
           source=hardware-tested-linux-4.19.200-manual-susfs-detection
+          allowed_delta=CONFIG_INPUT_RECOVERY_KEYCOMBO=y
           EOF
           if [ -d workspace/touchgrass-a52xq/.git ]; then
             git -C workspace/touchgrass-a52xq status --short \
@@ -165,7 +179,7 @@ jobs:
       - name: Upload kernel-only test ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.206-ReSukiSU-v4.1.0-SUSFS-v1.4.2-MANUAL-DETECTION-TEST-${{ github.run_number }}
+          name: A52XQ-4.19.206-ReSukiSU-SUSFS-RECOVERY-KEYCOMBO-TEST-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14
@@ -174,7 +188,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-4.19.206-resukisu-susfs-manual-detection-${{ github.run_number }}-diagnostics
+          name: a52xq-4.19.206-recovery-keycombo-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

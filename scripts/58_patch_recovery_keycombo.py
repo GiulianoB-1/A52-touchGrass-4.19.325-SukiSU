@@ -22,7 +22,7 @@ def main() -> None:
     config_anchor = '"$KERNEL_DIR/scripts/config" --file "$DEFCONFIG" \\\n'
     install_block = r"""
 info "Adding boot-time physical recovery key combination"
-install -m 0644 "$SCRIPT_DIR/58_recovery_keycombo.c" \
+install -m 0644 "$(dirname "$0")/58_recovery_keycombo.c" \
   "$KERNEL_DIR/drivers/input/recovery_keycombo.c"
 
 python3 - "$KERNEL_DIR/drivers/input/Kconfig" "$KERNEL_DIR/drivers/input/Makefile" <<'RECOVERYKEYPY'

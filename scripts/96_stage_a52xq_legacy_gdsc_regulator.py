@@ -18,6 +18,7 @@ DRIVER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/ioport.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -105,6 +106,7 @@ static int a52_legacy_gdsc_probe(struct platform_device *pdev)
 	struct regulator_config config = { };
 	struct a52_legacy_gdsc *gdsc;
 	struct regulator_dev *rdev;
+	struct resource *res;
 	const char *name;
 	u32 val;
 
@@ -120,9 +122,19 @@ static int a52_legacy_gdsc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	gdsc->dev = &pdev->dev;
-	gdsc->gdscr = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(gdsc->gdscr))
-		return PTR_ERR(gdsc->gdscr);
+	/*
+	 * The legacy standalone GDSC node describes a register inside the GCC
+	 * controller range. The GCC clock driver already owns that parent MMIO
+	 * resource, so devm_platform_ioremap_resource() would fail with -EBUSY.
+	 * Map the four-byte child register without requesting the overlapping
+	 * resource, matching the vendor DT's shared-register layout.
+	 */
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EINVAL;
+	gdsc->gdscr = devm_ioremap(&pdev->dev, res->start, resource_size(res));
+	if (!gdsc->gdscr)
+		return -ENOMEM;
 
 	gdsc->desc.name = name;
 	gdsc->desc.of_match = name;
@@ -228,6 +240,7 @@ def main() -> int:
         "scoped_provider": 'strcmp(name, "gcc_ufs_phy_gdsc")' in DRIVER_SOURCE,
         "legacy_compatible": '.compatible = "qcom,gdsc"' in DRIVER_SOURCE,
         "hba_vote_enable": "A52_GDSC_SW_COLLAPSE" in DRIVER_SOURCE,
+        "overlap_safe_mapping": "devm_ioremap(&pdev->dev, res->start" in DRIVER_SOURCE,
         "persistent_probe_trace": "A52GDSC PROBE" in DRIVER_SOURCE,
         "persistent_enable_trace": "A52GDSC ENABLE" in DRIVER_SOURCE,
         "boot_critical_disable_guard": "A52GDSC DISABLE_KEEP_ON" in DRIVER_SOURCE,
@@ -256,7 +269,8 @@ def main() -> int:
                 ),
                 "scope": "gcc_ufs_phy_gdsc only",
                 "policy": (
-                    "enable the HLOS vote and keep the boot-critical domain on "
+                    "map the overlapping GCC child register without reserving it, "
+                    "enable the HLOS vote, and keep the boot-critical domain on "
                     "for this diagnostic candidate"
                 ),
                 "checks": checks,

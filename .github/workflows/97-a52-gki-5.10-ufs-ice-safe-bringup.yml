@@ -24,6 +24,7 @@ concurrency:
 
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
   WORKFLOW96_ARTIFACT_ID: '8572438654'
 
 jobs:
@@ -53,12 +54,23 @@ jobs:
           path: gki
           key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
 
-      - name: Download and verify Workflow 96 candidate
+      - name: Download and verify source artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          mkdir -p workflow96/extracted
+          mkdir -p workflow68/extracted workflow96/extracted
+
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow68/extracted/integrated-port.patch
+
           curl --fail --location --retry 5 --retry-all-errors \
             --silent --show-error \
             -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -70,8 +82,11 @@ jobs:
           test -s workflow96/extracted/full-integrated-legacy-gdsc-ufs.patch
           test -s workflow96/extracted/diagnostic.config
           test -s workflow96/extracted/boot.img
+          test -s workflow96/extracted/gdsc-regulator-bridge/a52-legacy-gdsc-regulator.c
+          test -s workflow96/extracted/ufs-flight-recorder/a52-ufs-live-trace.c
+          test -s workflow96/extracted/ufs-phy-bridge/rpmh-provider-bridge/a52-rpmh-regulator-downstream.c
 
-      - name: Replay Workflow 96 source exactly
+      - name: Reconstruct complete Workflow 96 source
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
@@ -81,9 +96,52 @@ jobs:
           git -C gki/common reset --hard "${GKI_COMMON_SHA}"
           git -C gki/common clean -fd
 
-          PATCH="$PWD/workflow96/extracted/full-integrated-legacy-gdsc-ufs.patch"
-          git -C gki/common apply --check "$PATCH"
-          git -C gki/common apply "$PATCH"
+          # Workflow 96's archived git diff contains every tracked change, but
+          # git diff did not include newly generated files that were untracked.
+          TRACKED="$PWD/workflow96/extracted/full-integrated-legacy-gdsc-ufs.patch"
+          git -C gki/common apply --check "$TRACKED"
+          git -C gki/common apply "$TRACKED"
+
+          # Restore all new Lagoon source and DT files from the compile-proven
+          # Workflow 68 patch without reapplying its tracked-file modifications.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('workflow68/extracted/integrated-port.patch').read_text(
+              encoding='utf-8', errors='strict'
+          )
+          selected = []
+          for chunk in source.split('diff --git ')[1:]:
+              lines = chunk.splitlines()
+              if any(line.startswith('new file mode ') for line in lines[:10]):
+                  selected.append('diff --git ' + chunk)
+          if len(selected) != 59:
+              raise SystemExit(
+                  f'expected 59 Workflow 68 new files, found {len(selected)}'
+              )
+          Path('workflow68/new-files-only.patch').write_text(
+              ''.join(selected), encoding='utf-8'
+          )
+          PY
+          git -C gki/common apply --check "$PWD/workflow68/new-files-only.patch"
+          git -C gki/common apply "$PWD/workflow68/new-files-only.patch"
+
+          # Restore later generated providers and the UFS flight-recorder source.
+          install -m 0644 \
+            workflow96/extracted/gdsc-regulator-bridge/a52-legacy-gdsc-regulator.c \
+            gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+          install -m 0644 \
+            workflow96/extracted/ufs-phy-bridge/rpmh-provider-bridge/a52-rpmh-regulator-downstream.c \
+            gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          install -m 0644 \
+            workflow96/extracted/ufs-flight-recorder/a52-ufs-live-trace.c \
+            gki/common/drivers/scsi/ufs/a52-ufs-live-trace.c
+
+          test -s gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          test -s gki/common/drivers/clk/qcom/gcc-lagoon.c
+          test -s gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+          test -s gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          test -s gki/common/drivers/scsi/ufs/a52-ufs-live-trace.c
 
       - name: Stage ICE-safe storage bring-up
         run: |
@@ -104,9 +162,17 @@ jobs:
           grep -Fq 'A52UFS copy=1 ICE_INIT_END' \
             gki/common/drivers/scsi/ufs/ufs-qcom.c
 
+          # Intent-to-add makes the archived patch self-contained this time.
+          while IFS= read -r -d '' file; do
+            git -C gki/common add -N -- "$file"
+          done < <(git -C gki/common ls-files --others --exclude-standard -z)
           git -C gki/common diff --binary --no-ext-diff \
             > "$OUT/full-integrated-ufs-ice-safe.patch"
           test -s "$OUT/full-integrated-ufs-ice-safe.patch"
+          grep -Fq 'diff --git a/drivers/pinctrl/qcom/pinctrl-lagoon.c' \
+            "$OUT/full-integrated-ufs-ice-safe.patch"
+          grep -Fq 'diff --git a/drivers/scsi/ufs/a52-ufs-live-trace.c' \
+            "$OUT/full-integrated-ufs-ice-safe.patch"
 
       - name: Configure diagnostic kernel
         run: |
@@ -128,6 +194,7 @@ jobs:
           grep -Fxq 'CONFIG_BLK_INLINE_ENCRYPTION=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_BLK_INLINE_ENCRYPTION_FALLBACK=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PINCTRL_LAGOON=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_BLK_DEV_SD=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
 
@@ -143,7 +210,7 @@ jobs:
 
           "$CLANG" --version | tee "$OUT/logs/toolchain.log"
           make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
-            KCFLAGS=-Wno-error=frame-larger-than Image vmlinux \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
             2>&1 | tee "$OUT/logs/Image.log"
 
           test -s "$BUILD/arch/arm64/boot/Image"
@@ -272,6 +339,8 @@ jobs:
 
           printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
           printf 'workflow96-gdsc-fix-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'all-generated-lagoon-files-restored\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'self-contained-source-patch\tyes\n' >> "$OUT/candidate-status.tsv"
           printf 'ice-scm-and-mmio-access-bypassed\tyes\n' >> "$OUT/candidate-status.tsv"
           printf 'software-inline-encryption-fallback\tyes\n' >> "$OUT/candidate-status.tsv"
           printf 'vmlinux-and-ufs-disassembly-included\tyes\n' >> "$OUT/candidate-status.tsv"
@@ -331,9 +400,9 @@ jobs:
               f"Status: completed\n"
               f"Conclusion: {os.environ['RESULT']}\n"
               f"Head SHA: {os.environ['HEAD_SHA']}\n\n"
-              "Purpose: preserve the successful GDSC provider fix, bypass the "
-              "fatal Qualcomm ICE initialization path before SCM/MMIO access, "
-              "and test UFS link, SCSI and partition bring-up."
+              "Purpose: reconstruct the complete Workflow 96 source, preserve "
+              "the successful GDSC fix, bypass the fatal ICE path before "
+              "SCM/MMIO access, and test UFS link and partition bring-up."
           )
           print(json.dumps({'body': body}))
           PY

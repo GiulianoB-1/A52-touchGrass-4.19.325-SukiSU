@@ -24,6 +24,7 @@ concurrency:
 
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
   WORKFLOW95_ARTIFACT_ID: '8567975569'
 
 jobs:
@@ -71,7 +72,24 @@ jobs:
           test -s workflow95/extracted/diagnostic.config
           test -s workflow95/extracted/boot.img
 
-      - name: Replay audited Workflow 95 source patch
+      - name: Download and verify Workflow 68 integrated port
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow68/extracted
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow68/extracted/integrated-port.patch
+          test -s workflow68/extracted/integrated.config
+
+      - name: Replay proven integrated A52 port
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
@@ -81,16 +99,34 @@ jobs:
           git -C gki/common reset --hard "${GKI_COMMON_SHA}"
           git -C gki/common clean -fd
 
-          PATCH="$PWD/workflow95/extracted/full-integrated-ufs-bridge-flight-recorder.patch"
+          PATCH="$PWD/workflow68/extracted/integrated-port.patch"
           git -C gki/common apply --check "$PATCH"
           git -C gki/common apply "$PATCH"
 
-      - name: Stage legacy GDSC regulator bridge
+      - name: Stage Workflow 95 bridges and legacy GDSC provider
         run: |
           set -Eeuo pipefail
           OUT=artifacts/a52xq-gki-5.10-legacy-gdsc-ufs
-          mkdir -p "$OUT/logs" "$OUT/gdsc-regulator-bridge"
+          mkdir -p "$OUT/logs" "$OUT/watchdog-bridge" \
+            "$OUT/early-start-breadcrumbs" "$OUT/first-irq-trace" \
+            "$OUT/post-init-flight-recorder" "$OUT/pid1-exit-trace" \
+            "$OUT/ufs-flight-recorder" "$OUT/ufs-phy-bridge" \
+            "$OUT/gdsc-regulator-bridge"
 
+          python3 scripts/75_stage_a52xq_msm_watchdog.py \
+            --gki gki/common --output "$OUT/watchdog-bridge"
+          python3 scripts/83_stage_a52xq_early_start_kernel_breadcrumbs.py \
+            --gki gki/common --output "$OUT/early-start-breadcrumbs"
+          python3 scripts/91_stage_a52xq_first_irq_trace.py \
+            --gki gki/common --output "$OUT/first-irq-trace"
+          python3 scripts/92_stage_a52xq_post_init_flight_recorder.py \
+            --gki gki/common --output "$OUT/post-init-flight-recorder"
+          python3 scripts/93_stage_a52xq_pid1_exit_trace.py \
+            --gki gki/common --output "$OUT/pid1-exit-trace"
+          python3 scripts/94_stage_a52xq_ufs_live_trace.py \
+            --gki gki/common --output "$OUT/ufs-flight-recorder"
+          python3 scripts/94b_stage_a52xq_ufs_phy_bridge.py \
+            --gki gki/common --output "$OUT/ufs-phy-bridge"
           python3 scripts/96_stage_a52xq_legacy_gdsc_regulator.py \
             --gki gki/common --output "$OUT/gdsc-regulator-bridge"
 

@@ -209,8 +209,8 @@ jobs:
               ),
               "ufs_host_node_present": b"ufshc@1d84000" in new["dtb"],
               "ufs_phy_node_present": b"ufsphy_mem@1d87000" in new["dtb"],
-              "fixed_hba_contract_present": (
-                  b"vdd-hba-fixed-regulator" in new["dtb"]
+              "legacy_gdsc_node_present": (
+                  b"gcc_ufs_phy_gdsc" in new["dtb"]
               ),
           }
           failed = [name for name, passed in checks.items() if not passed]

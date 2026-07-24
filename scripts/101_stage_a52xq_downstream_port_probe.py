@@ -170,14 +170,13 @@ def stage_display(touchgrass: Path, gki: Path) -> dict:
 
     root_mk = gki / "Makefile"
     root_text = root_mk.read_text(errors="replace")
-    anchors = ("core-y\t\t+= init/ usr/", "core-y += init/ usr/")
-    anchor = next((item for item in anchors if item in root_text), None)
-    if anchor is None:
-        raise SystemExit("top-level core-y anchor not found")
+    boundary = "vmlinux-dirs :="
+    if boundary not in root_text:
+        raise SystemExit("top-level vmlinux-dirs boundary not found")
     if "A52_PORT_PROBE_TECHPACK" not in root_text:
         root_text = root_text.replace(
-            anchor,
-            anchor + "\n# A52_PORT_PROBE_TECHPACK\ncore-y += techpack/",
+            boundary,
+            "# A52_PORT_PROBE_TECHPACK\ncore-y += techpack/\n\n" + boundary,
             1,
         )
         root_mk.write_text(root_text)

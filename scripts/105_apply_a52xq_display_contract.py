@@ -340,18 +340,23 @@ def include_contract_in_port(gki: Path) -> dict[str, int]:
         'msm_drv': 0,
         'dsi_panel': 0,
         'dsi_display': 0,
+        'msm_notifier': 0,
         'compat_undef_pr_fmt_removed': 0,
     }
     for root in (gki / 'drivers/a52_display', gki / 'techpack/display'):
         if not root.exists():
             continue
-        for path in root.rglob('*.h'):
+        for path in root.rglob('*'):
+            if not path.is_file():
+                continue
             if path.name == 'msm_drv.h':
                 counts['msm_drv'] += add_include(path, '#include <drm/a52_display_contract.h>')
             elif path.name == 'dsi_panel.h':
                 counts['dsi_panel'] += add_include(path, '#include <drm/a52_display_contract.h>')
             elif path.name == 'dsi_display.h':
                 counts['dsi_display'] += add_include(path, '#include <drm/a52_display_contract.h>')
+            elif path.name == 'msm_notifier.c':
+                counts['msm_notifier'] += add_include(path, '#include <drm/a52_display_contract.h>')
 
     compat = gki / 'a52-port-compat.h'
     text = read(compat)
@@ -379,6 +384,12 @@ def validate(gki: Path) -> dict[str, bool]:
         'panel_hdr_single_definition': contract.count('struct drm_panel_hdr_properties {') == 0,
         'fps_contract': 'enum fps {' in contract or tree_has_named_block(gki / 'include', 'enum', 'fps'),
         'pr_fmt_preserved': '#undef pr_fmt' not in read(gki / 'a52-port-compat.h'),
+        'msm_notifier_contract': all(
+            '#include <drm/a52_display_contract.h>' in read(path)
+            for root in (gki / 'drivers/a52_display', gki / 'techpack/display')
+            if root.exists()
+            for path in root.rglob('msm_notifier.c')
+        ),
         'panel_notifier_field': 'struct blocking_notifier_head nh;' in read(gki / 'include/drm/drm_panel.h'),
         'encoder_bridge': re.search(r'struct\s+drm_bridge\s*\*\s*bridge\s*;', read(gki / 'include/drm/drm_encoder.h')) is not None,
     }

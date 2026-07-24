@@ -1,0 +1,353 @@
+name: 102 - A52 GKI 5.10 port adapter batch 1
+
+run-name: Apply shared 4.19 to 5.10 adapters and recompile downstream units
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/102-a52-gki-5.10-port-adapter-batch1.yml'
+      - 'scripts/102_apply_a52xq_port_adapter_batch1.py'
+      - 'scripts/a52xq_downstream_port_probe_v3.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/102-a52-gki-5.10-port-adapter-batch1.yml'
+      - 'scripts/102_apply_a52xq_port_adapter_batch1.py'
+      - 'scripts/a52xq_downstream_port_probe_v3.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-port-adapter-batch1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+  WORKFLOW101_ARTIFACT_ID: '8593004099'
+
+jobs:
+  adapter-probe:
+    name: Apply batch 1 adapters and measure error reduction
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves \
+            device-tree-compiler
+          python3 -m py_compile \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/102_apply_a52xq_port_adapter_batch1.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download verified baseline artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          for item in 99 100 101; do
+            mkdir -p "workflow${item}/extracted"
+          done
+          download() {
+            local id="$1" output="$2"
+            curl --fail --location --retry 5 --retry-all-errors \
+              --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "$output"
+          }
+          download "${WORKFLOW99_ARTIFACT_ID}" workflow99/artifact.zip
+          download "${WORKFLOW100_ARTIFACT_ID}" workflow100/artifact.zip
+          download "${WORKFLOW101_ARTIFACT_ID}" workflow101/artifact.zip
+          unzip -q workflow99/artifact.zip -d workflow99/extracted
+          unzip -q workflow100/artifact.zip -d workflow100/extracted
+          unzip -q workflow101/artifact.zip -d workflow101/extracted
+          (cd workflow99/extracted && sha256sum -c SHA256SUMS)
+          (cd workflow100/extracted && sha256sum -c SHA256SUMS)
+          (cd workflow101/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow101/extracted/compile/compile-incompatibilities.json
+          test -s workflow101/extracted/config/final.config
+
+      - name: Replay hardware-tested Workflow 99 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          PATCH="$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+          grep -Fq 'A52RPMHABI copy=1' \
+            gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+
+      - name: Stage complete downstream port units
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-port-adapter-batch1
+          mkdir -p "$OUT/logs" "$OUT/compile" "$OUT/config" "$OUT/stage"
+          python3 scripts/a52xq_downstream_port_probe_v3.py \
+            --touchgrass touchgrass \
+            --gki gki/common \
+            --dts workflow100/extracted/preserved.dts \
+            --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage-port.log"
+          test -s "$OUT/stage/port-probe-stage.json"
+          test -s gki/common/drivers/a52_display/msm/sde/sde_kms.c
+          test -s gki/common/drivers/a52_secure/qseecom.c
+
+      - name: Apply first shared adapter batch
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-port-adapter-batch1
+          python3 scripts/102_apply_a52xq_port_adapter_batch1.py \
+            --touchgrass touchgrass \
+            --gki gki/common \
+            --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/adapter-batch1.log"
+          test -s "$OUT/stage/adapter-batch-1.json"
+          test -s gki/common/a52-compat/include/asm/sizes.h
+          test -s gki/common/a52-compat/include/linux/msm_ion.h
+          test -s gki/common/drivers/a52_secure/trace_secure_buffer.h
+          ! grep -Fq 'compat_qseecom.o' gki/common/drivers/a52_secure/Makefile
+          ! grep -Fq 'MM_UNRECLAIMABLE' gki/common/drivers/gpu/msm/kgsl_device.h
+          ! grep -Eq 'get_ds\(|get_fs\(|set_fs\(' gki/common/drivers/gpu/msm/kgsl.c
+
+      - name: Resolve adapter compile configuration
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-port-adapter-batch1"
+          BUILD="$PWD/workspace/gki-port-adapter-batch1-out"
+          mkdir -p "$BUILD"
+          cp workflow101/extracted/config/final.config "$BUILD/.config"
+          cp "$BUILD/.config" "$OUT/config/before.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+      - name: Compile all adapted downstream units with keep-going
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-port-adapter-batch1"
+          BUILD="$PWD/workspace/gki-port-adapter-batch1-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/port-compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if test -s "$BUILD/arch/arm64/boot/Image"; then
+            cp "$BUILD/arch/arm64/boot/Image" \
+              "$OUT/compile/Image-NON-FLASHABLE"
+          fi
+
+      - name: Parse and compare incompatibilities
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-port-adapter-batch1
+          python3 - <<'PY'
+          import collections
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-5.10-port-adapter-batch1')
+          baseline = json.loads(Path(
+              'workflow101/extracted/compile/compile-incompatibilities.json'
+          ).read_text())
+          lines = (root / 'logs/port-compile.log').read_text(errors='replace').splitlines()
+          compiler = re.compile(
+              r'^(?P<file>[^:\s][^:]*):(?P<line>\d+):(?P<column>\d+): '
+              r'(?P<kind>fatal error|error): (?P<message>.*)$'
+          )
+          entries = []
+          signatures = collections.Counter()
+          subsystems = collections.Counter()
+          missing_headers = collections.Counter()
+
+          def subsystem(path):
+              if 'drivers/gpu/msm/' in path:
+                  return 'display-kgsl'
+              if 'drivers/a52_display/' in path or 'techpack/display/' in path:
+                  return 'display-sde-dsi-panel'
+              if 'drivers/a52_secure/' in path:
+                  return 'secure-qseecom'
+              return 'kernel-integration'
+
+          for line in lines:
+              match = compiler.match(line)
+              if not match:
+                  continue
+              item = match.groupdict()
+              item['subsystem'] = subsystem(item['file'])
+              entries.append(item)
+              signatures[(item['subsystem'], item['message'])] += 1
+              subsystems[item['subsystem']] += 1
+              header = re.search(
+                  r"fatal error: ['<](?P<header>[^'>]+)['>] file not found",
+                  line,
+              )
+              if header:
+                  missing_headers[header.group('header')] += 1
+
+          unique = [
+              {'subsystem': key[0], 'message': key[1], 'count': count}
+              for key, count in signatures.most_common()
+          ]
+          result = {
+              'status': 'adapter-batch1-compile-probe-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'baseline_compiler_error_count': baseline['compiler_error_count'],
+              'compiler_error_count': len(entries),
+              'error_reduction': baseline['compiler_error_count'] - len(entries),
+              'baseline_unique_error_signature_count': baseline['unique_error_signature_count'],
+              'unique_error_signature_count': len(unique),
+              'unique_signature_reduction': baseline['unique_error_signature_count'] - len(unique),
+              'subsystem_counts': dict(subsystems),
+              'missing_headers': dict(missing_headers.most_common()),
+              'unique_signatures': unique,
+              'entries': entries[:1500],
+          }
+          (root / 'compile/compile-incompatibilities.json').write_text(
+              json.dumps(result, indent=2, sort_keys=True) + '\n'
+          )
+          md = [
+              '# A52 adapter batch 1 compile result', '',
+              f"- Errors: **{len(entries)}**, baseline **{baseline['compiler_error_count']}**",
+              f"- Error reduction: **{result['error_reduction']}**",
+              f"- Unique signatures: **{len(unique)}**, baseline **{baseline['unique_error_signature_count']}**",
+              f"- Unique-signature reduction: **{result['unique_signature_reduction']}**",
+              '', '## Errors by subsystem', '',
+          ]
+          for name, count in subsystems.most_common():
+              md.append(f'- `{name}`: {count}')
+          md += ['', '## Highest-frequency remaining incompatibilities', '']
+          for item in unique[:120]:
+              md.append(f"- `{item['subsystem']}` ×{item['count']}: {item['message']}")
+          if missing_headers:
+              md += ['', '## Remaining missing headers', '']
+              for header, count in missing_headers.most_common():
+                  md.append(f'- `{header}` ×{count}')
+          (root / 'compile/COMPILE-INCOMPATIBILITIES.md').write_text(
+              '\n'.join(md) + '\n'
+          )
+          PY
+          test -s "$OUT/compile/compile-incompatibilities.json"
+          test -s "$OUT/compile/COMPILE-INCOMPATIBILITIES.md"
+
+      - name: Finalize non-flashable adapter artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-port-adapter-batch1
+          cp workflow101/extracted/driver-ownership-matrix.tsv \
+            "$OUT/driver-ownership-matrix.tsv"
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G 4.19 TO 5.10 PORT ADAPTER BATCH 1
+
+          This artifact is not flashable and is not hardware validated.
+          Workflow 99 remains the hardware-tested storage-working baseline.
+
+          Batch 1 removes shared structural blockers: legacy size/bootmem/ION/DMA
+          header gaps, duplicate DRM fallback code, incorrect separate compat
+          QSEECom compilation, relocated secure headers, removed set_fs usage,
+          mmap_sem renaming, IRQ/time transitive includes and isolated KGSL
+          unreclaimable-memory accounting.
+
+          The compile report measures the remaining incompatibilities against the
+          Workflow 101 baseline of 662 errors and 136 unique signatures.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-5.10-port-adapter-batch1')
+          result = json.loads((root / 'compile/compile-incompatibilities.json').read_text())
+          final = {
+              'status': 'adapter-batch1-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'workflow99_baseline_preserved': True,
+              'compiler_error_count': result['compiler_error_count'],
+              'error_reduction': result['error_reduction'],
+              'unique_error_signature_count': result['unique_error_signature_count'],
+              'unique_signature_reduction': result['unique_signature_reduction'],
+          }
+          (root / 'final-state.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload adapter batch 1 report
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-port-adapter-batch1-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-port-adapter-batch1
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-port-adapter-batch1-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-port-adapter-batch1
+            workspace/gki-port-adapter-batch1-out/.config
+          if-no-files-found: warn
+          retention-days: 14

@@ -177,8 +177,10 @@ def patch_reservation_objects(gki: Path) -> dict[str, int]:
 
 
 def patch_qseecom_ioctl(gki: Path) -> dict[str, int]:
-    source = gki / 'drivers/a52_secure/qseecom.c'
-    header = gki / 'drivers/a52_secure/qseecom_kernel.h'
+    secure = gki / 'drivers/a52_secure'
+    source = secure / 'qseecom.c'
+    header = secure / 'qseecom_kernel.h'
+    compat = secure / 'compat_qseecom.c'
     source_count = replace_literal(
         source,
         'static long qseecom_ioctl(struct file *file,',
@@ -194,7 +196,22 @@ def patch_qseecom_ioctl(gki: Path) -> dict[str, int]:
         insertion = ('\nstruct file;\n' + prototype + '\n')
         header.write_text(text[:endif] + insertion + text[endif:])
         header_count = 1
-    return {'source_visibility': source_count, 'header_prototype': header_count}
+
+    compat_text = compat.read_text(errors='replace')
+    include_line = '#include "qseecom_kernel.h"'
+    compat_include_count = 0
+    if include_line not in compat_text:
+        anchor = '#include "compat_qseecom.h"\n'
+        if anchor not in compat_text:
+            raise SystemExit('compat_qseecom.c include anchor not found')
+        compat.write_text(compat_text.replace(anchor, anchor + include_line + '\n', 1))
+        compat_include_count = 1
+
+    return {
+        'source_visibility': source_count,
+        'header_prototype': header_count,
+        'compat_header_include': compat_include_count,
+    }
 
 
 def patch_simple_renames(gki: Path) -> dict[str, int]:
@@ -294,6 +311,7 @@ def main() -> int:
         ('reservation_objects', 'struct'): 1,
         ('qseecom_ioctl', 'source_visibility'): 1,
         ('qseecom_ioctl', 'header_prototype'): 1,
+        ('qseecom_ioctl', 'compat_header_include'): 1,
     }
     failed = []
     for (section, key), minimum in required_minimums.items():

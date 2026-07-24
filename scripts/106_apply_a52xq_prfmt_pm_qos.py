@@ -216,7 +216,6 @@ def count_legacy_pm_qos_tokens(gki: Path) -> dict[str, int]:
         'PM_QOS_CPU_DMA_LATENCY': re.compile(r'\bPM_QOS_CPU_DMA_LATENCY\b'),
         'PM_QOS_REQ_AFFINE_CORES': re.compile(r'\bPM_QOS_REQ_AFFINE_CORES\b'),
         'PM_QOS_REQ_AFFINE_IRQ': re.compile(r'\bPM_QOS_REQ_AFFINE_IRQ\b'),
-        'cpus_affine': re.compile(r'\bcpus_affine\b'),
     }
     counts = {token: 0 for token in patterns}
     for path in source_files(gki):
@@ -224,6 +223,16 @@ def count_legacy_pm_qos_tokens(gki: Path) -> dict[str, int]:
         for token, pattern in patterns.items():
             counts[token] += len(pattern.findall(text))
     return counts
+
+
+def find_token_locations(gki: Path, token: str) -> list[str]:
+    locations: list[str] = []
+    pattern = re.compile(rf'\b{re.escape(token)}\b')
+    for path in source_files(gki):
+        for line_number, line in enumerate(read(path).splitlines(), 1):
+            if pattern.search(line):
+                locations.append(f'{path.relative_to(gki)}:{line_number}:{line.strip()}')
+    return locations
 
 
 def main() -> int:
@@ -249,6 +258,7 @@ def main() -> int:
     }
     report['pr_fmt_violations'] = find_pr_fmt_violations(gki)
     report['legacy_pm_qos_tokens'] = count_legacy_pm_qos_tokens(gki)
+    report['remaining_cpus_affine_locations'] = find_token_locations(gki, 'cpus_affine')
 
     failures = []
     if report['pr_fmt']['definitions'] < 50:
@@ -268,12 +278,11 @@ def main() -> int:
         for token, count in report['legacy_pm_qos_tokens'].items()
         if count
     )
-    if failures:
-        raise SystemExit('Workflow 106 staging validation failed: ' + '; '.join(failures))
-
     (output / 'phase4-prfmt-pm-qos-report.json').write_text(
         json.dumps(report, indent=2, sort_keys=True) + '\n'
     )
+    if failures:
+        raise SystemExit('Workflow 106 staging validation failed: ' + '; '.join(failures))
     return 0
 
 

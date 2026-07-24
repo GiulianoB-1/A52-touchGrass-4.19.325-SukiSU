@@ -143,7 +143,7 @@ def validate(gki: Path) -> dict[str, bool]:
         'smcinvoke_helper_renamed': (
             'static inline size_t smcinvoke_size_add' in smcinvoke
             and 'static inline size_t size_add' not in smcinvoke
-            and smcinvoke.count('smcinvoke_size_add(') >= 2
+            and smcinvoke.count('smcinvoke_size_add(') == 3
         ),
         'secure_trace_path_relocated': (
             '#define TRACE_INCLUDE_PATH ../../drivers/a52_secure/' in trace
@@ -178,7 +178,7 @@ def main() -> int:
         'cache.helpers': report['cache']['helpers'] == 1,
         'subsystem_restart_returns': report['subsystem_restart_returns'] == 1,
         'dma_debug_duplicates': report['dma_debug_duplicates'] == 1,
-        'smcinvoke_size_add_references': report['smcinvoke_size_add_references'] == 2,
+        'smcinvoke_size_add_references': report['smcinvoke_size_add_references'] == 3,
         'secure_trace_paths': report['secure_trace_paths'] == 1,
     }
     failures.extend(name for name, passed in expected.items() if not passed)

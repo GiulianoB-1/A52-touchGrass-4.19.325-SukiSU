@@ -85,6 +85,13 @@ def find_named_block(root: Path, kind: str, name: str) -> tuple[str, str]:
     return matches[0]
 
 
+def tree_has_named_block(root: Path, kind: str, name: str) -> bool:
+    return any(
+        extract_named_block(read(path), kind, name) is not None
+        for path in root.rglob('*.h')
+    )
+
+
 def add_include(path: Path, include_line: str) -> int:
     text = read(path)
     if include_line in text:
@@ -270,23 +277,23 @@ def patch_panel_notifier(gki: Path) -> dict[str, int]:
     if 'int drm_panel_notifier_register(' not in stext:
         functions = '''
 int drm_panel_notifier_register(struct drm_panel *panel,
-		struct notifier_block *nb)
+\t\tstruct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&panel->nh, nb);
+\treturn blocking_notifier_chain_register(&panel->nh, nb);
 }
 EXPORT_SYMBOL_GPL(drm_panel_notifier_register);
 
 int drm_panel_notifier_unregister(struct drm_panel *panel,
-		struct notifier_block *nb)
+\t\tstruct notifier_block *nb)
 {
-	return blocking_notifier_chain_unregister(&panel->nh, nb);
+\treturn blocking_notifier_chain_unregister(&panel->nh, nb);
 }
 EXPORT_SYMBOL_GPL(drm_panel_notifier_unregister);
 
 int drm_panel_notifier_call_chain(struct drm_panel *panel,
-		unsigned long val, void *v)
+\t\tunsigned long val, void *v)
 {
-	return blocking_notifier_call_chain(&panel->nh, val, v);
+\treturn blocking_notifier_call_chain(&panel->nh, val, v);
 }
 EXPORT_SYMBOL_GPL(drm_panel_notifier_call_chain);
 '''
@@ -303,11 +310,16 @@ EXPORT_SYMBOL_GPL(drm_panel_notifier_call_chain);
 def build_contract_header(touchgrass: Path, gki: Path) -> dict[str, str]:
     blocks = []
     origins: dict[str, str] = {}
+    include_root = gki / 'include'
     for kind, name in CONTRACT_TYPES:
         origin, block = find_named_block(touchgrass, kind, name)
         origins[name] = origin
-        blocks.append(block)
+        if not tree_has_named_block(include_root, kind, name):
+            blocks.append(block)
 
+    body = '\n\n'.join(blocks)
+    if body:
+        body += '\n\n'
     path = gki / 'include/drm/a52_display_contract.h'
     text = (
         '#ifndef __A52_DISPLAY_CONTRACT_H__\n'
@@ -316,15 +328,20 @@ def build_contract_header(touchgrass: Path, gki: Path) -> dict[str, str]:
         '#include <drm/drm_bridge.h>\n'
         '#include <uapi/drm/msm_drm.h>\n'
         '#include <uapi/drm/sde_drm.h>\n\n'
-        + '\n\n'.join(blocks)
-        + '\n\n#endif\n'
+        + body
+        + '#endif\n'
     )
     write(path, text)
     return origins
 
 
 def include_contract_in_port(gki: Path) -> dict[str, int]:
-    counts = {'msm_drv': 0, 'dsi_panel': 0, 'dsi_display': 0, 'compat_undef_pr_fmt': 0}
+    counts = {
+        'msm_drv': 0,
+        'dsi_panel': 0,
+        'dsi_display': 0,
+        'compat_undef_pr_fmt_removed': 0,
+    }
     for root in (gki / 'drivers/a52_display', gki / 'techpack/display'):
         if not root.exists():
             continue
@@ -335,20 +352,23 @@ def include_contract_in_port(gki: Path) -> dict[str, int]:
                 counts['dsi_panel'] += add_include(path, '#include <drm/a52_display_contract.h>')
             elif path.name == 'dsi_display.h':
                 counts['dsi_display'] += add_include(path, '#include <drm/a52_display_contract.h>')
+
     compat = gki / 'a52-port-compat.h'
     text = read(compat)
-    marker = '/* A52_DISPLAY_ALLOW_LOCAL_PR_FMT */'
-    if marker not in text:
-        idx = text.rfind('#endif')
-        if idx < 0:
-            raise SystemExit('a52-port-compat.h has no closing #endif')
-        text = text[:idx] + marker + '\n#ifdef pr_fmt\n#undef pr_fmt\n#endif\n' + text[idx:]
-        write(compat, text)
-        counts['compat_undef_pr_fmt'] = 1
+    broken = (
+        '/* A52_DISPLAY_ALLOW_LOCAL_PR_FMT */\n'
+        '#ifdef pr_fmt\n'
+        '#undef pr_fmt\n'
+        '#endif\n'
+    )
+    if broken in text:
+        write(compat, text.replace(broken, '', 1))
+        counts['compat_undef_pr_fmt_removed'] = 1
     return counts
 
 
 def validate(gki: Path) -> dict[str, bool]:
+    contract = read(gki / 'include/drm/a52_display_contract.h')
     checks = {
         'private_flags': 'private_flags' in read(gki / 'include/drm/drm_modes.h'),
         'vrefresh': re.search(r'\bvrefresh\s*;', read(gki / 'include/drm/drm_modes.h')) is not None,
@@ -356,6 +376,9 @@ def validate(gki: Path) -> dict[str, bool]:
         'msm_event': 'struct drm_msm_event_resp' in read(gki / 'include/uapi/drm/msm_drm.h'),
         'sde_scaler': 'struct sde_drm_scaler_v2' in read(gki / 'include/uapi/drm/sde_drm.h'),
         'panel_contract': (gki / 'include/drm/a52_display_contract.h').is_file(),
+        'panel_hdr_single_definition': contract.count('struct drm_panel_hdr_properties {') == 0,
+        'fps_contract': 'enum fps {' in contract or tree_has_named_block(gki / 'include', 'enum', 'fps'),
+        'pr_fmt_preserved': '#undef pr_fmt' not in read(gki / 'a52-port-compat.h'),
         'panel_notifier_field': 'struct blocking_notifier_head nh;' in read(gki / 'include/drm/drm_panel.h'),
         'encoder_bridge': re.search(r'struct\s+drm_bridge\s*\*\s*bridge\s*;', read(gki / 'include/drm/drm_encoder.h')) is not None,
     }

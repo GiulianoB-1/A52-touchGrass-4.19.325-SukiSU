@@ -1,0 +1,391 @@
+name: 101 - A52 GKI 5.10 downstream port compile probe
+
+run-name: Compile complete A52 display and secure-service port units
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/101-a52-gki-5.10-downstream-port-compile-probe.yml'
+      - 'scripts/101_stage_a52xq_downstream_port_probe.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/101-a52-gki-5.10-downstream-port-compile-probe.yml'
+      - 'scripts/101_stage_a52xq_downstream_port_probe.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-downstream-port-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+
+jobs:
+  probe:
+    name: Compile full downstream display and secure units
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves \
+            device-tree-compiler
+          python3 -m py_compile scripts/101_stage_a52xq_downstream_port_probe.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download Workflow 99 and 100 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          for item in 99 100; do
+            mkdir -p "workflow${item}/extracted"
+          done
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW99_ARTIFACT_ID}/zip" \
+            --output workflow99/artifact.zip
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW100_ARTIFACT_ID}/zip" \
+            --output workflow100/artifact.zip
+          unzip -q workflow99/artifact.zip -d workflow99/extracted
+          unzip -q workflow100/artifact.zip -d workflow100/extracted
+          (cd workflow99/extracted && sha256sum -c SHA256SUMS)
+          (cd workflow100/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow99/extracted/diagnostic.config
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow100/extracted/ramdisk-init-contract.txt
+
+      - name: Replay exact hardware-tested Workflow 99 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          PATCH="$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+          grep -Fq 'A52RPMHABI copy=1' \
+            gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          grep -Fq 'A52UFSDEP copy=1 HBA_STAGE' \
+            gki/common/drivers/scsi/ufs/ufshcd.c
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+          test -s touchgrass/techpack/display/msm/sde/sde_kms.c
+          test -s touchgrass/drivers/gpu/msm/adreno.c
+          test -s touchgrass/drivers/misc/qseecom.c
+          test -s touchgrass/drivers/soc/qcom/smcinvoke.c
+
+      - name: Correct driver ownership and stage complete port units
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-downstream-port-probe
+          mkdir -p "$OUT/logs" "$OUT/config" "$OUT/compile"
+          python3 scripts/101_stage_a52xq_downstream_port_probe.py \
+            --touchgrass touchgrass \
+            --gki gki/common \
+            --dts workflow100/extracted/preserved.dts \
+            --output "$OUT" \
+            2>&1 | tee "$OUT/logs/stage.log"
+          test -s "$OUT/PORT-PROBE.md"
+          test -s "$OUT/port-probe-stage.json"
+          test -s "$OUT/driver-ownership-matrix.tsv"
+          grep -Fq 'touchgrass-driver-only' "$OUT/driver-ownership-matrix.tsv"
+          test -s gki/common/techpack/display/msm/sde/sde_kms.c
+          test -s gki/common/drivers/gpu/msm/adreno.c
+          test -s gki/common/drivers/a52_secure/qseecom.c
+          test -s gki/common/a52-port-compat.h
+
+      - name: Resolve compile-probe configuration
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-downstream-port-probe"
+          BUILD="$PWD/workspace/gki-downstream-port-probe-out"
+          mkdir -p "$BUILD"
+          cp workflow99/extracted/diagnostic.config "$BUILD/.config"
+          cp "$BUILD/.config" "$OUT/config/before.config"
+
+          requested=(
+            CGROUP_DEVICE CGROUP_PIDS CGROUP_PERF
+            ION ION_SYSTEM_HEAP
+            QCOM_APCS_IPC QCOM_IPCC QCOM_SMP2P
+            QRTR QRTR_SMD QRTR_TUN
+            RPMSG RPMSG_CHAR RPMSG_QCOM_GLINK_RPM RPMSG_QCOM_GLINK_SMEM
+            REMOTEPROC QCOM_RMTFS_MEM QCOM_RPMHPD QCOM_PDC
+            QCOM_SOCINFO QCOM_QFPROM QCOM_AOSS_QMP
+            DRM SYNC_FILE DMA_SHARED_BUFFER
+          )
+          for symbol in "${requested[@]}"; do
+            gki/common/scripts/config --file "$BUILD/.config" -e "$symbol" || true
+          done
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/after.config"
+
+          printf 'symbol\tvalue\n' > "$OUT/config/requested-interface-state.tsv"
+          for symbol in "${requested[@]}"; do
+            value=absent
+            if grep -Fxq "CONFIG_${symbol}=y" "$BUILD/.config"; then
+              value=y
+            elif grep -Fxq "CONFIG_${symbol}=m" "$BUILD/.config"; then
+              value=m
+            elif grep -Fxq "# CONFIG_${symbol} is not set" "$BUILD/.config"; then
+              value=n
+            fi
+            printf 'CONFIG_%s\t%s\n' "$symbol" "$value" \
+              >> "$OUT/config/requested-interface-state.tsv"
+          done
+
+      - name: Compile all downstream port units with keep-going
+        id: compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-downstream-port-probe"
+          BUILD="$PWD/workspace/gki-downstream-port-probe-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/port-compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          echo "compile_rc=$rc" >> "$GITHUB_OUTPUT"
+          if test -s "$BUILD/arch/arm64/boot/Image"; then
+            cp "$BUILD/arch/arm64/boot/Image" \
+              "$OUT/compile/Image-NON-FLASHABLE"
+          fi
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+      - name: Parse all compile and link incompatibilities
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-downstream-port-probe
+          python3 - <<'PY'
+          import collections
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-5.10-downstream-port-probe')
+          log_path = root / 'logs/port-compile.log'
+          lines = log_path.read_text(errors='replace').splitlines()
+
+          compiler = re.compile(
+              r'^(?P<file>[^:\s][^:]*):(?P<line>\d+):(?P<column>\d+): '
+              r'(?P<kind>fatal error|error): (?P<message>.*)$'
+          )
+          linker = re.compile(r"undefined reference to [`'](?P<symbol>[^`']+)")
+          include = re.compile(r"fatal error: ['<](?P<header>[^'>]+)['>] file not found")
+
+          entries = []
+          missing_headers = collections.Counter()
+          undefined_symbols = collections.Counter()
+          subsystem_counts = collections.Counter()
+          signatures = collections.Counter()
+
+          def subsystem(path):
+              if 'techpack/display/' in path:
+                  return 'display-sde-dsi-panel'
+              if 'drivers/gpu/msm/' in path:
+                  return 'display-kgsl'
+              if 'drivers/a52_secure/' in path:
+                  return 'secure-qseecom'
+              if 'drivers/clk/qcom/mdss/' in path:
+                  return 'display-pll-clock'
+              return 'kernel-integration'
+
+          for line in lines:
+              match = compiler.match(line)
+              if match:
+                  item = match.groupdict()
+                  item['subsystem'] = subsystem(item['file'])
+                  entries.append(item)
+                  subsystem_counts[item['subsystem']] += 1
+                  signatures[(item['subsystem'], item['message'])] += 1
+                  header = include.search(line)
+                  if header:
+                      missing_headers[header.group('header')] += 1
+              link = linker.search(line)
+              if link:
+                  undefined_symbols[link.group('symbol')] += 1
+
+          unique_signatures = [
+              {
+                  'subsystem': subsystem_name,
+                  'message': message,
+                  'count': count,
+              }
+              for (subsystem_name, message), count in signatures.most_common()
+          ]
+          result = {
+              'status': 'compile-probe-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'compiler_error_count': len(entries),
+              'unique_error_signature_count': len(unique_signatures),
+              'subsystem_counts': dict(subsystem_counts),
+              'missing_headers': dict(missing_headers.most_common()),
+              'undefined_symbols': dict(undefined_symbols.most_common()),
+              'unique_signatures': unique_signatures,
+              'entries': entries[:1000],
+          }
+          (root / 'compile/compile-incompatibilities.json').write_text(
+              json.dumps(result, indent=2, sort_keys=True) + '\n'
+          )
+
+          md = [
+              '# A52 downstream 4.19 to 5.10 compile incompatibilities',
+              '',
+              f"- Make return code: **{result['make_return_code']}**",
+              f"- Compiler errors captured: **{len(entries)}**",
+              f"- Unique error signatures: **{len(unique_signatures)}**",
+              '',
+              '## Errors by subsystem',
+              '',
+          ]
+          for name, count in subsystem_counts.most_common():
+              md.append(f'- `{name}`: {count}')
+          md += ['', '## Highest-frequency incompatibilities', '']
+          for item in unique_signatures[:100]:
+              md.append(
+                  f"- `{item['subsystem']}` ×{item['count']}: {item['message']}"
+              )
+          if missing_headers:
+              md += ['', '## Missing headers', '']
+              for header, count in missing_headers.most_common():
+                  md.append(f'- `{header}` ×{count}')
+          if undefined_symbols:
+              md += ['', '## Undefined symbols', '']
+              for symbol, count in undefined_symbols.most_common(100):
+                  md.append(f'- `{symbol}` ×{count}')
+          (root / 'compile/COMPILE-INCOMPATIBILITIES.md').write_text(
+              '\n'.join(md) + '\n'
+          )
+          PY
+          test -s "$OUT/compile/compile-incompatibilities.json"
+          test -s "$OUT/compile/COMPILE-INCOMPATIBILITIES.md"
+
+      - name: Finalize non-flashable port probe
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-downstream-port-probe
+          cp workflow100/extracted/ramdisk-init-contract.txt \
+            "$OUT/ramdisk-init-contract.txt"
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G DOWNSTREAM DISPLAY AND SECURE-SERVICE PORT COMPILE PROBE
+
+          This artifact is not flashable. Workflow 99 remains the last hardware-tested
+          storage-working baseline.
+
+          The probe corrects Workflow 100's DT-versus-driver false positives, stages
+          the complete TouchGrass display techpack, downstream KGSL, QSEECom,
+          SMCInvoke, QTEE shared memory and secure-buffer units, and compiles them
+          against the exact 5.10 baseline with make -k.
+
+          Use driver-ownership-matrix.tsv and compile/COMPILE-INCOMPATIBILITIES.md
+          to implement all required 5.10 API adapters before a flashable candidate.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-5.10-downstream-port-probe')
+          stage = json.loads((root / 'port-probe-stage.json').read_text())
+          compile_result = json.loads(
+              (root / 'compile/compile-incompatibilities.json').read_text()
+          )
+          final = {
+              'status': 'downstream-port-compile-probe-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'workflow99_baseline_preserved': True,
+              'ownership_counts': stage['ownership_counts'],
+              'make_return_code': compile_result['make_return_code'],
+              'compiler_error_count': compile_result['compiler_error_count'],
+              'unique_error_signature_count': compile_result['unique_error_signature_count'],
+          }
+          (root / 'final-state.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload downstream port probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-downstream-port-probe-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-downstream-port-probe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-downstream-port-probe-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-downstream-port-probe
+            workspace/gki-downstream-port-probe-out/.config
+          if-no-files-found: warn
+          retention-days: 14

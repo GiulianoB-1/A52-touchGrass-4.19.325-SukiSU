@@ -1,0 +1,252 @@
+name: 104 - A52 GKI 5.10 Phase 2 kernel APIs
+
+run-name: Convert medium-risk 4.19 kernel APIs to 5.10
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/104-a52-gki-5.10-phase2-kernel-api.yml'
+      - 'scripts/104_apply_a52xq_phase2_kernel_api.py'
+      - 'scripts/103_apply_a52xq_phase1_compat.py'
+      - 'scripts/a52xq_downstream_port_probe_v3.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-phase2-kernel-api-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+  WORKFLOW103_ARTIFACT_ID: '8594146896'
+
+jobs:
+  phase2:
+    name: Apply Phase 2 kernel API adapters and recompile
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves device-tree-compiler
+          python3 -m py_compile \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/103_apply_a52xq_phase1_compat.py \
+            scripts/104_apply_a52xq_phase2_kernel_api.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download verified baseline artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          download() {
+            local name="$1" id="$2"
+            mkdir -p "${name}/extracted"
+            curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "${name}/artifact.zip"
+            unzip -q "${name}/artifact.zip" -d "${name}/extracted"
+            (cd "${name}/extracted" && sha256sum -c SHA256SUMS)
+          }
+          download workflow99 "${WORKFLOW99_ARTIFACT_ID}"
+          download workflow100 "${WORKFLOW100_ARTIFACT_ID}"
+          download workflow103 "${WORKFLOW103_ARTIFACT_ID}"
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow103/extracted/config/final.config
+          grep -Fq '"phase1_closed": true' workflow103/extracted/final-state.json
+          grep -Fq '"compiler_error_count": 2169' workflow103/extracted/final-state.json
+
+      - name: Replay hardware-tested Workflow 99 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          PATCH="$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+
+      - name: Stage downstream units and Phase 1
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-phase2-kernel-api
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile"
+          python3 scripts/a52xq_downstream_port_probe_v3.py \
+            --touchgrass touchgrass --gki gki/common \
+            --dts workflow100/extracted/preserved.dts --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage-port.log"
+          python3 scripts/103_apply_a52xq_phase1_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/phase1-stage.log"
+
+      - name: Apply Phase 2 kernel API adapters
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-phase2-kernel-api
+          python3 scripts/104_apply_a52xq_phase2_kernel_api.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/phase2-stage.log"
+          test -s "$OUT/stage/phase2-kernel-api-report.json"
+          grep -Fq 'phase2-kernel-api-compatibility-staged' \
+            "$OUT/stage/phase2-kernel-api-report.json"
+
+      - name: Resolve Phase 2 configuration
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-phase2-kernel-api"
+          BUILD="$PWD/workspace/gki-phase2-kernel-api-out"
+          mkdir -p "$BUILD"
+          cp workflow103/extracted/config/final.config "$BUILD/.config"
+          cp "$BUILD/.config" "$OUT/config/before.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+      - name: Recompile all adapted downstream units
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-phase2-kernel-api"
+          BUILD="$PWD/workspace/gki-phase2-kernel-api-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image > "$OUT/logs/port-compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if test -s "$BUILD/arch/arm64/boot/Image"; then
+            cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image-NON-FLASHABLE"
+          fi
+
+      - name: Measure Phase 2 closure
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-phase2-kernel-api
+          python3 - <<'PY'
+          import collections, json, re
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-5.10-phase2-kernel-api')
+          baseline = json.loads(Path('workflow103/extracted/compile/compile-incompatibilities.json').read_text())
+          compiler = re.compile(r'^(?P<file>[^:\s][^:]*):(?P<line>\d+):(?P<column>\d+): (?P<kind>fatal error|error): (?P<message>.*)$')
+          phase2 = re.compile(r'MM_UNRECLAIMABLE|NR_UNRECLAIMABLE_PAGES|mmap_sem|get_ds|set_fs|vfs_read|struct timespec|ktime_to_timespec|timespec_to_jiffies|getboottime|getnstimeofday|irq_handler_t|irqreturn_t|IRQ_HANDLED|tasklet_struct|tasklet_hi_schedule|reservation_object|qseecom_ioctl|kzfree|PTR_RET|\bdrm_debug\b')
+          entries=[]; sig=collections.Counter(); subs=collections.Counter(); residual=collections.Counter()
+          def subsystem(path):
+              if 'drivers/gpu/msm/' in path: return 'display-kgsl'
+              if 'drivers/a52_display/' in path or 'techpack/display/' in path: return 'display-sde-dsi-panel'
+              if 'drivers/a52_secure/' in path: return 'secure-qseecom'
+              return 'kernel-integration'
+          for line in (root/'logs/port-compile.log').read_text(errors='replace').splitlines():
+              m=compiler.match(line)
+              if not m: continue
+              item=m.groupdict(); item['subsystem']=subsystem(item['file'])
+              entries.append(item); sig[(item['subsystem'],item['message'])]+=1; subs[item['subsystem']]+=1
+              if phase2.search(item['message']): residual[item['message']]+=1
+          unique=[{'subsystem':k[0],'message':k[1],'count':v} for k,v in sig.most_common()]
+          result={
+              'status':'phase2-kernel-api-compile-complete','flashable':False,'hardware_validated':False,
+              'make_return_code':int((root/'compile/make-return-code.txt').read_text()),
+              'baseline_compiler_error_count':baseline['compiler_error_count'],
+              'compiler_error_count':len(entries),
+              'error_reduction':baseline['compiler_error_count']-len(entries),
+              'baseline_unique_error_signature_count':baseline['unique_error_signature_count'],
+              'unique_error_signature_count':len(unique),
+              'unique_signature_reduction':baseline['unique_error_signature_count']-len(unique),
+              'residual_phase2_error_count':sum(residual.values()),
+              'residual_phase2_signatures':dict(residual.most_common()),
+              'phase2_closed':not residual,
+              'subsystem_counts':dict(subs),'unique_signatures':unique,'entries':entries[:1500],
+          }
+          (root/'compile/compile-incompatibilities.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          md=['# A52 Workflow 104 Phase 2 result','',f"- Baseline errors: **{baseline['compiler_error_count']}**",f"- Remaining errors: **{len(entries)}**",f"- Error reduction: **{result['error_reduction']}**",f"- Remaining unique signatures: **{len(unique)}**",f"- Phase 2 residual errors: **{result['residual_phase2_error_count']}**",f"- Phase 2 closed: **{result['phase2_closed']}**",'', '## Remaining errors by subsystem','']
+          md += [f'- `{k}`: {v}' for k,v in subs.most_common()]
+          md += ['', '## Highest-frequency remaining incompatibilities','']
+          md += [f"- `{x['subsystem']}` ×{x['count']}: {x['message']}" for x in unique[:120]]
+          (root/'compile/PHASE2-RESULT.md').write_text('\n'.join(md)+'\n')
+          PY
+
+      - name: Finalize and upload Phase 2 report
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-phase2-kernel-api
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 PHASE 2 KERNEL API MIGRATION
+
+          This artifact is non-flashable and not hardware validated.
+          Workflow 99 remains the hardware-tested baseline.
+          Workflow 104 converts kernel-internal memory, mmap, timekeeping, interrupt,
+          reservation-object and QSEECom declaration APIs. It does not implement the
+          downstream DRM mode/UAPI contract or Qualcomm IOMMU/DMA semantics.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('artifacts/a52xq-gki-5.10-phase2-kernel-api')
+          r=json.loads((root/'compile/compile-incompatibilities.json').read_text())
+          final={'status':'phase2-kernel-api-compatibility-complete','flashable':False,'hardware_validated':False,'workflow99_baseline_preserved':True,'compiler_error_count':r['compiler_error_count'],'error_reduction':r['error_reduction'],'unique_error_signature_count':r['unique_error_signature_count'],'unique_signature_reduction':r['unique_signature_reduction'],'residual_phase2_error_count':r['residual_phase2_error_count'],'phase2_closed':r['phase2_closed']}
+          (root/'final-state.json').write_text(json.dumps(final,indent=2,sort_keys=True)+'\n')
+          PY
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Workflow 104 Phase 2 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-phase2-kernel-api-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-phase2-kernel-api
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require targeted Phase 2 closure
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('artifacts/a52xq-gki-5.10-phase2-kernel-api/final-state.json').read_text())
+          if not s['phase2_closed']:
+              raise SystemExit(f"Phase 2 still has {s['residual_phase2_error_count']} classified errors")
+          PY

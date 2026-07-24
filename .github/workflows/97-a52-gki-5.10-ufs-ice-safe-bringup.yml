@@ -1,0 +1,415 @@
+name: 97 - A52 GKI 5.10 UFS ICE-safe storage bring-up
+
+run-name: Build A52 GKI 5.10 UFS candidate with ICE safely bypassed
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/97-a52-gki-5.10-ufs-ice-safe-bringup.yml'
+      - 'scripts/97_stage_a52xq_ufs_ice_safe_bringup.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/97-a52-gki-5.10-ufs-ice-safe-bringup.yml'
+      - 'scripts/97_stage_a52xq_ufs_ice_safe_bringup.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-ufs-ice-safe-bringup-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  WORKFLOW68_ARTIFACT_ID: '8427146475'
+  WORKFLOW96_ARTIFACT_ID: '8572438654'
+
+jobs:
+  build:
+    name: Build ICE-safe UFS storage candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip file dwarves device-tree-compiler
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow68/extracted workflow96/extracted
+
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW68_ARTIFACT_ID}/zip" \
+            --output workflow68/artifact.zip
+          unzip -q workflow68/artifact.zip -d workflow68/extracted
+          (cd workflow68/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow68/extracted/integrated-port.patch
+
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW96_ARTIFACT_ID}/zip" \
+            --output workflow96/artifact.zip
+          unzip -q workflow96/artifact.zip -d workflow96/extracted
+          (cd workflow96/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow96/extracted/full-integrated-legacy-gdsc-ufs.patch
+          test -s workflow96/extracted/diagnostic.config
+          test -s workflow96/extracted/boot.img
+          test -s workflow96/extracted/gdsc-regulator-bridge/a52-legacy-gdsc-regulator.c
+          test -s workflow96/extracted/ufs-flight-recorder/a52-ufs-live-trace.c
+          test -s workflow96/extracted/ufs-phy-bridge/rpmh-provider-bridge/a52-rpmh-regulator-downstream.c
+
+      - name: Reconstruct complete Workflow 96 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          # Workflow 96's archived git diff contains every tracked change, but
+          # git diff did not include newly generated files that were untracked.
+          TRACKED="$PWD/workflow96/extracted/full-integrated-legacy-gdsc-ufs.patch"
+          git -C gki/common apply --check "$TRACKED"
+          git -C gki/common apply "$TRACKED"
+
+          # Restore all new Lagoon source and DT files from the compile-proven
+          # Workflow 68 patch without reapplying its tracked-file modifications.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('workflow68/extracted/integrated-port.patch').read_text(
+              encoding='utf-8', errors='strict'
+          )
+          selected = []
+          for chunk in source.split('diff --git ')[1:]:
+              lines = chunk.splitlines()
+              if any(line.startswith('new file mode ') for line in lines[:10]):
+                  selected.append('diff --git ' + chunk)
+          if len(selected) != 59:
+              raise SystemExit(
+                  f'expected 59 Workflow 68 new files, found {len(selected)}'
+              )
+          Path('workflow68/new-files-only.patch').write_text(
+              ''.join(selected), encoding='utf-8'
+          )
+          PY
+          git -C gki/common apply --check "$PWD/workflow68/new-files-only.patch"
+          git -C gki/common apply "$PWD/workflow68/new-files-only.patch"
+
+          # Restore later generated providers and the UFS flight-recorder source.
+          install -m 0644 \
+            workflow96/extracted/gdsc-regulator-bridge/a52-legacy-gdsc-regulator.c \
+            gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+          install -m 0644 \
+            workflow96/extracted/ufs-phy-bridge/rpmh-provider-bridge/a52-rpmh-regulator-downstream.c \
+            gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          install -m 0644 \
+            workflow96/extracted/ufs-flight-recorder/a52-ufs-live-trace.c \
+            gki/common/drivers/scsi/ufs/a52-ufs-live-trace.c
+
+          test -s gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          test -s gki/common/drivers/clk/qcom/gcc-lagoon.c
+          test -s gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+          test -s gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          test -s gki/common/drivers/scsi/ufs/a52-ufs-live-trace.c
+
+      - name: Stage ICE-safe storage bring-up
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup
+          mkdir -p "$OUT/logs" "$OUT/ice-safe-bridge" "$OUT/symbols"
+
+          python3 scripts/97_stage_a52xq_ufs_ice_safe_bringup.py \
+            --gki gki/common --output "$OUT/ice-safe-bridge"
+
+          git -C gki/common diff --check
+          grep -Fq '#define A52_UFS_ICE_SAFE_BRINGUP' \
+            gki/common/drivers/scsi/ufs/ufs-qcom-ice.c
+          grep -Fq 'A52ICE copy=1 SAFE_BYPASS' \
+            gki/common/drivers/scsi/ufs/ufs-qcom-ice.c
+          grep -Fq 'hba->caps &= ~UFSHCD_CAP_CRYPTO;' \
+            gki/common/drivers/scsi/ufs/ufs-qcom-ice.c
+          grep -Fq 'A52UFS copy=1 ICE_INIT_END' \
+            gki/common/drivers/scsi/ufs/ufs-qcom.c
+
+          # Intent-to-add makes the archived patch self-contained this time.
+          while IFS= read -r -d '' file; do
+            git -C gki/common add -N -- "$file"
+          done < <(git -C gki/common ls-files --others --exclude-standard -z)
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/full-integrated-ufs-ice-safe.patch"
+          test -s "$OUT/full-integrated-ufs-ice-safe.patch"
+          grep -Fq 'diff --git a/drivers/pinctrl/qcom/pinctrl-lagoon.c' \
+            "$OUT/full-integrated-ufs-ice-safe.patch"
+          grep -Fq 'diff --git a/drivers/scsi/ufs/a52-ufs-live-trace.c' \
+            "$OUT/full-integrated-ufs-ice-safe.patch"
+
+      - name: Configure diagnostic kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup"
+          BUILD="$PWD/workspace/gki-ufs-ice-safe-out"
+          mkdir -p "$BUILD"
+          cp workflow96/extracted/diagnostic.config "$BUILD/.config"
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/diagnostic.config"
+
+          grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_BLK_INLINE_ENCRYPTION=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_BLK_INLINE_ENCRYPTION_FALLBACK=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PINCTRL_LAGOON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_BLK_DEV_SD=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+
+      - name: Build Image and symbolized objects
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup"
+          BUILD="$PWD/workspace/gki-ufs-ice-safe-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            2>&1 | tee "$OUT/logs/Image.log"
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          test -s "$BUILD/vmlinux"
+          test -s "$BUILD/System.map"
+          test -s "$BUILD/drivers/scsi/ufs/ufs-qcom.o"
+          test -s "$BUILD/drivers/scsi/ufs/ufs-qcom-ice.o"
+
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/Image"
+          cp "$BUILD/vmlinux" "$OUT/symbols/vmlinux"
+          cp "$BUILD/System.map" "$OUT/symbols/System.map"
+          cp "$BUILD/drivers/scsi/ufs/ufs-qcom.o" "$OUT/symbols/ufs-qcom.o"
+          cp "$BUILD/drivers/scsi/ufs/ufs-qcom-ice.o" "$OUT/symbols/ufs-qcom-ice.o"
+
+          llvm-nm -n "$BUILD/vmlinux" | \
+            grep -E 'ufs_qcom_(ice_init|init|probe)$' \
+            > "$OUT/symbols/ufs-symbols.txt"
+          llvm-objdump -dr "$BUILD/drivers/scsi/ufs/ufs-qcom-ice.o" \
+            > "$OUT/symbols/ufs-qcom-ice.disassembly.txt"
+          llvm-objdump -dr "$BUILD/drivers/scsi/ufs/ufs-qcom.o" \
+            > "$OUT/symbols/ufs-qcom.disassembly.txt"
+
+          grep -aFq 'A52ICE copy=1 SAFE_BYPASS' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 ICE_INIT_END' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 CORE stage=link_startup' "$OUT/Image"
+          grep -aFq 'A52UFS copy=1 SD stage=device_add_disk' "$OUT/Image"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+
+      - name: Repack and audit ICE-safe boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source workflow96/extracted/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              'a52_boot_repack', 'scripts/38_repack_a52_p1_boot.py'
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path('workflow96/extracted/boot.img')
+          output = Path('artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup')
+          output_path = output / 'boot.img'
+          image_path = output / 'Image.gz'
+          src = module.parse_boot(source_path.read_bytes())
+          new = module.parse_boot(output_path.read_bytes())
+
+          checks = {
+              'partition_size_preserved': (
+                  output_path.stat().st_size
+                  == source_path.stat().st_size
+                  == 100663296
+              ),
+              'replacement_kernel_used': (
+                  hashlib.sha256(new['kernel']).digest()
+                  == hashlib.sha256(image_path.read_bytes()).digest()
+              ),
+              'rom_ramdisk_preserved': new['ramdisk'] == src['ramdisk'],
+              'second_preserved': new['second'] == src['second'],
+              'reserved_dtb_preserved': new['dtb'] == src['dtb'],
+              'diagnostic_cmdline_preserved': new['cmdline'] == src['cmdline'],
+              'ramoops_reservation_present': (
+                  b'a52-ramoops-reserved@b1b00000' in new['dtb']
+              ),
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit('final audit failed: ' + ', '.join(failed))
+
+          (output / 'final-audit.json').write_text(
+              json.dumps(
+                  {
+                      'status': 'ufs-ice-safe-storage-candidate-audited',
+                      'hardware_validated': False,
+                      'run96_result': (
+                          'legacy GDSC provider succeeded; fatal exception moved '
+                          'to ufs_qcom_ice_init after ufs_ice resource discovery'
+                      ),
+                      'candidate_policy': (
+                          'disable UFS inline crypto before SCM/MMIO access while '
+                          'retaining software inline-encryption fallback'
+                      ),
+                      'checks': checks,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Finalize candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 UFS ICE-SAFE STORAGE BRING-UP
+
+          Workflow 96 proved that the legacy gcc_ufs_phy_gdsc provider now binds
+          and that UFS passes regulator parsing. The next fatal exception occurred
+          inside ufs_qcom_ice_init immediately after the ufs_ice resource was found.
+
+          This diagnostic candidate clears UFSHCD_CAP_CRYPTO before any Qualcomm
+          ICE SCM call or ICE MMIO read. Software inline-encryption fallback remains
+          enabled. The purpose is to bring up the UFS link, SCSI LUNs and partitions
+          without touching the unproven ICE path. Full vmlinux, object files and
+          disassembly are included for precise symbolization of any next failure.
+
+          This image is not hardware-validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'workflow96-gdsc-fix-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'all-generated-lagoon-files-restored\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'self-contained-source-patch\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'ice-scm-and-mmio-access-bypassed\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'software-inline-encryption-fallback\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'vmlinux-and-ufs-disassembly-included\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'rom-ramdisk-and-dtb-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+      - name: Upload ICE-safe UFS candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-ufs-ice-safe-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-ufs-ice-safe-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-ufs-ice-safe-bringup
+            workspace/gki-ufs-ice-safe-out/.config
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    name: Report Workflow 97 status
+    if: always()
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Post run status to issue 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ needs.build.result }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY' > payload.json
+          import json
+          import os
+
+          body = (
+              f"Workflow 97 run: {os.environ['RUN_URL']}\n\n"
+              f"Status: completed\n"
+              f"Conclusion: {os.environ['RESULT']}\n"
+              f"Head SHA: {os.environ['HEAD_SHA']}\n\n"
+              "Purpose: reconstruct the complete Workflow 96 source, preserve "
+              "the successful GDSC fix, bypass the fatal ICE path before "
+              "SCM/MMIO access, and test UFS link and partition bring-up."
+          )
+          print(json.dumps({'body': body}))
+          PY
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/45/comments" \
+            --data-binary @payload.json

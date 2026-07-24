@@ -116,6 +116,43 @@ static inline int clk_set_flags(struct clk *clk, unsigned long flags)
     return result
 
 
+def patch_qcom_flag_header(gki: Path) -> int:
+    path = gki / "include/linux/clk/qcom.h"
+    marker = f"/* {PHASE}_QCOM_FLAG_HEADER */"
+    if path.is_file():
+        text = read(path)
+        if marker in text:
+            return 0
+        raise SystemExit(
+            "native include/linux/clk/qcom.h already exists without the Workflow 113 marker"
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "/* SPDX-License-Identifier: GPL-2.0-only */\n"
+        "/*\n"
+        " * Copyright (c) 2016, 2020 The Linux Foundation. All rights reserved.\n"
+        " */\n\n"
+        "#ifndef __LINUX_CLK_QCOM_H_\n"
+        "#define __LINUX_CLK_QCOM_H_\n\n"
+        f"{marker}\n"
+        "#include <linux/clk.h>\n\n"
+        "enum branch_mem_flags {\n"
+        "\tCLKFLAG_RETAIN_PERIPH,\n"
+        "\tCLKFLAG_NORETAIN_PERIPH,\n"
+        "\tCLKFLAG_RETAIN_MEM,\n"
+        "\tCLKFLAG_NORETAIN_MEM,\n"
+        "\tCLKFLAG_PERIPH_OFF_SET,\n"
+        "\tCLKFLAG_PERIPH_OFF_CLEAR,\n"
+        "};\n\n"
+        "void qcom_clk_dump(struct clk *clk, bool calltrace);\n"
+        "void qcom_clk_bulk_dump(int num_clks, struct clk_bulk_data *clks,\n"
+        "\t\t\tbool calltrace);\n\n"
+        "#endif  /* __LINUX_CLK_QCOM_H_ */\n"
+    )
+    return 1
+
+
 def patch_clock_core(gki: Path) -> int:
     path = gki / "drivers/clk/clk.c"
     text = read(path)
@@ -179,7 +216,7 @@ def patch_qcom_branch(gki: Path) -> dict[str, object]:
     path = gki / "drivers/clk/qcom/clk-branch.c"
     text = read(path)
     result: dict[str, object] = {
-        "qcom_flag_header": 0,
+        "qcom_flag_include": 0,
         "cbcr_helper": 0,
         "wired_tables": [],
     }
@@ -188,7 +225,7 @@ def patch_qcom_branch(gki: Path) -> dict[str, object]:
     include_block = f"""{include_marker}
 #include <linux/clk/qcom.h>
 """
-    text, result["qcom_flag_header"] = insert_once(
+    text, result["qcom_flag_include"] = insert_once(
         text,
         include_marker,
         "#include <linux/regmap.h>",
@@ -272,6 +309,8 @@ static int clk_branch_set_flags(struct clk_hw *hw, unsigned int flags)
 def validate(gki: Path) -> dict[str, bool]:
     provider = read(gki / "include/linux/clk-provider.h")
     public = read(gki / "include/linux/clk.h")
+    qcom_header_path = gki / "include/linux/clk/qcom.h"
+    qcom_header = read(qcom_header_path) if qcom_header_path.is_file() else ""
     core = read(gki / "drivers/clk/clk.c")
     branch = read(gki / "drivers/clk/qcom/clk-branch.c")
 
@@ -284,6 +323,17 @@ def validate(gki: Path) -> dict[str, bool]:
         start, end = find_ops_block(branch, name)
         table_checks[name] = ".set_flags = clk_branch_set_flags" in branch[start:end]
 
+    expected_enum = (
+        "enum branch_mem_flags {\n"
+        "\tCLKFLAG_RETAIN_PERIPH,\n"
+        "\tCLKFLAG_NORETAIN_PERIPH,\n"
+        "\tCLKFLAG_RETAIN_MEM,\n"
+        "\tCLKFLAG_NORETAIN_MEM,\n"
+        "\tCLKFLAG_PERIPH_OFF_SET,\n"
+        "\tCLKFLAG_PERIPH_OFF_CLEAR,\n"
+        "};"
+    )
+
     return {
         "provider_callback": (
             "(*set_flags)(struct clk_hw *hw, unsigned int flags);" in provider
@@ -295,11 +345,13 @@ def validate(gki: Path) -> dict[str, bool]:
             "static inline int clk_set_flags(struct clk *clk, unsigned long flags)"
             in public
         ),
+        "native_qcom_flag_header": qcom_header_path.is_file(),
+        "exact_downstream_flag_order": expected_enum in qcom_header,
         "core_dispatch": (
             "return clk->core->ops->set_flags(clk->core->hw, flags);" in core
         ),
         "core_export": "EXPORT_SYMBOL_GPL(clk_set_flags);" in core,
-        "qcom_flag_header": "#include <linux/clk/qcom.h>" in branch,
+        "qcom_flag_include": "#include <linux/clk/qcom.h>" in branch,
         "cbcr_bit12": branch.count("BIT(12)") >= 2,
         "cbcr_bit13": branch.count("BIT(13)") >= 2,
         "cbcr_bit14": branch.count("BIT(14)") >= 2,
@@ -352,6 +404,7 @@ def main() -> int:
         "hardware_validated": False,
         "public_header": patch_public_header(gki),
         "provider_header": patch_provider_header(gki),
+        "qcom_flag_header": {"created": patch_qcom_flag_header(gki)},
         "clock_core": {"dispatcher": patch_clock_core(gki)},
         "qcom_branch": patch_qcom_branch(gki),
         "semantic_source": "exact-touchgrass-common-clock-and-qcom-cbcr-behaviour",
@@ -363,6 +416,7 @@ def main() -> int:
         },
         "scope": [
             "public clk_set_flags consumer ABI",
+            "exact downstream Qualcomm branch flag enum",
             "clk_ops provider callback",
             "common clock dispatcher and GPL export",
             "Qualcomm CBCR flag decoding",
@@ -387,9 +441,10 @@ def main() -> int:
             report["provider_header"]["documentation"] == 1
         ),
         "provider_header.callback": report["provider_header"]["callback"] == 1,
+        "qcom_flag_header.created": report["qcom_flag_header"]["created"] == 1,
         "clock_core.dispatcher": report["clock_core"]["dispatcher"] == 1,
-        "qcom_branch.qcom_flag_header": (
-            report["qcom_branch"]["qcom_flag_header"] == 1
+        "qcom_branch.qcom_flag_include": (
+            report["qcom_branch"]["qcom_flag_include"] == 1
         ),
         "qcom_branch.cbcr_helper": report["qcom_branch"]["cbcr_helper"] == 1,
         "qcom_branch.wired_tables": (

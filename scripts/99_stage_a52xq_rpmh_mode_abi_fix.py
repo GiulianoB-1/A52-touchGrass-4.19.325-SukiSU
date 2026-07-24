@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -58,6 +59,14 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def macro_has_value(text: str, name: str, value: int) -> bool:
+    return re.search(
+        rf'^\s*#\s*define\s+{re.escape(name)}\s+{value}\b',
+        text,
+        flags=re.MULTILINE,
+    ) is not None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description='Fix the Samsung downstream RPMh regulator mode-number ABI.'
@@ -88,24 +97,28 @@ def main() -> int:
     levels_text = levels.read_text(encoding='utf-8')
 
     expected_upstream = {
-        'RET': '#define RPMH_REGULATOR_MODE_RET\t0',
-        'LPM': '#define RPMH_REGULATOR_MODE_LPM\t1',
-        'AUTO': '#define RPMH_REGULATOR_MODE_AUTO\t2',
-        'HPM': '#define RPMH_REGULATOR_MODE_HPM\t3',
+        'RPMH_REGULATOR_MODE_RET': 0,
+        'RPMH_REGULATOR_MODE_LPM': 1,
+        'RPMH_REGULATOR_MODE_AUTO': 2,
+        'RPMH_REGULATOR_MODE_HPM': 3,
     }
     expected_downstream = {
-        'PASS': '#define RPMH_REGULATOR_MODE_PASS\t0',
-        'RET': '#define RPMH_REGULATOR_MODE_RET\t\t1',
-        'LPM': '#define RPMH_REGULATOR_MODE_LPM\t\t2',
-        'AUTO': '#define RPMH_REGULATOR_MODE_AUTO\t3',
-        'HPM': '#define RPMH_REGULATOR_MODE_HPM\t\t4',
+        'RPMH_REGULATOR_MODE_PASS': 0,
+        'RPMH_REGULATOR_MODE_RET': 1,
+        'RPMH_REGULATOR_MODE_LPM': 2,
+        'RPMH_REGULATOR_MODE_AUTO': 3,
+        'RPMH_REGULATOR_MODE_HPM': 4,
     }
 
     missing_upstream = [
-        name for name, token in expected_upstream.items() if token not in upstream_text
+        f'{name}={value}'
+        for name, value in expected_upstream.items()
+        if not macro_has_value(upstream_text, name, value)
     ]
     missing_downstream = [
-        name for name, token in expected_downstream.items() if token not in levels_text
+        f'{name}={value}'
+        for name, value in expected_downstream.items()
+        if not macro_has_value(levels_text, name, value)
     ]
     if missing_upstream:
         raise SystemExit(

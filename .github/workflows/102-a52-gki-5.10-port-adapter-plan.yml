@@ -1,0 +1,89 @@
+name: 102 - A52 GKI 5.10 port-adapter plan
+
+run-name: Classify Workflow 101 compile failures into ordered adapters
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/102-a52-gki-5.10-port-adapter-plan.yml'
+      - 'scripts/102_plan_a52xq_5_10_port_adapters.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/102-a52-gki-5.10-port-adapter-plan.yml'
+      - 'scripts/102_plan_a52xq_5_10_port_adapters.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-port-adapter-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WORKFLOW101_ARTIFACT_ID: '8593004099'
+
+jobs:
+  plan:
+    name: Build ordered A52 4.19 to 5.10 adapter plan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates unzip python3
+          python3 -m py_compile scripts/102_plan_a52xq_5_10_port_adapters.py
+
+      - name: Download exact Workflow 101 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow101/extracted
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW101_ARTIFACT_ID}/zip" \
+            --output workflow101/artifact.zip
+          unzip -q workflow101/artifact.zip -d workflow101/extracted
+          (cd workflow101/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow101/extracted/final-state.json
+          test -s workflow101/extracted/compile/compile-incompatibilities.json
+          test -s workflow101/extracted/driver-ownership-matrix.tsv
+          grep -Fq 'downstream-port-compile-probe-complete' workflow101/extracted/final-state.json
+
+      - name: Generate deterministic adapter plan
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-port-adapter-plan
+          mkdir -p "$OUT"
+          python3 scripts/102_plan_a52xq_5_10_port_adapters.py \
+            --artifact workflow101/extracted \
+            --output "$OUT" \
+            2>&1 | tee "$OUT/generation.log"
+          test -s "$OUT/README-FIRST.txt"
+          test -s "$OUT/PORT-ADAPTER-PLAN.md"
+          test -s "$OUT/adapter-manifest.json"
+          test -s "$OUT/adapter-signatures.tsv"
+          test -s "$OUT/file-hotspots.tsv"
+          grep -Fq '"compiler_error_count": 662' "$OUT/adapter-manifest.json"
+          grep -Fq '"unique_error_signature_count": 136' "$OUT/adapter-manifest.json"
+          grep -Fq '"number": 103' "$OUT/adapter-manifest.json"
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Workflow 102 adapter plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-port-adapter-plan-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-port-adapter-plan
+          if-no-files-found: error
+          retention-days: 14

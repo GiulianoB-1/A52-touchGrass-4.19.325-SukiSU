@@ -90,7 +90,7 @@ def patch_memory_accounting(gki: Path) -> dict[str, int]:
     result['mm_counter_current'] = replace_literal(
         device,
         '\tadd_mm_counter(current->mm, MM_UNRECLAIMABLE, (size >> PAGE_SHIFT));',
-        '\t/* 5.10 removed MM_UNRECLAIMABLE; KGSL keeps its private byte stats. */',
+        '\t/* 5.10 keeps only the KGSL private byte statistics here. */',
     )
     result['mm_counter_task'] = replace_regex(
         device,
@@ -104,7 +104,7 @@ def patch_memory_accounting(gki: Path) -> dict[str, int]:
         page_state += replace_regex(
             path,
             r'\s*mod_node_page_state\([^;]*?NR_UNRECLAIMABLE_PAGES[^;]*?\);',
-            '\n\t\t/* 5.10 removed NR_UNRECLAIMABLE_PAGES; private KGSL stats remain. */',
+            '\n\t\t/* 5.10 keeps only the private KGSL page statistics here. */',
             flags=re.S,
         )
     result['node_page_state'] = page_state
@@ -126,18 +126,25 @@ def patch_mmap_locks(gki: Path) -> dict[str, int]:
 
 
 def patch_set_fs(gki: Path) -> dict[str, int]:
-    path = gki / 'drivers/gpu/msm/kgsl.c'
     counts = {
-        'old_fs_decl': replace_regex(path, r'^\s*mm_segment_t old_fs;\n', '', flags=re.M),
-        'get_fs': replace_regex(path, r'^\s*old_fs = get_fs\(\);\n', '', flags=re.M),
-        'set_fs_get_ds': replace_regex(path, r'^\s*set_fs\(get_ds\(\)\);\n', '', flags=re.M),
-        'set_fs_restore': replace_regex(path, r'^\s*set_fs\(old_fs\);\n', '', flags=re.M),
-        'vfs_read': replace_regex(
-            path,
-            r'vfs_read\(fp, \(char __user \*\)buf, ([^,]+), &fp->f_pos\)',
-            r'kernel_read(fp, buf, \1, &fp->f_pos)',
-        ),
+        'segment_declarations': 0,
+        'get_fs_assignments': 0,
+        'set_fs_calls': 0,
+        'vfs_read_calls': 0,
+        'user_buffer_casts': 0,
     }
+    for path in source_files(gki):
+        counts['segment_declarations'] += replace_regex(
+            path, r'^\s*mm_segment_t\s+\w+\s*;\n', '', flags=re.M
+        )
+        counts['get_fs_assignments'] += replace_regex(
+            path, r'^\s*\w+\s*=\s*get_fs\(\);\n', '', flags=re.M
+        )
+        counts['set_fs_calls'] += replace_regex(
+            path, r'^\s*set_fs\([^;]+\);\n', '', flags=re.M
+        )
+        counts['vfs_read_calls'] += replace_literal(path, 'vfs_read(', 'kernel_read(')
+        counts['user_buffer_casts'] += replace_literal(path, '(char __user *)', '')
     return counts
 
 
@@ -281,7 +288,7 @@ def main() -> int:
         ('memory_accounting', 'node_page_state'): 1,
         ('mmap_locks', 'read_lock'): 1,
         ('mmap_locks', 'read_unlock'): 1,
-        ('set_fs', 'vfs_read'): 1,
+        ('set_fs', 'vfs_read_calls'): 1,
         ('timekeeping', 'struct_timespec'): 1,
         ('timekeeping', 'ktime_to_timespec'): 1,
         ('reservation_objects', 'struct'): 1,

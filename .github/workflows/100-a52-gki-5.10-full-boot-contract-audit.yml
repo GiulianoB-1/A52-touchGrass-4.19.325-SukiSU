@@ -1,0 +1,272 @@
+name: 100 - A52 GKI 5.10 full boot-contract audit
+
+run-name: Audit and stage A52 4.19 to 5.10 boot-contract compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/100-a52-gki-5.10-full-boot-contract-audit.yml'
+      - 'scripts/100_a52_full_boot_contract_audit.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/100-a52-gki-5.10-full-boot-contract-audit.yml'
+      - 'scripts/100_a52_full_boot_contract_audit.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-full-boot-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+
+jobs:
+  audit:
+    name: Audit full userspace and downstream driver contract
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves \
+            device-tree-compiler
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify Workflow 99 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow99/extracted
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW99_ARTIFACT_ID}/zip" \
+            --output workflow99/artifact.zip
+          unzip -q workflow99/artifact.zip -d workflow99/extracted
+          (cd workflow99/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow99/extracted/diagnostic.config
+          test -s workflow99/extracted/boot.img
+          grep -Fq 'A52RPMHABI copy=1' \
+            workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+
+      - name: Replay exact Workflow 99 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          PATCH="$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+          grep -Fq 'A52RPMHABI copy=1' \
+            gki/common/drivers/regulator/a52-rpmh-regulator-downstream.c
+          grep -Fq 'A52UFSDEP copy=1 HBA_STAGE' \
+            gki/common/drivers/scsi/ufs/ufshcd.c
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+          test -d touchgrass/drivers
+          test -d touchgrass/arch/arm64/configs
+
+      - name: Run complete boot-contract comparison
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-full-boot-contract-audit
+          mkdir -p "$OUT/logs" "$OUT/config-foundation"
+          python3 scripts/100_a52_full_boot_contract_audit.py \
+            --touchgrass touchgrass \
+            --gki gki/common \
+            --boot workflow99/extracted/boot.img \
+            --gki-config workflow99/extracted/diagnostic.config \
+            --output "$OUT" \
+            2>&1 | tee "$OUT/logs/audit.log"
+          test -s "$OUT/BOOT-CONTRACT-AUDIT.md"
+          test -s "$OUT/boot-contract-report.json"
+          test -s "$OUT/critical-compatible-matrix.tsv"
+          test -s "$OUT/config-parity.tsv"
+
+      - name: Stage safe Android interface foundation
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-full-boot-contract-audit"
+          BUILD="$PWD/workspace/gki-boot-contract-out"
+          mkdir -p "$BUILD"
+          cp workflow99/extracted/diagnostic.config "$BUILD/.config"
+          cp "$BUILD/.config" "$OUT/config-foundation/before.config"
+
+          requested=(
+            CGROUP_DEVICE CGROUP_PIDS CGROUP_PERF
+            ION ION_SYSTEM_HEAP
+            QCOM_APCS_IPC QCOM_IPCC QCOM_SMP2P
+            QRTR QRTR_SMD QRTR_TUN
+            RPMSG RPMSG_CHAR RPMSG_QCOM_GLINK_RPM RPMSG_QCOM_GLINK_SMEM
+            REMOTEPROC QCOM_Q6V5_COMMON QCOM_RMTFS_MEM
+            QCOM_RPMHPD QCOM_PDC QCOM_SOCINFO QCOM_QFPROM
+            QCOM_AOSS_QMP
+          )
+
+          printf 'symbol\trequested\tretained\n' > "$OUT/config-foundation/interface-config.tsv"
+          for symbol in "${requested[@]}"; do
+            gki/common/scripts/config --file "$BUILD/.config" -e "$symbol" || true
+          done
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config-foundation/after.config"
+
+          for symbol in "${requested[@]}"; do
+            value=absent
+            if grep -Fxq "CONFIG_${symbol}=y" "$BUILD/.config"; then
+              value=y
+            elif grep -Fxq "CONFIG_${symbol}=m" "$BUILD/.config"; then
+              value=m
+            elif grep -Fxq "# CONFIG_${symbol} is not set" "$BUILD/.config"; then
+              value=n
+            fi
+            printf 'CONFIG_%s\ty\t%s\n' "$symbol" "$value" \
+              >> "$OUT/config-foundation/interface-config.tsv"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('artifacts/a52xq-gki-5.10-full-boot-contract-audit/config-foundation/interface-config.tsv')
+          rows = []
+          for line in path.read_text().splitlines()[1:]:
+              symbol, requested, retained = line.split('\t')
+              rows.append({'symbol': symbol, 'requested': requested, 'retained': retained})
+          Path('artifacts/a52xq-gki-5.10-full-boot-contract-audit/config-foundation/interface-config.json').write_text(
+              json.dumps({'hardware_validated': False, 'rows': rows}, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+      - name: Build non-flashable interface foundation
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-full-boot-contract-audit"
+          BUILD="$PWD/workspace/gki-boot-contract-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            2>&1 | tee "$OUT/logs/Image.log"
+          test -s "$BUILD/arch/arm64/boot/Image"
+          test -s "$BUILD/vmlinux"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/config-foundation/Image-NON-FLASHABLE"
+          cp "$BUILD/System.map" "$OUT/config-foundation/System.map"
+          cp "$BUILD/vmlinux" "$OUT/config-foundation/vmlinux"
+
+      - name: Finalize audit artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-full-boot-contract-audit
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G 4.19 TO 5.10 FULL BOOT-CONTRACT AUDIT
+
+          Workflow 99 is the storage-working baseline. This workflow does not make
+          a flashable image. It compares the preserved ramdisk and DTB against the
+          exact TouchGrass 4.19 source and the staged Android common 5.10 source.
+
+          It maps boot-critical DT compatible strings to exact source matches,
+          compares Android-facing config interfaces, extracts init/fstab/ueventd
+          requirements, and builds a non-flashable safe interface foundation.
+
+          The preserved DTB uses downstream Qualcomm SDE/MDSS, KGSL and QSEECom
+          bindings. Upstream DRM_MSM or generic TEE cannot be treated as drop-in
+          replacements. The report defines the complete driver-port units before
+          another phone flash.
+
+          Hardware validated: no.
+          Flashable: no.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('artifacts/a52xq-gki-5.10-full-boot-contract-audit/boot-contract-report.json').read_text())
+          state = {
+              'status': 'full-boot-contract-audit-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'workflow99_baseline_preserved': True,
+              'critical_compatible_count': report['critical_compatible_count'],
+              'blocker_count': report['blocker_count'],
+              'next_action': 'port complete downstream display, secure and IPC driver units using the generated exact source matrix',
+          }
+          Path('artifacts/a52xq-gki-5.10-full-boot-contract-audit/final-state.json').write_text(
+              json.dumps(state, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload full boot-contract audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-full-boot-contract-audit-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-full-boot-contract-audit
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-full-boot-contract-audit-failure-${{ github.run_number }}
+          path: |
+            artifacts/a52xq-gki-5.10-full-boot-contract-audit
+            workspace/gki-boot-contract-out/.config
+          if-no-files-found: warn
+          retention-days: 14

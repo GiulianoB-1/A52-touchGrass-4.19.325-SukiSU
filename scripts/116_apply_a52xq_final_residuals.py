@@ -35,15 +35,19 @@ def remove_ion_flag_cached(gki: Path) -> int:
 
 
 def restore_real_ion_header(gki: Path) -> dict[str, object]:
-    target = gki / "drivers/staging/android/ion/ion.h"
+    target = gki / "include/linux/ion.h"
     if not target.is_file():
-        raise SystemExit(f"missing Android 5.10 ION implementation header: {target}")
+        raise SystemExit(f"missing Android 5.10 public ION API header: {target}")
+    target_text = read(target)
+    if "struct dma_buf *ion_alloc(size_t len" not in target_text:
+        raise SystemExit("ACK public ION header does not expose the dma-buf ion_alloc API")
+
     path = gki / "a52-compat/include/linux/ion_kernel.h"
     content = """/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef __A52_COMPAT_LINUX_ION_KERNEL_H__
 #define __A52_COMPAT_LINUX_ION_KERNEL_H__
 /* A52_PHASE14_REAL_ION_RUNTIME: use ACK 5.10 ION, never ENODEV stubs. */
-#include "../../../drivers/staging/android/ion/ion.h"
+#include <linux/ion.h>
 #ifndef ION_FLAG_CACHED
 #define ION_FLAG_CACHED 1
 #endif
@@ -75,7 +79,7 @@ def patch_qseecom_runtime_helpers(gki: Path) -> dict[str, int]:
 
 /* A52_QSEECOM_REAL_SECURE_VM_HELPERS
  * Workflow 116 previously supplied ENODEV/zero compile stubs for these two
- * vendor ION helpers.  Keymaster reaches this path at runtime, so preserve the
+ * vendor ION helpers. Keymaster reaches this path at runtime, so preserve the
  * TouchGrass flag-to-VMID behaviour locally while using ACK's real ion_alloc.
  */
 static unsigned int a52_ion_get_flags_num_vm_elems(unsigned long flags)
@@ -139,17 +143,28 @@ static int a52_ion_populate_vm_list(unsigned long flags, unsigned int *vm_list,
     return {"changes": changes, "vm_count_calls": n1, "vm_list_calls": n2}
 
 
-def replace_legacy_header(gki: Path, name: str, candidates: tuple[str, ...], fallback: tuple[str, ...]) -> dict[str, object]:
+def replace_legacy_header(
+    gki: Path,
+    name: str,
+    candidates: tuple[str, ...],
+    fallback: tuple[str, ...],
+) -> dict[str, object]:
     wrapper = gki / "a52-compat/include/linux" / name
     selected = next((p for p in candidates if (gki / p).is_file()), None)
     guard = "__A52_COMPAT_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper()
     if selected:
-        body = f'/* A52_PHASE14_DIRECT_HEADER_REDIRECT */\n#include "../../../{selected}"\n'
+        body = (
+            "/* A52_PHASE14_DIRECT_HEADER_REDIRECT */\n"
+            f'#include "../../../{selected}"\n'
+        )
     else:
         body = "/* A52_PHASE14_LEGACY_HEADER_SHIM */\n" + "".join(
             f"#include <{item}>\n" for item in fallback
         )
-    content = f"/* SPDX-License-Identifier: GPL-2.0-only */\n#ifndef {guard}\n#define {guard}\n{body}#endif\n"
+    content = (
+        "/* SPDX-License-Identifier: GPL-2.0-only */\n"
+        f"#ifndef {guard}\n#define {guard}\n{body}#endif\n"
+    )
     changed = not wrapper.is_file() or read(wrapper) != content
     if changed:
         write(wrapper, content)
@@ -174,11 +189,13 @@ def function_bounds(content: str, signature: str) -> tuple[int, int]:
     if start < 0 or opening < 0:
         raise SystemExit(f"missing function {signature}")
     depth = 0
-    for i in range(opening, len(content)):
-        if content[i] == "{": depth += 1
-        elif content[i] == "}":
+    for index in range(opening, len(content)):
+        if content[index] == "{":
+            depth += 1
+        elif content[index] == "}":
             depth -= 1
-            if depth == 0: return opening, i
+            if depth == 0:
+                return opening, index
     raise SystemExit(f"unterminated function {signature}")
 
 
@@ -187,10 +204,19 @@ def guard_adreno_coresight(gki: Path) -> int:
     content = read(path)
     if "A52_PHASE14_CONFIG_OFF_CORESIGHT" in content:
         return 0
-    opening, closing = function_bounds(content, "int adreno_coresight_init(struct adreno_device *adreno_dev)")
-    body = content[opening + 1:closing]
-    guarded = "\n#ifndef CONFIG_CORESIGHT\n\t/* A52_PHASE14_CONFIG_OFF_CORESIGHT */\n\treturn 0;\n#else" + body + "#endif\n"
-    write(path, content[:opening + 1] + guarded + content[closing:])
+    opening, closing = function_bounds(
+        content, "int adreno_coresight_init(struct adreno_device *adreno_dev)"
+    )
+    body = content[opening + 1 : closing]
+    guarded = (
+        "\n#ifndef CONFIG_CORESIGHT\n"
+        "\t/* A52_PHASE14_CONFIG_OFF_CORESIGHT */\n"
+        "\treturn 0;\n"
+        "#else"
+        + body
+        + "#endif\n"
+    )
+    write(path, content[: opening + 1] + guarded + content[closing:])
     return 1
 
 
@@ -221,14 +247,28 @@ def patch_sde_crtc(gki: Path) -> dict[str, int]:
 def validate(gki: Path) -> dict[str, bool]:
     ion = read(gki / "a52-compat/include/linux/ion_kernel.h")
     qsee = read(gki / "drivers/a52_secure/qseecom.c")
+    public_ion = read(gki / "include/linux/ion.h")
     return {
-        "real_ion_header": "A52_PHASE14_REAL_ION_RUNTIME" in ion and "ERR_PTR(-ENODEV)" not in ion,
-        "ack_ion_redirect": "drivers/staging/android/ion/ion.h" in ion,
+        "real_ion_header": (
+            "A52_PHASE14_REAL_ION_RUNTIME" in ion
+            and "ERR_PTR(-ENODEV)" not in ion
+        ),
+        "ack_ion_redirect": "#include <linux/ion.h>" in ion,
+        "ack_dma_buf_allocator": "struct dma_buf *ion_alloc(size_t len" in public_ion,
         "real_vm_helpers": "A52_QSEECOM_REAL_SECURE_VM_HELPERS" in qsee,
-        "no_old_vm_helper_calls": not re.search(r"(?<!a52_)ion_(get_flags_num_vm_elems|populate_vm_list)\s*\(", qsee),
-        "qsee_callback_maybe_unused": "static int __maybe_unused qseecom_destroy_bridge_callback(" in qsee,
-        "legacy_scm_clean": "__asmeq(" not in read(gki / "drivers/a52_secure/a52_legacy_scm.c"),
-        "coresight_guard": "A52_PHASE14_CONFIG_OFF_CORESIGHT" in read(gki / "drivers/gpu/msm/adreno_coresight.c"),
+        "no_old_vm_helper_calls": not re.search(
+            r"(?<!a52_)ion_(get_flags_num_vm_elems|populate_vm_list)\s*\(", qsee
+        ),
+        "qsee_callback_maybe_unused": (
+            "static int __maybe_unused qseecom_destroy_bridge_callback(" in qsee
+        ),
+        "legacy_scm_clean": (
+            "__asmeq(" not in read(gki / "drivers/a52_secure/a52_legacy_scm.c")
+        ),
+        "coresight_guard": (
+            "A52_PHASE14_CONFIG_OFF_CORESIGHT"
+            in read(gki / "drivers/gpu/msm/adreno_coresight.c")
+        ),
     }
 
 
@@ -249,8 +289,18 @@ def main() -> int:
         "ion_runtime": restore_real_ion_header(gki),
         "qseecom_runtime": patch_qseecom_runtime_helpers(gki),
         "header_replacements": {
-            "dma-contiguous.h": replace_legacy_header(gki, "dma-contiguous.h", ("include/linux/dma-contiguous.h",), ("linux/dma-mapping.h", "linux/cma.h")),
-            "dma-debug.h": replace_legacy_header(gki, "dma-debug.h", ("include/linux/dma-debug.h", "kernel/dma/debug.h"), ("linux/dma-mapping.h",)),
+            "dma-contiguous.h": replace_legacy_header(
+                gki,
+                "dma-contiguous.h",
+                ("include/linux/dma-contiguous.h",),
+                ("linux/dma-mapping.h", "linux/cma.h"),
+            ),
+            "dma-debug.h": replace_legacy_header(
+                gki,
+                "dma-debug.h",
+                ("include/linux/dma-debug.h", "kernel/dma/debug.h"),
+                ("linux/dma-mapping.h",),
+            ),
         },
         "legacy_scm_asmeq_removed": remove_legacy_scm_asmeq(gki),
         "adreno_coresight_config_off_guarded": guard_adreno_coresight(gki),

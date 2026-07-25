@@ -180,6 +180,7 @@ jobs:
           ! grep -R -F 'a52_persistent_diag_mark("A52' \
             gki/common --include='*.c' --include='*.h'
           git -C gki/common diff --check
+          git -C gki/common add -N .
           git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/full-source.patch"
 
       - name: Resolve configuration and compile

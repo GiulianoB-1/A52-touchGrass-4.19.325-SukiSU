@@ -1,0 +1,17 @@
+name: 125 - TouchGrass 4.19 Keymaster flight recorder
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-feature-branch:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Select the diagnostic branch
+        run: |
+          echo 'Run this workflow from agent/a52-keymaster-real-ion.'
+          echo 'The main branch contains only the registration stub.'
+          exit 1

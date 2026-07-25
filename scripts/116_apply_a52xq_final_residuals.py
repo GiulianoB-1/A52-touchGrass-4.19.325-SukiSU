@@ -67,6 +67,23 @@ def restore_qseecom_ion_flag(gki: Path) -> int:
     return 1
 
 
+def mark_qseecom_callback_maybe_unused(gki: Path) -> int:
+    path = gki / "drivers/a52_secure/qseecom.c"
+    content = read(path)
+    old = "static int qseecom_destroy_bridge_callback("
+    new = "static int __maybe_unused qseecom_destroy_bridge_callback("
+
+    if new in content:
+        return 0
+    if content.count(old) != 1:
+        raise SystemExit(
+            "expected exactly one qseecom_destroy_bridge_callback definition"
+        )
+
+    write(path, content.replace(old, new, 1))
+    return 1
+
+
 def replace_legacy_header(
     gki: Path,
     name: str,
@@ -178,6 +195,7 @@ def patch_sde_crtc(gki: Path) -> dict[str, dict[str, int]]:
 def validate(gki: Path) -> dict[str, bool]:
     compat = read(gki / "a52-port-compat.h")
     ion_kernel = read(gki / "a52-compat/include/linux/ion_kernel.h")
+    qseecom = read(gki / "drivers/a52_secure/qseecom.c")
     dma_contiguous = read(gki / "a52-compat/include/linux/dma-contiguous.h")
     dma_debug = read(gki / "a52-compat/include/linux/dma-debug.h")
 
@@ -193,6 +211,9 @@ def validate(gki: Path) -> dict[str, bool]:
         "qseecom_ion_flag_restored": (
             "A52_PHASE14_QSEECOM_ION_FLAG" in ion_kernel
             and "#define ION_FLAG_CACHED 1" in ion_kernel
+        ),
+        "qseecom_callback_maybe_unused": (
+            "static int __maybe_unused qseecom_destroy_bridge_callback(" in qseecom
         ),
         "dma_contiguous_header_replaced": (
             "A52_PHASE14_" in dma_contiguous
@@ -227,6 +248,7 @@ def main() -> int:
         "scope": "the nine compiler errors remaining after Workflow 115",
         "ion_macro_removals": remove_ion_flag_cached(gki),
         "qseecom_ion_flag_restored": restore_qseecom_ion_flag(gki),
+        "qseecom_callback_maybe_unused": mark_qseecom_callback_maybe_unused(gki),
         "header_replacements": {
             "dma-contiguous.h": replace_legacy_header(
                 gki,
@@ -245,6 +267,7 @@ def main() -> int:
         "fallbacks": [
             "Removed legacy public DMA headers are represented by compile-time compatibility shims when no Android 5.10 target exists.",
             "ION_FLAG_CACHED is restored only in qseecom's ion_kernel compatibility header with its legacy ABI value 1.",
+            "The unused qseecom DMA-buffer destructor callback is retained with __maybe_unused and no runtime call path is changed.",
             "The existing Workflow 115 diagnostic runtime fallbacks remain unvalidated.",
         ],
     }

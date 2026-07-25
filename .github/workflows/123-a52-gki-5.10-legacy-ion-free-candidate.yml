@@ -1,6 +1,6 @@
-name: 123 - A52 GKI 5.10 legacy ION free candidate
+name: 123 - A52 GKI 5.10 secure flight recorder
 
-run-name: Build and package the legacy ION free compatibility candidate
+run-name: Build ACK secure-startup flight recorder against the TouchGrass reference
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: a52-gki-legacy-ion-free-manual
+  group: a52-gki-secure-flight-recorder-manual
   cancel-in-progress: true
 
 env:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build-package:
-    name: Compile and package one audited boot candidate
+    name: Compile and package one audited ACK recorder candidate
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -60,6 +60,7 @@ jobs:
             scripts/115_apply_a52xq_secondary_compat.py \
             scripts/116_apply_a52xq_final_residuals.py \
             scripts/123_apply_a52xq_legacy_ion_free_compat.py \
+            scripts/124_apply_a52xq_ion_qsee_runtime_trace.py \
             scripts/38_repack_a52_p1_boot.py
 
       - name: Restore pinned GKI source
@@ -95,7 +96,7 @@ jobs:
           test -s dtboot/extracted/boot.img
           echo "${DT_BACKED_BOOT_SHA256}  dtboot/extracted/boot.img" | sha256sum -c -
 
-      - name: Recreate proven source state
+      - name: Recreate source and stage secure recorder
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
@@ -111,7 +112,7 @@ jobs:
           git -C touchgrass checkout --detach FETCH_HEAD
           test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
 
-          OUT=artifacts/a52xq-gki-legacy-ion-free
+          OUT=artifacts/a52xq-gki-secure-flight-recorder
           mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package"
           python3 scripts/a52xq_downstream_port_probe_v3.py \
             --touchgrass touchgrass --gki gki/common \
@@ -147,18 +148,42 @@ jobs:
             --gki gki/common --output "$OUT/stage"
           python3 scripts/123_apply_a52xq_legacy_ion_free_compat.py \
             --gki gki/common --output "$OUT/stage"
-          grep -Fq 'legacy-ion-free-compat-staged' \
-            "$OUT/stage/phase15-legacy-ion-free-report.json"
-          grep -Fq 'A52_LEGACY_ION_FREE_IOCTL_COMPAT' \
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder/stage')
+          ion = json.loads((root / 'phase15-legacy-ion-free-report.json').read_text())
+          trace = json.loads((root / 'phase16-ack-secure-flight-recorder-report.json').read_text())
+          assert ion['status'] == 'legacy-ion-free-compat-retired'
+          assert ion['checks']['disproven_noop_absent'] is True
+          assert ion['checks']['fd_returning_allocation_present'] is True
+          assert trace['status'] == 'ack-secure-first-events-flight-recorder-staged'
+          assert trace['recorder']['capacity'] == 512
+          assert trace['recorder']['dump_delays_ms'] == [12000, 45000, 90000]
+          assert trace['breadcrumb_cleanup']['removed_calls'] > 0
+          assert trace['breadcrumb_cleanup']['remaining'] == 0
+          PY
+
+          ! grep -Fq 'A52_LEGACY_ION_FREE_IOCTL_COMPAT' \
             gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'A52_ACK_SECURE_FLIGHT_RECORDER' \
+            gki/common/drivers/a52_secure/Makefile
+          grep -Fq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' \
+            gki/common/drivers/staging/android/ion/ion.c
+          ! grep -R -F 'a52_persistent_diag_mark("A52' \
+            gki/common --include='*.c' --include='*.h'
           git -C gki/common diff --check
           git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/full-source.patch"
 
       - name: Resolve configuration and compile
         run: |
           set -Eeuo pipefail
-          OUT="$PWD/artifacts/a52xq-gki-legacy-ion-free"
-          BUILD="$PWD/workspace/gki-legacy-ion-free-out"
+          OUT="$PWD/artifacts/a52xq-gki-secure-flight-recorder"
+          BUILD="$PWD/workspace/gki-secure-flight-recorder-out"
           mkdir -p "$BUILD"
           cp workflow115/extracted/config/final.config "$BUILD/.config"
           CLANG="$(readlink -f "$(command -v clang)")"
@@ -179,23 +204,27 @@ jobs:
           test -s "$BUILD/arch/arm64/boot/Image"
           cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
           gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          grep -aFq 'A52 ACK 5.10 secure-startup flight recorder' "$OUT/compile/Image"
+          grep -aFq 'A52ACKFR BEGIN pass=%u' "$OUT/compile/Image"
+          grep -aFq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' "$OUT/compile/Image"
+          grep -aFq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' "$OUT/compile/Image"
+          ! grep -aFq 'a52_ion_compat: accepted legacy ION_IOC_FREE' "$OUT/compile/Image"
 
       - name: Audit compile and package boot image
         run: |
           set -Eeuo pipefail
-          OUT=artifacts/a52xq-gki-legacy-ion-free
+          OUT=artifacts/a52xq-gki-secure-flight-recorder
           python3 - <<'PY'
           import json
           import re
           from pathlib import Path
 
-          root = Path('artifacts/a52xq-gki-legacy-ion-free')
-          errors = []
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder')
           pattern = re.compile(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', re.M)
           text = (root / 'logs/compile.log').read_text(errors='replace')
           errors = pattern.findall(text)
           state = {
-              'status': 'legacy-ion-free-compile-complete',
+              'status': 'ack-secure-flight-recorder-compile-complete',
               'compiler_error_count': len(errors),
               'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
               'image_built': (root / 'compile/Image').stat().st_size > 0,
@@ -220,33 +249,45 @@ jobs:
           import json
           from pathlib import Path
 
-          root = Path('artifacts/a52xq-gki-legacy-ion-free')
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder')
           boot = root / 'package/boot.img'
-          report = json.loads((root / 'package/repack-report.json').read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          trace = json.loads((root / 'stage/phase16-ack-secure-flight-recorder-report.json').read_text())
           final = {
-              'status': 'legacy-ion-free-boot-audited',
+              'status': 'ack-secure-flight-recorder-boot-audited',
               'flashable_candidate': True,
               'hardware_validated': False,
-              'observed_legacy_ioctl': '0xc0044901',
-              'compatibility_semantics': 'accept legacy ION_IOC_FREE as no-op',
+              'reference_ion_free_result': '-ENOTTY',
+              'reference_ion_alloc_ioctl': '0xc0184900',
+              'reference_qsee_send_cmd_ioctl': '0xc0209703',
+              'recorder_capacity': trace['recorder']['capacity'],
+              'persistent_dump_delays_ms': trace['recorder']['dump_delays_ms'],
+              'removed_obsolete_breadcrumb_calls': trace['breadcrumb_cleanup']['removed_calls'],
               'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
               'boot_bytes': boot.stat().st_size,
-              'source_boot_sha256': report['source_sha256'],
-              'dtb_preserved': report['invariants']['dtb_preserved'],
-              'ramdisk_preserved': report['invariants']['ramdisk_preserved'],
-              'recovery_dtbo_preserved': report['invariants']['recovery_dtbo_preserved'],
-              'cmdline_preserved': report['invariants']['cmdline_preserved'],
+              'source_boot_sha256': repack['source_sha256'],
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
           }
-          (root / 'final-audit.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
+          (root / 'final-audit.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
           PY
 
           cat > "$OUT/README-FIRST.txt" <<'EOF'
-          A52 GKI 5.10 LEGACY ION FREE COMPATIBILITY CANDIDATE
+          A52 GKI 5.10 SECURE-STARTUP FLIGHT RECORDER
 
-          This candidate preserves the audited DT-backed ramoops layout and all boot
-          components except the newly compiled kernel. The kernel accepts Samsung's
-          observed legacy ION_IOC_FREE command 0xc0044901 as a successful no-op while
-          retaining ACK 5.10 dma-buf ownership. This image is not hardware validated.
+          The successful TouchGrass reference rejects ION_IOC_FREE with -ENOTTY,
+          allocates through the 24-byte fd-returning ION_IOC_ALLOC ABI, and completes
+          QSEECOM SEND_CMD ioctl 0xc0209703 with return 0.
+
+          This ACK candidate keeps the same ION behaviour, removes obsolete high-volume
+          bring-up breadcrumbs, preserves the first 512 ION/QSEECOM events, and dumps
+          them directly into the existing persistent console at 12, 45 and 90 seconds.
+
+          This image is not hardware validated.
           EOF
           sed -i 's/^          //' "$OUT/README-FIRST.txt"
           (
@@ -255,17 +296,17 @@ jobs:
             sha256sum -c SHA256SUMS
           )
 
-      - name: Upload single candidate artifact
+      - name: Upload single recorder artifact
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-gki-5.10-legacy-ion-free-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: artifacts/a52xq-gki-legacy-ion-free
+          name: a52xq-gki-5.10-secure-flight-recorder-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-secure-flight-recorder
           if-no-files-found: error
           retention-days: 14
 
       - name: Require final audited output
         run: |
           set -Eeuo pipefail
-          test -s artifacts/a52xq-gki-legacy-ion-free/package/boot.img
-          grep -Fq '"status": "legacy-ion-free-boot-audited"' \
-            artifacts/a52xq-gki-legacy-ion-free/final-audit.json
+          test -s artifacts/a52xq-gki-secure-flight-recorder/package/boot.img
+          grep -Fq '"status": "ack-secure-flight-recorder-boot-audited"' \
+            artifacts/a52xq-gki-secure-flight-recorder/final-audit.json

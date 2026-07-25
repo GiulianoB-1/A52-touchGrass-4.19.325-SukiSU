@@ -17,20 +17,53 @@ def write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
-def function_bounds(text: str, signature: str) -> tuple[int, int]:
-    start = text.find(signature)
-    opening = text.find("{", start)
-    if start < 0 or opening < 0:
-        raise SystemExit(f"missing function: {signature}")
-    depth = 0
-    for index in range(opening, len(text)):
-        if text[index] == "{":
-            depth += 1
-        elif text[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return opening, index
-    raise SystemExit(f"unterminated function: {signature}")
+def function_bounds(text: str, name: str) -> tuple[int, int] | None:
+    """Return opening/closing brace offsets for a C function definition."""
+    for match in re.finditer(r"\b" + re.escape(name) + r"\s*\(", text):
+        paren = match.end() - 1
+        depth = 0
+        close_paren = -1
+        for index in range(paren, len(text)):
+            char = text[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    close_paren = index
+                    break
+        if close_paren < 0:
+            continue
+        between = text[close_paren + 1 : close_paren + 80]
+        brace_rel = between.find("{")
+        semicolon_rel = between.find(";")
+        if brace_rel < 0 or (semicolon_rel >= 0 and semicolon_rel < brace_rel):
+            continue
+        opening = close_paren + 1 + brace_rel
+        brace_depth = 0
+        for index in range(opening, len(text)):
+            if text[index] == "{":
+                brace_depth += 1
+            elif text[index] == "}":
+                brace_depth -= 1
+                if brace_depth == 0:
+                    return opening, index
+    return None
+
+
+def inject_entry(text: str, name: str, prefix: str) -> tuple[str, int]:
+    bounds = function_bounds(text, name)
+    if bounds is None:
+        return text, 0
+    opening, _ = bounds
+    marker = f'{prefix} enter fn={name}'
+    if marker in text[opening : opening + 300]:
+        return text, 0
+    line = (
+        f'\n\tpr_info("{prefix} enter fn={name} pid=%d comm=%s\\n", '
+        "current->pid, current->comm);"
+    )
+    return text[: opening + 1] + line + text[opening + 1 :], 1
 
 
 def patch_ion(gki: Path) -> dict[str, int]:
@@ -39,60 +72,41 @@ def patch_ion(gki: Path) -> dict[str, int]:
     changes = 0
 
     if MARKER not in text:
-        signature = "static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)"
-        anchor = signature + "\n{"
-        if anchor not in text:
-            raise SystemExit("ion_ioctl anchor missing")
-        text = text.replace(
-            anchor,
-            anchor + "\n\t/* " + MARKER + " */\n"
+        bounds = function_bounds(text, "ion_ioctl")
+        if bounds is None:
+            raise SystemExit("ion_ioctl function missing")
+        opening, closing = bounds
+        entry = (
+            "\n\t/* " + MARKER + " */\n"
             "\tpr_info(\"A52ION enter pid=%d comm=%s cmd=0x%x arg=0x%lx\\n\",\n"
-            "\t\tcurrent->pid, current->comm, cmd, arg);",
-            1,
+            "\t\tcurrent->pid, current->comm, cmd, arg);"
         )
+        text = text[: opening + 1] + entry + text[opening + 1 :]
         changes += 1
 
-        opening, closing = function_bounds(text, signature)
+        bounds = function_bounds(text, "ion_ioctl")
+        if bounds is None:
+            raise SystemExit("ion_ioctl vanished after entry patch")
+        opening, closing = bounds
         body = text[opening + 1 : closing]
-        matches = list(re.finditer(r"(?m)^\treturn ret;\s*$", body))
-        if not matches:
-            raise SystemExit("ion_ioctl return anchor missing")
-        rel = matches[-1].start()
-        pos = opening + 1 + rel
-        text = text[:pos] + (
+        returns = list(re.finditer(r"(?m)^\treturn ret;\s*$", body))
+        if not returns:
+            raise SystemExit("ion_ioctl final return ret anchor missing")
+        position = opening + 1 + returns[-1].start()
+        exit_line = (
             "\tpr_info(\"A52ION exit pid=%d comm=%s cmd=0x%x ret=%d\\n\",\n"
             "\t\tcurrent->pid, current->comm, cmd, ret);\n"
-        ) + text[pos:]
+        )
+        text = text[:position] + exit_line + text[position:]
         changes += 1
 
-        alloc_anchor = "struct dma_buf *ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags)\n{"
-        if alloc_anchor not in text:
-            raise SystemExit("ion_alloc anchor missing")
-        text = text.replace(
-            alloc_anchor,
-            alloc_anchor + "\n\tpr_info(\"A52IONALLOC enter pid=%d comm=%s len=%zu heaps=0x%x flags=0x%x\\n\",\n"
-            "\t\tcurrent->pid, current->comm, len, heap_id_mask, flags);",
-            1,
-        )
-        changes += 1
+        text, added = inject_entry(text, "ion_alloc", "A52IONALLOC")
+        if not added:
+            raise SystemExit("ion_alloc trace anchor missing")
+        changes += added
 
     write(path, text)
     return {"changes": changes}
-
-
-def inject_function_entry(text: str, name: str) -> tuple[str, int]:
-    pattern = re.compile(
-        r"(?m)^(?P<sig>(?:static\s+)?(?:long|int|void)\s+" + re.escape(name) + r"\s*\([^;]*?\))\s*\n\{"
-    )
-    match = pattern.search(text)
-    if not match:
-        return text, 0
-    insert = (
-        match.group(0)
-        + "\n\tpr_info(\"A52QSEE enter fn=%s pid=%d comm=%s\\n\", "
-        + "__func__, current->pid, current->comm);"
-    )
-    return text[: match.start()] + insert + text[match.end() :], 1
 
 
 def patch_qsee(gki: Path) -> dict[str, object]:
@@ -108,22 +122,35 @@ def patch_qsee(gki: Path) -> dict[str, object]:
         else:
             text = "/* " + MARKER + " */\n" + text
 
-        for name in (
+        names = (
             "qseecom_open",
             "qseecom_release",
             "qseecom_ioctl",
+            "qseecom_start_app",
+            "qseecom_shutdown_app",
+            "qseecom_send_command",
+            "qseecom_send_modfd_cmd",
             "qseecom_load_app",
             "qseecom_unload_app",
-            "qseecom_send_cmd",
-            "qseecom_send_modfd_cmd",
-        ):
-            text, n = inject_function_entry(text, name)
-            if n:
+            "__qseecom_load_fw",
+            "__qseecom_send_cmd",
+        )
+        for name in names:
+            text, added = inject_entry(text, name, "A52QSEE")
+            if added:
                 found.append(name)
-                changes += n
+                changes += added
 
-        if "qseecom_ioctl" not in found or "qseecom_release" not in found:
-            raise SystemExit("required qseecom ioctl/release trace anchors missing")
+        required_groups = (
+            {"qseecom_open"},
+            {"qseecom_release"},
+            {"qseecom_ioctl"},
+            {"qseecom_start_app", "qseecom_load_app", "__qseecom_load_fw"},
+            {"qseecom_send_command", "qseecom_send_modfd_cmd", "__qseecom_send_cmd"},
+        )
+        missing = [sorted(group) for group in required_groups if not group.intersection(found)]
+        if missing:
+            raise SystemExit("required qseecom trace groups missing: " + repr(missing))
 
     write(path, text)
     return {"changes": changes, "functions": found}

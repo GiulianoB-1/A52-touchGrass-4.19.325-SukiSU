@@ -79,10 +79,10 @@ def apply_post_cleanup_compile_fixes(root: Path) -> dict[str, object]:
         ),
         (
             Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
-            "const char *driver =",
-            "const char *driver __maybe_unused =",
+            'const char *driver = dev->driver ? dev->driver->name : "<unbound>";',
+            'const char *driver __maybe_unused = dev->driver ? dev->driver->name : "<unbound>";',
             2,
-            "UFS live-trace driver locals",
+            "UFS live-trace callback driver locals",
         ),
         (
             Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
@@ -143,9 +143,10 @@ def self_test() -> None:
             ),
             "drivers/base/dd.c": "const char *reason = reason_source;\n",
             "drivers/scsi/ufs/a52-ufs-live-trace.c": (
-                "const char *driver = first;\n"
+                'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
                 "const char *type = kind;\n"
-                "const char *driver = second;\n"
+                'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
+                'const char *driver = "<unbound>";\n'
             ),
             "drivers/a52_secure/a52_ack_secure_flight_recorder.c": (
                 '#define pr_fmt(fmt) "A52ACKFR: " fmt\n'

@@ -34,6 +34,88 @@ def normalize_verbose_macro_calls(root: Path) -> dict[str, object]:
     return {"replacements": replacements, "changed_files": changed_files}
 
 
+def replace_or_verify(
+    path: Path,
+    old: str,
+    new: str,
+    expected: int,
+    label: str,
+) -> int:
+    if not path.is_file():
+        raise SystemExit(f"{label}: missing generated source: {path}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    new_count = text.count(new)
+    if new_count:
+        if new_count != expected:
+            raise SystemExit(
+                f"{label}: expected {expected} existing fixes, found {new_count}"
+            )
+        return 0
+    old_count = text.count(old)
+    if old_count != expected:
+        raise SystemExit(
+            f"{label}: expected {expected} unfixed anchors, found {old_count}"
+        )
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    return old_count
+
+
+def apply_post_cleanup_compile_fixes(root: Path) -> dict[str, object]:
+    fixes: list[dict[str, object]] = []
+    specifications = (
+        (
+            Path("drivers/regulator/a52-legacy-gdsc-regulator.c"),
+            "u32 val = readl_relaxed(gdsc->gdscr);",
+            "u32 val __maybe_unused = readl_relaxed(gdsc->gdscr);",
+            1,
+            "legacy GDSC status local",
+        ),
+        (
+            Path("drivers/base/dd.c"),
+            "const char *reason =",
+            "const char *reason __maybe_unused =",
+            1,
+            "fw_devlink diagnostic reason local",
+        ),
+        (
+            Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
+            "const char *driver =",
+            "const char *driver __maybe_unused =",
+            2,
+            "UFS live-trace driver locals",
+        ),
+        (
+            Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
+            "const char *type =",
+            "const char *type __maybe_unused =",
+            1,
+            "UFS live-trace type local",
+        ),
+        (
+            Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c"),
+            '#define pr_fmt(fmt) "A52ACKFR: " fmt\n',
+            '#undef pr_fmt\n#define pr_fmt(fmt) "A52ACKFR: " fmt\n',
+            1,
+            "ACK recorder pr_fmt reset",
+        ),
+    )
+    for relative, old, new, expected, label in specifications:
+        changed = replace_or_verify(root / relative, old, new, expected, label)
+        fixes.append(
+            {
+                "path": str(relative),
+                "label": label,
+                "expected": expected,
+                "changed": changed,
+            }
+        )
+    return {
+        "status": "post-cleanup-compile-fixes-applied",
+        "changed_total": sum(int(item["changed"]) for item in fixes),
+        "fixes": fixes,
+    }
+
+
 def self_test() -> None:
     import tempfile
 
@@ -52,6 +134,33 @@ def self_test() -> None:
             raise SystemExit("A52_VERBOSE macro normalization self-test failed")
         if second["replacements"] != 0:
             raise SystemExit("A52_VERBOSE macro normalization is not idempotent")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        samples = {
+            "drivers/regulator/a52-legacy-gdsc-regulator.c": (
+                "u32 val = readl_relaxed(gdsc->gdscr);\n"
+            ),
+            "drivers/base/dd.c": "const char *reason = reason_source;\n",
+            "drivers/scsi/ufs/a52-ufs-live-trace.c": (
+                "const char *driver = first;\n"
+                "const char *type = kind;\n"
+                "const char *driver = second;\n"
+            ),
+            "drivers/a52_secure/a52_ack_secure_flight_recorder.c": (
+                '#define pr_fmt(fmt) "A52ACKFR: " fmt\n'
+            ),
+        }
+        for relative, content in samples.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        first = apply_post_cleanup_compile_fixes(root)
+        second = apply_post_cleanup_compile_fixes(root)
+        if first["changed_total"] != 6:
+            raise SystemExit("post-cleanup compile-fix self-test changed wrong count")
+        if second["changed_total"] != 0:
+            raise SystemExit("post-cleanup compile fixes are not idempotent")
 
 
 def main() -> int:
@@ -104,7 +213,8 @@ def main() -> int:
         "checks": checks,
         "macro_normalization": macro_normalization,
     }
-    (out / "phase15-legacy-ion-free-report.json").write_text(
+    report_path = out / "phase15-legacy-ion-free-report.json"
+    report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -115,6 +225,13 @@ def main() -> int:
     subprocess.run(
         [sys.executable, str(trace_script), "--gki", str(gki), "--output", str(out)],
         check=True,
+    )
+
+    compile_fixes = apply_post_cleanup_compile_fixes(gki)
+    report["post_cleanup_compile_fixes"] = compile_fixes
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
     recorder_source = gki / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
@@ -131,6 +248,8 @@ def main() -> int:
     final_recorder = recorder_source.read_text(encoding="utf-8", errors="replace")
     if export_include not in final_recorder:
         raise SystemExit("generated ACK recorder export header was not added")
+    if "#undef pr_fmt\n#define pr_fmt" not in final_recorder:
+        raise SystemExit("generated ACK recorder pr_fmt reset is missing")
     if "EXPORT_SYMBOL_GPL(a52_ackfr_record);" not in final_recorder:
         raise SystemExit("generated ACK recorder export declaration is missing")
 

@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MARKER = "A52_LEGACY_ION_FREE_IOCTL_COMPAT"
+RETIRED_MARKER = "A52_LEGACY_ION_FREE_IOCTL_COMPAT"
 
 
 def main() -> int:
@@ -24,72 +24,54 @@ def main() -> int:
     if not path.is_file():
         raise SystemExit(f"missing ACK ION source: {path}")
 
-    text = path.read_text(errors="replace")
-    if "static long ion_ioctl(" not in text:
-        raise SystemExit("ACK ion_ioctl function was not found")
-    if "struct dma_buf *ion_alloc(size_t len" not in text:
-        raise SystemExit("expected ACK dma-buf ION allocator is missing")
-
-    changed = False
-    if MARKER not in text:
-        anchor = "static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)\n{"
-        if anchor not in text:
-            raise SystemExit("exact ion_ioctl anchor was not found")
-
-        old = "\tint ret = 0;\n\tunion ion_ioctl_arg data;\n"
-        if old not in text:
-            raise SystemExit("ion_ioctl local-variable anchor was not found")
-
-        new = old + "\n\t/* " + MARKER + "\n" \
-            "\t * Samsung's legacy libion still releases an opaque 32-bit handle with\n" \
-            "\t * _IOW('I', 1, __u32), observed as 0xc0044901. ACK 5.10 returns\n" \
-            "\t * dma-buf file descriptors directly, so closing the fd already owns the\n" \
-            "\t * allocation lifetime. Accept the obsolete handle-release notification\n" \
-            "\t * without recreating the removed per-client handle subsystem.\n" \
-            "\t */\n" \
-            "\tif (cmd == _IOW('I', 1, __u32)) {\n" \
-            "\t\tpr_info_ratelimited(\"a52_ion_compat: accepted legacy ION_IOC_FREE\\n\");\n" \
-            "\t\treturn 0;\n" \
-            "\t}\n"
-        text = text.replace(old, new, 1)
-        path.write_text(text)
-        changed = True
-
-    final = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     checks = {
-        "marker_present": MARKER in final,
-        "exact_legacy_command": "cmd == _IOW('I', 1, __u32)" in final,
-        "success_return": "accepted legacy ION_IOC_FREE" in final and "return 0;" in final,
-        "ack_allocator_preserved": "struct dma_buf *ion_alloc(size_t len" in final,
-        "no_legacy_handle_subsystem": "struct ion_handle" not in final,
-        "modern_ioctl_preserved": "case ION_IOC_ALLOC:" in final and "case ION_IOC_HEAP_QUERY:" in final,
+        "ack_ion_ioctl_present": "static long ion_ioctl(" in text,
+        "ack_dma_buf_allocator_present": "struct dma_buf *ion_alloc(size_t len" in text,
+        "fd_returning_allocation_present": (
+            "case ION_IOC_ALLOC:" in text
+            and "dma_buf_fd(" in text
+            and "data.allocation.fd = fd" in text
+        ),
+        "legacy_handle_subsystem_absent": "struct ion_handle" not in text,
+        "disproven_noop_absent": RETIRED_MARKER not in text,
+        "unknown_ioctl_returns_enotty": "return -ENOTTY;" in text,
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
-        raise SystemExit("legacy ION free compatibility audit failed: " + ", ".join(failed))
+        raise SystemExit("ACK ION reference audit failed: " + ", ".join(failed))
 
     report = {
-        "status": "legacy-ion-free-compat-staged",
-        "runtime_fix": "accept-samsung-c0044901-on-ack-dmabuf-ion",
-        "changed": changed,
+        "status": "legacy-ion-free-compat-retired",
+        "runtime_fix": "none-reference-parity-restored",
+        "changed": False,
         "flashable": False,
         "hardware_validated": False,
         "observed_ioctl": "0xc0044901",
-        "semantics": "legacy handle release accepted as no-op; dma-buf fd remains lifetime owner",
+        "working_touchgrass_result": "-ENOTTY",
+        "reason": (
+            "The successful TouchGrass flight-recorder boot shows that Samsung "
+            "userspace tolerates ION_IOC_FREE returning -ENOTTY, then allocates "
+            "through the same 24-byte fd-returning ION_IOC_ALLOC ABI. The earlier "
+            "ACK no-op patch was hardware-tested and did not fix the boot."
+        ),
         "checks": checks,
     }
     (out / "phase15-legacy-ion-free-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n"
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
-    trace_script = Path(__file__).with_name("124_apply_a52xq_ion_qsee_runtime_trace.py")
+    trace_script = Path(__file__).with_name(
+        "124_apply_a52xq_ion_qsee_runtime_trace.py"
+    )
     subprocess.run(
         [sys.executable, str(trace_script), "--gki", str(gki), "--output", str(out)],
         check=True,
     )
-    trace_report = out / "phase16-ion-qsee-runtime-trace-report.json"
+    trace_report = out / "phase16-ack-secure-flight-recorder-report.json"
     if not trace_report.is_file():
-        raise SystemExit("runtime trace report was not generated")
+        raise SystemExit("ACK secure flight-recorder report was not generated")
     return 0
 
 

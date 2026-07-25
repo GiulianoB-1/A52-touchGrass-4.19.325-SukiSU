@@ -3,11 +3,55 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 RETIRED_MARKER = "A52_LEGACY_ION_FREE_IOCTL_COMPAT"
+SEMICOLONLESS_VERBOSE_MACRO = re.compile(
+    r'(?m)^(?P<call>[ \t]*a52_persistent_diag_mark'
+    r'\("A52VERBOSE " fmt "\\n", ##__VA_ARGS__\))(?P<trailing>[ \t]*)$'
+)
+
+
+def normalize_verbose_macro_calls(root: Path) -> dict[str, object]:
+    changed_files: list[str] = []
+    replacements = 0
+    for path in sorted(root.rglob("*.[ch]")):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        updated, count = SEMICOLONLESS_VERBOSE_MACRO.subn(
+            lambda match: f'{match.group("call")};{match.group("trailing")}',
+            text,
+        )
+        if not count:
+            continue
+        path.write_text(updated, encoding="utf-8")
+        changed_files.append(str(path.relative_to(root)))
+        replacements += count
+    return {"replacements": replacements, "changed_files": changed_files}
+
+
+def self_test() -> None:
+    import tempfile
+
+    sample = (
+        '#define A52_VERBOSE(fmt, ...) \\\n'
+        '\ta52_persistent_diag_mark("A52VERBOSE " fmt "\\n", ##__VA_ARGS__)\n'
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        path = root / "macro.c"
+        path.write_text(sample, encoding="utf-8")
+        first = normalize_verbose_macro_calls(root)
+        patched = path.read_text(encoding="utf-8")
+        second = normalize_verbose_macro_calls(root)
+        if first["replacements"] != 1 or "##__VA_ARGS__);" not in patched:
+            raise SystemExit("A52_VERBOSE macro normalization self-test failed")
+        if second["replacements"] != 0:
+            raise SystemExit("A52_VERBOSE macro normalization is not idempotent")
 
 
 def main() -> int:
@@ -15,6 +59,7 @@ def main() -> int:
     parser.add_argument("--gki", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    self_test()
 
     gki = args.gki.resolve()
     out = args.output.resolve()
@@ -41,6 +86,7 @@ def main() -> int:
     if failed:
         raise SystemExit("ACK ION reference audit failed: " + ", ".join(failed))
 
+    macro_normalization = normalize_verbose_macro_calls(gki)
     report = {
         "status": "legacy-ion-free-compat-retired",
         "runtime_fix": "none-reference-parity-restored",
@@ -56,6 +102,7 @@ def main() -> int:
             "ACK no-op patch was hardware-tested and did not fix the boot."
         ),
         "checks": checks,
+        "macro_normalization": macro_normalization,
     }
     (out / "phase15-legacy-ion-free-report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",

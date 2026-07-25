@@ -78,9 +78,9 @@ def patch_qseecom_runtime_helpers(gki: Path) -> dict[str, int]:
         helpers = r'''
 
 /* A52_QSEECOM_REAL_SECURE_VM_HELPERS
- * Workflow 116 previously supplied ENODEV/zero compile stubs for these two
- * vendor ION helpers. Keymaster reaches this path at runtime, so preserve the
- * TouchGrass flag-to-VMID behaviour locally while using ACK's real ion_alloc.
+ * The compile probe previously supplied ENODEV/zero stubs for these vendor
+ * helpers. Keymaster reaches this path at runtime, so keep the TouchGrass
+ * flag-to-VMID behaviour while using ACK's real dma-buf ion_alloc().
  */
 static unsigned int a52_ion_get_flags_num_vm_elems(unsigned long flags)
 {
@@ -105,8 +105,8 @@ static int a52_ion_flag_to_vmid(unsigned long flag)
 	return -EINVAL;
 }
 
-static int a52_ion_populate_vm_list(unsigned long flags, unsigned int *vm_list,
-				    int nelems)
+static int a52_ion_populate_vm_list(unsigned long flags,
+				    unsigned int *vm_list, int nelems)
 {
 	unsigned int bit;
 	int vmid;
@@ -150,7 +150,7 @@ def replace_legacy_header(
     fallback: tuple[str, ...],
 ) -> dict[str, object]:
     wrapper = gki / "a52-compat/include/linux" / name
-    selected = next((p for p in candidates if (gki / p).is_file()), None)
+    selected = next((item for item in candidates if (gki / item).is_file()), None)
     guard = "__A52_COMPAT_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper()
     if selected:
         body = (
@@ -281,7 +281,9 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
 
     report = {
-        "status": "phase14-keymaster-runtime-fix-staged",
+        # Keep the Workflow 116 contract while recording the narrower runtime scope.
+        "status": "phase14-final-residuals-staged",
+        "runtime_fix": "keymaster-real-ion-and-secure-vmid",
         "flashable": False,
         "hardware_validated": False,
         "scope": "replace compile-only QSEE ION stubs with ACK ION and real secure VM helpers",

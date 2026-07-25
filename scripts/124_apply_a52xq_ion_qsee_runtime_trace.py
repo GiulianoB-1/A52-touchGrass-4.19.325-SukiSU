@@ -17,13 +17,30 @@ def write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
+def function_bounds(text: str, signature: str) -> tuple[int, int]:
+    start = text.find(signature)
+    opening = text.find("{", start)
+    if start < 0 or opening < 0:
+        raise SystemExit(f"missing function: {signature}")
+    depth = 0
+    for index in range(opening, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return opening, index
+    raise SystemExit(f"unterminated function: {signature}")
+
+
 def patch_ion(gki: Path) -> dict[str, int]:
     path = gki / "drivers/staging/android/ion/ion.c"
     text = read(path)
     changes = 0
 
     if MARKER not in text:
-        anchor = "static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)\n{"
+        signature = "static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)"
+        anchor = signature + "\n{"
         if anchor not in text:
             raise SystemExit("ion_ioctl anchor missing")
         text = text.replace(
@@ -35,11 +52,13 @@ def patch_ion(gki: Path) -> dict[str, int]:
         )
         changes += 1
 
-        # The ACK implementation has one final return path through ret.
-        matches = list(re.finditer(r"(?m)^\treturn ret;\s*$", text))
+        opening, closing = function_bounds(text, signature)
+        body = text[opening + 1 : closing]
+        matches = list(re.finditer(r"(?m)^\treturn ret;\s*$", body))
         if not matches:
             raise SystemExit("ion_ioctl return anchor missing")
-        pos = matches[0].start()
+        rel = matches[-1].start()
+        pos = opening + 1 + rel
         text = text[:pos] + (
             "\tpr_info(\"A52ION exit pid=%d comm=%s cmd=0x%x ret=%d\\n\",\n"
             "\t\tcurrent->pid, current->comm, cmd, ret);\n"
@@ -62,7 +81,6 @@ def patch_ion(gki: Path) -> dict[str, int]:
 
 
 def inject_function_entry(text: str, name: str) -> tuple[str, int]:
-    # Match a normal C function definition ending in the named function and an opening brace.
     pattern = re.compile(
         r"(?m)^(?P<sig>(?:static\s+)?(?:long|int|void)\s+" + re.escape(name) + r"\s*\([^;]*?\))\s*\n\{"
     )

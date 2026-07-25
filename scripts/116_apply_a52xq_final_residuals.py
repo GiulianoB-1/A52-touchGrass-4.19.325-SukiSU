@@ -46,6 +46,27 @@ def remove_ion_flag_cached(gki: Path) -> int:
     return changes
 
 
+def restore_qseecom_ion_flag(gki: Path) -> int:
+    path = gki / "a52-compat/include/linux/ion_kernel.h"
+    content = read(path)
+    marker = "A52_PHASE14_QSEECOM_ION_FLAG"
+    if marker in content:
+        return 0
+
+    block = """/* A52_PHASE14_QSEECOM_ION_FLAG: legacy ION ABI value. */
+#ifndef ION_FLAG_CACHED
+#define ION_FLAG_CACHED 1
+#endif
+"""
+    end = content.rfind("#endif")
+    if end < 0:
+        raise SystemExit(f"missing include guard terminator in {path}")
+
+    content = content[:end] + block + "\n" + content[end:]
+    write(path, content)
+    return 1
+
+
 def replace_legacy_header(
     gki: Path,
     name: str,
@@ -156,6 +177,7 @@ def patch_sde_crtc(gki: Path) -> dict[str, dict[str, int]]:
 
 def validate(gki: Path) -> dict[str, bool]:
     compat = read(gki / "a52-port-compat.h")
+    ion_kernel = read(gki / "a52-compat/include/linux/ion_kernel.h")
     dma_contiguous = read(gki / "a52-compat/include/linux/dma-contiguous.h")
     dma_debug = read(gki / "a52-compat/include/linux/dma-debug.h")
 
@@ -168,6 +190,10 @@ def validate(gki: Path) -> dict[str, bool]:
 
     return {
         "ion_macro_removed": "#define ION_FLAG_CACHED" not in compat,
+        "qseecom_ion_flag_restored": (
+            "A52_PHASE14_QSEECOM_ION_FLAG" in ion_kernel
+            and "#define ION_FLAG_CACHED 1" in ion_kernel
+        ),
         "dma_contiguous_header_replaced": (
             "A52_PHASE14_" in dma_contiguous
             and "include_next" not in dma_contiguous
@@ -200,6 +226,7 @@ def main() -> int:
         "hardware_validated": False,
         "scope": "the nine compiler errors remaining after Workflow 115",
         "ion_macro_removals": remove_ion_flag_cached(gki),
+        "qseecom_ion_flag_restored": restore_qseecom_ion_flag(gki),
         "header_replacements": {
             "dma-contiguous.h": replace_legacy_header(
                 gki,
@@ -217,6 +244,7 @@ def main() -> int:
         "sde_crtc": patch_sde_crtc(gki),
         "fallbacks": [
             "Removed legacy public DMA headers are represented by compile-time compatibility shims when no Android 5.10 target exists.",
+            "ION_FLAG_CACHED is restored only in qseecom's ion_kernel compatibility header with its legacy ABI value 1.",
             "The existing Workflow 115 diagnostic runtime fallbacks remain unvalidated.",
         ],
     }

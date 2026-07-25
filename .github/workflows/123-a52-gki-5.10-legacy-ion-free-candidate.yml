@@ -1,0 +1,21 @@
+name: 123 - A52 GKI 5.10 legacy ION free candidate
+
+run-name: Build and package the legacy ION free compatibility candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  registration-only:
+    name: Select the feature branch when dispatching
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prevent accidental main-branch candidate build
+        run: |
+          echo "This default-branch file registers Workflow 123 in the Actions UI."
+          echo "Run it with branch agent/a52-keymaster-real-ion to use the full workflow."
+          test "${GITHUB_REF}" != "refs/heads/main"

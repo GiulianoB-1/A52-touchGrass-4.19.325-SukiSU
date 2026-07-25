@@ -69,6 +69,24 @@ def main() -> int:
         [sys.executable, str(trace_script), "--gki", str(gki), "--output", str(out)],
         check=True,
     )
+
+    recorder_source = gki / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+    if not recorder_source.is_file():
+        raise SystemExit("generated ACK recorder source is missing")
+    recorder = recorder_source.read_text(encoding="utf-8", errors="replace")
+    export_include = "#include <linux/export.h>\n"
+    if export_include not in recorder:
+        anchor = "#include <linux/atomic.h>\n"
+        if anchor not in recorder:
+            raise SystemExit("generated ACK recorder include anchor is missing")
+        recorder = recorder.replace(anchor, anchor + export_include, 1)
+        recorder_source.write_text(recorder, encoding="utf-8")
+    final_recorder = recorder_source.read_text(encoding="utf-8", errors="replace")
+    if export_include not in final_recorder:
+        raise SystemExit("generated ACK recorder export header was not added")
+    if "EXPORT_SYMBOL_GPL(a52_ackfr_record);" not in final_recorder:
+        raise SystemExit("generated ACK recorder export declaration is missing")
+
     trace_report = out / "phase16-ack-secure-flight-recorder-report.json"
     if not trace_report.is_file():
         raise SystemExit("ACK secure flight-recorder report was not generated")

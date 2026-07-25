@@ -1,6 +1,6 @@
-name: 123 - A52 GKI 5.10 legacy ION free candidate
+name: 123 - A52 GKI 5.10 secure flight recorder
 
-run-name: Build and package the legacy ION free compatibility candidate
+run-name: Build ACK secure-startup flight recorder against the TouchGrass reference
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     name: Select the feature branch when dispatching
     runs-on: ubuntu-latest
     steps:
-      - name: Prevent accidental main-branch candidate build
+      - name: Prevent accidental main-branch recorder build
         run: |
           echo "This default-branch file registers Workflow 123 in the Actions UI."
           echo "Run it with branch agent/a52-keymaster-real-ion to use the full workflow."

@@ -72,7 +72,6 @@ def mark_qseecom_callback_maybe_unused(gki: Path) -> int:
     content = read(path)
     old = "static int qseecom_destroy_bridge_callback("
     new = "static int __maybe_unused qseecom_destroy_bridge_callback("
-
     if new in content:
         return 0
     if content.count(old) != 1:
@@ -192,12 +191,88 @@ def patch_sde_crtc(gki: Path) -> dict[str, dict[str, int]]:
     return report
 
 
+def count_smc_instructions(content: str) -> int:
+    return len(re.findall(r'"smc[ \t]+#0\\n"', content))
+
+
+def remove_legacy_scm_asmeq(gki: Path) -> int:
+    path = gki / "drivers/a52_secure/a52_legacy_scm.c"
+    content = read(path)
+    occurrences = content.count("__asmeq(")
+    if occurrences == 0:
+        return 0
+
+    pattern = re.compile(r"(?m)^[ \t]*__asmeq\([^\n]*\)[ \t]*\n")
+    content, removed = pattern.subn("", content)
+    if removed != occurrences or "__asmeq(" in content:
+        raise SystemExit(
+            f"failed to remove all legacy SCM __asmeq assertions: "
+            f"found={occurrences}, removed={removed}"
+        )
+    if content.count("asm volatile(") < 3 or count_smc_instructions(content) < 3:
+        raise SystemExit("legacy SCM SMC instructions were not preserved")
+
+    write(path, content)
+    return removed
+
+
+def find_function_close(content: str, signature: str, path: Path) -> tuple[int, int]:
+    start = content.find(signature)
+    if start < 0:
+        raise SystemExit(f"missing function {signature} in {path}")
+    opening = content.find("{", start + len(signature))
+    if opening < 0:
+        raise SystemExit(f"missing opening brace for {signature} in {path}")
+
+    depth = 0
+    for index in range(opening, len(content)):
+        char = content[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return opening, index
+    raise SystemExit(f"missing closing brace for {signature} in {path}")
+
+
+def guard_adreno_coresight_when_disabled(gki: Path) -> int:
+    path = gki / "drivers/gpu/msm/adreno_coresight.c"
+    content = read(path)
+    marker = "A52_PHASE14_CONFIG_OFF_CORESIGHT"
+    if marker in content:
+        return 0
+
+    signature = "int adreno_coresight_init(struct adreno_device *adreno_dev)"
+    opening, closing = find_function_close(content, signature, path)
+    body = content[opening + 1 : closing]
+    if body.count("of_get_coresight_platform_data(") != 1:
+        raise SystemExit(
+            "expected exactly one legacy CoreSight platform-data call in "
+            "adreno_coresight_init"
+        )
+
+    guarded = (
+        "\n#ifndef CONFIG_CORESIGHT\n"
+        "\t/* A52_PHASE14_CONFIG_OFF_CORESIGHT: optional tracing is disabled. */\n"
+        "\treturn 0;\n"
+        "#else"
+        + body
+        + "#endif\n"
+    )
+    content = content[: opening + 1] + guarded + content[closing:]
+    write(path, content)
+    return 1
+
+
 def validate(gki: Path) -> dict[str, bool]:
     compat = read(gki / "a52-port-compat.h")
     ion_kernel = read(gki / "a52-compat/include/linux/ion_kernel.h")
     qseecom = read(gki / "drivers/a52_secure/qseecom.c")
     dma_contiguous = read(gki / "a52-compat/include/linux/dma-contiguous.h")
     dma_debug = read(gki / "a52-compat/include/linux/dma-debug.h")
+    legacy_scm = read(gki / "drivers/a52_secure/a52_legacy_scm.c")
+    adreno_coresight = read(gki / "drivers/gpu/msm/adreno_coresight.c")
 
     sde_sources = [
         gki / root / "msm/sde/sde_crtc.c"
@@ -223,6 +298,16 @@ def validate(gki: Path) -> dict[str, bool]:
             "A52_PHASE14_" in dma_debug
             and "include_next" not in dma_debug
         ),
+        "legacy_scm_asmeq_removed": "__asmeq(" not in legacy_scm,
+        "legacy_scm_smc_preserved": (
+            legacy_scm.count("asm volatile(") >= 3
+            and count_smc_instructions(legacy_scm) >= 3
+        ),
+        "adreno_coresight_config_off_guarded": (
+            "A52_PHASE14_CONFIG_OFF_CORESIGHT" in adreno_coresight
+            and "#ifndef CONFIG_CORESIGHT" in adreno_coresight
+            and "of_get_coresight_platform_data(" in adreno_coresight
+        ),
         "hw_ds_initialized": "struct sde_hw_ds *hw_ds = NULL;" in sde_text,
         "cfg_initialized": "struct sde_hw_ds_cfg *cfg = NULL;" in sde_text,
         "plane_initialized_in_atomic_check": (
@@ -245,7 +330,7 @@ def main() -> int:
         "status": "phase14-final-residuals-staged",
         "flashable": False,
         "hardware_validated": False,
-        "scope": "the nine compiler errors remaining after Workflow 115",
+        "scope": "the five compiler errors remaining after Workflow 116 run 8",
         "ion_macro_removals": remove_ion_flag_cached(gki),
         "qseecom_ion_flag_restored": restore_qseecom_ion_flag(gki),
         "qseecom_callback_maybe_unused": mark_qseecom_callback_maybe_unused(gki),
@@ -263,11 +348,15 @@ def main() -> int:
                 ("linux/dma-mapping.h",),
             ),
         },
+        "legacy_scm_asmeq_removed": remove_legacy_scm_asmeq(gki),
+        "adreno_coresight_config_off_guarded": guard_adreno_coresight_when_disabled(gki),
         "sde_crtc": patch_sde_crtc(gki),
         "fallbacks": [
             "Removed legacy public DMA headers are represented by compile-time compatibility shims when no Android 5.10 target exists.",
             "ION_FLAG_CACHED is restored only in qseecom's ion_kernel compatibility header with its legacy ABI value 1.",
             "The unused qseecom DMA-buffer destructor callback is retained with __maybe_unused and no runtime call path is changed.",
+            "Legacy SCM __asmeq compile-time assertions are removed while fixed-register variables and SMC instructions are preserved.",
+            "GPU CoreSight registration is skipped only when CONFIG_CORESIGHT is disabled; optional tracing remains unavailable in that configuration.",
             "The existing Workflow 115 diagnostic runtime fallbacks remain unvalidated.",
         ],
     }

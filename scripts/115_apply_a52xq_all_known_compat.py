@@ -60,6 +60,34 @@ def remove_duplicate_qseecom_object(gki: Path) -> int:
     return 1
 
 
+def remove_static_display_export(gki: Path) -> dict[str, int]:
+    relative = Path('msm/sde_io_util.c')
+    export = 'EXPORT_SYMBOL(msm_dss_get_res_byname);'
+    function = 'static struct resource *msm_dss_get_res_byname('
+    report: dict[str, int] = {}
+
+    for root in ('drivers/a52_display', 'techpack/display'):
+        path = gki / root / relative
+        if not path.is_file():
+            continue
+        content = path.read_text(errors='replace')
+        if function not in content:
+            raise SystemExit(f'missing static msm_dss_get_res_byname in {path}')
+        count = content.count(export)
+        if count > 1:
+            raise SystemExit(f'multiple msm_dss_get_res_byname exports in {path}')
+        if count == 1:
+            content = content.replace(export + '\n', '', 1)
+            if export in content:
+                raise SystemExit(f'failed to remove static export in {path}')
+            path.write_text(content)
+        report[str(path.relative_to(gki))] = count
+
+    if not report:
+        raise SystemExit('no staged sde_io_util.c source found')
+    return report
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     base = load_module(
@@ -77,11 +105,11 @@ def main() -> int:
     if result not in (None, 0):
         return int(result)
 
+    gki = argument_path('--gki')
     link_fix = {
-        'status': 'qseecom-link-object-deduplicated',
-        'removed_compat_qseecom_object': remove_duplicate_qseecom_object(
-            argument_path('--gki')
-        ),
+        'status': 'post-compile-link-fixes-staged',
+        'removed_compat_qseecom_object': remove_duplicate_qseecom_object(gki),
+        'removed_static_display_exports': remove_static_display_export(gki),
     }
     print(json.dumps(link_fix, sort_keys=True))
     return 0

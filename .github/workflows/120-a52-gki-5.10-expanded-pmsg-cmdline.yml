@@ -1,0 +1,303 @@
+name: 120 - A52 GKI 5.10 expanded pmsg cmdline
+
+run-name: Reallocate ramoops through the boot header command line
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/120-a52-gki-5.10-expanded-pmsg-cmdline.yml'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-expanded-pmsg-cmdline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WORKFLOW118_ARTIFACT_ID: '8619248709'
+  WORKFLOW118_BOOT_SHA256: '4398c3ebcb9f99b7f5bddba9fd23292e784bb9e3f542769cfcc356158690ca4f'
+
+jobs:
+  package:
+    name: Package header-only expanded-pmsg boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl ca-certificates unzip python3 file
+          python3 -m py_compile scripts/38_repack_a52_p1_boot.py
+
+      - name: Download and verify Workflow 118 candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workflow118/extracted
+          curl --fail --location --retry 5 --retry-all-errors \
+            --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WORKFLOW118_ARTIFACT_ID}/zip" \
+            --output workflow118/artifact.zip
+          unzip -q workflow118/artifact.zip -d workflow118/extracted
+          (cd workflow118/extracted && sha256sum -c SHA256SUMS)
+          test -s workflow118/extracted/boot.img
+          test -s workflow118/extracted/final-audit.json
+          echo "${WORKFLOW118_BOOT_SHA256}  workflow118/extracted/boot.img" | sha256sum -c -
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          audit = json.loads(Path('workflow118/extracted/final-audit.json').read_text())
+          checks = {
+              'flashable_source': audit.get('flashable_candidate') is True,
+              'not_claimed_hardware_validated': audit.get('hardware_validated') is False,
+              'compile_closed': audit.get('compiler_error_count') == 0,
+              'make_succeeded': audit.get('make_return_code') == 0,
+              'source_boot_hash': (
+                  audit.get('boot_image_sha256')
+                  == '4398c3ebcb9f99b7f5bddba9fd23292e784bb9e3f542769cfcc356158690ca4f'
+              ),
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit('Workflow 118 source audit failed: ' + ', '.join(failed))
+          PY
+
+      - name: Patch only ramoops command-line sizing
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-expanded-pmsg-cmdline
+          mkdir -p "$OUT/source-reports"
+
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              'a52_boot_repack', 'scripts/38_repack_a52_p1_boot.py'
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          source_path = Path('workflow118/extracted/boot.img')
+          output_root = Path('artifacts/a52xq-gki-5.10-expanded-pmsg-cmdline')
+          source_bytes = source_path.read_bytes()
+          source = module.parse_boot(source_bytes)
+
+          old_tokens = {
+              'ramoops.record_size=0x00040000': 'ramoops.record_size=0x00000000',
+              'ramoops.console_size=0x00040000': 'ramoops.console_size=0x00040000',
+              'ramoops.ftrace_size=0x00040000': 'ramoops.ftrace_size=0x00000000',
+              'ramoops.pmsg_size=0x00040000': 'ramoops.pmsg_size=0x000c0000',
+          }
+          cmdline = source['cmdline']
+          for old in old_tokens:
+              if cmdline.count(old) != 1:
+                  raise SystemExit(f'expected exactly one command-line token: {old}')
+
+          new_cmdline = cmdline
+          for old, new in old_tokens.items():
+              new_cmdline = new_cmdline.replace(old, new)
+
+          encoded = new_cmdline.encode('ascii')
+          if len(encoded) > 1535:
+              raise SystemExit(f'new command line is too long: {len(encoded)} bytes')
+
+          output = bytearray(source_bytes)
+          output[64:576] = b'\0' * 512
+          output[608:1632] = b'\0' * 1024
+          output[64:576] = encoded[:512].ljust(512, b'\0')
+          output[608:1632] = encoded[512:].ljust(1024, b'\0')
+
+          rebuilt = module.parse_boot(bytes(output))
+          if rebuilt['cmdline'] != new_cmdline:
+              raise SystemExit('rebuilt command line does not match requested value')
+
+          allowed = set(range(64, 576)) | set(range(608, 1632))
+          unexpected = [
+              index
+              for index, (before, after) in enumerate(zip(source_bytes, output))
+              if before != after and index not in allowed
+          ]
+          if unexpected:
+              raise SystemExit(
+                  'bytes changed outside command-line fields: '
+                  + ', '.join(str(value) for value in unexpected[:20])
+              )
+
+          sha256 = lambda data: hashlib.sha256(data).hexdigest()
+          checks = {
+              'source_boot_hash_pinned': (
+                  sha256(source_bytes)
+                  == '4398c3ebcb9f99b7f5bddba9fd23292e784bb9e3f542769cfcc356158690ca4f'
+              ),
+              'partition_size_preserved': len(output) == len(source_bytes) == 100663296,
+              'header_version_preserved': rebuilt['header_version'] == source['header_version'] == 2,
+              'page_size_preserved': rebuilt['page_size'] == source['page_size'] == 4096,
+              'board_preserved': rebuilt['board'] == source['board'] == 'SRPTJ06A012',
+              'kernel_preserved': rebuilt['kernel'] == source['kernel'],
+              'ramdisk_preserved': rebuilt['ramdisk'] == source['ramdisk'],
+              'second_preserved': rebuilt['second'] == source['second'],
+              'recovery_dtbo_preserved': rebuilt['recovery_dtbo'] == source['recovery_dtbo'],
+              'dtb_preserved': rebuilt['dtb'] == source['dtb'],
+              'boot_id_preserved': rebuilt['id'] == source['id'],
+              'ramoops_base_preserved': 'ramoops.mem_address=0xB1B00000' in new_cmdline,
+              'ramoops_total_preserved': 'ramoops.mem_size=0x00100000' in new_cmdline,
+              'console_256k': 'ramoops.console_size=0x00040000' in new_cmdline,
+              'pmsg_768k': 'ramoops.pmsg_size=0x000c0000' in new_cmdline,
+              'record_disabled': 'ramoops.record_size=0x00000000' in new_cmdline,
+              'ftrace_disabled': 'ramoops.ftrace_size=0x00000000' in new_cmdline,
+              'pstore_backend_preserved': 'pstore.backend=ramoops' in new_cmdline,
+              'diagnostic_logging_preserved': (
+                  'ignore_loglevel' in new_cmdline
+                  and 'initcall_debug' in new_cmdline
+                  and 'pstore.compress=none' in new_cmdline
+              ),
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit('Workflow 120 audit failed: ' + ', '.join(failed))
+
+          output_root.joinpath('boot.img').write_bytes(output)
+          output_root.joinpath('Image.gz').write_bytes(rebuilt['kernel'])
+          output_root.joinpath('source-cmdline.txt').write_text(cmdline + '\n')
+          output_root.joinpath('patched-cmdline.txt').write_text(new_cmdline + '\n')
+
+          audit = {
+              'status': 'expanded-pmsg-cmdline-patched-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'source': 'Workflow 118 run 2 real-ION boot candidate',
+              'purpose': 'capture later Android userspace pmsg after Keymaster initialization',
+              'ramoops': {
+                  'base': '0xb1b00000',
+                  'total_size': 0x100000,
+                  'console_size': 0x40000,
+                  'pmsg_size': 0xc0000,
+                  'record_size': 0,
+                  'ftrace_size': 0,
+              },
+              'source_boot_sha256': sha256(source_bytes),
+              'boot_image_sha256': sha256(output),
+              'boot_image_bytes': len(output),
+              'kernel_sha256': sha256(rebuilt['kernel']),
+              'changed_byte_count': sum(
+                  before != after for before, after in zip(source_bytes, output)
+              ),
+              'allowed_change_ranges': ['64:576 cmdline', '608:1632 extra_cmdline'],
+              'checks': checks,
+          }
+          output_root.joinpath('final-audit.json').write_text(
+              json.dumps(audit, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          cp workflow118/extracted/final-audit.json \
+            "$OUT/source-reports/workflow118-final-audit.json"
+          cp workflow118/extracted/source-reports/workflow116-final-residuals-report.json \
+            "$OUT/source-reports/workflow116-final-residuals-report.json"
+
+      - name: Finalize diagnostic candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-expanded-pmsg-cmdline
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 EXPANDED-PMSG COMMAND-LINE CANDIDATE
+
+          This keeps the exact Workflow 118 real-ION kernel, ramdisk, DTB,
+          recovery DTBO and partition layout. Only four ramoops sizing values
+          in the Android boot header command line are changed:
+
+            console: 256 KiB
+            pmsg:    768 KiB
+            record:    0 KiB
+            ftrace:    0 KiB
+
+          The reserved memory remains exactly 1 MiB at 0xB1B00000.
+
+          The previous hardware capture proved that QSEE loaded skeymast, but
+          the 256 KiB pmsg zone filled with Keystore2 output before the later
+          Android userspace boot outcome could be recovered. This candidate
+          triples pmsg capacity without rebuilding the kernel.
+
+          This boot.img is a flashable diagnostic candidate, not hardware
+          validated. Keep the Workflow 118 boot image available for rollback.
+          After one boot attempt, enter recovery and collect the raw 1 MiB
+          ramoops region immediately.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'source-workflow\t118 run 2\n' >> "$OUT/candidate-status.tsv"
+          printf 'kernel-changed\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'ramdisk-changed\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'dtb-changed\tno\n' >> "$OUT/candidate-status.tsv"
+          printf 'header-cmdline-changed\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'console-bytes\t262144\n' >> "$OUT/candidate-status.tsv"
+          printf 'pmsg-bytes\t786432\n' >> "$OUT/candidate-status.tsv"
+          printf 'flashable-candidate\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Workflow 120 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-expanded-pmsg-cmdline-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-expanded-pmsg-cmdline
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require audited output
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-5.10-expanded-pmsg-cmdline')
+          audit = json.loads((root / 'final-audit.json').read_text())
+          expected = {
+              'console_size': 0x40000,
+              'pmsg_size': 0xc0000,
+              'record_size': 0,
+              'ftrace_size': 0,
+          }
+          failed = [
+              name for name, passed in audit.get('checks', {}).items() if not passed
+          ]
+          if failed:
+              raise SystemExit('residual audit failures: ' + ', '.join(failed))
+          for key, value in expected.items():
+              if audit.get('ramoops', {}).get(key) != value:
+                  raise SystemExit(f'unexpected {key}')
+          if audit.get('flashable_candidate') is not True:
+              raise SystemExit('candidate flag missing')
+          if audit.get('hardware_validated') is not False:
+              raise SystemExit('hardware validation state is incorrect')
+          if not (root / 'boot.img').is_file():
+              raise SystemExit('boot.img is missing')
+          PY

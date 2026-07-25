@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 MARKER = "A52_LEGACY_ION_FREE_IOCTL_COMPAT"
@@ -79,6 +81,15 @@ def main() -> int:
     (out / "phase15-legacy-ion-free-report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
     )
+
+    trace_script = Path(__file__).with_name("124_apply_a52xq_ion_qsee_runtime_trace.py")
+    subprocess.run(
+        [sys.executable, str(trace_script), "--gki", str(gki), "--output", str(out)],
+        check=True,
+    )
+    trace_report = out / "phase16-ion-qsee-runtime-trace-report.json"
+    if not trace_report.is_file():
+        raise SystemExit("runtime trace report was not generated")
     return 0
 
 

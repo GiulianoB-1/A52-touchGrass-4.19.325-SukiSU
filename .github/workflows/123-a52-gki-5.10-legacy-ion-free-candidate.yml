@@ -4,13 +4,16 @@ run-name: Build ACK secure-startup flight recorder against the TouchGrass refere
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-gki-secure-flight-recorder-manual
+  group: a52-gki-secure-flight-recorder-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -200,7 +203,16 @@ jobs:
           rc=$?
           set -e
           printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
-          test "$rc" -eq 0
+          if [ "$rc" -ne 0 ]; then
+            echo "::group::Compiler errors"
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 250 || true
+            echo "::endgroup::"
+            echo "::group::Compile log tail"
+            tail -n 300 "$OUT/logs/compile.log" || true
+            echo "::endgroup::"
+            exit "$rc"
+          fi
           test -s "$BUILD/arch/arm64/boot/Image"
           cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
           gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
@@ -209,6 +221,19 @@ jobs:
           grep -aFq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' "$OUT/compile/Image"
           grep -aFq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' "$OUT/compile/Image"
           ! grep -aFq 'a52_ion_compat: accepted legacy ION_IOC_FREE' "$OUT/compile/Image"
+
+      - name: Upload failed compile diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-secure-flight-recorder-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-secure-flight-recorder/logs
+            artifacts/a52xq-gki-secure-flight-recorder/compile/make-return-code.txt
+            artifacts/a52xq-gki-secure-flight-recorder/config/final.config
+            artifacts/a52xq-gki-secure-flight-recorder/stage/full-source.patch
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Audit compile and package boot image
         run: |

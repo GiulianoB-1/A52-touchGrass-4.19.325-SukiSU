@@ -46,31 +46,49 @@ def remove_ion_flag_cached(gki: Path) -> int:
     return changes
 
 
-def redirect_header(gki: Path, name: str, candidates: tuple[str, ...]) -> dict[str, object]:
+def replace_legacy_header(
+    gki: Path,
+    name: str,
+    candidates: tuple[str, ...],
+    fallback_includes: tuple[str, ...],
+) -> dict[str, object]:
     wrapper = gki / "a52-compat/include/linux" / name
-    selected = None
-    for candidate in candidates:
-        if (gki / candidate).is_file():
-            selected = candidate
-            break
-    if selected is None:
-        raise SystemExit(f"no in-tree target exists for compatibility header {name}")
-
-    # The wrapper sits at a52-compat/include/linux/<name>.
-    relative = "../../../" + selected
+    selected = next(
+        (candidate for candidate in candidates if (gki / candidate).is_file()),
+        None,
+    )
     guard = "__A52_COMPAT_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper()
+
+    if selected is not None:
+        relative = "../../../" + selected
+        body = (
+            "/* A52_PHASE14_DIRECT_HEADER_REDIRECT */\n"
+            f'#include "{relative}"\n'
+        )
+        mode = "direct-redirect"
+    else:
+        relative = None
+        body = "/* A52_PHASE14_LEGACY_HEADER_SHIM */\n" + "".join(
+            f"#include <{header}>\n" for header in fallback_includes
+        )
+        mode = "compatibility-shim"
+
     content = f"""/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef {guard}
 #define {guard}
-/* A52_PHASE14_DIRECT_HEADER_REDIRECT */
-#include \"{relative}\"
-#endif
+{body}#endif
 """
     previous = read(wrapper) if wrapper.is_file() else ""
     changed = previous != content
     if changed:
         write(wrapper, content)
-    return {"changed": changed, "target": selected, "relative_include": relative}
+    return {
+        "changed": changed,
+        "mode": mode,
+        "target": selected,
+        "relative_include": relative,
+        "fallback_includes": list(fallback_includes) if selected is None else [],
+    }
 
 
 def initialize_declaration_in_function(
@@ -150,12 +168,12 @@ def validate(gki: Path) -> dict[str, bool]:
 
     return {
         "ion_macro_removed": "#define ION_FLAG_CACHED" not in compat,
-        "dma_contiguous_redirected": (
-            "A52_PHASE14_DIRECT_HEADER_REDIRECT" in dma_contiguous
+        "dma_contiguous_header_replaced": (
+            "A52_PHASE14_" in dma_contiguous
             and "include_next" not in dma_contiguous
         ),
-        "dma_debug_redirected": (
-            "A52_PHASE14_DIRECT_HEADER_REDIRECT" in dma_debug
+        "dma_debug_header_replaced": (
+            "A52_PHASE14_" in dma_debug
             and "include_next" not in dma_debug
         ),
         "hw_ds_initialized": "struct sde_hw_ds *hw_ds = NULL;" in sde_text,
@@ -182,22 +200,24 @@ def main() -> int:
         "hardware_validated": False,
         "scope": "the nine compiler errors remaining after Workflow 115",
         "ion_macro_removals": remove_ion_flag_cached(gki),
-        "header_redirects": {
-            "dma-contiguous.h": redirect_header(
+        "header_replacements": {
+            "dma-contiguous.h": replace_legacy_header(
                 gki,
                 "dma-contiguous.h",
                 ("include/linux/dma-contiguous.h",),
+                ("linux/dma-mapping.h", "linux/cma.h"),
             ),
-            "dma-debug.h": redirect_header(
+            "dma-debug.h": replace_legacy_header(
                 gki,
                 "dma-debug.h",
                 ("include/linux/dma-debug.h", "kernel/dma/debug.h"),
+                ("linux/dma-mapping.h",),
             ),
         },
         "sde_crtc": patch_sde_crtc(gki),
         "fallbacks": [
-            "No new runtime fallback was added in Workflow 116.",
-            "The existing Workflow 115 diagnostic fallbacks remain unvalidated.",
+            "Removed legacy public DMA headers are represented by compile-time compatibility shims when no Android 5.10 target exists.",
+            "The existing Workflow 115 diagnostic runtime fallbacks remain unvalidated.",
         ],
     }
     report["validation"] = validate(gki)

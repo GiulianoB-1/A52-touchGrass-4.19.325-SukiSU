@@ -222,20 +222,22 @@ def guard_adreno_coresight(gki: Path) -> int:
 
 def patch_sde_crtc(gki: Path) -> dict[str, int]:
     result: dict[str, int] = {}
+    declarations = (
+        ("\tstruct sde_hw_ds *hw_ds;", "\tstruct sde_hw_ds *hw_ds = NULL;"),
+        ("\tstruct sde_hw_ds_cfg *cfg;", "\tstruct sde_hw_ds_cfg *cfg = NULL;"),
+        ("\tstruct drm_plane *plane;", "\tstruct drm_plane *plane = NULL;"),
+    )
     for root in DISPLAY_ROOTS:
         path = gki / root / "msm/sde/sde_crtc.c"
         if not path.is_file():
             continue
         content = read(path)
         changes = 0
-        for old, new in (
-            ("\tstruct sde_hw_ds *hw_ds;", "\tstruct sde_hw_ds *hw_ds = NULL;"),
-            ("\tstruct sde_hw_ds_cfg *cfg;", "\tstruct sde_hw_ds_cfg *cfg = NULL;"),
-            ("\tstruct drm_plane *plane;", "\tstruct drm_plane *plane = NULL;"),
-        ):
-            if old in content and new not in content:
-                content = content.replace(old, new, 1)
-                changes += 1
+        for old, new in declarations:
+            count = content.count(old)
+            if count:
+                content = content.replace(old, new)
+                changes += count
         if changes:
             write(path, content)
         result[str(path.relative_to(gki))] = changes
@@ -248,6 +250,19 @@ def validate(gki: Path) -> dict[str, bool]:
     ion = read(gki / "a52-compat/include/linux/ion_kernel.h")
     qsee = read(gki / "drivers/a52_secure/qseecom.c")
     public_ion = read(gki / "include/linux/ion.h")
+    sde_clean = True
+    for root in DISPLAY_ROOTS:
+        path = gki / root / "msm/sde/sde_crtc.c"
+        if path.is_file():
+            text = read(path)
+            sde_clean = sde_clean and not any(
+                old in text
+                for old in (
+                    "\tstruct sde_hw_ds *hw_ds;",
+                    "\tstruct sde_hw_ds_cfg *cfg;",
+                    "\tstruct drm_plane *plane;",
+                )
+            )
     return {
         "real_ion_header": (
             "A52_PHASE14_REAL_ION_RUNTIME" in ion
@@ -269,6 +284,7 @@ def validate(gki: Path) -> dict[str, bool]:
             "A52_PHASE14_CONFIG_OFF_CORESIGHT"
             in read(gki / "drivers/gpu/msm/adreno_coresight.c")
         ),
+        "sde_declarations_initialised": sde_clean,
     }
 
 
@@ -281,7 +297,6 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
 
     report = {
-        # Keep the Workflow 116 contract while recording the narrower runtime scope.
         "status": "phase14-final-residuals-staged",
         "runtime_fix": "keymaster-real-ion-and-secure-vmid",
         "flashable": False,

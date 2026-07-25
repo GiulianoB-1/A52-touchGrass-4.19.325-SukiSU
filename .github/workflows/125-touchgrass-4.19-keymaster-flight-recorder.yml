@@ -1,0 +1,298 @@
+name: 125 - TouchGrass 4.19 Keymaster flight recorder
+
+run-name: Build working TouchGrass baseline with a bounded Keymaster/QSEECOM recorder
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-touchgrass-keymaster-flight-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  DEFCONFIG: a52xq_eur_open_defconfig
+
+jobs:
+  build:
+    name: Build one TouchGrass flight-recorder candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ca-certificates make gcc g++ python3 bc bison flex \
+            clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu libssl-dev libelf-dev \
+            rsync cpio gzip zip unzip file dwarves device-tree-compiler
+          python3 -m py_compile \
+            scripts/125_apply_touchgrass_keymaster_flight_recorder.py
+
+      - name: Fetch exact TouchGrass source baseline
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+          test "$(sed -n 's/^VERSION = //p' touchgrass/Makefile)" = 4
+          test "$(sed -n 's/^PATCHLEVEL = //p' touchgrass/Makefile)" = 19
+
+      - name: Stage low-noise secure flight recorder
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-keymaster-flight-recorder
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/package"
+
+          # The working handset reports 4.19.200-touchGrassKernel+.
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 200/' touchgrass/Makefile
+
+          python3 scripts/125_apply_touchgrass_keymaster_flight_recorder.py \
+            --kernel touchgrass --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage.log"
+
+          git -C touchgrass diff --check
+          git -C touchgrass diff --binary --no-ext-diff \
+            > "$OUT/stage/touchgrass-keymaster-flight-recorder.patch"
+          test -s "$OUT/stage/touchgrass-keymaster-flight-recorder.patch"
+          grep -Fq 'touchgrass-keymaster-flight-recorder-staged' \
+            "$OUT/stage/touchgrass-keymaster-flight-recorder-report.json"
+          grep -Fq 'A52_TOUCHGRASS_KEYMASTER_FLIGHT_RECORDER' \
+            touchgrass/drivers/misc/qseecom.c
+          grep -Fq 'a52_keymaster_flight_recorder' \
+            touchgrass/drivers/misc/Makefile
+
+      - name: Configure matching TouchGrass kernel release
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-keymaster-flight-recorder"
+          BUILD="$PWD/workspace/touchgrass-kmfr-out"
+          mkdir -p "$BUILD"
+
+          common_make=(
+            -C touchgrass O="$BUILD" ARCH=arm64
+            CC=clang-14 HOSTCC=clang-14 HOSTCXX=clang++-14
+            LD=ld.lld-14 AR=llvm-ar-14 NM=llvm-nm-14
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14
+            STRIP=llvm-strip-14
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+          )
+
+          make "${common_make[@]}" "vendor/${DEFCONFIG}" \
+            2>&1 | tee "$OUT/logs/defconfig.log"
+
+          touchgrass/scripts/config --file "$BUILD/.config" \
+            --set-str LOCALVERSION '-touchGrassKernel+' \
+            --disable LOCALVERSION_AUTO \
+            --enable PRINTK_TIME \
+            --enable PROC_FS \
+            --set-val LOG_BUF_SHIFT 22 \
+            --set-val LOG_CPU_MAX_BUF_SHIFT 16
+
+          make "${common_make[@]}" olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          release="$(make -s "${common_make[@]}" kernelrelease)"
+          printf '%s\n' "$release" | tee "$OUT/config/kernelrelease.txt"
+          test "$release" = '4.19.200-touchGrassKernel+'
+          grep -Fxq 'CONFIG_PRINTK_TIME=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PROC_FS=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_LOG_BUF_SHIFT=22' "$BUILD/.config"
+
+      - name: Compile TouchGrass Image.gz-dtb
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-keymaster-flight-recorder"
+          BUILD="$PWD/workspace/touchgrass-kmfr-out"
+          common_make=(
+            -C touchgrass O="$BUILD" ARCH=arm64
+            CC=clang-14 HOSTCC=clang-14 HOSTCXX=clang++-14
+            LD=ld.lld-14 AR=llvm-ar-14 NM=llvm-nm-14
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14
+            STRIP=llvm-strip-14
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+          )
+
+          clang-14 --version | tee "$OUT/logs/toolchain.log"
+          make "${common_make[@]}" -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image.gz-dtb \
+            2>&1 | tee "$OUT/logs/build.log"
+
+          IMAGE="$BUILD/arch/arm64/boot/Image.gz-dtb"
+          test -s "$IMAGE"
+          cp "$IMAGE" "$OUT/package/Image.gz-dtb"
+          grep -aFq 'A52 TouchGrass Keymaster flight recorder' "$IMAGE"
+          grep -aFq 'QSEE enter fn=qseecom_ioctl' "$IMAGE"
+          grep -aFq 'ION enter fn=ion_ioctl' "$IMAGE"
+          grep -aFq 'a52_keymaster_flight_recorder' "$IMAGE"
+
+      - name: Package one AnyKernel flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-keymaster-flight-recorder"
+          rm -rf anykernel
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          rm -rf anykernel/.git anykernel/.github
+          rm -f anykernel/README.md anykernel/Image anykernel/Image.gz \
+            anykernel/Image.gz-dtb anykernel/dtb anykernel/dtbo.img
+          cp "$OUT/package/Image.gz-dtb" anykernel/Image.gz-dtb
+
+          cat > anykernel/anykernel.sh <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # TouchGrass A52 5G Keymaster flight recorder
+
+          properties() { '
+          kernel.string=TouchGrass 4.19.200 Keymaster Flight Recorder
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          supported.versions=
+          '; }
+
+          block=auto;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+
+          . tools/ak3-core.sh;
+
+          ui_print "  TouchGrass Keymaster flight recorder";
+          ui_print "  Preserving the installed ramdisk and root state";
+          dump_boot;
+          write_boot;
+          EOF
+
+          cat > anykernel/README-FIRST.txt <<'EOF'
+          A52 TOUCHGRASS KEYMASTER FLIGHT RECORDER
+
+          This is a diagnostic build of the known-working TouchGrass 4.19 path.
+          It records selected ION and QSEECOM events in a bounded in-kernel ring.
+
+          After Android boots, collect it with:
+
+            adb shell su 0 cat /proc/a52_keymaster_flight_recorder \
+              > touchgrass-keymaster-flight-recorder.txt
+            adb shell su 0 dmesg > touchgrass-flight-recorder-dmesg.txt
+            adb logcat -b all -d -v threadtime \
+              > touchgrass-flight-recorder-logcat.txt
+
+          The proc recorder contains at most 4096 selected secure-startup events.
+          This artifact is not hardware validated until it boots on the phone.
+          EOF
+
+          cat > "$OUT/package/COLLECT-WINDOWS-POWERSHELL.ps1" <<'EOF'
+          $ErrorActionPreference = 'Stop'
+          adb wait-for-device
+          adb shell su 0 cat /proc/a52_keymaster_flight_recorder |
+            Out-File -Encoding utf8 touchgrass-keymaster-flight-recorder.txt
+          adb shell su 0 dmesg |
+            Out-File -Encoding utf8 touchgrass-flight-recorder-dmesg.txt
+          adb logcat -b all -d -v threadtime |
+            Out-File -Encoding utf8 touchgrass-flight-recorder-logcat.txt
+          Compress-Archive -Force -Path @(
+            'touchgrass-keymaster-flight-recorder.txt',
+            'touchgrass-flight-recorder-dmesg.txt',
+            'touchgrass-flight-recorder-logcat.txt'
+          ) -DestinationPath 'TouchGrass-Keymaster-Flight-Recorder-Capture.zip'
+          EOF
+
+          chmod 755 anykernel/anykernel.sh
+          (
+            cd anykernel
+            zip -qr9 "$OUT/package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip" .
+          )
+          test -s "$OUT/package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip"
+
+      - name: Audit and finalize artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-keymaster-flight-recorder
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/touchgrass-keymaster-flight-recorder')
+          image = root / 'package/Image.gz-dtb'
+          flashable = root / 'package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip'
+          release = (root / 'config/kernelrelease.txt').read_text().strip()
+          report = {
+              'status': 'touchgrass-keymaster-flight-recorder-built-audited',
+              'hardware_validated': False,
+              'touchgrass_source_sha': '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
+              'kernelrelease': release,
+              'proc_endpoint': '/proc/a52_keymaster_flight_recorder',
+              'event_capacity': 4096,
+              'image_bytes': image.stat().st_size,
+              'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'flashable_sha256': hashlib.sha256(flashable.read_bytes()).hexdigest(),
+              'critical_observation': (
+                  'The working TouchGrass ion-ioctl implementation also returns '
+                  '-ENOTTY for unsupported legacy commands; ION_IOC_FREE alone is '
+                  'not a sufficient explanation for the ACK Keymaster death.'
+              ),
+          }
+          (root / 'final-audit.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 TOUCHGRASS 4.19 KEYMASTER FLIGHT RECORDER
+
+          One manual, low-noise baseline build.
+
+          Flashable package:
+            package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip
+
+          After a successful boot, read:
+            /proc/a52_keymaster_flight_recorder
+
+          The collector commands are in:
+            package/COLLECT-WINDOWS-POWERSHELL.ps1
+
+          Not hardware validated until tested on the phone.
+          EOF
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload single TouchGrass recorder artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-keymaster-flight-recorder-NOT-HARDWARE-VALIDATED
+          path: artifacts/touchgrass-keymaster-flight-recorder
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Require final output
+        run: |
+          set -Eeuo pipefail
+          test -s artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
+          test -s artifacts/touchgrass-keymaster-flight-recorder/package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip
+          grep -Fq 'touchgrass-keymaster-flight-recorder-built-audited' \
+            artifacts/touchgrass-keymaster-flight-recorder/final-audit.json

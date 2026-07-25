@@ -1,0 +1,325 @@
+name: 118 - A52 GKI 5.10 Keymaster real-ION boot candidate
+
+run-name: Package the run-14 Keymaster real-ION A52 kernel
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/118-a52-gki-5.10-keymaster-real-ion-boot.yml'
+      - 'scripts/38_repack_a52_p1_boot.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-keymaster-real-ion-boot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW116_ARTIFACT_ID: '8618968377'
+  WORKFLOW99_BOOT_SHA256: 'ff486ecba5cf78e321f5e22376791b98a06b372883dde1b422e512f4a25f23b3'
+  WORKFLOW116_IMAGE_SHA256: '3c225bdd088a042b2f12b09014aeb3ab073d5f10b2d0fdc2c05963fd224ebe39'
+
+jobs:
+  package:
+    name: Package and audit Keymaster real-ION boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl ca-certificates unzip python3 gzip file
+          python3 -m py_compile scripts/38_repack_a52_p1_boot.py
+
+      - name: Download pinned source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          download() {
+            local name="$1" id="$2"
+            mkdir -p "${name}/extracted"
+            curl --fail --location --retry 5 --retry-all-errors \
+              --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "${name}/artifact.zip"
+            unzip -q "${name}/artifact.zip" -d "${name}/extracted"
+            (cd "${name}/extracted" && sha256sum -c SHA256SUMS)
+          }
+
+          download workflow99 "${WORKFLOW99_ARTIFACT_ID}"
+          download workflow116 "${WORKFLOW116_ARTIFACT_ID}"
+
+          test -s workflow99/extracted/boot.img
+          test -s workflow99/extracted/repack-report.json
+          test -s workflow116/extracted/compile/Image-NON-FLASHABLE
+          test -s workflow116/extracted/compile/compile-incompatibilities.json
+          test -s workflow116/extracted/config/final.config
+          test -s workflow116/extracted/final-state.json
+          test -s workflow116/extracted/stage/phase14-final-residuals-report.json
+
+          echo "${WORKFLOW99_BOOT_SHA256}  workflow99/extracted/boot.img" | sha256sum -c -
+          echo "${WORKFLOW116_IMAGE_SHA256}  workflow116/extracted/compile/Image-NON-FLASHABLE" | sha256sum -c -
+
+      - name: Require compile closure and real ION validation
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('workflow116/extracted')
+          state = json.loads((root / 'final-state.json').read_text())
+          compile_report = json.loads(
+              (root / 'compile/compile-incompatibilities.json').read_text()
+          )
+          residuals = json.loads(
+              (root / 'stage/phase14-final-residuals-report.json').read_text()
+          )
+
+          checks = {
+              'compile_closed': state.get('compile_closed') is True,
+              'zero_compiler_errors': state.get('compiler_error_count') == 0,
+              'make_return_code_zero': state.get('make_return_code') == 0,
+              'image_built': state.get('image_built') is True,
+              'workflow99_baseline_preserved': (
+                  state.get('workflow99_baseline_preserved') is True
+              ),
+              'report_zero_errors': compile_report.get('compiler_error_count') == 0,
+              'report_make_return_code_zero': compile_report.get('make_return_code') == 0,
+              'report_image_built': compile_report.get('image_built') is True,
+              'no_remaining_entries': compile_report.get('entries') == [],
+          }
+
+          validation = residuals.get('validation', {})
+          checks.update({
+              'runtime_fix_identified': (
+                  residuals.get('runtime_fix')
+                  == 'keymaster-real-ion-and-secure-vmid'
+              ),
+              'ack_ion_redirect': validation.get('ack_ion_redirect') is True,
+              'real_ion_header': validation.get('real_ion_header') is True,
+              'real_vm_helpers': validation.get('real_vm_helpers') is True,
+              'no_old_vm_helper_calls': (
+                  validation.get('no_old_vm_helper_calls') is True
+              ),
+              'qsee_callback_maybe_unused': (
+                  validation.get('qsee_callback_maybe_unused') is True
+              ),
+              'qsee_vm_count_call_replaced': (
+                  residuals.get('qseecom_runtime', {}).get('vm_count_calls') == 1
+              ),
+              'qsee_vm_list_call_replaced': (
+                  residuals.get('qseecom_runtime', {}).get('vm_list_calls') == 1
+              ),
+          })
+
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit(
+                  'Workflow 116 Keymaster/ION validation failed: ' + ', '.join(failed)
+              )
+          PY
+
+      - name: Prepare exact kernel payload
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-keymaster-real-ion-boot
+          mkdir -p "$OUT/source-reports"
+
+          cp workflow116/extracted/compile/Image-NON-FLASHABLE "$OUT/Image"
+          cp workflow116/extracted/config/final.config "$OUT/final.config"
+          cp workflow116/extracted/final-state.json \
+            "$OUT/source-reports/workflow116-final-state.json"
+          cp workflow116/extracted/compile/compile-incompatibilities.json \
+            "$OUT/source-reports/workflow116-compile-incompatibilities.json"
+          cp workflow116/extracted/stage/phase14-final-residuals-report.json \
+            "$OUT/source-reports/workflow116-final-residuals-report.json"
+          cp workflow99/extracted/repack-report.json \
+            "$OUT/source-reports/workflow99-repack-report.json"
+          cp workflow99/extracted/final-audit.json \
+            "$OUT/source-reports/workflow99-final-audit.json"
+
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+          test "$(gzip -dc "$OUT/Image.gz" | sha256sum | awk '{print $1}')" = \
+            "${WORKFLOW116_IMAGE_SHA256}"
+
+          file "$OUT/Image" | tee "$OUT/Image.file.txt"
+          grep -Fq 'Linux kernel ARM64 boot executable Image' "$OUT/Image.file.txt"
+
+      - name: Repack boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-keymaster-real-ion-boot
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source workflow99/extracted/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+      - name: Audit boot contract and provenance
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              'a52_boot_repack', 'scripts/38_repack_a52_p1_boot.py'
+          )
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          output = Path('artifacts/a52xq-gki-5.10-keymaster-real-ion-boot')
+          source_bytes = Path('workflow99/extracted/boot.img').read_bytes()
+          output_bytes = (output / 'boot.img').read_bytes()
+          raw_image = (output / 'Image').read_bytes()
+          gzip_image = (output / 'Image.gz').read_bytes()
+
+          source = module.parse_boot(source_bytes)
+          rebuilt = module.parse_boot(output_bytes)
+          sha256 = lambda data: hashlib.sha256(data).hexdigest()
+
+          checks = {
+              'workflow99_source_hash_pinned':
+                  sha256(source_bytes) == 'ff486ecba5cf78e321f5e22376791b98a06b372883dde1b422e512f4a25f23b3',
+              'workflow116_raw_image_hash_pinned':
+                  sha256(raw_image) == '3c225bdd088a042b2f12b09014aeb3ab073d5f10b2d0fdc2c05963fd224ebe39',
+              'partition_size_preserved':
+                  len(output_bytes) == len(source_bytes) == 100663296,
+              'header_version_preserved':
+                  rebuilt['header_version'] == source['header_version'] == 2,
+              'page_size_preserved':
+                  rebuilt['page_size'] == source['page_size'] == 4096,
+              'board_preserved':
+                  rebuilt['board'] == source['board'] == 'SRPTJ06A012',
+              'cmdline_preserved': rebuilt['cmdline'] == source['cmdline'],
+              'replacement_kernel_used':
+                  sha256(rebuilt['kernel']) == sha256(gzip_image),
+              'ramdisk_preserved': rebuilt['ramdisk'] == source['ramdisk'],
+              'second_preserved': rebuilt['second'] == source['second'],
+              'recovery_dtbo_preserved':
+                  rebuilt['recovery_dtbo'] == source['recovery_dtbo'],
+              'reserved_dtb_preserved': rebuilt['dtb'] == source['dtb'],
+              'ramoops_reservation_present':
+                  b'a52-ramoops-reserved@b1b00000' in rebuilt['dtb'],
+              'ufs_host_node_present': b'ufshc@1d84000' in rebuilt['dtb'],
+              'ufs_phy_node_present': b'ufsphy_mem@1d87000' in rebuilt['dtb'],
+              'legacy_gdsc_node_present': b'gcc_ufs_phy_gdsc' in rebuilt['dtb'],
+              'diagnostic_cmdline_present':
+                  'pstore.backend=ramoops' in rebuilt['cmdline']
+                  and 'initcall_debug' in rebuilt['cmdline']
+                  and 'ignore_loglevel' in rebuilt['cmdline'],
+              'boot_id_changed': rebuilt['id'] != source['id'],
+          }
+
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit('Workflow 118 audit failed: ' + ', '.join(failed))
+
+          audit = {
+              'status': 'keymaster-real-ion-boot-repacked-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'kernel_source': 'Workflow 116 run 14 real-ION Image',
+              'boot_contract_source': 'Workflow 99 boot.img',
+              'compiler_error_count': 0,
+              'make_return_code': 0,
+              'raw_image_sha256': sha256(raw_image),
+              'gzip_image_sha256': sha256(gzip_image),
+              'boot_image_sha256': sha256(output_bytes),
+              'boot_image_bytes': len(output_bytes),
+              'replacement_kernel_bytes': len(gzip_image),
+              'checks': checks,
+          }
+          (output / 'final-audit.json').write_text(
+              json.dumps(audit, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+      - name: Finalize candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-keymaster-real-ion-boot
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 KEYMASTER REAL-ION BOOT CANDIDATE
+
+          This candidate uses the compile-closed Workflow 116 run-14 kernel.
+          The previous compile-only ION ENODEV stubs were replaced by the real
+          Android common 5.10 ION allocation API and QSEE secure VMID mapping.
+
+          The Workflow 99 Samsung boot structure is preserved. The ROM ramdisk,
+          second stage, recovery DTBO, DTB, board name, addresses, page size,
+          diagnostic command line, and 96 MiB partition size remain unchanged.
+
+          This boot.img is a flashable candidate but is not hardware validated.
+          Keep a known-good boot image and recovery path available. After the
+          first boot attempt, collect pstore/ramoops before attempting another boot.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          printf 'check\tresult\n' > "$OUT/candidate-status.tsv"
+          printf 'workflow116-run\t14\n' >> "$OUT/candidate-status.tsv"
+          printf 'real-ion-runtime\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'compiler-errors\t0\n' >> "$OUT/candidate-status.tsv"
+          printf 'make-return-code\t0\n' >> "$OUT/candidate-status.tsv"
+          printf 'workflow99-boot-contract-preserved\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'flashable-candidate\tyes\n' >> "$OUT/candidate-status.tsv"
+          printf 'hardware-validated\tno\n' >> "$OUT/candidate-status.tsv"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+      - name: Upload Workflow 118 boot candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-keymaster-real-ion-boot-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-5.10-keymaster-real-ion-boot
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require audited candidate
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-5.10-keymaster-real-ion-boot')
+          audit = json.loads((root / 'final-audit.json').read_text())
+          if audit.get('flashable_candidate') is not True:
+              raise SystemExit('Workflow 118 did not produce a flashable candidate')
+          if audit.get('hardware_validated') is not False:
+              raise SystemExit('hardware validation state is incorrect')
+          failed = [
+              name for name, passed in audit.get('checks', {}).items() if not passed
+          ]
+          if failed:
+              raise SystemExit(
+                  'Workflow 118 residual audit failures: ' + ', '.join(failed)
+              )
+          if not (root / 'boot.img').is_file():
+              raise SystemExit('Workflow 118 boot.img is missing')
+          PY

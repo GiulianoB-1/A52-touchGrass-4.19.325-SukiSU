@@ -65,10 +65,20 @@ def apply_post_cleanup_compile_fixes(root: Path) -> dict[str, object]:
     specifications = (
         (
             Path("drivers/regulator/a52-legacy-gdsc-regulator.c"),
-            "u32 val = readl_relaxed(gdsc->gdscr);",
-            "u32 val __maybe_unused = readl_relaxed(gdsc->gdscr);",
+            (
+                "static int a52_legacy_gdsc_disable(struct regulator_dev *rdev)\n"
+                "{\n"
+                "\tstruct a52_legacy_gdsc *gdsc = rdev_get_drvdata(rdev);\n"
+                "\tu32 val = readl_relaxed(gdsc->gdscr);"
+            ),
+            (
+                "static int a52_legacy_gdsc_disable(struct regulator_dev *rdev)\n"
+                "{\n"
+                "\tstruct a52_legacy_gdsc *gdsc = rdev_get_drvdata(rdev);\n"
+                "\tu32 val __maybe_unused = readl_relaxed(gdsc->gdscr);"
+            ),
             1,
-            "legacy GDSC status local",
+            "legacy GDSC disable status local",
         ),
         (
             Path("drivers/base/dd.c"),
@@ -139,7 +149,18 @@ def self_test() -> None:
         root = Path(tmp)
         samples = {
             "drivers/regulator/a52-legacy-gdsc-regulator.c": (
-                "u32 val = readl_relaxed(gdsc->gdscr);\n"
+                "static int a52_legacy_gdsc_is_enabled(struct regulator_dev *rdev)\n"
+                "{\n"
+                "\tstruct a52_legacy_gdsc *gdsc = rdev_get_drvdata(rdev);\n"
+                "\tu32 val = readl_relaxed(gdsc->gdscr);\n"
+                "\treturn !!val;\n"
+                "}\n\n"
+                "static int a52_legacy_gdsc_disable(struct regulator_dev *rdev)\n"
+                "{\n"
+                "\tstruct a52_legacy_gdsc *gdsc = rdev_get_drvdata(rdev);\n"
+                "\tu32 val = readl_relaxed(gdsc->gdscr);\n"
+                "\treturn 0;\n"
+                "}\n"
             ),
             "drivers/base/dd.c": "const char *reason = reason_source;\n",
             "drivers/scsi/ufs/a52-ufs-live-trace.c": (
@@ -162,6 +183,11 @@ def self_test() -> None:
             raise SystemExit("post-cleanup compile-fix self-test changed wrong count")
         if second["changed_total"] != 0:
             raise SystemExit("post-cleanup compile fixes are not idempotent")
+        gdsc = (root / "drivers/regulator/a52-legacy-gdsc-regulator.c").read_text()
+        if gdsc.count("u32 val = readl_relaxed(gdsc->gdscr);") != 1:
+            raise SystemExit("used GDSC is_enabled status local was not preserved")
+        if gdsc.count("u32 val __maybe_unused = readl_relaxed(gdsc->gdscr);") != 1:
+            raise SystemExit("GDSC disable status local was not repaired exactly once")
 
 
 def main() -> int:

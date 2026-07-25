@@ -59,7 +59,7 @@ jobs:
           test -s workflow118/extracted/boot.img
           echo "${WORKFLOW118_BOOT_SHA256}  workflow118/extracted/boot.img" | sha256sum -c -
 
-      - name: Extract source DTB
+      - name: Extract source DTB and validate reservation
         run: |
           set -Eeuo pipefail
           OUT=artifacts/a52xq-gki-5.10-dtb-expanded-pmsg
@@ -82,23 +82,25 @@ jobs:
           dtc -I dtb -O dtb -p 8192 \
             -o "$OUT/patched.dtb" "$OUT/original.dtb" \
             2> "$OUT/dtc-roundtrip-warnings.txt"
-          fdtget -t s "$OUT/patched.dtb" "$RAMOOPS_NODE" compatible | grep -Fxq ramoops
           test "$(fdtget -t x "$OUT/patched.dtb" "$RAMOOPS_NODE" reg)" = '0 b1b00000 0 100000'
 
-      - name: Set authoritative ramoops DT layout
+      - name: Convert reserved node to authoritative ramoops layout
         run: |
           set -Eeuo pipefail
           OUT=artifacts/a52xq-gki-5.10-dtb-expanded-pmsg
           DTB="$OUT/patched.dtb"
 
-          # Total reserved region remains exactly 1 MiB:
-          # 64 KiB panic record + 192 KiB console + 768 KiB pmsg.
+          # The node was previously only a reservation. Make it the authoritative
+          # ramoops platform device while preserving its exact 1 MiB physical range.
+          fdtput -t s "$DTB" "$RAMOOPS_NODE" compatible ramoops
           fdtput -t x "$DTB" "$RAMOOPS_NODE" record-size 0x00010000
           fdtput -t x "$DTB" "$RAMOOPS_NODE" console-size 0x00030000
           fdtput -t x "$DTB" "$RAMOOPS_NODE" pmsg-size 0x000c0000
           fdtput -t x "$DTB" "$RAMOOPS_NODE" ftrace-size 0x00000000
           fdtput -t x "$DTB" "$RAMOOPS_NODE" ecc-size 0x00000000
 
+          test "$(fdtget -t s "$DTB" "$RAMOOPS_NODE" compatible)" = ramoops
+          test "$(fdtget -t x "$DTB" "$RAMOOPS_NODE" reg)" = '0 b1b00000 0 100000'
           test "$(fdtget -t x "$DTB" "$RAMOOPS_NODE" record-size)" = 10000
           test "$(fdtget -t x "$DTB" "$RAMOOPS_NODE" console-size)" = 30000
           test "$(fdtget -t x "$DTB" "$RAMOOPS_NODE" pmsg-size)" = c0000
@@ -128,7 +130,6 @@ jobs:
           import hashlib
           import importlib.util
           import json
-          import struct
           from pathlib import Path
 
           spec = importlib.util.spec_from_file_location(
@@ -158,6 +159,7 @@ jobs:
               'board_preserved': rebuilt['board'] == source['board'] == 'SRPTJ06A012',
               'dtb_changed': rebuilt['dtb'] != source['dtb'],
               'ramoops_node_preserved': b'a52-ramoops-reserved@b1b00000' in rebuilt['dtb'],
+              'ramoops_compatible_added': b'ramoops\x00' in rebuilt['dtb'],
               'ufs_host_node_preserved': b'ufshc@1d84000' in rebuilt['dtb'],
               'ufs_phy_node_preserved': b'ufsphy_mem@1d87000' in rebuilt['dtb'],
               'legacy_gdsc_preserved': b'gcc_ufs_phy_gdsc' in rebuilt['dtb'],

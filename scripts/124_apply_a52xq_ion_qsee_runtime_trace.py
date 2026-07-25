@@ -51,17 +51,23 @@ def function_bounds(text: str, name: str) -> tuple[int, int] | None:
     return None
 
 
+def c_ident(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+
 def inject_entry(text: str, name: str, prefix: str) -> tuple[str, int]:
     bounds = function_bounds(text, name)
     if bounds is None:
         return text, 0
     opening, _ = bounds
     marker = f'{prefix} enter fn={name}'
-    if marker in text[opening : opening + 300]:
+    if marker in text[opening : opening + 500]:
         return text, 0
+    variable = f"a52_trace_{c_ident(name)}"
     line = (
-        f'\n\tpr_info("{prefix} enter fn={name} pid=%d comm=%s\\n", '
-        "current->pid, current->comm);"
+        f'\n\tint __maybe_unused {variable} = '
+        f'(pr_info("{prefix} enter fn={name} pid=%d comm=%s\\n", '
+        "current->pid, current->comm), 0);"
     )
     return text[: opening + 1] + line + text[opening + 1 :], 1
 
@@ -75,11 +81,12 @@ def patch_ion(gki: Path) -> dict[str, int]:
         bounds = function_bounds(text, "ion_ioctl")
         if bounds is None:
             raise SystemExit("ion_ioctl function missing")
-        opening, closing = bounds
+        opening, _ = bounds
         entry = (
             "\n\t/* " + MARKER + " */\n"
-            "\tpr_info(\"A52ION enter pid=%d comm=%s cmd=0x%x arg=0x%lx\\n\",\n"
-            "\t\tcurrent->pid, current->comm, cmd, arg);"
+            "\tint __maybe_unused a52_trace_ion_ioctl = "
+            "(pr_info(\"A52ION enter pid=%d comm=%s cmd=0x%x arg=0x%lx\\n\",\n"
+            "\t\tcurrent->pid, current->comm, cmd, arg), 0);"
         )
         text = text[: opening + 1] + entry + text[opening + 1 :]
         changes += 1

@@ -29,8 +29,8 @@ RECORDER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 /*
  * A52 TouchGrass Keymaster flight recorder.
  *
- * Keeps a bounded, low-volume secure-startup timeline outside the normal
- * printk ring. Read it from /proc/a52_keymaster_flight_recorder after boot.
+ * Preserves the first secure-startup events instead of overwriting them with
+ * later traffic. Read /proc/a52_keymaster_flight_recorder after Android boots.
  */
 #define pr_fmt(fmt) "A52KMFR: " fmt
 
@@ -47,13 +47,14 @@ RECORDER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/a52_keymaster_flight_recorder.h>
 
-#define A52_KMFR_CAPACITY 4096U
+#define A52_KMFR_CAPACITY 8192U
 #define A52_KMFR_MESSAGE_LEN 192U
 
 struct a52_kmfr_event {
 	u64 seq;
 	u64 monotonic_ns;
 	pid_t pid;
+	pid_t tgid;
 	char comm[TASK_COMM_LEN];
 	char message[A52_KMFR_MESSAGE_LEN];
 };
@@ -61,6 +62,7 @@ struct a52_kmfr_event {
 static struct a52_kmfr_event a52_kmfr_ring[A52_KMFR_CAPACITY];
 static DEFINE_SPINLOCK(a52_kmfr_lock);
 static atomic64_t a52_kmfr_sequence = ATOMIC64_INIT(0);
+static atomic64_t a52_kmfr_dropped = ATOMIC64_INIT(0);
 
 void a52_kmfr_record(const char *fmt, ...)
 {
@@ -69,11 +71,17 @@ void a52_kmfr_record(const char *fmt, ...)
 	va_list args;
 	u64 seq;
 
-	memset(&event, 0, sizeof(event));
 	seq = (u64)atomic64_inc_return(&a52_kmfr_sequence);
+	if (seq > A52_KMFR_CAPACITY) {
+		atomic64_inc(&a52_kmfr_dropped);
+		return;
+	}
+
+	memset(&event, 0, sizeof(event));
 	event.seq = seq;
 	event.monotonic_ns = ktime_get_ns();
 	event.pid = current->pid;
+	event.tgid = current->tgid;
 	get_task_comm(event.comm, current);
 
 	va_start(args, fmt);
@@ -81,11 +89,11 @@ void a52_kmfr_record(const char *fmt, ...)
 	va_end(args);
 
 	spin_lock_irqsave(&a52_kmfr_lock, irq_flags);
-	a52_kmfr_ring[(seq - 1) % A52_KMFR_CAPACITY] = event;
+	a52_kmfr_ring[seq - 1] = event;
 	spin_unlock_irqrestore(&a52_kmfr_lock, irq_flags);
 
-	pr_info_ratelimited("seq=%llu pid=%d comm=%s %s\n",
-		(unsigned long long)event.seq, event.pid,
+	pr_info_ratelimited("seq=%llu pid=%d tgid=%d comm=%s %s\n",
+		(unsigned long long)event.seq, event.pid, event.tgid,
 		event.comm, event.message);
 }
 EXPORT_SYMBOL_GPL(a52_kmfr_record);
@@ -95,31 +103,31 @@ static int a52_kmfr_show(struct seq_file *m, void *unused)
 	struct a52_kmfr_event event;
 	unsigned long irq_flags;
 	u64 end;
-	u64 start;
 	u64 cursor;
+	u64 dropped;
 
 	end = (u64)atomic64_read(&a52_kmfr_sequence);
-	start = end > A52_KMFR_CAPACITY ?
-		end - A52_KMFR_CAPACITY + 1 : 1;
+	if (end > A52_KMFR_CAPACITY)
+		end = A52_KMFR_CAPACITY;
+	dropped = (u64)atomic64_read(&a52_kmfr_dropped);
 
-	seq_printf(m, "# %s capacity=%u first=%llu last=%llu\n",
+	seq_printf(m, "# %s mode=first-events capacity=%u stored=%llu dropped=%llu\n",
 		"A52 TouchGrass Keymaster flight recorder",
-		A52_KMFR_CAPACITY,
-		(unsigned long long)(end ? start : 0),
-		(unsigned long long)end);
+		A52_KMFR_CAPACITY, (unsigned long long)end,
+		(unsigned long long)dropped);
 
-	for (cursor = start; cursor <= end; cursor++) {
+	for (cursor = 1; cursor <= end; cursor++) {
 		spin_lock_irqsave(&a52_kmfr_lock, irq_flags);
-		event = a52_kmfr_ring[(cursor - 1) % A52_KMFR_CAPACITY];
+		event = a52_kmfr_ring[cursor - 1];
 		spin_unlock_irqrestore(&a52_kmfr_lock, irq_flags);
 
 		if (event.seq != cursor)
 			continue;
 
-		seq_printf(m, "%llu %llu pid=%d comm=%s %s\n",
+		seq_printf(m, "%llu %llu pid=%d tgid=%d comm=%s %s\n",
 			(unsigned long long)event.seq,
 			(unsigned long long)event.monotonic_ns,
-			event.pid, event.comm, event.message);
+			event.pid, event.tgid, event.comm, event.message);
 	}
 
 	return 0;
@@ -146,7 +154,8 @@ static int __init a52_kmfr_init(void)
 		return -ENOMEM;
 	}
 
-	a52_kmfr_record("RECORDER online capacity=%u", A52_KMFR_CAPACITY);
+	a52_kmfr_record("RECORDER online capacity=%u mode=first-events",
+		A52_KMFR_CAPACITY);
 	return 0;
 }
 late_initcall(a52_kmfr_init);
@@ -168,15 +177,87 @@ def append_once(text: str, marker: str, addition: str) -> tuple[str, bool]:
     return text.rstrip() + "\n\n" + addition.rstrip() + "\n", True
 
 
+def mask_c(text: str) -> str:
+    """Mask comments and string/character literals while preserving indices."""
+    out = list(text)
+    state = "normal"
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        nxt = text[index + 1] if index + 1 < len(text) else ""
+
+        if state == "normal":
+            if char == "/" and nxt == "/":
+                out[index] = out[index + 1] = " "
+                state = "line-comment"
+                index += 2
+                continue
+            if char == "/" and nxt == "*":
+                out[index] = out[index + 1] = " "
+                state = "block-comment"
+                index += 2
+                continue
+            if char == '"':
+                out[index] = " "
+                state = "string"
+                escaped = False
+            elif char == "'":
+                out[index] = " "
+                state = "char"
+                escaped = False
+        elif state == "line-comment":
+            if char == "\n":
+                state = "normal"
+            else:
+                out[index] = " "
+        elif state == "block-comment":
+            if char == "*" and nxt == "/":
+                out[index] = out[index + 1] = " "
+                state = "normal"
+                index += 2
+                continue
+            if char != "\n":
+                out[index] = " "
+        elif state in {"string", "char"}:
+            quote = '"' if state == "string" else "'"
+            if char == "\n":
+                escaped = False
+            else:
+                out[index] = " "
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    state = "normal"
+        index += 1
+    return "".join(out)
+
+
+def top_level_before(masked: str, position: int) -> bool:
+    depth = 0
+    for char in masked[:position]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depth == 0
+
+
 def function_definition(text: str, name: str) -> tuple[int, int, int, str] | None:
     """Return signature start, opening brace, closing brace and signature."""
+    masked = mask_c(text)
     pattern = re.compile(r"\b" + re.escape(name) + r"\s*\(")
-    for match in pattern.finditer(text):
+    for match in pattern.finditer(masked):
+        if not top_level_before(masked, match.start()):
+            continue
+
         paren = match.end() - 1
         depth = 0
         close_paren = -1
-        for index in range(paren, len(text)):
-            char = text[index]
+        for index in range(paren, len(masked)):
+            char = masked[index]
             if char == "(":
                 depth += 1
             elif char == ")":
@@ -187,7 +268,7 @@ def function_definition(text: str, name: str) -> tuple[int, int, int, str] | Non
         if close_paren < 0:
             continue
 
-        tail = text[close_paren + 1 : close_paren + 256]
+        tail = masked[close_paren + 1 : close_paren + 512]
         brace_rel = tail.find("{")
         semi_rel = tail.find(";")
         if brace_rel < 0 or (semi_rel >= 0 and semi_rel < brace_rel):
@@ -196,8 +277,8 @@ def function_definition(text: str, name: str) -> tuple[int, int, int, str] | Non
 
         brace_depth = 0
         closing = -1
-        for index in range(opening, len(text)):
-            char = text[index]
+        for index in range(opening, len(masked)):
+            char = masked[index]
             if char == "{":
                 brace_depth += 1
             elif char == "}":
@@ -252,9 +333,7 @@ def entry_expression(domain: str, name: str, signature: str) -> str:
         message += " app=%s"
         args.append('app_name ? app_name : "<null>"')
 
-    call_args = ""
-    if args:
-        call_args = ", " + ", ".join(args)
+    call_args = ", " + ", ".join(args) if args else ""
     return f'a52_kmfr_record("{message}"{call_args})'
 
 
@@ -264,46 +343,27 @@ def inject_entry(text: str, domain: str, name: str) -> tuple[str, bool, str]:
         return text, False, "missing"
     _, opening, _, signature = found
     marker = f"{domain} enter fn={name}"
-    body_prefix = text[opening : opening + 512]
-    if marker in body_prefix:
+    if marker in text[opening : opening + 768]:
         return text, False, "already-present"
 
-    var = f"__a52_kmfr_entry_{identifier(name)}"
+    variable = f"__a52_kmfr_entry_{identifier(name)}"
     expression = entry_expression(domain, name, signature)
-    declaration = f"\n\tint {var} __maybe_unused = ({expression}, 0);"
-    text = text[: opening + 1] + declaration + text[opening + 1 :]
-    return text, True, "inserted"
+    declaration = f"\n\tint {variable} __maybe_unused = ({expression}, 0);"
+    return text[: opening + 1] + declaration + text[opening + 1 :], True, "inserted"
 
 
-def inject_final_return(text: str, domain: str, name: str) -> tuple[str, bool]:
-    found = function_definition(text, name)
-    if found is None:
-        return text, False
-    _, opening, closing, _ = found
-    body = text[opening + 1 : closing]
-    marker = f"{domain} exit fn={name}"
-    if marker in body:
-        return text, False
-
-    returns = list(
-        re.finditer(
-            r"(?m)^(?P<indent>[ \t]*)return[ \t]+(?P<var>ret|rc|retval|fd);[ \t]*$",
-            body,
-        )
+def traced_return(indent: str, domain: str, name: str, expression: str) -> str:
+    """Return one compound statement so unbraced if/else control flow is preserved."""
+    return (
+        f"{indent}do {{\n"
+        f'{indent}\ta52_kmfr_record("{domain} exit fn={name} ret=%ld", '
+        f"(long)({expression}));\n"
+        f"{indent}\treturn {expression};\n"
+        f"{indent}}} while (0);"
     )
-    if not returns:
-        return text, False
-
-    match = returns[-1]
-    position = opening + 1 + match.start()
-    indent = match.group("indent")
-    variable = match.group("var")
-    line = f'{indent}a52_kmfr_record("{marker} ret=%d", {variable});\n'
-    return text[:position] + line + text[position:], True
 
 
-def inject_safe_returns(text: str, domain: str, name: str) -> tuple[str, int]:
-    """Trace simple side-effect-free return expressions inside one function."""
+def inject_returns(text: str, domain: str, name: str) -> tuple[str, int]:
     found = function_definition(text, name)
     if found is None:
         return text, 0
@@ -314,21 +374,29 @@ def inject_safe_returns(text: str, domain: str, name: str) -> tuple[str, int]:
         r"(?P<expr>ret|rc|retval|fd|0|-[A-Z][A-Z0-9_]*)[ \t]*;[ \t]*$"
     )
     matches = list(pattern.finditer(body))
-    added = 0
     for match in reversed(matches):
-        expression = match.group("expr")
-        indent = match.group("indent")
         absolute = opening + 1 + match.start()
-        prefix = text[max(opening + 1, absolute - 180) : absolute]
-        if f"{domain} exit fn={name}" in prefix:
-            continue
-        line = (
-            f'{indent}a52_kmfr_record("{domain} exit fn={name} ret=%ld", '
-            f'(long)({expression}));\n'
+        replacement = traced_return(
+            match.group("indent"), domain, name, match.group("expr")
         )
-        text = text[:absolute] + line + text[absolute:]
-        added += 1
-    return text, added
+        text = text[:absolute] + replacement + text[opening + 1 + match.end() :]
+    return text, len(matches)
+
+
+def audit_safe_exit_blocks(text: str, domain: str) -> int:
+    lines = text.splitlines()
+    count = 0
+    for index, line in enumerate(lines):
+        if f'a52_kmfr_record("{domain} exit fn=' not in line:
+            continue
+        count += 1
+        previous = lines[index - 1].strip() if index else ""
+        if previous != "do {":
+            raise SystemExit(
+                f"unsafe {domain} exit instrumentation near line {index + 1}: "
+                "trace is not inside a single do/while statement"
+            )
+    return count
 
 
 def patch_qsee(root: Path) -> dict[str, object]:
@@ -343,7 +411,6 @@ def patch_qsee(root: Path) -> dict[str, object]:
         if include_anchor not in text:
             raise SystemExit("qseecom include anchor missing")
         text = text.replace(include_anchor, include_anchor + include, 1)
-
     text = text.replace(include, include + f"/* {MARKER} */\n", 1)
 
     names = (
@@ -366,10 +433,7 @@ def patch_qsee(root: Path) -> dict[str, object]:
         text, _, state = inject_entry(text, "QSEE", name)
         exit_count = 0
         if state != "missing":
-            text, exit_count = inject_safe_returns(text, "QSEE", name)
-            if not exit_count:
-                text, exit_added = inject_final_return(text, "QSEE", name)
-                exit_count = 1 if exit_added else 0
+            text, exit_count = inject_returns(text, "QSEE", name)
         staged.append({"name": name, "entry": state, "exit_count": exit_count})
 
     required_groups = (
@@ -384,8 +448,13 @@ def patch_qsee(root: Path) -> dict[str, object]:
     if missing:
         raise SystemExit("required QSEECOM groups missing: " + repr(missing))
 
+    safe_exit_count = audit_safe_exit_blocks(text, "QSEE")
     write(path, text)
-    return {"already_staged": False, "functions": staged}
+    return {
+        "already_staged": False,
+        "functions": staged,
+        "safe_exit_count": safe_exit_count,
+    }
 
 
 def patch_ion(root: Path) -> dict[str, object]:
@@ -408,19 +477,23 @@ def patch_ion(root: Path) -> dict[str, object]:
         ioctl = ioctl.replace(ioctl_anchor, ioctl_anchor + include, 1)
 
     staged: list[dict[str, object]] = []
-
-    ioctl, _, state = inject_entry(ioctl, "ION", "ion_ioctl")
-    exit_count = 0
-    if state != "missing":
-        ioctl, exit_count = inject_safe_returns(ioctl, "ION", "ion_ioctl")
-    staged.append({"name": "ion_ioctl", "entry": state, "exit_count": exit_count})
-
-    for name in ("ion_alloc_dmabuf", "ion_alloc", "ion_alloc_fd", "ion_buffer_create"):
-        core, _, state = inject_entry(core, "ION", name)
-        exit_added = False
+    for name, target in (
+        ("ion_ioctl", "ioctl"),
+        ("ion_alloc_dmabuf", "core"),
+        ("ion_alloc", "core"),
+        ("ion_alloc_fd", "core"),
+        ("ion_buffer_create", "core"),
+    ):
+        source = ioctl if target == "ioctl" else core
+        source, _, state = inject_entry(source, "ION", name)
+        exit_count = 0
         if state != "missing":
-            core, exit_added = inject_final_return(core, "ION", name)
-        staged.append({"name": name, "entry": state, "exit_count": 1 if exit_added else 0})
+            source, exit_count = inject_returns(source, "ION", name)
+        if target == "ioctl":
+            ioctl = source
+        else:
+            core = source
+        staged.append({"name": name, "entry": state, "exit_count": exit_count})
 
     present = {item["name"] for item in staged if item["entry"] != "missing"}
     if "ion_ioctl" not in present:
@@ -428,9 +501,15 @@ def patch_ion(root: Path) -> dict[str, object]:
     if not {"ion_alloc_dmabuf", "ion_alloc", "ion_alloc_fd", "ion_buffer_create"}.intersection(present):
         raise SystemExit("ION allocation trace anchor missing")
 
+    safe_exit_count = audit_safe_exit_blocks(core + "\n" + ioctl, "ION")
     write(core_path, core)
     write(ioctl_path, ioctl)
-    return {"functions": staged, "ioctl_file": str(ION_IOCTL_REL), "core_file": str(ION_REL)}
+    return {
+        "functions": staged,
+        "ioctl_file": str(ION_IOCTL_REL),
+        "core_file": str(ION_REL),
+        "safe_exit_count": safe_exit_count,
+    }
 
 
 def stage_recorder(root: Path) -> dict[str, object]:
@@ -450,9 +529,21 @@ def stage_recorder(root: Path) -> dict[str, object]:
         "header": str(HEADER_REL),
         "source": str(SOURCE_REL),
         "makefile_changed": changed,
-        "capacity": 4096,
+        "capacity": 8192,
+        "capture_mode": "first-events-preserved",
         "proc_path": "/proc/a52_keymaster_flight_recorder",
     }
+
+
+def self_test() -> None:
+    sample = """static int demo(int value)\n{\n\tif (value)\n\t\treturn -EINVAL;\n\treturn 0;\n}\n"""
+    patched, count = inject_returns(sample, "TEST", "demo")
+    if count != 2:
+        raise SystemExit("return rewriter self-test did not trace both returns")
+    if "if (value)\n\t\tdo {" not in patched:
+        raise SystemExit("return rewriter self-test broke unbraced if control flow")
+    if audit_safe_exit_blocks(patched, "TEST") != 2:
+        raise SystemExit("return rewriter self-test audit failed")
 
 
 def main() -> int:
@@ -460,6 +551,8 @@ def main() -> int:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+
+    self_test()
 
     root = args.kernel.resolve()
     output = args.output.resolve()
@@ -474,13 +567,14 @@ def main() -> int:
         "status": "touchgrass-keymaster-flight-recorder-staged",
         "hardware_validated": False,
         "marker": MARKER,
+        "control_flow_safe_return_wrapping": True,
         "recorder": stage_recorder(root),
         "qseecom": patch_qsee(root),
         "ion": patch_ion(root),
         "markers": ["A52KMFR", "QSEE enter", "ION enter"],
         "scope": (
-            "bounded in-kernel secure-startup circular recorder plus rate-limited "
-            "printk mirror"
+            "first 8192 selected secure-startup events preserved in an in-kernel "
+            "recorder plus a rate-limited printk mirror"
         ),
     }
     (output / "touchgrass-keymaster-flight-recorder-report.json").write_text(

@@ -1,0 +1,113 @@
+name: 151 - A52 GKI ION heap API probe
+
+run-name: Export exact ACK ION heap APIs for A52 heap 27
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/151-a52-gki-ion-heap-api-probe.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-ion-heap-api-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+
+jobs:
+  probe:
+    name: Export pinned ACK ION source contracts
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify Run 32 source patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p run32/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+          test -s run32/extracted/stage/full-source.patch
+
+      - name: Reconstruct and export exact ION APIs
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply --check "$PWD/run32/extracted/stage/full-source.patch"
+          git -C gki/common apply "$PWD/run32/extracted/stage/full-source.patch"
+
+          OUT=ion-api-probe
+          mkdir -p "$OUT/source" "$OUT/reports"
+          copy_if_present() {
+            local path="$1"
+            if [ -f "gki/common/$path" ]; then
+              mkdir -p "$OUT/source/$(dirname "$path")"
+              cp "gki/common/$path" "$OUT/source/$path"
+            fi
+          }
+          for path in \
+            drivers/staging/android/ion/ion.c \
+            drivers/staging/android/ion/ion_private.h \
+            drivers/staging/android/ion/ion_heap.c \
+            drivers/staging/android/ion/ion_cma_heap.c \
+            drivers/staging/android/ion/ion_dma_buf.c \
+            drivers/staging/android/ion/ion_system_heap.c \
+            drivers/staging/android/ion/Makefile \
+            drivers/staging/android/ion/Kconfig \
+            include/linux/ion.h \
+            include/linux/dma-buf.h \
+            include/linux/of_reserved_mem.h; do
+            copy_if_present "$path"
+          done
+
+          {
+            echo '=== ION registration symbols ==='
+            grep -RInE 'ion_device_add_heap|__ion_device_add_heap|ion_assign_heap_id|ION_HEAP_TYPE_CUSTOM|ION_HEAP_TYPE_DMA' \
+              gki/common/drivers/staging/android/ion gki/common/include/linux/ion.h || true
+            echo '=== CMA heap symbols ==='
+            grep -RInE 'ion_cma|dma_alloc_attrs|dev_get_cma_area|of_reserved_mem_device_init' \
+              gki/common/drivers/staging/android/ion gki/common/include/linux || true
+            echo '=== heap operation shapes ==='
+            grep -RInE 'struct ion_heap_ops|struct ion_buf_ops|map_kernel|get_flags|allocate\)' \
+              gki/common/drivers/staging/android/ion gki/common/include/linux/ion.h || true
+          } > "$OUT/reports/symbols.txt"
+
+          git -C gki/common rev-parse HEAD > "$OUT/reports/base-head.txt"
+          sha256sum "$OUT"/source/* 2>/dev/null || true
+          find "$OUT/source" -type f -print0 | sort -z | xargs -0 sha256sum \
+            > "$OUT/reports/SOURCE-SHA256SUMS"
+
+      - name: Upload exact ION API probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-ion-heap-api-probe-${{ github.run_number }}
+          path: ion-api-probe
+          if-no-files-found: error
+          retention-days: 7

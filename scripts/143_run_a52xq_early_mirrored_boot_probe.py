@@ -19,6 +19,7 @@ PHASE20 = "phase20-qseecom-reserved-memory-shmbridge-report.json"
 PHASE21 = "phase21-ion-legacy-system-heap-mask-report.json"
 PHASE22 = "phase22-ion-dmabuf-contract-report.json"
 PHASE23 = "phase23-ion-system-heap-secure-gate-report.json"
+PHASE24 = "phase24-qseecom-ion-heap27-report.json"
 
 
 def load_base() -> dict[str, object]:
@@ -64,79 +65,84 @@ def main() -> int:
     if rc:
         return rc
 
-    run_stage(
+    stages = (
         "144_apply_a52xq_qseecom_reserved_mem_shmbridge.py",
-        args.gki,
-        args.output,
-    )
-    run_stage(
         "146_apply_a52xq_legacy_system_heap_mask.py",
-        args.gki,
-        args.output,
-    )
-    run_stage(
         "149_apply_a52xq_ion_system_heap_secure_gate.py",
-        args.gki,
-        args.output,
-    )
-    run_stage(
         "148_apply_a52xq_ion_dmabuf_contract.py",
-        args.gki,
-        args.output,
+        "152_apply_a52xq_qseecom_ion_heap27.py",
     )
+    for script_name in stages:
+        run_stage(script_name, args.gki, args.output)
 
     output = args.output.resolve()
-    phase19_path = output / PHASE19
-    phase20_path = output / PHASE20
-    phase21_path = output / PHASE21
-    phase22_path = output / PHASE22
-    phase23_path = output / PHASE23
-    paths = (phase19_path, phase20_path, phase21_path, phase22_path, phase23_path)
-    if not all(path.is_file() for path in paths):
+    report_paths = {
+        "phase19": output / PHASE19,
+        "phase20": output / PHASE20,
+        "phase21": output / PHASE21,
+        "phase22": output / PHASE22,
+        "phase23": output / PHASE23,
+        "phase24": output / PHASE24,
+    }
+    if not all(path.is_file() for path in report_paths.values()):
         raise SystemExit("missing combined early-boot or memory-contract stage report")
 
-    phase19 = json.loads(phase19_path.read_text(encoding="utf-8"))
-    phase20 = json.loads(phase20_path.read_text(encoding="utf-8"))
-    phase21 = json.loads(phase21_path.read_text(encoding="utf-8"))
-    phase22 = json.loads(phase22_path.read_text(encoding="utf-8"))
-    phase23 = json.loads(phase23_path.read_text(encoding="utf-8"))
+    reports = {
+        name: json.loads(path.read_text(encoding="utf-8"))
+        for name, path in report_paths.items()
+    }
     expected = (
-        (phase20, "qseecom-reserved-memory-shmbridge-staged"),
-        (phase21, "ion-legacy-system-heap-mask-compat-staged"),
-        (phase22, "ion-dmabuf-contract-compat-staged"),
-        (phase23, "ion-system-heap-secure-gate-staged"),
+        ("phase20", "qseecom-reserved-memory-shmbridge-staged"),
+        ("phase21", "ion-legacy-system-heap-mask-compat-staged"),
+        ("phase22", "ion-dmabuf-contract-compat-staged"),
+        ("phase23", "ion-system-heap-secure-gate-staged"),
+        ("phase24", "qseecom-ion-heap27-cma-staged"),
     )
-    for report, status in expected:
-        if report.get("status") != status:
+    for name, status in expected:
+        if reports[name].get("status") != status:
             raise SystemExit(f"combined stage did not pass: {status}")
 
-    qsee = args.gki.resolve() / "drivers/a52_secure/qseecom.c"
-    ion = args.gki.resolve() / "drivers/staging/android/ion/ion.c"
-    ion_dmabuf = args.gki.resolve() / "drivers/staging/android/ion/ion_dma_buf.c"
-    qsee_text = qsee.read_text(encoding="utf-8", errors="replace")
-    ion_text = ion.read_text(encoding="utf-8", errors="replace")
-    ion_dmabuf_text = ion_dmabuf.read_text(encoding="utf-8", errors="replace")
+    root = args.gki.resolve()
+    qsee = root / "drivers/a52_secure/qseecom.c"
+    heap27 = root / "drivers/a52_secure/a52_qseecom_ion_heap.c"
+    ion = root / "drivers/staging/android/ion/ion.c"
+    ion_dmabuf = root / "drivers/staging/android/ion/ion_dma_buf.c"
+    texts = {
+        "qsee": qsee.read_text(encoding="utf-8", errors="replace"),
+        "heap27": heap27.read_text(encoding="utf-8", errors="replace"),
+        "ion": ion.read_text(encoding="utf-8", errors="replace"),
+        "ion_dmabuf": ion_dmabuf.read_text(encoding="utf-8", errors="replace"),
+    }
     required = (
-        (qsee_text, "A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE"),
-        (qsee_text, "A52_QSEECOM_DMABUF_SHAPE_TRACE"),
-        (qsee_text, "DMABUF flags bridge fd=%d ret=%d flags=%lx n=%u"),
-        (qsee_text, "DMABUF shape fd=%d buf=%zu n=%u orig=%u"),
-        (ion_text, "A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT"),
-        (ion_text, "A52_ION_SYSTEM_HEAP_NONSECURE_GATE"),
-        (ion_text, "ION_FLAGS_CP_MASK | ION_FLAG_SECURE"),
-        (ion_dmabuf_text, "A52_ION_DMABUF_FLAGS_FALLBACK"),
-        (ion_dmabuf_text, "*flags = buffer->flags;"),
+        ("qsee", "A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE"),
+        ("qsee", "A52_QSEECOM_DMABUF_SHAPE_TRACE"),
+        ("qsee", "DMABUF flags bridge fd=%d ret=%d flags=%lx n=%u"),
+        ("qsee", "DMABUF shape fd=%d buf=%zu n=%u orig=%u"),
+        ("ion", "A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT"),
+        ("ion", "A52_ION_SYSTEM_HEAP_NONSECURE_GATE"),
+        ("ion", "ION_FLAGS_CP_MASK | ION_FLAG_SECURE"),
+        ("ion_dmabuf", "A52_ION_DMABUF_FLAGS_FALLBACK"),
+        ("ion_dmabuf", "*flags = buffer->flags;"),
+        ("heap27", "A52_QSECOM_ION_HEAP27_CMA"),
+        ("heap27", "A52_QSECOM_HEAP_ID 27U"),
+        ("heap27", "ION_HEAP_TYPE_CUSTOM"),
+        ("heap27", "of_reserved_mem_device_init(&pdev->dev)"),
+        ("heap27", "cma_alloc(state->cma"),
+        ("heap27", "sg_alloc_table(table, 1"),
+        ("heap27", "ion_device_add_heap(&a52_heap27.heap)"),
     )
-    missing = [token for text, token in required if token not in text]
+    missing = [token for source, token in required if token not in texts[source]]
     if missing:
         raise SystemExit("combined Probe 143 audit failed: " + ", ".join(missing))
 
-    phase19["status"] = "ack-secure-memory-contract-audited-staged"
-    phase19["reserved_memory_shmbridge"] = phase20
-    phase19["legacy_system_heap_compat"] = phase21
-    phase19["ion_dmabuf_contract"] = phase22
-    phase19["system_heap_secure_gate"] = phase23
-    phase19_path.write_text(
+    phase19 = reports["phase19"]
+    phase19["status"] = "ack-qseecom-heap27-memory-contract-staged"
+    phase19["reserved_memory_shmbridge"] = reports["phase20"]
+    phase19["legacy_system_heap_compat"] = reports["phase21"]
+    phase19["ion_dmabuf_contract"] = reports["phase22"]
+    phase19["system_heap_secure_gate"] = reports["phase23"]
+    phase19["qseecom_heap27"] = reports["phase24"]
+    report_paths["phase19"].write_text(
         json.dumps(phase19, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

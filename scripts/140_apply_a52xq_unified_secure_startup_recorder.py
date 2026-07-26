@@ -12,7 +12,7 @@ HEADER_REL = Path("include/linux/a52_ack_secure_flight_recorder.h")
 SOURCE_REL = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 RAMOOPS_REL = Path("fs/pstore/ram.c")
 REPORT = "phase17-ack-unified-secure-recorder-report.json"
-CAPACITY = 960
+CAPACITY = 768
 LINE_LEN = 256
 
 HEADER = r'''/* SPDX-License-Identifier: GPL-2.0-only */
@@ -49,7 +49,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/a52_ack_secure_flight_recorder.h>
 
-#define A52_USR2_CAPACITY 960U
+#define A52_USR2_CAPACITY 768U
 #define A52_USR2_MESSAGE_LEN 96U
 #define A52_USR2_LINE_LEN 256U
 #define A52_USR2_BANK_CONSOLE BIT(0)
@@ -376,6 +376,7 @@ def stage_recorder(root: Path) -> dict[str, object]:
     checks = {
         "immediate_write": "a52_usr2_persist_event(&event, A52_USR2_BANK_BOTH)" in source,
         "event_driven_early_retry": "a52_usr2_backend_seen" in source,
+        "early_retry": "a52_usr2_flush_missing" in source,
         "device_retry": "device_initcall(a52_usr2_device_retry)" in source,
         "late_retry": "late_initcall(a52_usr2_late_retry)" in source,
         "no_delayed_work": "schedule_delayed_work" not in source,

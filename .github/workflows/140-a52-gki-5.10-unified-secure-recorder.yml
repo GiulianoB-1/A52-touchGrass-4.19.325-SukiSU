@@ -4,6 +4,11 @@ run-name: Build one mirrored persistent ACK secure-startup recorder
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/140-a52-gki-5.10-unified-secure-recorder.yml
+      - scripts/140_apply_a52xq_unified_secure_startup_recorder.py
+      - scripts/140_decode_a52xq_unified_secure_recorder.py
   push:
     branches:
       - agent/a52-keymaster-real-ion
@@ -71,23 +76,26 @@ jobs:
             scripts/140_apply_a52xq_unified_secure_startup_recorder.py \
             scripts/140_decode_a52xq_unified_secure_recorder.py \
             scripts/38_repack_a52_p1_boot.py
+          rm -rf /tmp/a52-decoder-test
           mkdir -p /tmp/a52-decoder-test
-          cat > /tmp/a52-decoder-test/bank-a.bin <<'EOF'
-          A52USR2 seq=1 ns=100 pid=1 tgid=1 cpu=0 comm=init msg=ION enter fn=ion_ioctl cmd=0xc0184900 commit=5a52c0de
+          cat > /tmp/a52-decoder-test/raw.bin <<'EOF'
+          A52USR2 seq=1 ns=100 pid=1 tgid=1 cpu=0 comm=init msg=QSEEINIT A52USR2 enter fn=qseecom_probe stage=probe commit=5a52c0de
+          A52USR2 seq=1 ns=100 pid=1 tgid=1 cpu=0 comm=init msg=QSEEINIT A52USR2 enter fn=qseecom_probe stage=probe commit=5a52c0de
+          A52USR2 seq=2 ns=200 pid=2 tgid=2 cpu=1 comm=skeymast msg=QSEE exit fn=qseecom_ioctl cmd=0xc0209703 ret=0 commit=5a52c0de
           A52USR2 seq=2 ns=200 pid=2 tgid=2 cpu=1 comm=skeymast msg=QSEE exit fn=qseecom_ioctl cmd=0xc0209703 ret=0 commit=5a52c0de
           EOF
-          cp /tmp/a52-decoder-test/bank-a.bin /tmp/a52-decoder-test/bank-b.bin
           python3 scripts/140_decode_a52xq_unified_secure_recorder.py \
-            /tmp/a52-decoder-test/bank-a.bin /tmp/a52-decoder-test/bank-b.bin \
-            --output /tmp/a52-decoder-test/out
+            /tmp/a52-decoder-test/raw.bin --output /tmp/a52-decoder-test/out
           python3 - <<'PY'
           import json
           from pathlib import Path
           state = json.loads(Path('/tmp/a52-decoder-test/out/summary.json').read_text())
           assert state['stats']['unique_events'] == 2
           assert state['stats']['raw_event_copies'] == 4
-          assert state['mirroring']['events_seen_in_two_or_more_sources'] == 2
+          assert state['mirroring']['events_with_two_or_more_copies'] == 2
           assert state['sequence']['gaps'] == []
+          assert state['domains']['QSEEINIT'] == 1
+          assert state['domains']['QSEE'] == 1
           PY
 
       - name: Restore pinned GKI source
@@ -183,7 +191,6 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           root = Path('artifacts/a52xq-gki-unified-secure-recorder/stage')
           ion = json.loads((root / 'phase15-legacy-ion-free-report.json').read_text())
           trace = json.loads((root / 'phase17-ack-unified-secure-recorder-report.json').read_text())
@@ -194,11 +201,15 @@ jobs:
           assert trace['recorder']['capacity'] == 768
           assert trace['recorder']['checks']['immediate_write'] is True
           assert trace['recorder']['checks']['early_retry'] is True
+          assert trace['recorder']['checks']['event_driven_early_retry'] is True
+          assert trace['recorder']['checks']['device_retry'] is True
+          assert trace['recorder']['checks']['late_retry'] is True
           assert trace['recorder']['checks']['no_delayed_work'] is True
+          assert trace['recorder']['checks']['real_newline_delimiter'] is True
           assert trace['ramoops']['checks']['direct_writer_exported'] is True
           assert trace['ramoops']['checks']['console_bank_reserved'] is True
           assert trace['ramoops']['checks']['ftrace_bank_reserved'] is True
-          for group in ('shmbridge', 'secure_buffer', 'qsee_scm'):
+          for group in ('qsee_init', 'qsee_memory', 'qsee_scm', 'shmbridge', 'secure_buffer'):
               item = trace['boundaries'][group]
               assert item['missing_file'] is False
               assert any(fn['entry'] != 'missing' for fn in item['functions'])
@@ -213,6 +224,10 @@ jobs:
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
           ! grep -Fq 'schedule_delayed_work' \
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'A52USR2 enter fn=qseecom_probe' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'A52USR2 enter fn=qseecom_dmabuf_map' \
+            gki/common/drivers/a52_secure/qseecom.c
           grep -Fq 'A52USR2 enter fn=qtee_shmbridge_register' \
             gki/common/drivers/a52_secure/qtee_shmbridge.c
           grep -Fq 'A52USR2 enter fn=__hyp_assign_table' \
@@ -261,6 +276,8 @@ jobs:
           gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
           grep -aFq 'A52USR2 seq=%llu' "$OUT/compile/Image"
           grep -aFq 'unified secure recorder enabled' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=qseecom_probe' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=qseecom_dmabuf_map' "$OUT/compile/Image"
           grep -aFq 'A52USR2 enter fn=qtee_shmbridge_register' "$OUT/compile/Image"
           grep -aFq 'A52USR2 enter fn=__hyp_assign_table' "$OUT/compile/Image"
           grep -aFq 'A52USR2 enter fn=__qseecom_scm_call2_locked' "$OUT/compile/Image"
@@ -291,7 +308,6 @@ jobs:
           import json
           import re
           from pathlib import Path
-
           root = Path('artifacts/a52xq-gki-unified-secure-recorder')
           pattern = re.compile(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', re.M)
           text = (root / 'logs/compile.log').read_text(errors='replace')
@@ -321,7 +337,6 @@ jobs:
           import hashlib
           import json
           from pathlib import Path
-
           root = Path('artifacts/a52xq-gki-unified-secure-recorder')
           boot = root / 'package/boot.img'
           repack = json.loads((root / 'package/repack-report.json').read_text())
@@ -347,9 +362,7 @@ jobs:
               'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
               'cmdline_preserved': repack['invariants']['cmdline_preserved'],
           }
-          (root / 'final-audit.json').write_text(
-              json.dumps(final, indent=2, sort_keys=True) + '\n'
-          )
+          (root / 'final-audit.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
           PY
 
           cat > "$OUT/README-FIRST.txt" <<'EOF'
@@ -357,25 +370,27 @@ jobs:
 
           This supersedes the delayed A52ACKFR recorder. Each bounded event is
           written immediately into two mirrored RAMOOPS zones: console and ftrace.
-          An in-memory copy is used only to retry events emitted before RAMOOPS is ready.
+          The in-memory array retries only events emitted before RAMOOPS is ready.
 
           Captured metadata includes:
+          - exact QSEECOM probe and initialization stages
           - ION ioctl and allocation entry/return data
           - QSEECOM open, ioctl, app lifecycle and SEND_CMD paths
-          - QTEE shared-memory bridge registration and allocation
+          - dma-buf mapping, CPU mapping, cache and unmap paths
+          - QTEE shared-memory bridge operations
           - secure-buffer and hyp_assign transitions
           - QSEECOM-specific SCM IDs, argument descriptors and return values
           - timestamp, sequence, PID, TGID, CPU and task name
 
-          It never records command or response buffers, keys, authentication tokens,
-          process memory, or payload contents.
+          It never records command/response buffers, keys, authentication tokens,
+          process memory or payload contents.
 
           Test procedure:
           1. Back up the current boot partition.
           2. Flash package/boot.img to boot.
-          3. Attempt one Android boot. No 12/45/90-second dump wait is required.
+          3. Attempt one Android boot. No timed dump wait is required.
           4. Reboot directly to OrangeFox without flashing another kernel.
-          5. Run the existing expanded RAMOOPS collector.
+          5. Run the expanded RAMOOPS collector.
           6. Upload the collector archive. The included decoder can also be run as:
              python3 tools/decode-a52-unified-secure-recorder.py <archive-or-files> --output decoded
 

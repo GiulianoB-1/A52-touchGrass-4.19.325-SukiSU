@@ -12,6 +12,8 @@ from pathlib import Path
 ION_REL = Path("drivers/staging/android/ion/ion.c")
 QSEE_REL = Path("drivers/a52_secure/qseecom.c")
 GENERATOR_NAME = "140_apply_a52xq_unified_secure_startup_recorder.py"
+FAILURE_PROBE_NAME = "154_apply_a52xq_failure_window_probe.py"
+FAILURE_REPORT = "phase25-a52-failure-window-probe-report.json"
 ION_MARKER = "ION result fd=%d len=%llu heap=%x flags=%x"
 QSEE_API_MARKER = "QSEE SEND api req=%u rsp=%u"
 QSEE_CORE_MARKER = "QSEE SEND core id=%u app=%s req=%u rsp=%u"
@@ -133,7 +135,7 @@ def patch_qsee(root: Path) -> dict[str, object]:
         f'a52_ackfr_record("{QSEE_CORE_MARKER}", '
         'data ? data->client.app_id : 0, '
         'data ? data->client.app_name : "<null>", '
-        'req ? req->cmd_req_len : 0, req ? req->resp_len : 0)'
+        "req ? req->cmd_req_len : 0, req ? req->resp_len : 0)"
     )
     text, core_state = replace_call_once(
         text, core_old, core_new, "QSEECOM core SEND_CMD"
@@ -200,7 +202,7 @@ def self_test() -> None:
 def run_stage_script(name: str, gki: Path, output: Path) -> None:
     script = Path(__file__).with_name(name)
     if not script.is_file():
-        raise SystemExit(f"missing staging script: {script}")
+        raise SystemExit(f"missing compatibility stage: {script}")
     subprocess.run(
         [sys.executable, str(script), "--gki", str(gki), "--output", str(output)],
         check=True,
@@ -228,22 +230,35 @@ def main() -> int:
     if not early_report_path.is_file():
         raise SystemExit(f"missing early mirrored boot report: {early_report_path}")
 
+    ion = patch_ion(root)
+    qsee = patch_qsee(root)
+    run_stage_script(FAILURE_PROBE_NAME, root, output)
+    failure_report_path = output / FAILURE_REPORT
+    if not failure_report_path.is_file():
+        raise SystemExit(f"missing failure-window probe report: {failure_report_path}")
+
     report = {
         "status": "ack-secure-parameter-probe-141-staged",
         "hardware_validated": False,
         "payload_capture": False,
         "unified_generator": unified_generator,
         "early_boot_probe": json.loads(early_report_path.read_text()),
-        "ion": patch_ion(root),
-        "qsee": patch_qsee(root),
+        "ion": ion,
+        "qsee": qsee,
+        "failure_window_probe": json.loads(failure_report_path.read_text()),
         "markers": {
             "ion_allocation_result": ION_MARKER,
             "qsee_send_api": QSEE_API_MARKER,
             "qsee_send_core": QSEE_CORE_MARKER,
+            "heartbeat": "HB tick=%u online=%u run=%lu j=%lu",
+            "display_scope": "%s enter fn=%s / %s exit fn=%s us=%llu",
+            "watchdog": "WDT disarm before=%u after=%u",
         },
         "scope": (
             "record ION allocation fd/length/heap/flags and QSEECOM SEND_CMD "
-            "buffer lengths plus app identity without copying secure payload bytes"
+            "buffer lengths plus app identity without copying secure payload bytes; "
+            "also record a five-minute kernel heartbeat, timed display-stack scopes, "
+            "and explicit watchdog disarm state"
         ),
     }
     (output / "phase18-ack-secure-parameter-probe-report.json").write_text(

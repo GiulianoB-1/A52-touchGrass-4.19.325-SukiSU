@@ -9,17 +9,41 @@ from pathlib import Path
 ION_REL = Path('drivers/staging/android/ion/ion.c')
 REPORT = 'phase23-ion-system-heap-secure-gate-report.json'
 MARKER = 'A52_ION_SYSTEM_HEAP_NONSECURE_GATE'
+INCLUDE = '#include <linux/msm_ion.h>\n'
 
 OLD = '''\t\tif (fd == -ENODEV &&\n\t\t\t(data.allocation.heap_id_mask & (1U << 25))) {'''
-NEW = '''\t\t/* A52_ION_SYSTEM_HEAP_NONSECURE_GATE\n\t\t * Downstream system heap 25 rejects secure/CP allocations. Do not\n\t\t * translate those requests to ACK generic HLOS system memory.\n\t\t */\n\t\tif (fd == -ENODEV &&\n\t\t\t(data.allocation.heap_id_mask & (1U << 25)) &&\n\t\t\t!(data.allocation.flags &\n\t\t\t  (ION_FLAGS_CP_MASK | ION_FLAG_SECURE))) {'''
+NEW = '''\t\t/* A52_ION_SYSTEM_HEAP_NONSECURE_GATE
+\t\t * Downstream system heap 25 rejects secure/CP allocations. Do not
+\t\t * translate those requests to ACK generic HLOS system memory.
+\t\t */
+\t\tif (fd == -ENODEV &&
+\t\t\t(data.allocation.heap_id_mask & (1U << 25)) &&
+\t\t\t!(data.allocation.flags &
+\t\t\t  (ION_FLAGS_CP_MASK | ION_FLAG_SECURE))) {'''
 
 
 def read(path: Path) -> str:
     return path.read_text(encoding='utf-8', errors='replace')
 
 
+def ensure_msm_ion_include(text: str) -> tuple[str, str]:
+    if INCLUDE in text:
+        if text.count(INCLUDE) != 1:
+            raise SystemExit('msm_ion include count is not one')
+        return text, 'already-present'
+
+    include_pos = text.find('#include ')
+    if include_pos < 0:
+        text = INCLUDE + text
+    else:
+        text = text[:include_pos] + INCLUDE + text[include_pos:]
+    return text, 'inserted'
+
+
 def patch(path: Path) -> dict[str, object]:
     text = read(path)
+    text, include_state = ensure_msm_ion_include(text)
+
     if MARKER in text:
         if text.count(MARKER) != 1:
             raise SystemExit('secure-gate marker count is not one')
@@ -32,6 +56,7 @@ def patch(path: Path) -> dict[str, object]:
         state = 'inserted'
 
     required = (
+        INCLUDE.strip(),
         MARKER,
         'ION_FLAGS_CP_MASK | ION_FLAG_SECURE',
         '!(data.allocation.flags &',
@@ -44,6 +69,7 @@ def patch(path: Path) -> dict[str, object]:
     return {
         'source': str(ION_REL),
         'state': state,
+        'msm_ion_include': include_state,
         'legacy_system_heap_id': 25,
         'retry_limited_to_nonsecure': True,
         'secure_and_cp_requests_preserved': True,
@@ -51,15 +77,31 @@ def patch(path: Path) -> dict[str, object]:
 
 
 def self_test() -> None:
-    sample = '''/* A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT */\nstatic void f(void)\n{\n\t\tif (fd == -ENODEV &&\n\t\t\t(data.allocation.heap_id_mask & (1U << 25))) {\n\t\t\tfd = 0;\n\t\t}\n}\n'''
+    sample = '''/* A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT */
+#include <linux/kernel.h>
+static void f(void)
+{
+\t\tif (fd == -ENODEV &&
+\t\t\t(data.allocation.heap_id_mask & (1U << 25))) {
+\t\t\tfd = 0;
+\t\t}
+}
+'''
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / ION_REL
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(sample, encoding='utf-8')
         first = patch(path)
         second = patch(path)
+        staged = path.read_text(encoding='utf-8')
         if first['state'] != 'inserted' or second['state'] != 'already-present':
             raise SystemExit('secure-gate idempotence self-test failed')
+        if first['msm_ion_include'] != 'inserted':
+            raise SystemExit('secure-gate include self-test did not insert')
+        if second['msm_ion_include'] != 'already-present':
+            raise SystemExit('secure-gate include is not idempotent')
+        if staged.count(INCLUDE) != 1:
+            raise SystemExit('secure-gate include self-test count failed')
 
 
 def main() -> int:

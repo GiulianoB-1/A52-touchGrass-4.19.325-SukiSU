@@ -330,13 +330,19 @@ def output(
 
 def self_test() -> None:
     lines = (
+        b"A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored "
+        b"metadata_only=1 commit=5a52c0de\n"
         b"A52USR2 seq=1 ns=100 pid=10 tgid=10 cpu=3 comm=skeymast "
         b"msg=ION result fd=7 len=4096 heap=1 flags=0 commit=5a52c0de\n"
         b"A52USR2 seq=2 ns=200 pid=10 tgid=10 cpu=3 comm=skeymast "
         b"msg=QSEE SEND core id=4 app=keymaster req=128 rsp=256 "
         b"commit=5a52c0de\n"
     )
-    matches = list(EVENT_RE.finditer(io.BytesIO(lines).read()))
+    raw = io.BytesIO(lines).read()
+    controls = list(CONTROL_RE.finditer(raw))
+    if len(controls) != 1 or text(controls[0].group("kind")) != "BOOT_EARLY":
+        raise SystemExit("decoder early-control self-test failed")
+    matches = list(EVENT_RE.finditer(raw))
     if len(matches) != 2:
         raise SystemExit("decoder event self-test failed")
     events = [

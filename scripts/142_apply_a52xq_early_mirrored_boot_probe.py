@@ -64,7 +64,7 @@ static int __init a52_usr2_late_retry(void)
 \t\t(unsigned long long)atomic64_read(&a52_usr2_dropped));
 \treturn 0;
 }
-late_initcall(a52_usr2_late_retry);'''
+late_initcall(a52_usr2_late_retry);'''.replace(r"\t", "\t")
 
 RECORDER_TAIL_NEW = r'''EXPORT_SYMBOL_GPL(a52_ackfr_record);
 
@@ -139,7 +139,7 @@ static int __init a52_usr2_late_retry(void)
 \t\t(unsigned long long)atomic64_read(&a52_usr2_dropped));
 \treturn 0;
 }
-late_initcall(a52_usr2_late_retry);'''
+late_initcall(a52_usr2_late_retry);'''.replace(r"\t", "\t")
 
 RAW_FTRACE_BLOCK = r'''/* A52_DIAG_FTRACE_MIRROR */
 static void a52_diag_ftrace_raw_write(const char *s, unsigned int count)
@@ -170,7 +170,7 @@ static void a52_diag_ftrace_raw_write(const char *s, unsigned int count)
 \twmb();
 }
 
-'''
+'''.replace(r"\t", "\t")
 
 FTRACE_API_BLOCK = r'''void a52_persistent_diag_mark_ftrace(const char *fmt, ...)
 {
@@ -226,7 +226,7 @@ static int __init a52_persistent_diag_ftrace_init(void)
 \treturn 0;
 }
 
-'''
+'''.replace(r"\t", "\t")
 
 MAIN_INIT_RE = re.compile(
     r"int __init a52_persistent_diag_init\(void\)\n\{[\s\S]*?\n\}\n\n"
@@ -536,6 +536,10 @@ EXPORT_SYMBOL_GPL(a52_ackfr_ramoops_write);'''
             raise SystemExit("early mirrored probe is not idempotent")
         if second[2]["backend"] != "already-present" or second[2]["heartbeats"] != "already-present":
             raise SystemExit("generator mirror patch is not idempotent")
+        if r"\t" in ram.read_text():
+            raise SystemExit("literal tab escapes leaked into generated C source")
+        if "\ta52_ackfr_record(\"BOOT phase=pre_smp\")" not in gen.read_text():
+            raise SystemExit("boot heartbeat template did not retain real indentation")
 
 
 def main() -> int:

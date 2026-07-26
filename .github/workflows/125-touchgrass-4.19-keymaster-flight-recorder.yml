@@ -4,6 +4,15 @@ run-name: Build working TouchGrass baseline with a bounded Keymaster/QSEECOM rec
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/125-touchgrass-4.19-keymaster-flight-recorder.yml
+      - scripts/125_apply_touchgrass_keymaster_flight_recorder.py
+      - scripts/126_apply_touchgrass_audio_sysfs_boot_guard.py
+      - scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py
+      - scripts/128_apply_touchgrass_reserve_keymaster_ramoops_console.py
 
 permissions:
   contents: read
@@ -39,7 +48,9 @@ jobs:
             libssl-dev libelf-dev rsync cpio gzip zip unzip file \
             dwarves device-tree-compiler
           python3 -m py_compile \
-            scripts/125_apply_touchgrass_keymaster_flight_recorder.py
+            scripts/125_apply_touchgrass_keymaster_flight_recorder.py \
+            scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py \
+            scripts/128_apply_touchgrass_reserve_keymaster_ramoops_console.py
 
       - name: Fetch exact TouchGrass source baseline
         run: |
@@ -57,7 +68,7 @@ jobs:
           test -f touchgrass/tools/dtc
           chmod 755 touchgrass/tools/dtc
 
-      - name: Stage control-flow-safe secure flight recorder
+      - name: Stage control-flow-safe persistent secure flight recorder
         run: |
           set -Eeuo pipefail
           OUT="$PWD/artifacts/touchgrass-keymaster-flight-recorder"
@@ -89,12 +100,28 @@ jobs:
           assert report['recorder']['capture_mode'] == 'first-events-preserved'
           assert report['qseecom']['safe_exit_count'] > 0
           assert report['ion']['safe_exit_count'] > 0
+          persistence = report['failed_boot_persistence']
+          assert persistence['status'] == 'touchgrass-keymaster-ramoops-persistence-staged'
+          assert persistence['survives_incomplete_android_boot'] is True
+          assert persistence['requires_adb_before_reboot'] is False
+          assert persistence['persistent_capacity'] == 768
+          assert persistence['payload_policy'] == (
+              'metadata-only-no-command-or-response-buffers'
+          )
+          assert persistence['console_frontend_reserved'] is True
+          assert persistence['pmsg_capture_retained'] is True
+          assert persistence['panic_dmesg_capture_retained'] is True
           PY
 
           grep -Fq 'A52_TOUCHGRASS_KEYMASTER_FLIGHT_RECORDER' \
             touchgrass/drivers/misc/qseecom.c
           grep -Fq 'A52_KMFR_CAPACITY 8192U' \
             touchgrass/drivers/misc/a52_keymaster_flight_recorder.c
+          grep -Fq 'A52_KMFR_PERSIST_CAPACITY 768U' \
+            touchgrass/drivers/misc/a52_keymaster_flight_recorder.c
+          grep -Fq 'A52KMFR-PERSIST seq=%llu' \
+            touchgrass/drivers/misc/a52_keymaster_flight_recorder.c
+          grep -Fq 'A52_KMFR_CONSOLE_RESERVED' touchgrass/fs/pstore/ram.c
           grep -Fq 'mode=first-events' \
             touchgrass/drivers/misc/a52_keymaster_flight_recorder.c
 
@@ -137,6 +164,9 @@ jobs:
           grep -Fxq 'CONFIG_PRINTK_TIME=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_PROC_FS=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_LOG_BUF_SHIFT=22' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_PMSG=y' "$BUILD/.config"
 
       - name: Compile TouchGrass Image
         run: |
@@ -164,6 +194,8 @@ jobs:
           grep -aFq 'A52 TouchGrass Keymaster flight recorder' "$IMAGE"
           grep -aFq 'QSEE enter fn=qseecom_ioctl' "$IMAGE"
           grep -aFq 'ION enter fn=ion_ioctl' "$IMAGE"
+          grep -aFq 'A52KMFR-PERSIST seq=%llu' "$IMAGE"
+          grep -aFq 'BOOT BEGIN release=%s backend=ramoops-console' "$IMAGE"
           grep -aFq 'mode=first-events' "$IMAGE"
           grep -aFq 'a52_keymaster_flight_recorder' "$IMAGE"
 
@@ -186,10 +218,10 @@ jobs:
 
           cat > anykernel/anykernel.sh <<'EOF'
           # AnyKernel3 Ramdisk Mod Script
-          # TouchGrass A52 5G Keymaster flight recorder
+          # TouchGrass A52 5G persistent Keymaster flight recorder
 
           properties() { '
-          kernel.string=TouchGrass 4.19.200 Keymaster Flight Recorder
+          kernel.string=TouchGrass 4.19.200 Persistent Keymaster Flight Recorder
           do.devicecheck=0
           do.modules=0
           do.systemless=1
@@ -207,7 +239,7 @@ jobs:
 
           . tools/ak3-core.sh;
 
-          ui_print "  TouchGrass Keymaster flight recorder";
+          ui_print "  TouchGrass persistent Keymaster flight recorder";
           ui_print "  Target: /dev/block/by-name/boot (non-A/B)";
           ui_print "  Preserving the installed ramdisk and separate DTB";
           dump_boot;
@@ -215,16 +247,20 @@ jobs:
           EOF
 
           cat > anykernel/README-FIRST.txt <<'EOF'
-          A52 TOUCHGRASS KEYMASTER FLIGHT RECORDER
+          A52 TOUCHGRASS PERSISTENT KEYMASTER FLIGHT RECORDER
 
           Diagnostic build of the known-working TouchGrass 4.19 path.
-          It preserves the first 8192 selected ION and QSEECOM events.
+          It keeps the first 8192 selected ION and QSEECOM events in RAM and
+          mirrors the first 768 metadata-only events into console RAMOOPS.
 
-          After Android boots, read:
+          After a failed Android boot, force-reboot directly into recovery and
+          collect /sys/fs/pstore before attempting another Android boot.
+          Look for A52KMFR-PERSIST in console-ramoops-0.
+
+          If Android boots, the full volatile trace is also available at:
             /proc/a52_keymaster_flight_recorder
 
-          Run COLLECT-WINDOWS-POWERSHELL.ps1 from the artifact package folder.
-          This artifact is not hardware validated until it boots on the phone.
+          This artifact is not hardware validated until tested on the phone.
           EOF
 
           cat > "$OUT/package/COLLECT-WINDOWS-POWERSHELL.ps1" <<'EOF'
@@ -282,7 +318,7 @@ jobs:
           unzip -l "$OUT/package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip" \
             | grep -Eq '[[:space:]]anykernel.sh$'
 
-      - name: Audit and finalize artifact
+      - name: Audit and finalize persistent artifact
         run: |
           set -Eeuo pipefail
           OUT=artifacts/touchgrass-keymaster-flight-recorder
@@ -298,9 +334,10 @@ jobs:
           stage = json.loads((
               root / 'stage/touchgrass-keymaster-flight-recorder-report.json'
           ).read_text())
+          persistence = stage['failed_boot_persistence']
           anykernel_commit = (root / 'package/anykernel-commit.txt').read_text().strip()
           report = {
-              'status': 'touchgrass-keymaster-flight-recorder-built-audited',
+              'status': 'touchgrass-persistent-keymaster-flight-recorder-built-audited',
               'hardware_validated': False,
               'touchgrass_source_sha': '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
               'kernelrelease': release,
@@ -315,6 +352,23 @@ jobs:
               'control_flow_safe_return_wrapping': stage[
                   'control_flow_safe_return_wrapping'
               ],
+              'persistent_backend': persistence['backend'],
+              'persistent_capacity': persistence['persistent_capacity'],
+              'persistent_line_length': persistence['persistent_line_length'],
+              'persistent_payload_policy': persistence['payload_policy'],
+              'survives_incomplete_android_boot': persistence[
+                  'survives_incomplete_android_boot'
+              ],
+              'requires_adb_before_reboot': persistence[
+                  'requires_adb_before_reboot'
+              ],
+              'console_frontend_reserved': persistence[
+                  'console_frontend_reserved'
+              ],
+              'pmsg_capture_retained': persistence['pmsg_capture_retained'],
+              'panic_dmesg_capture_retained': persistence[
+                  'panic_dmesg_capture_retained'
+              ],
               'image_bytes': image.stat().st_size,
               'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
               'flashable_sha256': hashlib.sha256(flashable.read_bytes()).hexdigest(),
@@ -327,21 +381,36 @@ jobs:
           assert report['event_capacity'] == 8192
           assert report['capture_mode'] == 'first-events-preserved'
           assert report['control_flow_safe_return_wrapping'] is True
+          assert report['persistent_backend'] == 'existing-ramoops-console-zone'
+          assert report['persistent_capacity'] == 768
+          assert report['persistent_payload_policy'] == (
+              'metadata-only-no-command-or-response-buffers'
+          )
+          assert report['survives_incomplete_android_boot'] is True
+          assert report['requires_adb_before_reboot'] is False
+          assert report['console_frontend_reserved'] is True
+          assert report['pmsg_capture_retained'] is True
+          assert report['panic_dmesg_capture_retained'] is True
           (root / 'final-audit.json').write_text(
               json.dumps(report, indent=2, sort_keys=True) + '\n'
           )
           PY
 
           cat > "$OUT/README-FIRST.txt" <<'EOF'
-          A52 TOUCHGRASS 4.19 KEYMASTER FLIGHT RECORDER
+          A52 TOUCHGRASS 4.19 PERSISTENT KEYMASTER FLIGHT RECORDER
 
-          One manual baseline build using TouchGrass's a52xq_defconfig.
-          The recorder preserves the first 8192 selected secure-startup events.
+          This build mirrors the first 768 metadata-only Keymaster/QSEECOM/ION
+          events into the existing RAMOOPS console zone. It does not record
+          command buffers, response buffers, key blobs, or private key material.
+
+          After a failed boot, enter recovery immediately and collect pstore
+          before another Android boot. Search console-ramoops-0 for:
+            A52KMFR-PERSIST
 
           Flashable package:
             package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip
 
-          Windows collector:
+          Windows successful-boot collector:
             package/COLLECT-WINDOWS-POWERSHELL.ps1
 
           Not hardware validated until tested on the phone.
@@ -354,21 +423,29 @@ jobs:
             sha256sum -c SHA256SUMS
           )
 
-      - name: Upload single TouchGrass recorder artifact
+      - name: Upload single persistent TouchGrass recorder artifact
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-touchgrass-keymaster-flight-recorder-NOT-HARDWARE-VALIDATED
+          name: a52xq-touchgrass-persistent-keymaster-flight-recorder-NOT-HARDWARE-VALIDATED
           path: artifacts/touchgrass-keymaster-flight-recorder
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
 
-      - name: Require final output
+      - name: Require final persistent output
         run: |
           set -Eeuo pipefail
           test -s artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
           test -s artifacts/touchgrass-keymaster-flight-recorder/package/A52XQ-TouchGrass-Keymaster-Flight-Recorder-Flashable.zip
-          grep -Fq 'touchgrass-keymaster-flight-recorder-built-audited' \
+          grep -Fq 'touchgrass-persistent-keymaster-flight-recorder-built-audited' \
             artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
           grep -Fq '"event_capacity": 8192' \
+            artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
+          grep -Fq '"persistent_capacity": 768' \
+            artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
+          grep -Fq '"console_frontend_reserved": true' \
+            artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
+          grep -Fq '"pmsg_capture_retained": true' \
+            artifacts/touchgrass-keymaster-flight-recorder/final-audit.json
+          grep -Fq '"panic_dmesg_capture_retained": true' \
             artifacts/touchgrass-keymaster-flight-recorder/final-audit.json

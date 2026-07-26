@@ -8,6 +8,7 @@ on:
       - scripts/125_apply_touchgrass_keymaster_flight_recorder.py
       - scripts/126_apply_touchgrass_audio_sysfs_boot_guard.py
       - scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py
+      - scripts/128_apply_touchgrass_reserve_keymaster_ramoops_console.py
       - .github/workflows/125-touchgrass-4.19-keymaster-flight-recorder.yml
       - .github/workflows/127-trigger-touchgrass-persistent-keymaster-recorder.yml
 

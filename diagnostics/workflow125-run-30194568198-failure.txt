@@ -1,0 +1,368 @@
+Workflow 125 failed run: 30194568198
+Total decoded log lines: 440805
+
+=== Interesting lines ===
+2026-07-26T08:24:52.5747013Z [36;1m  scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py \[0m
+2026-07-26T08:26:03.3004986Z [36;1mpersistence = report['failed_boot_persistence'][0m
+2026-07-26T08:26:05.9094561Z staged persistent failed-boot Keymaster recorder: capacity=768 backend=ramoops-console
+2026-07-26T08:26:30.3125072Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/extract-cert.c: In function ‘display_openssl_errors’:
+2026-07-26T08:26:30.3126692Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/extract-cert.c:46:9: warning: ‘ERR_get_error_line’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+2026-07-26T08:26:30.3127594Z    46 |         while ((e = ERR_get_error_line(&file, &line))) {
+2026-07-26T08:26:30.3130757Z   411 | unsigned long ERR_get_error_line(const char **file, int *line);
+2026-07-26T08:26:30.3131874Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/extract-cert.c: In function ‘drain_openssl_errors’:
+2026-07-26T08:26:30.3133173Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/extract-cert.c:59:9: warning: ‘ERR_get_error_line’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+2026-07-26T08:26:30.3133997Z    59 |         while (ERR_get_error_line(&file, &line)) {}
+2026-07-26T08:26:30.3135821Z   411 | unsigned long ERR_get_error_line(const char **file, int *line);
+2026-07-26T08:26:30.3178623Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/sign-file.c: In function ‘display_openssl_errors’:
+2026-07-26T08:26:30.3181431Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/sign-file.c:89:9: warning: ‘ERR_get_error_line’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+2026-07-26T08:26:30.3183091Z    89 |         while ((e = ERR_get_error_line(&file, &line))) {
+2026-07-26T08:26:30.3186615Z   411 | unsigned long ERR_get_error_line(const char **file, int *line);
+2026-07-26T08:26:30.3188866Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/sign-file.c: In function ‘drain_openssl_errors’:
+2026-07-26T08:26:30.3191259Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/sign-file.c:102:9: warning: ‘ERR_get_error_line’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+2026-07-26T08:26:30.3192851Z   102 |         while (ERR_get_error_line(&file, &line)) {}
+2026-07-26T08:26:30.3197026Z   411 | unsigned long ERR_get_error_line(const char **file, int *line);
+2026-07-26T08:27:34.0065243Z   CC      security/integrity/integrity_audit.o
+2026-07-26T08:28:01.1379942Z   CC      security/samsung/five/five_audit.o
+2026-07-26T08:28:49.2152166Z   CC      security/lsm_audit.o
+2026-07-26T08:30:29.7999011Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/fs/pstore/ram.c:524:1: error: expected expression
+2026-07-26T08:30:29.8093527Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/fs/pstore/ram.c:526:1: error: expected expression
+2026-07-26T08:30:29.8096440Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/fs/pstore/ram.c:528:1: error: expected expression
+2026-07-26T08:30:29.8099430Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/fs/pstore/ram.c:531:1: error: expected expression
+2026-07-26T08:30:29.8102233Z /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/fs/pstore/ram.c:532:1: error: expected expression
+2026-07-26T08:30:29.8104371Z  errors generated.
+2026-07-26T08:30:29.8194247Z make[3]: *** [/home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/Makefile.build:338: fs/pstore/ram.o] Error 1
+2026-07-26T08:30:29.8208673Z make[2]: *** [/home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/scripts/Makefile.build:642: fs/pstore] Error 2
+2026-07-26T08:30:29.8211228Z make[1]: *** [/home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass/Makefile:1211: fs] Error 2
+2026-07-26T08:30:53.3189063Z   CC      kernel/audit.o
+2026-07-26T08:30:54.8420527Z   CC      kernel/auditfilter.o
+2026-07-26T08:30:56.1663790Z   CC      kernel/auditsc.o
+2026-07-26T08:30:58.0368862Z   CC      kernel/audit_watch.o
+2026-07-26T08:30:58.5038934Z   CC      kernel/audit_fsnotify.o
+2026-07-26T08:30:58.9455795Z   CC      kernel/audit_tree.o
+2026-07-26T08:32:51.4288871Z   CC      drivers/md/dm-exception-store.o
+2026-07-26T08:34:53.2173212Z   CC      drivers/scsi/scsi_error.o
+2026-07-26T08:35:35.0714227Z   CC      drivers/tty/tty_audit.o
+2026-07-26T08:39:44.6853736Z make: *** [Makefile:146: sub-make] Error 2
+2026-07-26T08:39:44.6875948Z ##[error]Process completed with exit code 2.
+
+=== Final 320 lines ===
+2026-07-26T08:39:44.1621642Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1622242Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1622834Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1623435Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1624033Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1624633Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1625234Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1625836Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1626450Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1627244Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1628069Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1628694Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1629304Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1629918Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1630533Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1631136Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1631743Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1632411Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1633019Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1633622Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1634242Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1634852Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1635461Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1636067Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1636671Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1637275Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1638067Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1638683Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1639289Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1640076Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1640687Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1641296Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1641901Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1642508Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1643122Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1643732Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1644334Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1644939Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1645547Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1646147Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1646761Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1647544Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1648348Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1649111Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1649755Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1650378Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1650983Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1651589Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1652192Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1652803Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1653411Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1654016Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1654634Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1655242Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1655847Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1656621Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1657242Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1658051Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1658652Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1659271Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1659883Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1660566Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1661170Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1661786Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1662402Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1663006Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1663619Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1664236Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1664850Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1665773Z aarch64-linux-gnu-objdump: Warning: Bogus end-of-siblings marker detected at offset 1c8db in .debug_info section
+2026-07-26T08:39:44.1666998Z aarch64-linux-gnu-objdump: Warning: Bogus end-of-siblings marker detected at offset 1c8f2 in .debug_info section
+2026-07-26T08:39:44.1668118Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1669006Z aarch64-linux-gnu-objdump: Warning: Bogus end-of-siblings marker detected at offset 1c915 in .debug_info section
+2026-07-26T08:39:44.1670280Z aarch64-linux-gnu-objdump: Warning: Further warnings about bogus end-of-sibling markers suppressed
+2026-07-26T08:39:44.1671142Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1671759Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1672363Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1672963Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1673551Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1674153Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1674769Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1675455Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1676050Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1676649Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1677274Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1678240Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1678842Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1679625Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1680272Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1680878Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1681486Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1682100Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1682718Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1683315Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1683923Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1684533Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1685147Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1685770Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1686385Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1687176Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1687977Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1688587Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1689182Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1689783Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1690384Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1690984Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1691581Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1692203Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1692821Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1693423Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1694043Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1694644Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1695242Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1695819Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1696417Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1697009Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1697599Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1698403Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1699187Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1699811Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1700415Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1701015Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1701599Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1702187Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1702768Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1703367Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1703971Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1704577Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1705187Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1705782Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1706394Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1707203Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1708006Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1708774Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1709389Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1709987Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1710594Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1711196Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1711797Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1712406Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1712996Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1713602Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1714205Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1714802Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1715404Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1716210Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1716825Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1717453Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1718284Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1718892Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1719504Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1720099Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1720695Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1732622Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1733312Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1733940Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1734546Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1735141Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1735724Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1736333Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1736945Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1737545Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1738365Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1738991Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1739798Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1740456Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1741074Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1741698Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1742315Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1742929Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1743538Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1744141Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1744737Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1745325Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1745943Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1746531Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1747144Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1748108Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1748700Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1749433Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1750026Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1750619Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1751207Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1751796Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1752383Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1752977Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1753570Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1754171Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1754762Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1755353Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1755908Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1756656Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1757249Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1758039Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1758665Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1759275Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1759867Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1760465Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1761067Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1761678Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1762278Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1762879Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1763488Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1764081Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1764668Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1765262Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1765855Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1766458Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1767043Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1767640Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1768439Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1769202Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1769807Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1770406Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1771013Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1771607Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1772215Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1772820Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1773415Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1774019Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1774630Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1775319Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1775947Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1776762Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1777390Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1778355Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1778984Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1779586Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1780186Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1780787Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1781387Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1781987Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1782586Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1783217Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1783840Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1784436Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1785047Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1785820Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1786427Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1787039Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1787637Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1788540Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1789144Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1789757Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1790363Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1790977Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1791587Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1792190Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1792789Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1793409Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1793997Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1794597Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1795205Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1795831Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1796442Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1797037Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1797621Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1798626Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1799241Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1799838Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1800442Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1801037Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1801648Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1802262Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1802882Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1803487Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1804081Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1804686Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1805304Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.1806112Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.1807179Z aarch64-linux-gnu-objdump: Warning: DIE at offset 0x1e0e6 refers to abbreviation number 155509 which does not exist
+2026-07-26T08:39:44.2972024Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2972752Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2973381Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2974010Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2974626Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2975237Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2975726Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2976109Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.2976500Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2976869Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2977223Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2977974Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2978482Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2978840Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2979193Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x23
+2026-07-26T08:39:44.2979550Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2979906Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2980272Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2980655Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2981028Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2981395Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2981753Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2982113Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.2982471Z aarch64-linux-gnu-objdump: Warning: Unrecognized form: 0x22
+2026-07-26T08:39:44.3062592Z   AR      drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/built-in.a
+2026-07-26T08:39:44.3889248Z   AR      drivers/net/wireless/built-in.a
+2026-07-26T08:39:44.4587353Z   AR      drivers/net/built-in.a
+2026-07-26T08:39:44.5296272Z   AR      drivers/built-in.a
+2026-07-26T08:39:44.6851972Z make[1]: Leaving directory '/home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/workspace/touchgrass-kmfr-out'
+2026-07-26T08:39:44.6853736Z make: *** [Makefile:146: sub-make] Error 2
+2026-07-26T08:39:44.6856545Z make: Leaving directory '/home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU/touchgrass'
+2026-07-26T08:39:44.6875948Z ##[error]Process completed with exit code 2.
+2026-07-26T08:39:44.7017518Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-26T08:39:44.7019214Z Post job cleanup.
+2026-07-26T08:39:44.7905916Z [command]/usr/bin/git version
+2026-07-26T08:39:44.7950294Z git version 2.54.0
+2026-07-26T08:39:44.7987609Z Temporarily overriding HOME='/home/runner/work/_temp/001dd51f-ddeb-4139-b02e-c635135a3e85' before making global git config changes
+2026-07-26T08:39:44.7989241Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-26T08:39:44.7994199Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/A52-touchGrass-4.19.325-SukiSU/A52-touchGrass-4.19.325-SukiSU
+2026-07-26T08:39:44.8036609Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-26T08:39:44.8074165Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-26T08:39:44.8363943Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-26T08:39:44.8390814Z http.https://github.com/.extraheader
+2026-07-26T08:39:44.8402222Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-07-26T08:39:44.8441702Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-26T08:39:44.8736086Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-26T08:39:44.8778776Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-26T08:39:44.9221724Z Cleaning up orphan processes
+2026-07-26T08:39:44.9487082Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

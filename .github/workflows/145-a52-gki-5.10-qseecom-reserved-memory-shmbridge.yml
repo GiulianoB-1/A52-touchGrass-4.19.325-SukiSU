@@ -1,0 +1,291 @@
+name: 145 - A52 GKI 5.10 QSEECOM reserved-memory bridge
+
+run-name: Build A52 QSEECOM reserved-memory shmbridge candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/145-a52-gki-5.10-qseecom-reserved-memory-shmbridge.yml
+      - scripts/144_apply_a52xq_qseecom_reserved_mem_shmbridge.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-qseecom-reserved-memory-shmbridge-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN24_ARTIFACT_ID: '8633447013'
+
+jobs:
+  build-package:
+    name: Build and package reserved-memory QSEECOM bridge
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate tools
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/144_apply_a52xq_qseecom_reserved_mem_shmbridge.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify Run 24 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p run24/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN24_ARTIFACT_ID}/zip" \
+            --output run24/artifact.zip
+          unzip -q run24/artifact.zip -d run24/extracted
+          (cd run24/extracted && sha256sum -c SHA256SUMS)
+          test -s run24/extracted/stage/full-source.patch
+          test -s run24/extracted/config/final.config
+          test -s run24/extracted/package/boot.img
+          test -s run24/extracted/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq '"status": "ack-unified-secure-recorder-boot-audited"' \
+            run24/extracted/final-audit.json
+
+      - name: Restore Run 24 source and apply reserved-memory bridge
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply --check "$PWD/run24/extracted/stage/full-source.patch"
+          git -C gki/common apply "$PWD/run24/extracted/stage/full-source.patch"
+
+          git -C gki/common config user.name 'A52 workflow'
+          git -C gki/common config user.email 'a52-workflow@users.noreply.github.com'
+          git -C gki/common add -A
+          git -C gki/common commit -m 'Recreate audited Run 24 staged source'
+
+          OUT=artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package" "$OUT/tools"
+          python3 scripts/144_apply_a52xq_qseecom_reserved_mem_shmbridge.py \
+            --gki gki/common --output "$OUT/stage"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge/stage/phase20-qseecom-reserved-memory-shmbridge-report.json')
+          report = json.loads(path.read_text())
+          assert report['status'] == 'qseecom-reserved-memory-shmbridge-staged'
+          assert report['payload_capture'] is False
+          assert report['observed_failure']['return'] == -22
+          assert report['fix']['legacy_path_preserved'] is True
+          assert report['fix']['reserved_memory_fallback'] is True
+          PY
+
+          grep -Fq 'A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'of_reserved_mem_lookup(rmem_node)' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'QSEEINIT heap_bridge heap=%u path=%s pa=%llx size=%zu' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'QSEEINIT heap_bridge_result heap=%u path=%s ret=%d' \
+            gki/common/drivers/a52_secure/qseecom.c
+          git -C gki/common diff --check
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/qseecom-reserved-memory-shmbridge.patch"
+          test -s "$OUT/stage/qseecom-reserved-memory-shmbridge.patch"
+
+      - name: Resolve configuration and compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge"
+          BUILD="$PWD/workspace/gki-qseecom-reserved-memory-shmbridge-out"
+          mkdir -p "$BUILD"
+          cp run24/extracted/config/final.config "$BUILD/.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            tail -n 400 "$OUT/logs/compile.log" || true
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+          grep -aFq 'QSEEINIT heap_bridge heap=%u path=%s pa=%llx size=%zu' \
+            "$OUT/compile/Image"
+          grep -aFq 'QSEEINIT heap_bridge_result heap=%u path=%s ret=%d' \
+            "$OUT/compile/Image"
+          grep -aFq 'reserved-memory-unavailable' "$OUT/compile/Image"
+          grep -aFq 'legacy-cma' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' \
+            "$OUT/compile/Image"
+
+      - name: Upload failed compile diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-qseecom-reserved-memory-shmbridge-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge/logs
+            artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge/compile/make-return-code.txt
+            artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge/config/final.config
+            artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge/stage
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Repack and audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run24/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge')
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', compile_log, re.M)
+          stage = json.loads((root / 'stage/phase20-qseecom-reserved-memory-shmbridge-report.json').read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          boot = root / 'package/boot.img'
+          state = {
+              'status': 'qseecom-reserved-memory-shmbridge-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'source_recorder_run': 24,
+              'source_recorder_artifact_id': 8633447013,
+              'observed_failure': stage['observed_failure'],
+              'legacy_cma_path_preserved': stage['fix']['legacy_path_preserved'],
+              'reserved_memory_fallback': stage['fix']['reserved_memory_fallback'],
+              'metadata_only': not stage['payload_capture'],
+              'compiler_error_count': len(errors),
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
+          }
+          if state['compiler_error_count'] or state['make_return_code']:
+              raise SystemExit(f'compile audit failed: {state}')
+          for key in ('dtb_preserved', 'ramdisk_preserved', 'recovery_dtbo_preserved', 'cmdline_preserved'):
+              if not state[key]:
+                  raise SystemExit(f'boot invariant failed: {key}')
+          (root / 'final-audit.json').write_text(json.dumps(state, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cp run24/extracted/tools/decode-a52-unified-secure-recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+          cat > "$OUT/RUN24-FINDING.md" <<'EOF'
+          # Run 24 hardware finding
+
+          The mirrored raw RAMOOPS capture reached the `fs` initcall level and then
+          entered QSEECOM initialization. Device setup, DT parsing, clock setup, bus
+          setup, app-region setup, and worker-thread creation all completed.
+
+          `qseecom_register_shmbridge()` then returned `-22` (`-EINVAL`). The copied
+          downstream driver expected legacy Qualcomm ION heap platform devices with
+          attached CMA areas. ACK uses generic dma-buf ION, while the preserved device
+          tree still supplies the TA and QSEECOM heaps through `shared-dma-pool`
+          `memory-region` references.
+
+          This candidate preserves the old CMA lookup when available and otherwise
+          registers those same heap regions through reserved-memory. Heap 26 remains
+          optional and absent exactly as in the preserved device tree.
+          EOF
+          sed -i 's/^          //' "$OUT/RUN24-FINDING.md"
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 QSEECOM RESERVED-MEMORY SHMBRIDGE CANDIDATE
+
+          This image fixes the concrete Run 24 QSEECOM initialization failure.
+
+          The downstream legacy CMA path remains the first choice. When ACK has no
+          per-heap platform device, QSEECOM now resolves the heap node's memory-region
+          and registers the existing shared-dma-pool directly with QTEE.
+
+          Test once:
+          1. Back up the current boot partition.
+          2. Flash package/boot.img to boot only.
+          3. Attempt one Android boot.
+          4. If boot fails or stalls, enter OrangeFox directly without flashing another kernel.
+          5. Run the raw 1 MiB RAMOOPS collector and upload the archive.
+
+          This image is compiled and audited but not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload reserved-memory bridge candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-qseecom-reserved-memory-shmbridge-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final audited output
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-qseecom-reserved-memory-shmbridge
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/final-audit.json"
+          grep -Fq '"status": "qseecom-reserved-memory-shmbridge-boot-audited"' \
+            "$OUT/final-audit.json"
+          grep -Fq '"reserved_memory_fallback": true' "$OUT/final-audit.json"
+          grep -Fq '"hardware_validated": false' "$OUT/final-audit.json"

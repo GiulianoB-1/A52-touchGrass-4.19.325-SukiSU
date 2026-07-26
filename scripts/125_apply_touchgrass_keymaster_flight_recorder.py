@@ -74,6 +74,18 @@ def run_failed_boot_persistence() -> None:
     )
 
 
+def run_ramoops_console_reservation() -> None:
+    reservation = Path(__file__).with_name(
+        "128_apply_touchgrass_reserve_keymaster_ramoops_console.py"
+    )
+    if not reservation.is_file():
+        raise SystemExit(f"RAMOOPS console reservation script missing: {reservation}")
+    subprocess.run(
+        [sys.executable, str(reservation), *sys.argv[1:]],
+        check=True,
+    )
+
+
 def run_audio_boot_guard() -> None:
     guard = Path(__file__).with_name(
         "126_apply_touchgrass_audio_sysfs_boot_guard.py"
@@ -106,6 +118,12 @@ def merge_stage_reports() -> None:
         "metadata-only-no-command-or-response-buffers"
     ):
         raise SystemExit("failed-boot recorder payload policy is not metadata-only")
+    if persistence.get("console_frontend_reserved") is not True:
+        raise SystemExit("RAMOOPS console zone was not reserved for the recorder")
+    if persistence.get("pmsg_capture_retained") is not True:
+        raise SystemExit("RAMOOPS pmsg capture was not retained")
+    if persistence.get("panic_dmesg_capture_retained") is not True:
+        raise SystemExit("RAMOOPS panic dmesg capture was not retained")
     if guard.get("status") != "touchgrass-audio-sysfs-boot-guard-staged":
         raise SystemExit("audio guard report has unexpected status")
     if guard.get("panic_removed") is not True:
@@ -121,6 +139,7 @@ def merge_stage_reports() -> None:
     for marker in (
         guard.get("marker"),
         "A52_TOUCHGRASS_FAILED_BOOT_KEYMASTER_RAMOOPS",
+        "A52_KMFR_CONSOLE_RESERVED",
     ):
         if marker and marker not in markers:
             markers.append(marker)
@@ -134,6 +153,7 @@ def merge_stage_reports() -> None:
 def main() -> int:
     run_pinned_recorder_core()
     run_failed_boot_persistence()
+    run_ramoops_console_reservation()
     run_audio_boot_guard()
     merge_stage_reports()
     return 0

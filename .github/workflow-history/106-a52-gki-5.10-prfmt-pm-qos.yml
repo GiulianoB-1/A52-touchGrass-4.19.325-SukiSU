@@ -1,0 +1,336 @@
+name: 106 - A52 GKI 5.10 pr_fmt and PM QoS
+
+run-name: Migrate local logging and CPU latency QoS to Android 5.10
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/106-a52-gki-5.10-prfmt-pm-qos.yml'
+      - 'scripts/106_apply_a52xq_prfmt_pm_qos.py'
+      - 'scripts/105_apply_a52xq_display_contract.py'
+      - 'scripts/104_apply_a52xq_phase2_kernel_api.py'
+      - 'scripts/103_apply_a52xq_phase1_compat.py'
+      - 'scripts/a52xq_downstream_port_probe_v3.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-5.10-prfmt-pm-qos-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+  WORKFLOW105_ARTIFACT_ID: '8598639271'
+
+jobs:
+  prfmt-pm-qos:
+    name: Port local pr_fmt and native CPU latency QoS
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves device-tree-compiler
+          python3 -m py_compile \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/103_apply_a52xq_phase1_compat.py \
+            scripts/104_apply_a52xq_phase2_kernel_api.py \
+            scripts/105_apply_a52xq_display_contract.py \
+            scripts/106_apply_a52xq_prfmt_pm_qos.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download verified baseline artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          download() {
+            local name="$1" id="$2"
+            mkdir -p "${name}/extracted"
+            curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "${name}/artifact.zip"
+            unzip -q "${name}/artifact.zip" -d "${name}/extracted"
+            (cd "${name}/extracted" && sha256sum -c SHA256SUMS)
+          }
+          download workflow99 "${WORKFLOW99_ARTIFACT_ID}"
+          download workflow100 "${WORKFLOW100_ARTIFACT_ID}"
+          download workflow105 "${WORKFLOW105_ARTIFACT_ID}"
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow105/extracted/config/final.config
+          grep -Fq '"compiler_error_count": 411' workflow105/extracted/final-state.json
+          grep -Fq '"display_contract_closed": true' workflow105/extracted/final-state.json
+
+      - name: Replay hardware-tested Workflow 99 source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          PATCH="$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+
+      - name: Recreate closed Workflow 105 baseline
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-prfmt-pm-qos
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile"
+          python3 scripts/a52xq_downstream_port_probe_v3.py \
+            --touchgrass touchgrass --gki gki/common \
+            --dts workflow100/extracted/preserved.dts --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage-port.log"
+          python3 scripts/103_apply_a52xq_phase1_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/phase1-stage.log"
+          python3 scripts/104_apply_a52xq_phase2_kernel_api.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/phase2-stage.log"
+          python3 scripts/105_apply_a52xq_display_contract.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/display-contract-stage.log"
+
+      - name: Apply local pr_fmt and native PM QoS migration
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-prfmt-pm-qos
+          python3 scripts/106_apply_a52xq_prfmt_pm_qos.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/prfmt-pm-qos-stage.log"
+          test -s "$OUT/stage/phase4-prfmt-pm-qos-report.json"
+          grep -Fq 'phase4-prfmt-native-pm-qos-staged' \
+            "$OUT/stage/phase4-prfmt-pm-qos-report.json"
+
+      - name: Resolve migrated configuration
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-prfmt-pm-qos"
+          BUILD="$PWD/workspace/gki-prfmt-pm-qos-out"
+          mkdir -p "$BUILD"
+          cp workflow105/extracted/config/final.config "$BUILD/.config"
+          cp "$BUILD/.config" "$OUT/config/before.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+      - name: Compile migrated downstream tree
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-5.10-prfmt-pm-qos"
+          BUILD="$PWD/workspace/gki-prfmt-pm-qos-out"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          "$CLANG" --version | tee "$OUT/logs/toolchain.log"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image > "$OUT/logs/port-compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if test -s "$BUILD/arch/arm64/boot/Image"; then
+            cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image-NON-FLASHABLE"
+          fi
+
+      - name: Measure Workflow 106 closure
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-prfmt-pm-qos
+          python3 - <<'PY'
+          import collections, json, re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-5.10-prfmt-pm-qos')
+          baseline = json.loads(Path('workflow105/extracted/compile/compile-incompatibilities.json').read_text())
+          compiler = re.compile(r'^(?P<file>[^:\s][^:]*):(?P<line>\d+):(?P<column>\d+): (?P<kind>fatal error|error): (?P<message>.*)$')
+          target = re.compile(
+              r"'pr_fmt' macro redefined|"
+              r"pm_qos_(add|update|update_request_timeout|remove)_request|"
+              r"PM_QOS_(CPU_DMA_LATENCY|REQ_AFFINE_(CORES|IRQ))|"
+              r"no member named '(type|cpus_affine|irq)' in 'struct pm_qos_request'"
+          )
+
+          def subsystem(path):
+              if 'drivers/gpu/msm/' in path:
+                  return 'display-kgsl'
+              if 'drivers/a52_display/' in path or 'techpack/display/' in path:
+                  return 'display-sde-dsi-panel'
+              if 'drivers/a52_secure/' in path:
+                  return 'secure-qseecom'
+              return 'kernel-integration'
+
+          entries = []
+          signatures = collections.Counter()
+          subsystems = collections.Counter()
+          residual = collections.Counter()
+          for line in (root / 'logs/port-compile.log').read_text(errors='replace').splitlines():
+              match = compiler.match(line)
+              if not match:
+                  continue
+              item = match.groupdict()
+              item['subsystem'] = subsystem(item['file'])
+              entries.append(item)
+              signatures[(item['subsystem'], item['message'])] += 1
+              subsystems[item['subsystem']] += 1
+              if target.search(item['message']):
+                  residual[item['message']] += 1
+
+          baseline_target = sum(
+              1 for item in baseline['entries'] if target.search(item['message'])
+          )
+          unique = [
+              {'subsystem': key[0], 'message': key[1], 'count': value}
+              for key, value in signatures.most_common()
+          ]
+          result = {
+              'status': 'prfmt-pm-qos-compile-complete',
+              'flashable': False,
+              'hardware_validated': False,
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'baseline_compiler_error_count': baseline['compiler_error_count'],
+              'compiler_error_count': len(entries),
+              'error_reduction': baseline['compiler_error_count'] - len(entries),
+              'baseline_target_error_count': baseline_target,
+              'residual_target_error_count': sum(residual.values()),
+              'target_error_reduction': baseline_target - sum(residual.values()),
+              'target_closed': not residual,
+              'residual_target_signatures': dict(residual.most_common()),
+              'unique_error_signature_count': len(unique),
+              'subsystem_counts': dict(subsystems),
+              'unique_signatures': unique,
+              'entries': entries[:1800],
+          }
+          (root / 'compile/compile-incompatibilities.json').write_text(
+              json.dumps(result, indent=2, sort_keys=True) + '\n'
+          )
+          md = [
+              '# A52 Workflow 106 pr_fmt and PM QoS result',
+              '',
+              f"- Workflow 105 errors: **{baseline['compiler_error_count']}**",
+              f"- Remaining errors: **{len(entries)}**",
+              f"- Total error reduction: **{result['error_reduction']}**",
+              f"- Targeted baseline errors: **{baseline_target}**",
+              f"- Targeted residual errors: **{result['residual_target_error_count']}**",
+              f"- Target closed: **{result['target_closed']}**",
+              '',
+              '## Remaining errors by subsystem',
+              '',
+          ]
+          md += [f'- `{key}`: {value}' for key, value in subsystems.most_common()]
+          md += ['', '## Highest-frequency remaining incompatibilities', '']
+          md += [f"- `{item['subsystem']}` x{item['count']}: {item['message']}" for item in unique[:140]]
+          (root / 'compile/WORKFLOW-106-RESULT.md').write_text('\n'.join(md) + '\n')
+          PY
+
+      - name: Finalize Workflow 106 artifact
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-5.10-prfmt-pm-qos
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 5G GKI 5.10 LOCAL LOGGING AND PM QOS MIGRATION
+
+          This artifact is non-flashable and not hardware validated.
+          Workflow 99 remains the hardware-tested storage baseline.
+          Workflow 106 protects each downstream local pr_fmt definition and migrates
+          legacy system-wide PM QoS calls to Android 5.10 CPU latency QoS calls.
+
+          Important semantic debt remains: Android 5.10 applies these CPU latency votes
+          globally, so the old per-core and IRQ affinity is not preserved. The removed
+          timeout helper is represented by a persistent vote until the next explicit
+          update or removal. Do not flash this artifact.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-5.10-prfmt-pm-qos')
+          report = root / 'compile/compile-incompatibilities.json'
+          if report.is_file():
+              r = json.loads(report.read_text())
+              final = {
+                  'status': 'prfmt-pm-qos-migration-complete',
+                  'flashable': False,
+                  'hardware_validated': False,
+                  'workflow99_baseline_preserved': True,
+                  'compiler_error_count': r['compiler_error_count'],
+                  'error_reduction': r['error_reduction'],
+                  'baseline_target_error_count': r['baseline_target_error_count'],
+                  'residual_target_error_count': r['residual_target_error_count'],
+                  'target_closed': r['target_closed'],
+              }
+          else:
+              final = {
+                  'status': 'prfmt-pm-qos-staging-failed',
+                  'flashable': False,
+                  'hardware_validated': False,
+                  'workflow99_baseline_preserved': True,
+              }
+          (root / 'final-state.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
+          PY
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Workflow 106 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-prfmt-pm-qos-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/a52xq-gki-5.10-prfmt-pm-qos
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require targeted closure and net progress
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          state = json.loads(Path('artifacts/a52xq-gki-5.10-prfmt-pm-qos/final-state.json').read_text())
+          if not state.get('target_closed', False):
+              raise SystemExit(
+                  f"Workflow 106 still has {state.get('residual_target_error_count', 'unknown')} targeted errors"
+              )
+          if state.get('error_reduction', 0) <= 0:
+              raise SystemExit(
+                  f"Workflow 106 did not reduce total compiler errors: {state.get('compiler_error_count', 'unknown')} remain"
+              )
+          PY

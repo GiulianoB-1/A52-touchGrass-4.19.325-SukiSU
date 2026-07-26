@@ -18,6 +18,76 @@ CORE_URL = (
 RECORDER_REPORT = "touchgrass-keymaster-flight-recorder-report.json"
 AUDIO_GUARD_REPORT = "touchgrass-audio-sysfs-boot-guard-report.json"
 PERSISTENCE_STATUS = "touchgrass-keymaster-ramoops-persistence-staged"
+RECOVERY_COLLECTOR = "COLLECT-FAILED-BOOT-RAMOOPS-RECOVERY.ps1"
+RECOVERY_MARKER = "A52KMFR-PERSIST"
+
+RECOVERY_COLLECTOR_SOURCE = r'''$ErrorActionPreference = 'Stop'
+
+$Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$OutputDirectory = Join-Path (Get-Location) "A52-Failed-Boot-RAMOOPS-$Stamp"
+$PstoreDirectory = Join-Path $OutputDirectory 'pstore'
+$MarkerReport = Join-Path $OutputDirectory 'A52KMFR-PERSIST-matches.txt'
+$ArchivePath = "$OutputDirectory.zip"
+
+New-Item -ItemType Directory -Path $PstoreDirectory -Force | Out-Null
+
+function Save-AdbShell {
+  param(
+    [Parameter(Mandatory = $true)][string]$FileName,
+    [Parameter(Mandatory = $true)][string]$Command
+  )
+
+  $Destination = Join-Path $OutputDirectory $FileName
+  & adb shell $Command 2>&1 | Out-File -FilePath $Destination -Encoding utf8
+}
+
+adb wait-for-device
+if ($LASTEXITCODE -ne 0) {
+  throw 'adb wait-for-device failed.'
+}
+
+$RecoveryId = (& adb shell id 2>&1 | Out-String).Trim()
+$RecoveryId | Out-File -FilePath (Join-Path $OutputDirectory 'recovery-id.txt') -Encoding utf8
+if ($LASTEXITCODE -ne 0) {
+  throw 'Could not query the recovery ADB identity.'
+}
+if ($RecoveryId -notmatch 'uid=0') {
+  throw "Recovery ADB is not root. Reported identity: $RecoveryId"
+}
+
+& adb shell "mkdir -p /sys/fs/pstore; grep -q ' /sys/fs/pstore ' /proc/mounts || mount -t pstore pstore /sys/fs/pstore"
+if ($LASTEXITCODE -ne 0) {
+  throw 'Could not mount the pstore filesystem in recovery.'
+}
+
+Save-AdbShell -FileName 'pstore-listing.txt' -Command 'ls -la /sys/fs/pstore'
+Save-AdbShell -FileName 'proc-mounts.txt' -Command 'cat /proc/mounts'
+Save-AdbShell -FileName 'proc-cmdline.txt' -Command 'cat /proc/cmdline'
+Save-AdbShell -FileName 'proc-version.txt' -Command 'cat /proc/version'
+Save-AdbShell -FileName 'recovery-dmesg.txt' -Command 'dmesg'
+
+& adb pull /sys/fs/pstore/. $PstoreDirectory
+if ($LASTEXITCODE -ne 0) {
+  throw 'Failed to pull raw files from /sys/fs/pstore.'
+}
+
+$Matches = @(
+  Get-ChildItem -Path $PstoreDirectory -File -Recurse |
+    Select-String -Pattern 'A52KMFR-PERSIST' -SimpleMatch
+)
+
+if ($Matches.Count -gt 0) {
+  $Matches |
+    ForEach-Object { '{0}:{1}:{2}' -f $_.Path, $_.LineNumber, $_.Line } |
+    Out-File -FilePath $MarkerReport -Encoding utf8
+} else {
+  'No A52KMFR-PERSIST marker was found in the recovered pstore files.' |
+    Out-File -FilePath $MarkerReport -Encoding utf8
+}
+
+Compress-Archive -Force -Path (Join-Path $OutputDirectory '*') -DestinationPath $ArchivePath
+Write-Host "Saved raw failed-boot RAMOOPS capture to: $ArchivePath"
+'''
 
 
 def git_blob_sha1(data: bytes) -> str:
@@ -98,7 +168,32 @@ def run_audio_boot_guard() -> None:
     )
 
 
-def merge_stage_reports() -> None:
+def write_recovery_collector() -> Path:
+    output = argument_path("--output")
+    output.mkdir(parents=True, exist_ok=True)
+    path = output / RECOVERY_COLLECTOR
+    path.write_text(
+        RECOVERY_COLLECTOR_SOURCE.rstrip() + "\n",
+        encoding="utf-8",
+    )
+
+    source = path.read_text(encoding="utf-8")
+    required = (
+        "uid=0",
+        "/sys/fs/pstore",
+        "adb pull /sys/fs/pstore/.",
+        RECOVERY_MARKER,
+        "Compress-Archive",
+    )
+    missing = [token for token in required if token not in source]
+    if missing:
+        raise SystemExit("recovery collector audit failed: " + ", ".join(missing))
+    if "su 0" in source or "adb root" in source:
+        raise SystemExit("recovery collector must not depend on Android root commands")
+    return path
+
+
+def merge_stage_reports(collector_path: Path) -> None:
     output = argument_path("--output")
     recorder_path = output / RECORDER_REPORT
     guard_path = output / AUDIO_GUARD_REPORT
@@ -106,6 +201,8 @@ def merge_stage_reports() -> None:
         raise SystemExit(f"recorder report missing: {recorder_path}")
     if not guard_path.is_file():
         raise SystemExit(f"audio guard report missing: {guard_path}")
+    if collector_path.parent != output or not collector_path.is_file():
+        raise SystemExit(f"recovery collector missing: {collector_path}")
 
     recorder = json.loads(recorder_path.read_text(encoding="utf-8"))
     guard = json.loads(guard_path.read_text(encoding="utf-8"))
@@ -129,6 +226,13 @@ def merge_stage_reports() -> None:
     if guard.get("panic_removed") is not True:
         raise SystemExit("audio guard report does not confirm panic removal")
 
+    persistence["recovery_collector"] = {
+        "path": collector_path.name,
+        "mode": "recovery-adb-root-no-android-su",
+        "marker": RECOVERY_MARKER,
+        "pulls_raw_pstore": True,
+        "creates_zip_archive": True,
+    }
     recorder["audio_sysfs_boot_guard"] = guard
     recorder["pinned_recorder_core"] = {
         "commit": CORE_COMMIT,
@@ -155,7 +259,8 @@ def main() -> int:
     run_failed_boot_persistence()
     run_ramoops_console_reservation()
     run_audio_boot_guard()
-    merge_stage_reports()
+    collector_path = write_recovery_collector()
+    merge_stage_reports(collector_path)
     return 0
 
 

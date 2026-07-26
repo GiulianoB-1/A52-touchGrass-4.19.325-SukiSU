@@ -17,6 +17,7 @@ CORE_URL = (
 )
 RECORDER_REPORT = "touchgrass-keymaster-flight-recorder-report.json"
 AUDIO_GUARD_REPORT = "touchgrass-audio-sysfs-boot-guard-report.json"
+PERSISTENCE_STATUS = "touchgrass-keymaster-ramoops-persistence-staged"
 
 
 def git_blob_sha1(data: bytes) -> str:
@@ -61,6 +62,18 @@ def run_pinned_recorder_core() -> None:
         raise SystemExit(f"pinned recorder core returned {result}")
 
 
+def run_failed_boot_persistence() -> None:
+    persistence = Path(__file__).with_name(
+        "127_apply_touchgrass_failed_boot_keymaster_persistence.py"
+    )
+    if not persistence.is_file():
+        raise SystemExit(f"failed-boot persistence script missing: {persistence}")
+    subprocess.run(
+        [sys.executable, str(persistence), *sys.argv[1:]],
+        check=True,
+    )
+
+
 def run_audio_boot_guard() -> None:
     guard = Path(__file__).with_name(
         "126_apply_touchgrass_audio_sysfs_boot_guard.py"
@@ -84,6 +97,15 @@ def merge_stage_reports() -> None:
 
     recorder = json.loads(recorder_path.read_text(encoding="utf-8"))
     guard = json.loads(guard_path.read_text(encoding="utf-8"))
+    persistence = recorder.get("failed_boot_persistence", {})
+    if persistence.get("status") != PERSISTENCE_STATUS:
+        raise SystemExit("failed-boot persistence report has unexpected status")
+    if persistence.get("survives_incomplete_android_boot") is not True:
+        raise SystemExit("failed-boot persistence report does not confirm survival")
+    if persistence.get("payload_policy") != (
+        "metadata-only-no-command-or-response-buffers"
+    ):
+        raise SystemExit("failed-boot recorder payload policy is not metadata-only")
     if guard.get("status") != "touchgrass-audio-sysfs-boot-guard-staged":
         raise SystemExit("audio guard report has unexpected status")
     if guard.get("panic_removed") is not True:
@@ -96,9 +118,12 @@ def merge_stage_reports() -> None:
         "integrity_verified": True,
     }
     markers = list(recorder.get("markers", []))
-    marker = guard.get("marker")
-    if marker and marker not in markers:
-        markers.append(marker)
+    for marker in (
+        guard.get("marker"),
+        "A52_TOUCHGRASS_FAILED_BOOT_KEYMASTER_RAMOOPS",
+    ):
+        if marker and marker not in markers:
+            markers.append(marker)
     recorder["markers"] = markers
     recorder_path.write_text(
         json.dumps(recorder, indent=2, sort_keys=True) + "\n",
@@ -108,6 +133,7 @@ def merge_stage_reports() -> None:
 
 def main() -> int:
     run_pinned_recorder_core()
+    run_failed_boot_persistence()
     run_audio_boot_guard()
     merge_stage_reports()
     return 0

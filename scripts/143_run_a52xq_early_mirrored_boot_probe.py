@@ -17,6 +17,8 @@ BASE_URL = (
 PHASE19 = "phase19-ack-early-mirrored-boot-probe-report.json"
 PHASE20 = "phase20-qseecom-reserved-memory-shmbridge-report.json"
 PHASE21 = "phase21-ion-legacy-system-heap-mask-report.json"
+PHASE22 = "phase22-ion-dmabuf-contract-report.json"
+PHASE23 = "phase23-ion-system-heap-secure-gate-report.json"
 
 
 def load_base() -> dict[str, object]:
@@ -72,45 +74,68 @@ def main() -> int:
         args.gki,
         args.output,
     )
+    run_stage(
+        "149_apply_a52xq_ion_system_heap_secure_gate.py",
+        args.gki,
+        args.output,
+    )
+    run_stage(
+        "148_apply_a52xq_ion_dmabuf_contract.py",
+        args.gki,
+        args.output,
+    )
 
     output = args.output.resolve()
     phase19_path = output / PHASE19
     phase20_path = output / PHASE20
     phase21_path = output / PHASE21
-    if not all(path.is_file() for path in (phase19_path, phase20_path, phase21_path)):
-        raise SystemExit("missing combined early-boot, shmbridge, or ION stage report")
+    phase22_path = output / PHASE22
+    phase23_path = output / PHASE23
+    paths = (phase19_path, phase20_path, phase21_path, phase22_path, phase23_path)
+    if not all(path.is_file() for path in paths):
+        raise SystemExit("missing combined early-boot or memory-contract stage report")
 
     phase19 = json.loads(phase19_path.read_text(encoding="utf-8"))
     phase20 = json.loads(phase20_path.read_text(encoding="utf-8"))
     phase21 = json.loads(phase21_path.read_text(encoding="utf-8"))
-    if phase20.get("status") != "qseecom-reserved-memory-shmbridge-staged":
-        raise SystemExit("reserved-memory shmbridge stage did not pass")
-    if phase21.get("status") != "ion-legacy-system-heap-mask-compat-staged":
-        raise SystemExit("legacy ION system-heap stage did not pass")
+    phase22 = json.loads(phase22_path.read_text(encoding="utf-8"))
+    phase23 = json.loads(phase23_path.read_text(encoding="utf-8"))
+    expected = (
+        (phase20, "qseecom-reserved-memory-shmbridge-staged"),
+        (phase21, "ion-legacy-system-heap-mask-compat-staged"),
+        (phase22, "ion-dmabuf-contract-compat-staged"),
+        (phase23, "ion-system-heap-secure-gate-staged"),
+    )
+    for report, status in expected:
+        if report.get("status") != status:
+            raise SystemExit(f"combined stage did not pass: {status}")
 
     qsee = args.gki.resolve() / "drivers/a52_secure/qseecom.c"
     ion = args.gki.resolve() / "drivers/staging/android/ion/ion.c"
+    ion_dmabuf = args.gki.resolve() / "drivers/staging/android/ion/ion_dma_buf.c"
     qsee_text = qsee.read_text(encoding="utf-8", errors="replace")
     ion_text = ion.read_text(encoding="utf-8", errors="replace")
-    qsee_required = (
-        "A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE",
-        "of_reserved_mem_lookup(rmem_node)",
-        "QSEEINIT heap_bridge_result heap=%u path=%s ret=%d",
+    ion_dmabuf_text = ion_dmabuf.read_text(encoding="utf-8", errors="replace")
+    required = (
+        (qsee_text, "A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE"),
+        (qsee_text, "A52_QSEECOM_DMABUF_SHAPE_TRACE"),
+        (qsee_text, "DMABUF flags bridge fd=%d ret=%d flags=%lx n=%u"),
+        (qsee_text, "DMABUF shape fd=%d buf=%zu n=%u orig=%u"),
+        (ion_text, "A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT"),
+        (ion_text, "A52_ION_SYSTEM_HEAP_NONSECURE_GATE"),
+        (ion_text, "ION_FLAGS_CP_MASK | ION_FLAG_SECURE"),
+        (ion_dmabuf_text, "A52_ION_DMABUF_FLAGS_FALLBACK"),
+        (ion_dmabuf_text, "*flags = buffer->flags;"),
     )
-    ion_required = (
-        "A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT",
-        "fd == -ENODEV",
-        "ION compat legacy_system original=%x effective=%x",
-        "ION compat_result fd=%d original=%x effective=%x",
-    )
-    missing = [item for item in qsee_required if item not in qsee_text]
-    missing += [item for item in ion_required if item not in ion_text]
+    missing = [token for text, token in required if token not in text]
     if missing:
         raise SystemExit("combined Probe 143 audit failed: " + ", ".join(missing))
 
-    phase19["status"] = "ack-early-mirrored-plus-shmbridge-plus-ion-compat-staged"
+    phase19["status"] = "ack-secure-memory-contract-audited-staged"
     phase19["reserved_memory_shmbridge"] = phase20
     phase19["legacy_system_heap_compat"] = phase21
+    phase19["ion_dmabuf_contract"] = phase22
+    phase19["system_heap_secure_gate"] = phase23
     phase19_path.write_text(
         json.dumps(phase19, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

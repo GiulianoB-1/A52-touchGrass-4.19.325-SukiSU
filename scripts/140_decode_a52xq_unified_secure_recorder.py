@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Rebuild marker: compile the QSEECOM reserved-memory shmbridge compatibility stage.
 import argparse
 import csv
 import hashlib

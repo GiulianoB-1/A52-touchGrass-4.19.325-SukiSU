@@ -223,7 +223,7 @@ def main() -> int:
 
     generator = Path(__file__).with_name(GENERATOR_NAME)
     unified_generator = patch_unified_generator(generator)
-    run_stage_script("142_apply_a52xq_early_mirrored_boot_probe.py", root, output)
+    run_stage_script("143_run_a52xq_early_mirrored_boot_probe.py", root, output)
     early_report_path = output / "phase19-ack-early-mirrored-boot-probe-report.json"
     if not early_report_path.is_file():
         raise SystemExit(f"missing early mirrored boot report: {early_report_path}")

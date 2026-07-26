@@ -118,16 +118,18 @@ def apply_post_cleanup_compile_fixes(root: Path) -> dict[str, object]:
         (
             Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c"),
             (
-                "\ta52_persistent_diag_mark(\n"
-                "\t\t\"A52ACKFR BEGIN pass=%u stored=%llu dropped=%llu capacity=%u\\n\","
+                "static int __init a52_ackfr_init(void)\n"
+                "{\n"
+                "\tschedule_delayed_work(&a52_ackfr_dump_work, msecs_to_jiffies(12000));"
             ),
             (
-                "\ta52_persistent_diag_mark(\"A52 ACK 5.10 secure-startup flight recorder\\n\");\n"
-                "\ta52_persistent_diag_mark(\n"
-                "\t\t\"A52ACKFR BEGIN pass=%u stored=%llu dropped=%llu capacity=%u\\n\","
+                "static int __init a52_ackfr_init(void)\n"
+                "{\n"
+                '\tpr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");\n'
+                "\tschedule_delayed_work(&a52_ackfr_dump_work, msecs_to_jiffies(12000));"
             ),
             1,
-            "ACK recorder embedded identity marker",
+            "ACK recorder retained build identifier",
         ),
     )
     for relative, old, new, expected, label in specifications:
@@ -196,8 +198,11 @@ def self_test() -> None:
             ),
             "drivers/a52_secure/a52_ack_secure_flight_recorder.c": (
                 '#define pr_fmt(fmt) "A52ACKFR: " fmt\n'
-                "\ta52_persistent_diag_mark(\n"
-                "\t\t\"A52ACKFR BEGIN pass=%u stored=%llu dropped=%llu capacity=%u\\n\",\n"
+                "static int __init a52_ackfr_init(void)\n"
+                "{\n"
+                "\tschedule_delayed_work(&a52_ackfr_dump_work, msecs_to_jiffies(12000));\n"
+                "\treturn 0;\n"
+                "}\n"
             ),
         }
         for relative, content in samples.items():
@@ -220,9 +225,13 @@ def self_test() -> None:
             raise SystemExit("cleaned UFS property helper was not repaired exactly once")
         if "static int a52_prop_len(" in ufs:
             raise SystemExit("unfixed cleaned UFS property helper remains")
-        recorder = (root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c").read_text()
-        if recorder.count("A52 ACK 5.10 secure-startup flight recorder") != 1:
-            raise SystemExit("recorder identity marker was not embedded exactly once")
+        recorder = (
+            root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+        ).read_text()
+        if recorder.count(
+            'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");'
+        ) != 1:
+            raise SystemExit("ACK recorder build identifier was not retained exactly once")
 
 
 def main() -> int:
@@ -312,8 +321,11 @@ def main() -> int:
         raise SystemExit("generated ACK recorder export header was not added")
     if "#undef pr_fmt\n#define pr_fmt" not in final_recorder:
         raise SystemExit("generated ACK recorder pr_fmt reset is missing")
-    if "A52 ACK 5.10 secure-startup flight recorder" not in final_recorder:
-        raise SystemExit("generated ACK recorder identity marker is missing")
+    if (
+        'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");'
+        not in final_recorder
+    ):
+        raise SystemExit("generated ACK recorder build identifier is missing")
     if "EXPORT_SYMBOL_GPL(a52_ackfr_record);" not in final_recorder:
         raise SystemExit("generated ACK recorder export declaration is missing")
 

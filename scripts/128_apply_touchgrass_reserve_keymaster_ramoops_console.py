@@ -121,6 +121,12 @@ void a52_keymaster_ramoops_write(const char *buf, size_t len)
 \tpersistent_ram_write(prz, buf, len);
 }
 '''
+    # The fixture is raw to preserve C escapes. Convert only indentation escapes
+    # to real tabs before exercising the production source anchors.
+    sample = sample.replace(r"\t", "\t")
+    if r"\t" in sample:
+        raise SystemExit("RAMOOPS fixture still contains literal tab escapes")
+
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "ram.c"
         path.write_text(sample, encoding="utf-8")

@@ -1,0 +1,330 @@
+name: 154 - A52 GKI 5.10 QSEECOM ION heaps 19 and 27
+
+run-name: Build real CMA-backed Samsung QSEECOM ION heaps
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/154-a52-gki-5.10-qseecom-ion-heaps19-27.yml
+      - scripts/148_apply_a52xq_ion_dmabuf_contract.py
+      - scripts/149_apply_a52xq_ion_system_heap_secure_gate.py
+      - scripts/153_apply_a52xq_qseecom_ion_heaps.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-qseecom-ion-heaps19-27-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+
+jobs:
+  build-package:
+    name: Compile and package audited QSEECOM heaps 19 and 27
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate tools
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/148_apply_a52xq_ion_dmabuf_contract.py \
+            scripts/149_apply_a52xq_ion_system_heap_secure_gate.py \
+            scripts/153_apply_a52xq_qseecom_ion_heaps.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify Run 32 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p run32/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+          test -s run32/extracted/stage/full-source.patch
+          test -s run32/extracted/config/final.config
+          test -s run32/extracted/package/boot.img
+          test -s run32/extracted/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq '"status": "ack-unified-secure-recorder-boot-audited"' \
+            run32/extracted/final-audit.json
+          grep -Fq 'A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE' \
+            run32/extracted/stage/full-source.patch
+          grep -Fq 'A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT' \
+            run32/extracted/stage/full-source.patch
+
+      - name: Restore Run 32 source and stage memory contract
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply --check "$PWD/run32/extracted/stage/full-source.patch"
+          git -C gki/common apply "$PWD/run32/extracted/stage/full-source.patch"
+
+          git -C gki/common config user.name 'A52 workflow'
+          git -C gki/common config user.email 'a52-workflow@users.noreply.github.com'
+          git -C gki/common add -A
+          git -C gki/common commit -m 'Recreate hardware-tested Run 32 staged source'
+
+          OUT=artifacts/a52xq-gki-qseecom-ion-heaps19-27
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package" "$OUT/tools"
+
+          python3 scripts/149_apply_a52xq_ion_system_heap_secure_gate.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/148_apply_a52xq_ion_dmabuf_contract.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/153_apply_a52xq_qseecom_ion_heaps.py \
+            --gki gki/common --output "$OUT/stage"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-qseecom-ion-heaps19-27/stage')
+          expected = {
+              'phase22-ion-dmabuf-contract-report.json': 'ion-dmabuf-contract-compat-staged',
+              'phase23-ion-system-heap-secure-gate-report.json': 'ion-system-heap-secure-gate-staged',
+              'phase24-qseecom-ion-heaps-report.json': 'qseecom-ion-heaps19-27-cma-staged',
+          }
+          for filename, status in expected.items():
+              report = json.loads((root / filename).read_text())
+              assert report['status'] == status, (filename, report.get('status'))
+              assert report['hardware_validated'] is False
+              assert report.get('payload_capture', False) is False
+          heaps = json.loads((root / 'phase24-qseecom-ion-heaps-report.json').read_text())
+          assert heaps['fix']['userspace_heap_ids'] == [19, 27]
+          assert heaps['fix']['sg_entries_per_allocation'] == 1
+          assert heaps['fix']['secure_requests_rejected'] is True
+          PY
+
+          grep -Fq 'A52_QSECOM_ION_CMA_HEAPS_19_27' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'A52_QSEE_HEAP_TA 19U' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'A52_QSEE_HEAP_MAIN 27U' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'state->heap.type = (enum ion_heap_type)ION_HEAP_TYPE_CUSTOM' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'state->heap.id = BIT(legacy_id)' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'cma_alloc(state->cma' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'sg_alloc_table(table, 1' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' \
+            gki/common/drivers/staging/android/ion/ion_dma_buf.c
+          grep -Fq 'A52_ION_SYSTEM_HEAP_NONSECURE_GATE' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE' \
+            gki/common/drivers/a52_secure/qseecom.c
+          git -C gki/common diff --check
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/qseecom-ion-heaps19-27.patch"
+          test -s "$OUT/stage/qseecom-ion-heaps19-27.patch"
+
+      - name: Resolve configuration and compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-qseecom-ion-heaps19-27"
+          BUILD="$PWD/workspace/gki-qseecom-ion-heaps19-27-out"
+          mkdir -p "$BUILD"
+          cp run32/extracted/config/final.config "$BUILD/.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          grep -Fq 'CONFIG_ION=y' "$OUT/config/final.config"
+          grep -Fq 'CONFIG_CMA=y' "$OUT/config/final.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo '::group::Compiler errors'
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            echo '::endgroup::'
+            echo '::group::Compile log tail'
+            tail -n 400 "$OUT/logs/compile.log" || true
+            echo '::endgroup::'
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' \
+            "$OUT/compile/Image"
+          grep -aFq 'QSEEINIT heap_bridge_result heap=%u path=%s ret=%d' \
+            "$OUT/compile/Image"
+          grep -aFq 'ION qsee_heap=%u register ret=%d assigned=%u pages=%lu' \
+            "$OUT/compile/Image"
+          grep -aFq 'ION qsee_heap=%u alloc len=%lu size=%lu flags=%lx ret=0' \
+            "$OUT/compile/Image"
+          grep -aFq 'ION qsee_heaps init ret19=%d ret27=%d' \
+            "$OUT/compile/Image"
+          grep -aFq 'DMABUF flags bridge fd=%d ret=%d flags=%lx n=%u' \
+            "$OUT/compile/Image"
+          grep -aFq 'DMABUF shape fd=%d buf=%zu n=%u orig=%u' \
+            "$OUT/compile/Image"
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-qseecom-ion-heaps19-27-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/logs
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/compile/make-return-code.txt
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/config/final.config
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/stage
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Repack and audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-qseecom-ion-heaps19-27
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-qseecom-ion-heaps19-27')
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', compile_log, re.M)
+          heaps = json.loads((root / 'stage/phase24-qseecom-ion-heaps-report.json').read_text())
+          dmabuf = json.loads((root / 'stage/phase22-ion-dmabuf-contract-report.json').read_text())
+          secure_gate = json.loads((root / 'stage/phase23-ion-system-heap-secure-gate-report.json').read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          boot = root / 'package/boot.img'
+          state = {
+              'status': 'qseecom-ion-heaps19-27-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'source_recorder_run': 32,
+              'source_recorder_artifact_id': 8635093061,
+              'observed_run32_heap_id': 19,
+              'observed_run32_heap_mask': '0x00080000',
+              'registered_heap_ids': heaps['fix']['userspace_heap_ids'],
+              'one_sg_entry_per_allocation': heaps['fix']['sg_entries_per_allocation'] == 1,
+              'secure_requests_rejected': heaps['fix']['secure_requests_rejected'],
+              'dmabuf_flags_fallback': dmabuf['ion']['default_returns_buffer_flags'],
+              'system_heap_retry_nonsecure_only': secure_gate['fix']['retry_limited_to_nonsecure'],
+              'compiler_error_count': len(errors),
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
+              'metadata_only': True,
+          }
+          if state['compiler_error_count'] or state['make_return_code']:
+              raise SystemExit(f'compile audit failed: {state}')
+          for key in ('dtb_preserved', 'ramdisk_preserved', 'recovery_dtbo_preserved', 'cmdline_preserved'):
+              if not state[key]:
+                  raise SystemExit(f'boot invariant failed: {key}')
+          if state['registered_heap_ids'] != [19, 27]:
+              raise SystemExit(f'heap registration audit failed: {state}')
+          (root / 'final-audit.json').write_text(json.dumps(state, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cp run32/extracted/tools/decode-a52-unified-secure-recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 QSEECOM ION HEAPS 19 AND 27 CANDIDATE
+
+          This candidate starts from the compiled and hardware-tested Run 32 source.
+          Run 32 proved that QSEECOM initialization and reserved-memory bridges pass,
+          then showed repeated ION allocation failures for Samsung heap mask 0x00080000,
+          which is QSEECOM TA heap ID 19.
+
+          This image registers two real contiguous ION heaps with Samsung's original IDs:
+          - heap 19 from the qseecom_ta_region shared-dma-pool
+          - heap 27 from the qseecom_region shared-dma-pool
+
+          Each allocation is CMA-backed and represented by one scatter-gather entry.
+          Secure/CP allocation flags are rejected rather than silently mapped to HLOS memory.
+          dma_buf_get_flags() retains the downstream-compatible buffer flag fallback.
+
+          Test once:
+          1. Back up the current boot partition.
+          2. Flash package/boot.img to boot only.
+          3. Attempt one Android boot.
+          4. If boot fails or stalls, enter OrangeFox directly without flashing another kernel.
+          5. Collect and upload the raw 1 MiB RAMOOPS snapshot and standard pstore archive.
+
+          This image is compiled and audited but not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload audited candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-qseecom-ion-heaps19-27-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-qseecom-ion-heaps19-27
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final audited output
+        run: |
+          set -Eeuo pipefail
+          test -s artifacts/a52xq-gki-qseecom-ion-heaps19-27/package/boot.img
+          test -s artifacts/a52xq-gki-qseecom-ion-heaps19-27/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq '"status": "qseecom-ion-heaps19-27-boot-audited"' \
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/final-audit.json
+          grep -Fq '"registered_heap_ids": [' \
+            artifacts/a52xq-gki-qseecom-ion-heaps19-27/final-audit.json

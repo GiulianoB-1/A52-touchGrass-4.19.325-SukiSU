@@ -11,6 +11,9 @@ from pathlib import Path
 
 MODULE_NAME = "142_apply_a52xq_early_mirrored_boot_probe.py"
 REPORT = "phase19-ack-early-mirrored-boot-probe-report.json"
+HEARTBEAT_START = "EXPORT_SYMBOL_GPL(a52_ackfr_record);"
+HEARTBEAT_END = "late_initcall(a52_usr2_late_retry);"
+HEARTBEAT_MARKER = "/* A52_ACKFR_BOOT_PHASE_HEARTBEATS */"
 
 
 def load_module():
@@ -35,6 +38,94 @@ def write_log(path: Path, lines: list[str]) -> None:
 def snapshot(logs: Path, label: str, path: Path) -> None:
     if path.is_file():
         shutil.copy2(path, logs / f"probe142-{label}-{path.name}")
+
+
+def patch_generator_bounded(module, path: Path) -> dict[str, object]:
+    text = module.read(path)
+
+    if "A52_ACKFR_EARLY_MIRRORED_BACKEND" in text:
+        backend_state = "already-present"
+    else:
+        matches = list(module.BACKEND_PATTERN.finditer(text))
+        if len(matches) != 1:
+            raise SystemExit(
+                f"unified backend anchor mismatch: expected 1, found {len(matches)}"
+            )
+        match = matches[0]
+        text = text[: match.start()] + module.BACKEND_NEW + text[match.end() :]
+        backend_state = "inserted"
+
+    if HEARTBEAT_MARKER in text:
+        if text.count(HEARTBEAT_MARKER) != 1:
+            raise SystemExit("boot heartbeat marker count is not one")
+        heartbeat_state = "already-present"
+    else:
+        start_count = text.count(HEARTBEAT_START)
+        end_count = text.count(HEARTBEAT_END)
+        if start_count != 1 or end_count != 1:
+            raise SystemExit(
+                "bounded boot heartbeat anchors mismatch: "
+                f"start={start_count} end={end_count}"
+            )
+        start = text.index(HEARTBEAT_START)
+        end = text.index(HEARTBEAT_END, start) + len(HEARTBEAT_END)
+        old_block = text[start:end]
+        required_old = (
+            "static int __init a52_usr2_device_retry(void)",
+            "static int __init a52_usr2_late_retry(void)",
+            'a52_usr2_write_control("BOOT_READY")',
+        )
+        missing_old = [item for item in required_old if item not in old_block]
+        if missing_old:
+            raise SystemExit(
+                "bounded heartbeat source audit failed: " + ", ".join(missing_old)
+            )
+        text = text[:start] + module.RECORDER_TAIL_NEW + text[end:]
+        heartbeat_state = "inserted-bounded"
+
+    audit_anchor = (
+        '        "direct_writer_exported": '
+        '"EXPORT_SYMBOL_GPL(a52_ackfr_ramoops_write);" in text,\n'
+    )
+    audit_replacement = (
+        audit_anchor
+        + '        "early_console_backend": '
+        '"a52_persistent_diag_mark(\\"%.*s\\"" in text,\n'
+        + '        "early_ftrace_backend": '
+        '"a52_persistent_diag_mark_ftrace(\\"%.*s\\"" in text,\n'
+    )
+    if '"early_ftrace_backend"' in text:
+        if text.count('"early_ftrace_backend"') != 1:
+            raise SystemExit("unified backend audit marker count is not one")
+        audit_state = "already-present"
+    else:
+        count = text.count(audit_anchor)
+        if count != 1:
+            raise SystemExit(
+                f"unified backend audit anchor mismatch: expected 1, found {count}"
+            )
+        text = text.replace(audit_anchor, audit_replacement, 1)
+        audit_state = "inserted"
+
+    required = (
+        "A52_ACKFR_EARLY_MIRRORED_BACKEND",
+        HEARTBEAT_MARKER,
+        '"early_console_backend"',
+        '"early_ftrace_backend"',
+        'a52_ackfr_record("BOOT phase=pre_smp")',
+        'a52_ackfr_record("BOOT phase=late")',
+    )
+    missing = [item for item in required if item not in text]
+    if missing:
+        raise SystemExit("bounded unified generator audit failed: " + ", ".join(missing))
+    module.write(path, text)
+    return {
+        "source": path.name,
+        "backend": backend_state,
+        "heartbeats": heartbeat_state,
+        "audit": audit_state,
+        "anchor_mode": "bounded-start-end",
+    }
 
 
 def main() -> int:
@@ -86,9 +177,12 @@ def main() -> int:
         main = module.patch_main(main_source)
         lines.append("patch_main success " + json.dumps(main, sort_keys=True))
 
-        lines.append("patch_generator begin")
-        generator_result = module.patch_generator(generator)
-        lines.append("patch_generator success " + json.dumps(generator_result, sort_keys=True))
+        lines.append("patch_generator_bounded begin")
+        generator_result = patch_generator_bounded(module, generator)
+        lines.append(
+            "patch_generator_bounded success "
+            + json.dumps(generator_result, sort_keys=True)
+        )
 
         lines.append("patch_decoder begin")
         decoder_result = module.patch_decoder(decoder)

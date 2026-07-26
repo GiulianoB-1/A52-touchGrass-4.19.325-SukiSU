@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -195,6 +197,16 @@ def self_test() -> None:
             raise SystemExit("QSEECOM parameter probe is not idempotent")
 
 
+def run_stage_script(name: str, gki: Path, output: Path) -> None:
+    script = Path(__file__).with_name(name)
+    if not script.is_file():
+        raise SystemExit(f"missing staging script: {script}")
+    subprocess.run(
+        [sys.executable, str(script), "--gki", str(gki), "--output", str(output)],
+        check=True,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gki", type=Path, required=True)
@@ -210,11 +222,18 @@ def main() -> int:
         raise SystemExit("missing staged ACK parameter-probe sources: " + ", ".join(missing))
 
     generator = Path(__file__).with_name(GENERATOR_NAME)
+    unified_generator = patch_unified_generator(generator)
+    run_stage_script("142_apply_a52xq_early_mirrored_boot_probe.py", root, output)
+    early_report_path = output / "phase19-ack-early-mirrored-boot-probe-report.json"
+    if not early_report_path.is_file():
+        raise SystemExit(f"missing early mirrored boot report: {early_report_path}")
+
     report = {
         "status": "ack-secure-parameter-probe-141-staged",
         "hardware_validated": False,
         "payload_capture": False,
-        "unified_generator": patch_unified_generator(generator),
+        "unified_generator": unified_generator,
+        "early_boot_probe": json.loads(early_report_path.read_text()),
         "ion": patch_ion(root),
         "qsee": patch_qsee(root),
         "markers": {

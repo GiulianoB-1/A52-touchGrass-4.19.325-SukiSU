@@ -89,6 +89,13 @@ def apply_post_cleanup_compile_fixes(root: Path) -> dict[str, object]:
         ),
         (
             Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
+            "static int a52_prop_len(struct device_node *np, const char *name)",
+            "static int __maybe_unused a52_prop_len(struct device_node *np, const char *name)",
+            1,
+            "UFS property helper after breadcrumb cleanup",
+        ),
+        (
+            Path("drivers/scsi/ufs/a52-ufs-live-trace.c"),
             'const char *driver = dev->driver ? dev->driver->name : "<unbound>";',
             'const char *driver __maybe_unused = dev->driver ? dev->driver->name : "<unbound>";',
             2,
@@ -164,6 +171,10 @@ def self_test() -> None:
             ),
             "drivers/base/dd.c": "const char *reason = reason_source;\n",
             "drivers/scsi/ufs/a52-ufs-live-trace.c": (
+                "static int a52_prop_len(struct device_node *np, const char *name)\n"
+                "{\n"
+                "\treturn 0;\n"
+                "}\n"
                 'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
                 "const char *type = kind;\n"
                 'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
@@ -179,7 +190,7 @@ def self_test() -> None:
             path.write_text(content, encoding="utf-8")
         first = apply_post_cleanup_compile_fixes(root)
         second = apply_post_cleanup_compile_fixes(root)
-        if first["changed_total"] != 6:
+        if first["changed_total"] != 7:
             raise SystemExit("post-cleanup compile-fix self-test changed wrong count")
         if second["changed_total"] != 0:
             raise SystemExit("post-cleanup compile fixes are not idempotent")
@@ -188,6 +199,11 @@ def self_test() -> None:
             raise SystemExit("used GDSC is_enabled status local was not preserved")
         if gdsc.count("u32 val __maybe_unused = readl_relaxed(gdsc->gdscr);") != 1:
             raise SystemExit("GDSC disable status local was not repaired exactly once")
+        ufs = (root / "drivers/scsi/ufs/a52-ufs-live-trace.c").read_text()
+        if ufs.count("static int __maybe_unused a52_prop_len(") != 1:
+            raise SystemExit("cleaned UFS property helper was not repaired exactly once")
+        if "static int a52_prop_len(" in ufs:
+            raise SystemExit("unfixed cleaned UFS property helper remains")
 
 
 def main() -> int:

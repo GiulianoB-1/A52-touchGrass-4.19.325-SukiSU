@@ -1,0 +1,314 @@
+name: 147 - A52 GKI 5.10 legacy ION system heap compatibility
+
+run-name: Build A52 legacy ION system-heap mask candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/147-a52-gki-5.10-ion-system-heap-compat.yml
+      - scripts/146_apply_a52xq_legacy_system_heap_mask.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-ion-system-heap-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN29_ARTIFACT_ID: '8634299927'
+  RUN29_BOOT_SHA256: '660d234d4f5fc96c2a888a4e7c0e3392aab808cb68d59b7fd5d7cfc1b6bfa928'
+
+jobs:
+  build-package:
+    name: Build and package legacy ION system-heap candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate tools
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/146_apply_a52xq_legacy_system_heap_mask.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download and verify Run 29 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p run29/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN29_ARTIFACT_ID}/zip" \
+            --output run29/artifact.zip
+          unzip -q run29/artifact.zip -d run29/extracted
+          (cd run29/extracted && sha256sum -c SHA256SUMS)
+          test -s run29/extracted/stage/full-source.patch
+          test -s run29/extracted/config/final.config
+          test -s run29/extracted/package/boot.img
+          test -s run29/extracted/tools/decode-a52-unified-secure-recorder.py
+          echo "${RUN29_BOOT_SHA256}  run29/extracted/package/boot.img" | sha256sum -c -
+          grep -Fq '"status": "ack-unified-secure-recorder-boot-audited"' \
+            run29/extracted/final-audit.json
+
+      - name: Restore Run 29 source and apply ION mask compatibility
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply --check "$PWD/run29/extracted/stage/full-source.patch"
+          git -C gki/common apply "$PWD/run29/extracted/stage/full-source.patch"
+
+          git -C gki/common config user.name 'A52 workflow'
+          git -C gki/common config user.email 'a52-workflow@users.noreply.github.com'
+          git -C gki/common add -A
+          git -C gki/common commit -m 'Recreate hardware-tested Run 29 staged source'
+
+          OUT=artifacts/a52xq-gki-ion-system-heap-compat
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package" "$OUT/tools"
+          python3 scripts/146_apply_a52xq_legacy_system_heap_mask.py \
+            --gki gki/common --output "$OUT/stage"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('artifacts/a52xq-gki-ion-system-heap-compat/stage/phase21-ion-legacy-system-heap-mask-report.json')
+          report = json.loads(path.read_text())
+          assert report['status'] == 'ion-legacy-system-heap-mask-compat-staged'
+          assert report['payload_capture'] is False
+          assert report['observed_run29']['qseecom_probe_return'] == 0
+          assert report['observed_run29']['boot_ready_reached'] is True
+          assert report['observed_run29']['ion_alloc_return'] == -19
+          assert report['fix']['legacy_system_heap_id'] == 25
+          assert report['fix']['other_heap_requests_unchanged'] is True
+          PY
+
+          grep -Fq 'A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'fd == -ENODEV' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq '(1U << 25)' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'ION_HEAP_SYSTEM' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'ION alloc_request len=%llu original=%x flags=%x' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'ION compat_result fd=%d original=%x effective=%x' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'A52_ACKFR_EARLY_MIRRORED_BACKEND' \
+            gki/common/fs/pstore/ram.c
+          git -C gki/common diff --check
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/ion-system-heap-compat.patch"
+          test -s "$OUT/stage/ion-system-heap-compat.patch"
+
+      - name: Resolve configuration and compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-ion-system-heap-compat"
+          BUILD="$PWD/workspace/gki-ion-system-heap-compat-out"
+          mkdir -p "$BUILD"
+          cp run29/extracted/config/final.config "$BUILD/.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo '::group::Compiler errors'
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            echo '::endgroup::'
+            echo '::group::Compile log tail'
+            tail -n 400 "$OUT/logs/compile.log" || true
+            echo '::endgroup::'
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+          grep -aFq 'ION alloc_request len=%llu original=%x flags=%x' \
+            "$OUT/compile/Image"
+          grep -aFq 'ION compat legacy_system original=%x effective=%x' \
+            "$OUT/compile/Image"
+          grep -aFq 'ION compat_result fd=%d original=%x effective=%x' \
+            "$OUT/compile/Image"
+          grep -aFq 'QSEEINIT heap_bridge_result heap=%u path=%s ret=%d' \
+            "$OUT/compile/Image"
+          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' \
+            "$OUT/compile/Image"
+
+      - name: Upload failed compile diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-ion-system-heap-compat-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-ion-system-heap-compat/logs
+            artifacts/a52xq-gki-ion-system-heap-compat/compile/make-return-code.txt
+            artifacts/a52xq-gki-ion-system-heap-compat/config/final.config
+            artifacts/a52xq-gki-ion-system-heap-compat/stage
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Repack and audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-ion-system-heap-compat
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run29/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-ion-system-heap-compat')
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', compile_log, re.M)
+          stage = json.loads((root / 'stage/phase21-ion-legacy-system-heap-mask-report.json').read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          boot = root / 'package/boot.img'
+          state = {
+              'status': 'ion-legacy-system-heap-mask-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'source_recorder_run': 29,
+              'source_recorder_artifact_id': 8634299927,
+              'observed_run29': stage['observed_run29'],
+              'legacy_system_heap_id': stage['fix']['legacy_system_heap_id'],
+              'upstream_system_heap_mask': stage['fix']['upstream_system_heap_mask'],
+              'other_heap_requests_unchanged': stage['fix']['other_heap_requests_unchanged'],
+              'metadata_only': not stage['payload_capture'],
+              'compiler_error_count': len(errors),
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
+          }
+          if state['compiler_error_count'] or state['make_return_code']:
+              raise SystemExit(f'compile audit failed: {state}')
+          for key in ('dtb_preserved', 'ramdisk_preserved', 'recovery_dtbo_preserved', 'cmdline_preserved'):
+              if not state[key]:
+                  raise SystemExit(f'boot invariant failed: {key}')
+          (root / 'final-audit.json').write_text(json.dumps(state, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cp run29/extracted/tools/decode-a52-unified-secure-recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+          cat > "$OUT/RUN29-HARDWARE-FINDING.md" <<'EOF'
+          # Run 29 hardware finding
+
+          Run 29 fixed the previous QSEECOM shared-memory bridge failure on hardware.
+          Heap 19 and heap 27 registered through their reserved-memory regions, heap 26
+          remained optional, `qseecom_register_shmbridge()` returned 0, and
+          `qseecom_probe()` returned 0.
+
+          The kernel then reached device and late initcalls, emitted `BOOT_READY`, and
+          started Samsung and Android secure services. The 768-event persistent recorder
+          filled over roughly 26.5 seconds without a kernel panic marker.
+
+          The next concrete blocker was repeated `ION_IOC_ALLOC` command `0xc0184900`
+          returning `-19` (`-ENODEV`). This candidate preserves the original request,
+          then retries only a failed Samsung legacy system-heap bit 25 request using
+          ACK generic `ION_HEAP_SYSTEM`. All other heap masks remain unchanged.
+          EOF
+          sed -i 's/^          //' "$OUT/RUN29-HARDWARE-FINDING.md"
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 LEGACY ION SYSTEM-HEAP MASK CANDIDATE
+
+          This image builds directly on the hardware-tested Run 29 source and boot image.
+          It retains the working QSEECOM reserved-memory bridge and mirrored recorder.
+
+          The only behavioural change is a bounded ION allocation fallback:
+          - make the original allocation request unchanged
+          - only after `-ENODEV`, check for Samsung legacy system-heap bit 25
+          - retry that bit through ACK generic `ION_HEAP_SYSTEM`
+          - leave every other heap request unchanged
+
+          Test once:
+          1. Back up the current boot partition.
+          2. Flash package/boot.img to boot only.
+          3. Attempt one Android boot.
+          4. If boot fails or the display turns off, enter OrangeFox directly.
+          5. Do not flash another kernel before collecting the raw 1 MiB RAMOOPS image.
+          6. Upload the new collector archive and RESULT text.
+
+          This image is compiled and audited but not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload ION system-heap candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-ion-system-heap-compat-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-ion-system-heap-compat
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final audited output
+        run: |
+          set -Eeuo pipefail
+          ROOT=artifacts/a52xq-gki-ion-system-heap-compat
+          test -s "$ROOT/package/boot.img"
+          test -s "$ROOT/tools/decode-a52-unified-secure-recorder.py"
+          test -s "$ROOT/stage/phase21-ion-legacy-system-heap-mask-report.json"
+          grep -Fq '"status": "ion-legacy-system-heap-mask-boot-audited"' \
+            "$ROOT/final-audit.json"
+          grep -Fq '"compiler_error_count": 0' "$ROOT/final-audit.json"
+          grep -Fq '"hardware_validated": false' "$ROOT/final-audit.json"

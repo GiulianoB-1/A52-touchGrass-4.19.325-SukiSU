@@ -22,9 +22,7 @@ EVENT_RE = re.compile(
 )
 CONTROL_RE = re.compile(
     rb"A52USR2 (?P<kind>BOOT_BEGIN|BOOT_READY) (?P<body>.*?) commit="
-    + COMMIT.encode()
-    + rb"(?:\r?\n|\x00)",
-    re.DOTALL,
+    + COMMIT.encode() + rb"(?:\r?\n|\x00)", re.DOTALL,
 )
 
 
@@ -37,180 +35,145 @@ class Event:
     cpu: int
     comm: str
     message: str
+    copies: int
     sources: tuple[str, ...]
 
 
-def iter_regular_files(path: Path) -> Iterable[tuple[str, bytes]]:
+def files(path: Path) -> Iterable[tuple[str, bytes]]:
     if path.is_dir():
         for item in sorted(path.rglob("*")):
             if item.is_file():
                 try:
                     yield str(item), item.read_bytes()
                 except OSError:
-                    continue
+                    pass
         return
     suffixes = "".join(path.suffixes[-2:]).lower()
     if path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
-                if info.is_dir():
-                    continue
-                try:
-                    yield f"{path}!{info.filename}", archive.read(info)
-                except (OSError, RuntimeError, zipfile.BadZipFile):
-                    continue
+                if not info.is_dir():
+                    try:
+                        yield f"{path}!{info.filename}", archive.read(info)
+                    except (OSError, RuntimeError, zipfile.BadZipFile):
+                        pass
         return
     if suffixes in {".tar.gz", ".tgz"} or path.suffix.lower() == ".tar":
         with tarfile.open(path, "r:*") as archive:
             for member in archive.getmembers():
-                if not member.isfile():
-                    continue
-                handle = archive.extractfile(member)
-                if handle is None:
-                    continue
-                yield f"{path}!{member.name}", handle.read()
+                if member.isfile():
+                    handle = archive.extractfile(member)
+                    if handle is not None:
+                        yield f"{path}!{member.name}", handle.read()
         return
     yield str(path), path.read_bytes()
 
 
-def clean_text(raw: bytes) -> str:
+def text(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace").replace("\x00", "").strip()
 
 
-def parse_inputs(paths: list[Path]) -> tuple[list[Event], list[dict[str, str]], dict[str, int]]:
+def parse(paths: list[Path]) -> tuple[list[Event], list[dict[str, str]], dict[str, int]]:
     by_seq: dict[int, dict[str, object]] = {}
     controls: list[dict[str, str]] = []
-    file_count = 0
-    matched_files = 0
-    raw_matches = 0
-
+    scanned = matched_files = raw_copies = 0
     for path in paths:
-        for source, data in iter_regular_files(path):
-            file_count += 1
-            source_matched = False
-            for match in CONTROL_RE.finditer(data):
-                source_matched = True
-                controls.append(
-                    {
-                        "source": source,
-                        "kind": clean_text(match.group("kind")),
-                        "body": clean_text(match.group("body")),
-                    }
-                )
-            for match in EVENT_RE.finditer(data):
-                source_matched = True
-                raw_matches += 1
-                seq = int(match.group("seq"))
+        for source, data in files(path):
+            scanned += 1
+            matched = False
+            for found in CONTROL_RE.finditer(data):
+                matched = True
+                controls.append({
+                    "source": source,
+                    "kind": text(found.group("kind")),
+                    "body": text(found.group("body")),
+                })
+            for found in EVENT_RE.finditer(data):
+                matched = True
+                raw_copies += 1
+                seq = int(found.group("seq"))
                 candidate = {
                     "seq": seq,
-                    "monotonic_ns": int(match.group("ns")),
-                    "pid": int(match.group("pid")),
-                    "tgid": int(match.group("tgid")),
-                    "cpu": int(match.group("cpu")),
-                    "comm": clean_text(match.group("comm")),
-                    "message": clean_text(match.group("msg")),
+                    "monotonic_ns": int(found.group("ns")),
+                    "pid": int(found.group("pid")),
+                    "tgid": int(found.group("tgid")),
+                    "cpu": int(found.group("cpu")),
+                    "comm": text(found.group("comm")),
+                    "message": text(found.group("msg")),
                 }
                 current = by_seq.get(seq)
                 if current is None:
+                    candidate["copies"] = 1
                     candidate["sources"] = {source}
                     by_seq[seq] = candidate
-                else:
-                    current["sources"].add(source)  # type: ignore[index]
-                    # Preserve the longest valid copy when one bank was truncated.
-                    if len(str(candidate["message"])) > len(str(current["message"])):
-                        sources = current["sources"]
-                        candidate["sources"] = sources
-                        by_seq[seq] = candidate
-            if source_matched:
-                matched_files += 1
+                    continue
+                current["copies"] = int(current["copies"]) + 1
+                current["sources"].add(source)  # type: ignore[index]
+                if len(str(candidate["message"])) > len(str(current["message"])):
+                    candidate["copies"] = current["copies"]
+                    candidate["sources"] = current["sources"]
+                    by_seq[seq] = candidate
+            matched_files += int(matched)
 
     events = [
         Event(
-            seq=int(item["seq"]),
-            monotonic_ns=int(item["monotonic_ns"]),
-            pid=int(item["pid"]),
-            tgid=int(item["tgid"]),
-            cpu=int(item["cpu"]),
-            comm=str(item["comm"]),
-            message=str(item["message"]),
-            sources=tuple(sorted(item["sources"])),  # type: ignore[arg-type]
+            seq=int(item["seq"]), monotonic_ns=int(item["monotonic_ns"]),
+            pid=int(item["pid"]), tgid=int(item["tgid"]), cpu=int(item["cpu"]),
+            comm=str(item["comm"]), message=str(item["message"]),
+            copies=int(item["copies"]), sources=tuple(sorted(item["sources"])),  # type: ignore[arg-type]
         )
         for _, item in sorted(by_seq.items())
     ]
-    stats = {
-        "files_scanned": file_count,
+    return events, controls, {
+        "files_scanned": scanned,
         "files_with_recorder_data": matched_files,
-        "raw_event_copies": raw_matches,
+        "raw_event_copies": raw_copies,
         "unique_events": len(events),
         "control_records": len(controls),
     }
-    return events, controls, stats
 
 
-def classify(message: str) -> str:
-    if message.startswith("ION "):
-        return "ION"
-    if message.startswith("QSEE "):
-        return "QSEE"
-    if message.startswith("SHMBRIDGE ") or "qtee_shmbridge" in message:
-        return "SHMBRIDGE"
-    if message.startswith("SECUREBUF ") or "hyp_assign" in message or "secure_buffer" in message:
-        return "SECUREBUF"
-    if message.startswith("SCM ") or "scm_call" in message:
-        return "SCM"
+def domain(message: str) -> str:
+    for prefix in ("ION", "QSEEINIT", "QSEE", "DMABUF", "SHMBRIDGE", "SECUREBUF", "SCM"):
+        if message.startswith(prefix + " "):
+            return prefix
     return "OTHER"
 
 
-def write_outputs(output: Path, events: list[Event], controls: list[dict[str, str]],
-                  stats: dict[str, int], inputs: list[Path]) -> None:
-    output.mkdir(parents=True, exist_ok=True)
-    csv_path = output / "secure-events.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+def output(root: Path, events: list[Event], controls: list[dict[str, str]],
+           stats: dict[str, int], inputs: list[Path]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    first_ns = events[0].monotonic_ns if events else 0
+    with (root / "secure-events.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(
-            ["seq", "monotonic_ns", "delta_ms", "pid", "tgid", "cpu", "comm", "domain", "message", "copies", "sources"]
-        )
-        first_ns = events[0].monotonic_ns if events else 0
+        writer.writerow(["seq", "monotonic_ns", "delta_ms", "pid", "tgid", "cpu",
+                         "comm", "domain", "message", "copies", "sources"])
         for event in events:
-            writer.writerow(
-                [
-                    event.seq,
-                    event.monotonic_ns,
-                    f"{(event.monotonic_ns - first_ns) / 1_000_000:.3f}" if first_ns else "",
-                    event.pid,
-                    event.tgid,
-                    event.cpu,
-                    event.comm,
-                    classify(event.message),
-                    event.message,
-                    len(event.sources),
-                    " | ".join(event.sources),
-                ]
-            )
-
-    text_path = output / "secure-events.txt"
-    with text_path.open("w", encoding="utf-8") as handle:
-        for control in controls:
-            handle.write(f"CONTROL {control['kind']} {control['body']} source={control['source']}\n")
-        first_ns = events[0].monotonic_ns if events else 0
+            writer.writerow([
+                event.seq, event.monotonic_ns,
+                f"{(event.monotonic_ns - first_ns) / 1_000_000:.3f}" if first_ns else "",
+                event.pid, event.tgid, event.cpu, event.comm, domain(event.message),
+                event.message, event.copies, " | ".join(event.sources),
+            ])
+    with (root / "secure-events.txt").open("w", encoding="utf-8") as handle:
+        for item in controls:
+            handle.write(f"CONTROL {item['kind']} {item['body']} source={item['source']}\n")
         for event in events:
-            delta_ms = (event.monotonic_ns - first_ns) / 1_000_000 if first_ns else 0
+            delta = (event.monotonic_ns - first_ns) / 1_000_000 if first_ns else 0
             handle.write(
-                f"{event.seq:04d} +{delta_ms:10.3f} ms pid={event.pid} tgid={event.tgid} "
-                f"cpu={event.cpu} comm={event.comm} [{classify(event.message)}] {event.message}\n"
+                f"{event.seq:04d} +{delta:10.3f} ms pid={event.pid} tgid={event.tgid} "
+                f"cpu={event.cpu} comm={event.comm} copies={event.copies} "
+                f"[{domain(event.message)}] {event.message}\n"
             )
 
     domains: dict[str, int] = {}
-    mirrored = 0
     for event in events:
-        domain = classify(event.message)
-        domains[domain] = domains.get(domain, 0) + 1
-        if len(event.sources) >= 2:
-            mirrored += 1
-    gaps = []
+        key = domain(event.message)
+        domains[key] = domains.get(key, 0) + 1
+    gaps: list[int] = []
     if events:
-        expected = set(range(events[0].seq, events[-1].seq + 1))
-        gaps = sorted(expected - {event.seq for event in events})
+        gaps = sorted(set(range(events[0].seq, events[-1].seq + 1)) - {e.seq for e in events})
+    mirrored = sum(event.copies >= 2 for event in events)
     summary = {
         "status": "decoded" if events else "no-valid-events-found",
         "format": "A52USR2",
@@ -218,8 +181,7 @@ def write_outputs(output: Path, events: list[Event], controls: list[dict[str, st
         "inputs": [str(path) for path in inputs],
         "input_sha256": {
             str(path): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in inputs
-            if path.is_file()
+            for path in inputs if path.is_file()
         },
         "stats": stats,
         "sequence": {
@@ -228,6 +190,7 @@ def write_outputs(output: Path, events: list[Event], controls: list[dict[str, st
             "gaps": gaps,
         },
         "mirroring": {
+            "events_with_two_or_more_copies": mirrored,
             "events_seen_in_two_or_more_sources": mirrored,
             "events_seen_once": len(events) - mirrored,
         },
@@ -235,17 +198,16 @@ def write_outputs(output: Path, events: list[Event], controls: list[dict[str, st
         "controls": controls,
         "privacy": "metadata-only; no command/response buffers, keys, tokens, or process memory",
     }
-    (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    (root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
 
 def self_test() -> None:
     line = (
-        b"xxA52USR2 seq=2 ns=200 pid=10 tgid=10 cpu=3 comm=skeymast "
+        b"A52USR2 seq=2 ns=200 pid=10 tgid=10 cpu=3 comm=skeymast "
         b"msg=QSEE exit fn=qseecom_ioctl cmd=0xc0209703 ret=0 commit=5a52c0de\n"
     )
-    with io.BytesIO(line) as handle:
-        match = EVENT_RE.search(handle.read())
-    if not match or int(match.group("seq")) != 2 or match.group("msg").decode()[-5:] != "ret=0":
+    match = EVENT_RE.search(io.BytesIO(line).read())
+    if not match or int(match.group("seq")) != 2 or text(match.group("msg"))[-5:] != "ret=0":
         raise SystemExit("decoder self-test failed")
 
 
@@ -258,8 +220,8 @@ def main() -> int:
     missing = [str(path) for path in args.inputs if not path.exists()]
     if missing:
         raise SystemExit("missing input: " + ", ".join(missing))
-    events, controls, stats = parse_inputs(args.inputs)
-    write_outputs(args.output, events, controls, stats, args.inputs)
+    events, controls, stats = parse(args.inputs)
+    output(args.output, events, controls, stats, args.inputs)
     print(json.dumps({"status": "ok", **stats, "output": str(args.output)}, sort_keys=True))
     return 0 if events else 2
 

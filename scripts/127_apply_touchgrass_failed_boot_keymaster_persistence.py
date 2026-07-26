@@ -337,6 +337,11 @@ static int __init a52_kmfr_init(void)
 }
 late_initcall(a52_kmfr_init);
 '''
+    # The fixture is raw so C string \n escapes remain literal. Normalize only indentation escapes for the production patch anchors.
+    recorder_sample = recorder_sample.replace(r"\t", "	")
+    if r"\t" in recorder_sample:
+        raise SystemExit("recorder fixture still contains literal tab escapes")
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / RAM_REL).parent.mkdir(parents=True, exist_ok=True)

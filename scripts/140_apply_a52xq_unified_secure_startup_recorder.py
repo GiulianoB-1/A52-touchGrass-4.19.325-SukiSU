@@ -35,6 +35,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
  * becomes available. No command/response buffers, keys, authentication tokens,
  * payload contents, or process memory are captured.
  */
+#undef pr_fmt
 #define pr_fmt(fmt) "A52USR2: " fmt
 
 #include <linux/atomic.h>
@@ -374,6 +375,7 @@ def stage_recorder(root: Path) -> dict[str, object]:
     write(root / SOURCE_REL, SOURCE)
     source = read(root / SOURCE_REL)
     checks = {
+        "pr_fmt_reset": "#undef pr_fmt\n#define pr_fmt" in source,
         "immediate_write": "a52_usr2_persist_event(&event, A52_USR2_BANK_BOTH)" in source,
         "event_driven_early_retry": "a52_usr2_backend_seen" in source,
         "early_retry": "a52_usr2_flush_missing" in source,

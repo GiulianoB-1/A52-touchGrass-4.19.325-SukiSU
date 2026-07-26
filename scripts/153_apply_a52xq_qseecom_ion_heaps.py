@@ -14,6 +14,7 @@ BASE_URL = (
 )
 UAPI_REL = Path("include/uapi/linux/ion.h")
 WRAPPER_MARKER = "A52_QSECOM_ION_HEADER_SPLIT_AUDIT"
+PR_FMT_LINE = '#define pr_fmt(fmt) "A52IONQSEE: " fmt\n\n'
 
 
 def load_base() -> dict[str, object]:
@@ -24,10 +25,23 @@ def load_base() -> dict[str, object]:
         "__name__": "a52_qseecom_heap153_base",
     }
     exec(compile(source, BASE_URL, "exec"), namespace)
-    for name in ("read", "stage", "self_test", "ION_HDR_REL", "REPORT"):
+    for name in (
+        "read", "stage", "self_test", "ION_HDR_REL", "REPORT", "C_SOURCE"
+    ):
         if name not in namespace:
             raise SystemExit(f"immutable heap stage missing {name}")
     return namespace
+
+
+def remove_redundant_pr_fmt(base: dict[str, object]) -> None:
+    source = str(base["C_SOURCE"])
+    count = source.count(PR_FMT_LINE)
+    if count != 1:
+        raise SystemExit(f"QSEECOM heap pr_fmt anchor expected 1, found {count}")
+    source = source.replace(PR_FMT_LINE, "", 1)
+    if "#define pr_fmt" in source:
+        raise SystemExit("QSEECOM heap source still defines pr_fmt")
+    base["C_SOURCE"] = source
 
 
 def main() -> int:
@@ -37,6 +51,7 @@ def main() -> int:
     args = parser.parse_args()
 
     base = load_base()
+    remove_redundant_pr_fmt(base)
     self_test = base["self_test"]
     assert callable(self_test)
     self_test()
@@ -72,6 +87,11 @@ def main() -> int:
     assert callable(stage)
     result = stage(root)
 
+    staged_source = root / base["C_REL"]
+    staged_text = staged_source.read_text(encoding="utf-8", errors="replace")
+    if "#define pr_fmt" in staged_text:
+        raise SystemExit("staged QSEECOM heap source redefines pr_fmt")
+
     report = {
         "status": "qseecom-ion-heaps19-27-cma-staged",
         "hardware_validated": False,
@@ -80,6 +100,9 @@ def main() -> int:
             "kernel_header": str(base["ION_HDR_REL"]),
             "uapi_header": str(UAPI_REL),
             "split_header_contract": True,
+        },
+        "compile_compat": {
+            "redundant_pr_fmt_removed": True,
         },
         "observed_run32": {
             "allocation_mask": "0x00080000",

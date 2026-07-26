@@ -9,9 +9,18 @@ from pathlib import Path
 
 ION_REL = Path("drivers/staging/android/ion/ion.c")
 QSEE_REL = Path("drivers/a52_secure/qseecom.c")
+GENERATOR_NAME = "140_apply_a52xq_unified_secure_startup_recorder.py"
 ION_MARKER = "ION result fd=%d len=%llu heap=%x flags=%x"
 QSEE_API_MARKER = "QSEE SEND api req=%u rsp=%u"
 QSEE_CORE_MARKER = "QSEE SEND core id=%u app=%s req=%u rsp=%u"
+PR_FMT_OLD = '#define pr_fmt(fmt) "A52USR2: " fmt'
+PR_FMT_NEW = '#undef pr_fmt\n#define pr_fmt(fmt) "A52USR2: " fmt'
+AUDIT_OLD = (
+    '        "bounded": f"#define A52_USR2_CAPACITY {CAPACITY}U" in source,\n'
+)
+AUDIT_NEW = AUDIT_OLD + (
+    '        "pr_fmt_reset": "#undef pr_fmt\\n#define pr_fmt" in source,\n'
+)
 
 
 def read(path: Path) -> str:
@@ -32,6 +41,45 @@ def replace_call_once(text: str, old: str, new: str, label: str) -> tuple[str, s
     if old_count != 1:
         raise SystemExit(f"{label}: expected one generic marker, found {old_count}")
     return text.replace(old, new, 1), "inserted"
+
+
+def patch_unified_generator(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        raise SystemExit(f"missing unified recorder generator: {path}")
+    text = read(path)
+
+    if PR_FMT_NEW in text:
+        pr_fmt_state = "already-present"
+    else:
+        count = text.count(PR_FMT_OLD)
+        if count != 1:
+            raise SystemExit(
+                f"unified recorder pr_fmt anchor mismatch: expected 1, found {count}"
+            )
+        text = text.replace(PR_FMT_OLD, PR_FMT_NEW, 1)
+        pr_fmt_state = "inserted"
+
+    if AUDIT_NEW in text:
+        audit_state = "already-present"
+    else:
+        count = text.count(AUDIT_OLD)
+        if count != 1:
+            raise SystemExit(
+                f"unified recorder audit anchor mismatch: expected 1, found {count}"
+            )
+        text = text.replace(AUDIT_OLD, AUDIT_NEW, 1)
+        audit_state = "inserted"
+
+    if text.count(PR_FMT_NEW) != 1:
+        raise SystemExit("unified recorder pr_fmt reset count is not one")
+    if text.count(AUDIT_NEW) != 1:
+        raise SystemExit("unified recorder pr_fmt audit count is not one")
+    write(path, text)
+    return {
+        "source": path.name,
+        "pr_fmt_reset": pr_fmt_state,
+        "source_audit": audit_state,
+    }
 
 
 def patch_ion(root: Path) -> dict[str, object]:
@@ -106,6 +154,7 @@ def self_test() -> None:
         root = Path(tmp)
         ion = root / ION_REL
         qsee = root / QSEE_REL
+        generator = root / GENERATOR_NAME
         ion.parent.mkdir(parents=True, exist_ok=True)
         qsee.parent.mkdir(parents=True, exist_ok=True)
         ion.write_text(
@@ -117,10 +166,25 @@ def self_test() -> None:
             "int b = (a52_ackfr_record(\"QSEE enter fn=__qseecom_send_cmd\"), 0);\n",
             encoding="utf-8",
         )
+        generator.write_text(
+            "SOURCE = r'''\n"
+            + PR_FMT_OLD
+            + "\n'''\n"
+            + "checks = {\n"
+            + AUDIT_OLD
+            + "}\n",
+            encoding="utf-8",
+        )
+        first_generator = patch_unified_generator(generator)
+        second_generator = patch_unified_generator(generator)
         first_ion = patch_ion(root)
         first_qsee = patch_qsee(root)
         second_ion = patch_ion(root)
         second_qsee = patch_qsee(root)
+        if first_generator["pr_fmt_reset"] != "inserted":
+            raise SystemExit("unified recorder generator self-test did not insert")
+        if second_generator["pr_fmt_reset"] != "already-present":
+            raise SystemExit("unified recorder generator patch is not idempotent")
         if first_ion["allocation_result"] != "inserted":
             raise SystemExit("ION parameter-probe self-test did not insert")
         if first_qsee["send_api"] != "inserted" or first_qsee["send_core"] != "inserted":
@@ -145,10 +209,12 @@ def main() -> int:
     if missing:
         raise SystemExit("missing staged ACK parameter-probe sources: " + ", ".join(missing))
 
+    generator = Path(__file__).with_name(GENERATOR_NAME)
     report = {
         "status": "ack-secure-parameter-probe-141-staged",
         "hardware_validated": False,
         "payload_capture": False,
+        "unified_generator": patch_unified_generator(generator),
         "ion": patch_ion(root),
         "qsee": patch_qsee(root),
         "markers": {

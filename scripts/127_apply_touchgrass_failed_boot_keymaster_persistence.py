@@ -73,6 +73,11 @@ void a52_keymaster_ramoops_write(const char *buf, size_t len)
 }
 EXPORT_SYMBOL_GPL(a52_keymaster_ramoops_write);
 '''
+    # The writer template is raw. Convert only indentation escapes before inserting C source.
+    addition = addition.replace(r"\t", "	")
+    if r"\t" in addition:
+        raise SystemExit("RAMOOPS writer still contains literal tab escapes")
+
     updated, changed = replace_once_or_verify(
         text,
         anchor,

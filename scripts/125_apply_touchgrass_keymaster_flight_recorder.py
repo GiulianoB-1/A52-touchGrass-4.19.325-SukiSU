@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 CORE_COMMIT = "ea1a1db1fb0417779976a7be52778f6724ce138d"
@@ -18,75 +20,131 @@ CORE_URL = (
 RECORDER_REPORT = "touchgrass-keymaster-flight-recorder-report.json"
 AUDIO_GUARD_REPORT = "touchgrass-audio-sysfs-boot-guard-report.json"
 PERSISTENCE_STATUS = "touchgrass-keymaster-ramoops-persistence-staged"
-RECOVERY_COLLECTOR = "COLLECT-FAILED-BOOT-RAMOOPS-RECOVERY.ps1"
+RECOVERY_COLLECTOR = "A52XQ-Failed-Boot-RAMOOPS-Collector-Flashable.zip"
 RECOVERY_MARKER = "A52KMFR-PERSIST"
 
-RECOVERY_COLLECTOR_SOURCE = r'''$ErrorActionPreference = 'Stop'
+RECOVERY_INSTALLER = r'''#!/sbin/sh
+OUTFD="$2"
+ZIPFILE="$3"
 
-$Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$OutputDirectory = Join-Path (Get-Location) "A52-Failed-Boot-RAMOOPS-$Stamp"
-$PstoreDirectory = Join-Path $OutputDirectory 'pstore'
-$MarkerReport = Join-Path $OutputDirectory 'A52KMFR-PERSIST-matches.txt'
-$ArchivePath = "$OutputDirectory.zip"
-
-New-Item -ItemType Directory -Path $PstoreDirectory -Force | Out-Null
-
-function Save-AdbShell {
-  param(
-    [Parameter(Mandatory = $true)][string]$FileName,
-    [Parameter(Mandatory = $true)][string]$Command
-  )
-
-  $Destination = Join-Path $OutputDirectory $FileName
-  & adb shell $Command 2>&1 | Out-File -FilePath $Destination -Encoding utf8
+ui_print() {
+  echo "ui_print $1" > "/proc/self/fd/$OUTFD"
+  echo "ui_print" > "/proc/self/fd/$OUTFD"
 }
 
-adb wait-for-device
-if ($LASTEXITCODE -ne 0) {
-  throw 'adb wait-for-device failed.'
+abort() {
+  ui_print "ERROR: $1"
+  exit 1
 }
 
-$RecoveryId = (& adb shell id 2>&1 | Out-String).Trim()
-$RecoveryId | Out-File -FilePath (Join-Path $OutputDirectory 'recovery-id.txt') -Encoding utf8
-if ($LASTEXITCODE -ne 0) {
-  throw 'Could not query the recovery ADB identity.'
-}
-if ($RecoveryId -notmatch 'uid=0') {
-  throw "Recovery ADB is not root. Reported identity: $RecoveryId"
-}
+ui_print "A52 failed-boot RAMOOPS collector"
+ui_print "Read-only collector: no partition will be flashed"
 
-& adb shell "mkdir -p /sys/fs/pstore; grep -q ' /sys/fs/pstore ' /proc/mounts || mount -t pstore pstore /sys/fs/pstore"
-if ($LASTEXITCODE -ne 0) {
-  throw 'Could not mount the pstore filesystem in recovery.'
-}
+grep -q '[[:space:]]/data[[:space:]]' /proc/mounts 2>/dev/null ||
+  mount /data >/dev/null 2>&1 || true
 
-Save-AdbShell -FileName 'pstore-listing.txt' -Command 'ls -la /sys/fs/pstore'
-Save-AdbShell -FileName 'proc-mounts.txt' -Command 'cat /proc/mounts'
-Save-AdbShell -FileName 'proc-cmdline.txt' -Command 'cat /proc/cmdline'
-Save-AdbShell -FileName 'proc-version.txt' -Command 'cat /proc/version'
-Save-AdbShell -FileName 'recovery-dmesg.txt' -Command 'dmesg'
+STORAGE=""
+for CANDIDATE in /sdcard /data/media/0 /external_sd /usb_otg; do
+  [ -d "$CANDIDATE" ] || continue
+  TESTFILE="$CANDIDATE/.a52-kmfr-write-test-$$"
+  if (echo test > "$TESTFILE") 2>/dev/null; then
+    rm -f "$TESTFILE"
+    STORAGE="$CANDIDATE"
+    break
+  fi
+done
 
-& adb pull /sys/fs/pstore/. $PstoreDirectory
-if ($LASTEXITCODE -ne 0) {
-  throw 'Failed to pull raw files from /sys/fs/pstore.'
-}
+[ -n "$STORAGE" ] ||
+  abort "No writable storage. Mount/decrypt Data or insert writable SD/USB storage."
 
-$Matches = @(
-  Get-ChildItem -Path $PstoreDirectory -File -Recurse |
-    Select-String -Pattern 'A52KMFR-PERSIST' -SimpleMatch
-)
+mkdir -p /sys/fs/pstore || abort "Cannot create /sys/fs/pstore"
+if ! grep -q '[[:space:]]/sys/fs/pstore[[:space:]]' /proc/mounts 2>/dev/null; then
+  mount -t pstore pstore /sys/fs/pstore >/dev/null 2>&1 ||
+    abort "Cannot mount the pstore filesystem"
+fi
 
-if ($Matches.Count -gt 0) {
-  $Matches |
-    ForEach-Object { '{0}:{1}:{2}' -f $_.Path, $_.LineNumber, $_.Line } |
-    Out-File -FilePath $MarkerReport -Encoding utf8
-} else {
-  'No A52KMFR-PERSIST marker was found in the recovered pstore files.' |
-    Out-File -FilePath $MarkerReport -Encoding utf8
-}
+STAMP="$(date +%Y%m%d-%H%M%S 2>/dev/null)"
+[ -n "$STAMP" ] || STAMP="unknown-time"
+DEST="$STORAGE/A52-Failed-Boot-RAMOOPS-$STAMP-$$"
+PSTORE_DEST="$DEST/pstore"
+MATCHES="$DEST/A52KMFR-PERSIST-matches.txt"
 
-Compress-Archive -Force -Path (Join-Path $OutputDirectory '*') -DestinationPath $ArchivePath
-Write-Host "Saved raw failed-boot RAMOOPS capture to: $ArchivePath"
+mkdir -p "$PSTORE_DEST" || abort "Cannot create output directory"
+
+cat /proc/mounts > "$DEST/proc-mounts.txt" 2>&1 || true
+cat /proc/cmdline > "$DEST/proc-cmdline.txt" 2>&1 || true
+cat /proc/version > "$DEST/proc-version.txt" 2>&1 || true
+dmesg > "$DEST/recovery-dmesg.txt" 2>&1 || true
+ls -la /sys/fs/pstore > "$DEST/pstore-listing.txt" 2>&1 || true
+getprop > "$DEST/recovery-getprop.txt" 2>&1 || true
+
+FOUND=0
+for SOURCE in /sys/fs/pstore/*; do
+  [ -e "$SOURCE" ] || continue
+  NAME="$(basename "$SOURCE")"
+  cp -p "$SOURCE" "$PSTORE_DEST/$NAME" 2>/dev/null ||
+    cp "$SOURCE" "$PSTORE_DEST/$NAME" 2>/dev/null ||
+    abort "Failed to copy pstore record: $NAME"
+  FOUND=1
+done
+
+if [ "$FOUND" -eq 0 ]; then
+  echo "No files were present in /sys/fs/pstore." > "$DEST/NO-PSTORE-FILES.txt"
+fi
+
+grep -R -n -F 'A52KMFR-PERSIST' "$PSTORE_DEST" > "$MATCHES" 2>/dev/null || true
+if [ ! -s "$MATCHES" ]; then
+  echo "No A52KMFR-PERSIST marker was found in the recovered pstore files." > "$MATCHES"
+fi
+
+cat > "$DEST/README-FIRST.txt" <<EOF
+A52 FAILED-BOOT RAMOOPS CAPTURE
+
+Raw records:
+  pstore/
+
+Recorder matches:
+  A52KMFR-PERSIST-matches.txt
+
+The collector is read-only. It does not erase pstore and does not write any
+kernel, boot image, ramdisk, DTB, recovery, or other partition.
+EOF
+
+ARCHIVE="$DEST.tar.gz"
+if command -v tar >/dev/null 2>&1; then
+  PARENT="$(dirname "$DEST")"
+  BASE="$(basename "$DEST")"
+  if tar -czf "$ARCHIVE" -C "$PARENT" "$BASE" >/dev/null 2>&1; then
+    ui_print "Compressed capture: $ARCHIVE"
+  else
+    ui_print "Could not compress; raw folder was retained"
+  fi
+else
+  ui_print "tar unavailable; raw folder was retained"
+fi
+
+sync
+ui_print "RAMOOPS capture saved to:"
+ui_print "$DEST"
+ui_print "Collection completed successfully"
+exit 0
+'''
+
+RECOVERY_UPDATER_SCRIPT = "# A52 read-only RAMOOPS collector\n"
+
+RECOVERY_README = '''A52XQ FAILED-BOOT RAMOOPS COLLECTOR
+
+Flash this ZIP from OrangeFox immediately after a failed Android boot.
+It copies /sys/fs/pstore and recovery diagnostics to writable storage.
+
+Before flashing:
+1. Reboot directly into OrangeFox after the failed boot.
+2. Do not attempt another Android boot first.
+3. Mount and decrypt Data, or provide writable SD/USB storage.
+4. Flash this collector ZIP.
+
+The collector does not flash any partition and does not erase pstore.
+It does not require ADB, PowerShell, Android root, or Magisk.
 '''
 
 
@@ -102,6 +160,18 @@ def argument_path(flag: str) -> Path:
     except (ValueError, IndexError) as exc:
         raise SystemExit(f"missing required argument {flag}") from exc
     return Path(value).resolve()
+
+
+def add_zip_bytes(
+    archive: zipfile.ZipFile,
+    name: str,
+    data: bytes,
+    mode: int = 0o644,
+) -> None:
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3
+    info.external_attr = (stat.S_IFREG | mode) << 16
+    archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED)
 
 
 def run_pinned_recorder_core() -> None:
@@ -172,24 +242,76 @@ def write_recovery_collector() -> Path:
     output = argument_path("--output")
     output.mkdir(parents=True, exist_ok=True)
     path = output / RECOVERY_COLLECTOR
-    path.write_text(
-        RECOVERY_COLLECTOR_SOURCE.rstrip() + "\n",
-        encoding="utf-8",
-    )
+    manifest = {
+        "name": "A52XQ failed-boot RAMOOPS collector",
+        "mode": "recovery-flashable-read-only",
+        "marker": RECOVERY_MARKER,
+        "writes_partitions": False,
+        "erases_pstore": False,
+        "requires_adb": False,
+        "requires_powershell": False,
+    }
 
-    source = path.read_text(encoding="utf-8")
-    required = (
-        "uid=0",
+    with zipfile.ZipFile(path, "w", allowZip64=True) as archive:
+        add_zip_bytes(
+            archive,
+            "META-INF/com/google/android/update-binary",
+            RECOVERY_INSTALLER.encode("utf-8"),
+            0o755,
+        )
+        add_zip_bytes(
+            archive,
+            "META-INF/com/google/android/updater-script",
+            RECOVERY_UPDATER_SCRIPT.encode("utf-8"),
+        )
+        add_zip_bytes(
+            archive,
+            "README-FIRST.txt",
+            RECOVERY_README.encode("utf-8"),
+        )
+        add_zip_bytes(
+            archive,
+            "collector-manifest.json",
+            (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        )
+
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        required_entries = {
+            "META-INF/com/google/android/update-binary",
+            "META-INF/com/google/android/updater-script",
+            "README-FIRST.txt",
+            "collector-manifest.json",
+        }
+        missing_entries = sorted(required_entries - names)
+        if missing_entries:
+            raise SystemExit(
+                "recovery collector ZIP audit failed: " + ", ".join(missing_entries)
+            )
+        installer = archive.read(
+            "META-INF/com/google/android/update-binary"
+        ).decode("utf-8")
+
+    required_tokens = (
         "/sys/fs/pstore",
-        "adb pull /sys/fs/pstore/.",
         RECOVERY_MARKER,
-        "Compress-Archive",
+        "A52-Failed-Boot-RAMOOPS",
+        "cp -p",
+        "tar -czf",
+        "Read-only collector",
     )
-    missing = [token for token in required if token not in source]
-    if missing:
-        raise SystemExit("recovery collector audit failed: " + ", ".join(missing))
-    if "su 0" in source or "adb root" in source:
-        raise SystemExit("recovery collector must not depend on Android root commands")
+    missing_tokens = [token for token in required_tokens if token not in installer]
+    if missing_tokens:
+        raise SystemExit(
+            "recovery collector installer audit failed: " + ", ".join(missing_tokens)
+        )
+    forbidden_tokens = ("dd if=", "/dev/block", "flash_image", "persistent_ram_zap")
+    present_forbidden = [token for token in forbidden_tokens if token in installer]
+    if present_forbidden:
+        raise SystemExit(
+            "recovery collector contains forbidden write path: "
+            + ", ".join(present_forbidden)
+        )
     return path
 
 
@@ -228,10 +350,16 @@ def merge_stage_reports(collector_path: Path) -> None:
 
     persistence["recovery_collector"] = {
         "path": collector_path.name,
-        "mode": "recovery-adb-root-no-android-su",
+        "mode": "recovery-flashable-read-only",
         "marker": RECOVERY_MARKER,
-        "pulls_raw_pstore": True,
-        "creates_zip_archive": True,
+        "copies_raw_pstore": True,
+        "attempts_tar_gzip_archive": True,
+        "writes_partitions": False,
+        "erases_pstore": False,
+        "requires_adb": False,
+        "requires_powershell": False,
+        "sha256": hashlib.sha256(collector_path.read_bytes()).hexdigest(),
+        "bytes": collector_path.stat().st_size,
     }
     recorder["audio_sysfs_boot_guard"] = guard
     recorder["pinned_recorder_core"] = {

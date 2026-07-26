@@ -21,7 +21,7 @@ EVENT_RE = re.compile(
     re.DOTALL,
 )
 CONTROL_RE = re.compile(
-    rb"A52USR2 (?P<kind>BOOT_BEGIN|BOOT_READY) (?P<body>.*?) commit="
+    rb"A52USR2 (?P<kind>BOOT_EARLY|BOOT_BEGIN|BOOT_READY) (?P<body>.*?) commit="
     + COMMIT.encode() + rb"(?:\r?\n|\x00)",
     re.DOTALL,
 )

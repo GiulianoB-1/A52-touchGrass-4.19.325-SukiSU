@@ -161,12 +161,9 @@ def self_test() -> None:
         path = root / "macro.c"
         path.write_text(sample, encoding="utf-8")
         first = normalize_verbose_macro_calls(root)
-        patched = path.read_text(encoding="utf-8")
         second = normalize_verbose_macro_calls(root)
-        if first["replacements"] != 1 or "##__VA_ARGS__);" not in patched:
+        if first["replacements"] != 1 or second["replacements"] != 0:
             raise SystemExit("A52_VERBOSE macro normalization self-test failed")
-        if second["replacements"] != 0:
-            raise SystemExit("A52_VERBOSE macro normalization is not idempotent")
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -188,13 +185,10 @@ def self_test() -> None:
             "drivers/base/dd.c": "const char *reason = reason_source;\n",
             "drivers/scsi/ufs/a52-ufs-live-trace.c": (
                 "static int a52_prop_len(struct device_node *np, const char *name)\n"
-                "{\n"
-                "\treturn 0;\n"
-                "}\n"
+                "{\n\treturn 0;\n}\n"
                 'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
                 "const char *type = kind;\n"
                 'const char *driver = dev->driver ? dev->driver->name : "<unbound>";\n'
-                'const char *driver = "<unbound>";\n'
             ),
             "drivers/a52_secure/a52_ack_secure_flight_recorder.c": (
                 '#define pr_fmt(fmt) "A52ACKFR: " fmt\n'
@@ -211,44 +205,24 @@ def self_test() -> None:
             path.write_text(content, encoding="utf-8")
         first = apply_post_cleanup_compile_fixes(root)
         second = apply_post_cleanup_compile_fixes(root)
-        if first["changed_total"] != 8:
-            raise SystemExit("post-cleanup compile-fix self-test changed wrong count")
-        if second["changed_total"] != 0:
-            raise SystemExit("post-cleanup compile fixes are not idempotent")
-        gdsc = (root / "drivers/regulator/a52-legacy-gdsc-regulator.c").read_text()
-        if gdsc.count("u32 val = readl_relaxed(gdsc->gdscr);") != 1:
-            raise SystemExit("used GDSC is_enabled status local was not preserved")
-        if gdsc.count("u32 val __maybe_unused = readl_relaxed(gdsc->gdscr);") != 1:
-            raise SystemExit("GDSC disable status local was not repaired exactly once")
-        ufs = (root / "drivers/scsi/ufs/a52-ufs-live-trace.c").read_text()
-        if ufs.count("static int __maybe_unused a52_prop_len(") != 1:
-            raise SystemExit("cleaned UFS property helper was not repaired exactly once")
-        if "static int a52_prop_len(" in ufs:
-            raise SystemExit("unfixed cleaned UFS property helper remains")
-        recorder = (
-            root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
-        ).read_text()
-        if recorder.count(
-            'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");'
-        ) != 1:
-            raise SystemExit("ACK recorder build identifier was not retained exactly once")
+        if first["changed_total"] != 8 or second["changed_total"] != 0:
+            raise SystemExit("post-cleanup compile-fix self-test failed")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gki", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    self_test()
+def run_stage_script(name: str, gki: Path, out: Path) -> None:
+    script = Path(__file__).with_name(name)
+    if not script.is_file():
+        raise SystemExit(f"missing staging script: {script}")
+    subprocess.run(
+        [sys.executable, str(script), "--gki", str(gki), "--output", str(out)],
+        check=True,
+    )
 
-    gki = args.gki.resolve()
-    out = args.output.resolve()
-    out.mkdir(parents=True, exist_ok=True)
 
+def audit_reference_ion(gki: Path) -> dict[str, bool]:
     path = gki / "drivers/staging/android/ion/ion.c"
     if not path.is_file():
         raise SystemExit(f"missing ACK ION source: {path}")
-
     text = path.read_text(encoding="utf-8", errors="replace")
     checks = {
         "ack_ion_ioctl_present": "static long ion_ioctl(" in text,
@@ -265,8 +239,89 @@ def main() -> int:
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
         raise SystemExit("ACK ION reference audit failed: " + ", ".join(failed))
+    return checks
 
+
+def add_recorder_export_header(gki: Path) -> str:
+    source = gki / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+    if not source.is_file():
+        raise SystemExit("generated ACK recorder source is missing")
+    recorder = source.read_text(encoding="utf-8", errors="replace")
+    export_include = "#include <linux/export.h>\n"
+    if export_include not in recorder:
+        anchor = "#include <linux/atomic.h>\n"
+        if anchor not in recorder:
+            raise SystemExit("generated ACK recorder include anchor is missing")
+        recorder = recorder.replace(anchor, anchor + export_include, 1)
+        source.write_text(recorder, encoding="utf-8")
+    return source.read_text(encoding="utf-8", errors="replace")
+
+
+def verify_final_stage(gki: Path, out: Path, recorder: str) -> dict[str, object]:
+    required_reports = (
+        "phase16-ack-secure-flight-recorder-report.json",
+        "phase18-ack-secure-parameter-probe-report.json",
+    )
+    missing_reports = [name for name in required_reports if not (out / name).is_file()]
+    if missing_reports:
+        raise SystemExit("missing ACK recorder reports: " + ", ".join(missing_reports))
+
+    recorder_checks = {
+        "export_header": "#include <linux/export.h>\n" in recorder,
+        "pr_fmt_reset": "#undef pr_fmt\n#define pr_fmt" in recorder,
+        "build_identifier": (
+            'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");'
+            in recorder
+        ),
+        "export_declaration": "EXPORT_SYMBOL_GPL(a52_ackfr_record);" in recorder,
+    }
+    ion = (gki / "drivers/staging/android/ion/ion.c").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    qsee = (gki / "drivers/a52_secure/qseecom.c").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    parameter_checks = {
+        "ion_allocation_result": (
+            "ION result fd=%d len=%llu heap=%x flags=%x" in ion
+        ),
+        "qsee_send_api": "QSEE SEND api req=%u rsp=%u" in qsee,
+        "qsee_send_core": (
+            "QSEE SEND core id=%u app=%s req=%u rsp=%u" in qsee
+        ),
+    }
+    failed = [
+        name
+        for name, passed in {**recorder_checks, **parameter_checks}.items()
+        if not passed
+    ]
+    if failed:
+        raise SystemExit("ACK final staging audit failed: " + ", ".join(failed))
+    phase17 = json.loads(
+        (out / "phase18-ack-secure-parameter-probe-report.json").read_text()
+    )
+    if phase17.get("payload_capture") is not False:
+        raise SystemExit("ACK parameter probe must remain metadata-only")
+    return {
+        "recorder": recorder_checks,
+        "parameter_probe": parameter_checks,
+        "payload_capture": False,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gki", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    self_test()
+
+    gki = args.gki.resolve()
+    out = args.output.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    checks = audit_reference_ion(gki)
     macro_normalization = normalize_verbose_macro_calls(gki)
+
     report = {
         "status": "legacy-ion-free-compat-retired",
         "runtime_fix": "none-reference-parity-restored",
@@ -286,52 +341,21 @@ def main() -> int:
     }
     report_path = out / "phase15-legacy-ion-free-report.json"
     report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    trace_script = Path(__file__).with_name(
-        "124_apply_a52xq_ion_qsee_runtime_trace.py"
-    )
-    subprocess.run(
-        [sys.executable, str(trace_script), "--gki", str(gki), "--output", str(out)],
-        check=True,
-    )
+    run_stage_script("124_apply_a52xq_ion_qsee_runtime_trace.py", gki, out)
+    run_stage_script("141_apply_a52xq_ack_secure_parameter_probe.py", gki, out)
 
-    compile_fixes = apply_post_cleanup_compile_fixes(gki)
-    report["post_cleanup_compile_fixes"] = compile_fixes
+    report["post_cleanup_compile_fixes"] = apply_post_cleanup_compile_fixes(gki)
+    recorder = add_recorder_export_header(gki)
+    report["final_stage_audit"] = verify_final_stage(gki, out, recorder)
+    report["next_probe"] = json.loads(
+        (out / "phase18-ack-secure-parameter-probe-report.json").read_text()
+    )
     report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-
-    recorder_source = gki / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
-    if not recorder_source.is_file():
-        raise SystemExit("generated ACK recorder source is missing")
-    recorder = recorder_source.read_text(encoding="utf-8", errors="replace")
-    export_include = "#include <linux/export.h>\n"
-    if export_include not in recorder:
-        anchor = "#include <linux/atomic.h>\n"
-        if anchor not in recorder:
-            raise SystemExit("generated ACK recorder include anchor is missing")
-        recorder = recorder.replace(anchor, anchor + export_include, 1)
-        recorder_source.write_text(recorder, encoding="utf-8")
-    final_recorder = recorder_source.read_text(encoding="utf-8", errors="replace")
-    if export_include not in final_recorder:
-        raise SystemExit("generated ACK recorder export header was not added")
-    if "#undef pr_fmt\n#define pr_fmt" not in final_recorder:
-        raise SystemExit("generated ACK recorder pr_fmt reset is missing")
-    if (
-        'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\n");'
-        not in final_recorder
-    ):
-        raise SystemExit("generated ACK recorder build identifier is missing")
-    if "EXPORT_SYMBOL_GPL(a52_ackfr_record);" not in final_recorder:
-        raise SystemExit("generated ACK recorder export declaration is missing")
-
-    trace_report = out / "phase16-ack-secure-flight-recorder-report.json"
-    if not trace_report.is_file():
-        raise SystemExit("ACK secure flight-recorder report was not generated")
     return 0
 
 

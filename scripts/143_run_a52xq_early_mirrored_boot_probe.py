@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import shutil
 import traceback
 from pathlib import Path
@@ -19,6 +20,10 @@ def load_module():
         raise SystemExit(f"cannot load Probe 142: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.BACKEND_PATTERN = re.compile(
+        r"(?m)^unsigned int a52_ackfr_ramoops_write\(const char \*buf, size_t len,\n"
+        r"[\s\S]*?^EXPORT_SYMBOL_GPL\(a52_ackfr_ramoops_write\);"
+    )
     return module
 
 
@@ -56,6 +61,18 @@ def main() -> int:
         lines.append("self_test begin")
         module.self_test()
         lines.append("self_test success")
+
+        generator_text = generator.read_text(encoding="utf-8", errors="replace")
+        backend_matches = list(module.BACKEND_PATTERN.finditer(generator_text))
+        lines.append(f"anchored_backend_matches={len(backend_matches)}")
+        if len(backend_matches) != 1:
+            raise RuntimeError(
+                "anchored unified backend definition count mismatch: "
+                f"expected 1, found {len(backend_matches)}"
+            )
+        match_start = backend_matches[0].start()
+        if generator_text[max(0, match_start - 7):match_start] == "extern ":
+            raise RuntimeError("anchored backend pattern still matched an extern declaration")
 
         missing = [str(path) for path in (main_source, ramoops_source) if not path.is_file()]
         if missing:

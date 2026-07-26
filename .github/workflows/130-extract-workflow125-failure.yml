@@ -1,0 +1,116 @@
+name: 130 - Extract Workflow 125 staging failure
+
+on:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/130-extract-workflow125-failure.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    env:
+      FAILED_RUN_ID: '30193835419'
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-keymaster-real-ion
+
+      - name: Download and reduce failed job log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p diagnostics .workflow130
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${FAILED_RUN_ID}/jobs?per_page=100" \
+            > .workflow130/jobs.json
+
+          job_id="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('.workflow130/jobs.json').read_text())
+          jobs = data.get('jobs', [])
+          candidates = [
+              job for job in jobs
+              if 'TouchGrass flight-recorder candidate' in job.get('name', '')
+          ]
+          if not candidates:
+              candidates = jobs
+          if not candidates:
+              raise SystemExit('no jobs found for failed run')
+          print(candidates[0]['id'])
+          PY
+          )"
+          printf '%s\n' "$job_id" > .workflow130/job-id.txt
+
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" \
+            --output .workflow130/job-log.bin
+
+          python3 - <<'PY'
+          import io
+          import json
+          import re
+          import zipfile
+          from pathlib import Path
+
+          run_id = '30193835419'
+          jobs = json.loads(Path('.workflow130/jobs.json').read_text())
+          job_id = Path('.workflow130/job-id.txt').read_text().strip()
+          raw = Path('.workflow130/job-log.bin').read_bytes()
+          if zipfile.is_zipfile(io.BytesIO(raw)):
+              parts = []
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  for name in sorted(archive.namelist()):
+                      if name.endswith('/'):
+                          continue
+                      parts.append(archive.read(name).decode('utf-8', errors='replace'))
+              text = '\n'.join(parts)
+          else:
+              text = raw.decode('utf-8', errors='replace')
+
+          lines = text.splitlines()
+          patterns = re.compile(
+              r'(error|failed|failure|traceback|systemexit|assertion|calledprocess|'
+              r'expected|missing|audit|exception|non-zero|exit code)',
+              re.IGNORECASE,
+          )
+          interesting = [line for line in lines if patterns.search(line)]
+          report = [
+              f'Workflow 125 failed run: {run_id}',
+              f'Job ID: {job_id}',
+              f'Total decoded log lines: {len(lines)}',
+              '',
+              '=== Interesting lines ===',
+              *interesting[-180:],
+              '',
+              '=== Final 260 lines ===',
+              *lines[-260:],
+              '',
+          ]
+          Path(f'diagnostics/workflow125-run-{run_id}-failure.txt').write_text(
+              '\n'.join(report), encoding='utf-8'
+          )
+          PY
+
+      - name: Commit reduced diagnostics
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/workflow125-run-30193835419-failure.txt
+          git commit -m 'Record Workflow 125 staging failure diagnostics'
+          git push origin HEAD:agent/a52-keymaster-real-ion

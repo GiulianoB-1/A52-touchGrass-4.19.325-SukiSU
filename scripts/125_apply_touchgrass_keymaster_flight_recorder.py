@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import urllib.request
@@ -132,6 +133,52 @@ def run_pinned_recorder_core() -> None:
         raise SystemExit(f"pinned recorder core returned {result}")
 
 
+def normalize_generated_recorder_locals() -> None:
+    """Make the generated recorder tolerant of whitespace and declaration order drift."""
+    kernel = argument_path("--kernel")
+    path = kernel / "drivers/misc/a52_keymaster_flight_recorder.c"
+    if not path.is_file():
+        raise SystemExit(f"generated Keymaster recorder is missing: {path}")
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    marker = "persistent_line[A52_KMFR_PERSIST_LINE_LEN]"
+    if marker in text:
+        return
+
+    function = re.search(
+        r"void\s+a52_kmfr_record\s*\([^)]*\)\s*\{(?P<body>.*?)\n\}",
+        text,
+        re.DOTALL,
+    )
+    if function is None:
+        raise SystemExit("could not locate generated a52_kmfr_record function")
+
+    body = function.group("body")
+    anchor = re.search(
+        r"(?m)^(?P<indent>[ \t]*)unsigned\s+long\s+irq_flags\s*;\s*$",
+        body,
+    )
+    if anchor is None:
+        raise SystemExit("could not locate irq_flags local in generated recorder")
+
+    indent = anchor.group("indent")
+    insertion = (
+        anchor.group(0)
+        + "\n"
+        + indent
+        + "char persistent_line[A52_KMFR_PERSIST_LINE_LEN];\n"
+        + indent
+        + "int persistent_len;"
+    )
+    body = body[: anchor.start()] + insertion + body[anchor.end() :]
+    updated = text[: function.start("body")] + body + text[function.end("body") :]
+    path.write_text(updated, encoding="utf-8")
+
+    verified = path.read_text(encoding="utf-8", errors="replace")
+    if verified.count(marker) != 1 or verified.count("int persistent_len;") != 1:
+        raise SystemExit("generated recorder local normalization audit failed")
+
+
 def run_failed_boot_persistence() -> None:
     persistence = Path(__file__).with_name(
         "127_apply_touchgrass_failed_boot_keymaster_persistence.py"
@@ -256,6 +303,7 @@ def merge_stage_reports(collector_path: Path) -> None:
 
 def main() -> int:
     run_pinned_recorder_core()
+    normalize_generated_recorder_locals()
     run_failed_boot_persistence()
     run_ramoops_console_reservation()
     run_audio_boot_guard()

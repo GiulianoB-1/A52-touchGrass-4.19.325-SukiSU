@@ -59,11 +59,26 @@ def write(path: Path, text: str) -> None:
 def add_include(text: str) -> tuple[str, bool]:
     if INCLUDE in text:
         return text, False
-    matches = list(re.finditer(r"^#include[^\n]*\n", text, flags=re.M))
-    if not matches:
-        raise SystemExit("no include anchor found")
-    pos = matches[-1].end()
-    return text[:pos] + INCLUDE + "\n" + text[pos:], True
+
+    # Insert into the initial unconditional include block. Several Samsung files
+    # contain additional #include directives thousands of lines later, inside
+    # functions or CONFIG_DISPLAY_SAMSUNG blocks. Using the global last include
+    # would place the recorder declaration after the instrumented function.
+    offset = 0
+    seen_include = False
+    insert_at = -1
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if line.startswith("#include"):
+            seen_include = True
+            insert_at = offset + len(line)
+        elif seen_include and stripped and not stripped.startswith(("/*", "*", "//")):
+            break
+        offset += len(line)
+
+    if insert_at < 0:
+        raise SystemExit("initial include anchor not found")
+    return text[:insert_at] + INCLUDE + "\n" + text[insert_at:], True
 
 
 def mask_c(text: str) -> str:

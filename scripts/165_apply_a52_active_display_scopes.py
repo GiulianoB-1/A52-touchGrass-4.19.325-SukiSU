@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 REPORT_NAME = "phase28-a52-active-display-scopes-report.json"
-MARKER = "A52_ACTIVE_DISPLAY_SCOPES_V1"
+MARKER = "A52_ACTIVE_DISPLAY_SCOPES_V2"
 INCLUDE = "#include <linux/a52_ack_secure_flight_recorder.h>"
 CAPTURE_SHA256 = "afce7a237eb723f3b87c0326b6242e6a2816975057d193281e91bf958abd3614"
 
@@ -122,41 +122,38 @@ def mask_c(text: str) -> str:
     return "".join(out)
 
 
-def top_level_before(masked: str, position: int) -> bool:
-    depth = 0
-    for c in masked[:position]:
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-    return depth == 0
+def definition_openings(text: str, name: str) -> list[int]:
+    """Return opening braces for definitions, ignoring calls and prototypes.
 
-
-def function_opening(text: str, name: str) -> int | None:
+    Do not use whole-file brace depth here. The downstream Samsung sources have
+    mutually exclusive preprocessor branches whose raw braces are intentionally
+    unbalanced until preprocessing.
+    """
     masked = mask_c(text)
+    openings: list[int] = []
     for match in re.finditer(r"\b" + re.escape(name) + r"\s*\(", masked):
-        if not top_level_before(masked, match.start()):
-            continue
         paren = match.end() - 1
         depth = 0
         close_paren = -1
         for i in range(paren, len(masked)):
-            if masked[i] == "(":
+            c = masked[i]
+            if c == "(":
                 depth += 1
-            elif masked[i] == ")":
+            elif c == ")":
                 depth -= 1
                 if depth == 0:
                     close_paren = i
                     break
         if close_paren < 0:
             continue
-        tail = masked[close_paren + 1: close_paren + 2048]
+
+        tail = masked[close_paren + 1 : close_paren + 4097]
         brace_rel = tail.find("{")
         semi_rel = tail.find(";")
         if brace_rel < 0 or (semi_rel >= 0 and semi_rel < brace_rel):
             continue
-        return close_paren + 1 + brace_rel
-    return None
+        openings.append(close_paren + 1 + brace_rel)
+    return openings
 
 
 def scope_name(function: str) -> str:
@@ -167,11 +164,13 @@ def inject_scope(text: str, function: str) -> tuple[str, str]:
     statement = f'A52_ACKFR_SCOPE("DISP", "{scope_name(function)}");'
     if statement in text:
         return text, "already-present"
-    opening = function_opening(text, function)
-    if opening is None:
-        raise SystemExit(f"active display function missing: {function}")
-    text = text[:opening + 1] + "\n\t" + statement + text[opening + 1:]
-    return text, "inserted"
+    openings = definition_openings(text, function)
+    if len(openings) != 1:
+        raise SystemExit(
+            f"active display definition count mismatch: {function}: {len(openings)}"
+        )
+    opening = openings[0]
+    return text[: opening + 1] + "\n\t" + statement + text[opening + 1 :], "inserted"
 
 
 def audit_file(path: Path, functions: tuple[str, ...]) -> None:
@@ -180,10 +179,9 @@ def audit_file(path: Path, functions: tuple[str, ...]) -> None:
         raise SystemExit(f"recorder include missing: {path}")
     for function in functions:
         statement = f'A52_ACKFR_SCOPE("DISP", "{scope_name(function)}");'
-        if text.count(statement) != 1:
-            raise SystemExit(
-                f"scope audit failed for {path}:{function}: count={text.count(statement)}"
-            )
+        count = text.count(statement)
+        if count != 1:
+            raise SystemExit(f"scope audit failed for {path}:{function}: count={count}")
 
 
 def run(gki: Path, output: Path) -> dict[str, object]:
@@ -193,12 +191,11 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         path = gki / rel
         if not path.is_file():
             raise SystemExit(f"compiled A52 display source missing: {path}")
-        text = read(path)
-        text, include_changed = add_include(text)
+        text, include_changed = add_include(read(path))
         states: list[dict[str, str]] = []
         for function in functions:
             text, state = inject_scope(text, function)
-            inserted += state == "inserted"
+            inserted += int(state == "inserted")
             states.append(
                 {
                     "function": function,
@@ -227,6 +224,7 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         "inactive_tree_previously_instrumented": "techpack/display",
         "scope_domain": "DISP",
         "scope_prefix": "a52.",
+        "parser": "definition-based-preprocessor-safe",
         "target_file_count": len(TARGETS),
         "target_function_count": total,
         "inserted_function_count": inserted,
@@ -264,8 +262,14 @@ def self_test() -> None:
             for index, function in enumerate(functions):
                 qualifier = "static " if index % 2 else ""
                 body.append(
+                    f"{qualifier}int {function}(void *arg);\n"
                     f"{qualifier}int {function}(void *arg)\n"
                     "{\n"
+                    "#if defined(TEST_A)\n"
+                    "\tif (arg) { return 1; }\n"
+                    "#else\n"
+                    "\tif (!arg) { return 0; }\n"
+                    "#endif\n"
                     "\treturn arg != 0;\n"
                     "}\n\n"
                 )

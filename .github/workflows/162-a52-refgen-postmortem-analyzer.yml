@@ -57,7 +57,7 @@ jobs:
           1,1000000,WDT disarm before=1 after=0
           2,2000000,REFGEN driver_register rc=0
           3,3000000,"REFGEN probe enter compat=qcom,refgen-kona-regulator"
-          4,4000000,REFGEN mapped start=0x88e7000 size=132 raw=0x0
+          4,4000000,REFGEN mapped start=0x88e7000 size=96 raw=0x0
           5,5000000,REFGEN probe ready initial_enabled=0
           6,6000000,REFGEN kona_enable raw=0x0->0x1 enabled=1
           7,7000000,DISP enter fn=dsi_display_enable
@@ -75,6 +75,9 @@ jobs:
             output/diagnosis.json
           test -s output/diagnosis.md
           test -s output/critical-timeline.csv
+          grep -Fq '"stock_lagoon_0x60_layout": true' output/diagnosis.json
+          grep -Fq '"resource_covers_ctrl5": false' output/diagnosis.json
+          grep -Fq 'outside the declared resource span' output/diagnosis.json
 
       - name: Enforce metadata-only contract
         run: |

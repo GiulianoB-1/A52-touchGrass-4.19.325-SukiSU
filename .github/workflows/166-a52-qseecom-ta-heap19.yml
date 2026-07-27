@@ -1,0 +1,413 @@
+name: 166 - A52 QSEECOM TA heap 19
+
+run-name: Build TouchGrass-parity QSEECOM TA ION heap 19 candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-qseecom-ta-heap19
+    paths:
+      - .github/workflows/166-a52-qseecom-ta-heap19.yml
+      - scripts/166_apply_a52_qseecom_ta_heap19.py
+      - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-active-display-scopes
+    paths:
+      - .github/workflows/166-a52-qseecom-ta-heap19.yml
+      - scripts/166_apply_a52_qseecom_ta_heap19.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-qseecom-ta-heap19-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+  ACTIVE_SOURCE_ARTIFACT_ID: '8654956416'
+  ACTIVE_SOURCE_ARTIFACT_SHA256: a70b7cd08c3e578415cc5289a36a4efb1ad61cfe8734c2e198b9aa8ebb763c08
+  THIRD_CAPTURE_SHA256: e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+jobs:
+  build-package:
+    name: Compile and package QSEECOM TA heap-19 candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate patcher
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/166_apply_a52_qseecom_ta_heap19.py \
+            scripts/38_repack_a52_p1_boot.py
+          python3 scripts/166_apply_a52_qseecom_ta_heap19.py --self-test
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download active source, Run 32 container, and TouchGrass references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p active/extracted run32/extracted touchgrass
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ACTIVE_SOURCE_ARTIFACT_ID}/zip" \
+            --output active/artifact.zip
+          printf '%s  %s\n' "${ACTIVE_SOURCE_ARTIFACT_SHA256}" active/artifact.zip \
+            | sha256sum -c -
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q active/artifact.zip -d active/extracted
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd active/extracted && sha256sum -c SHA256SUMS)
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+
+          test -s active/extracted/stage/refgen-active-display-scopes-source.patch
+          test -s active/extracted/config/final.config
+          test -s active/extracted/package/boot.img
+          test "$(tr -d '\r\n' < active/extracted/compile/make-return-code.txt)" = 0
+          test -s run32/extracted/package/boot.img
+          grep -Fq 'A52_ACTIVE_DISPLAY_SCOPES_V1' \
+            active/extracted/stage/refgen-active-display-scopes-source.patch
+          grep -Fq 'A52_USR2_CRITICAL_PERSIST_V1' \
+            active/extracted/stage/refgen-active-display-scopes-source.patch
+
+          TG_RAW="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/${TOUCHGRASS_COMMIT}"
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            "${TG_RAW}/drivers/staging/android/ion/msm/msm_ion_of.c" \
+            --output touchgrass/msm_ion_of.c
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            "${TG_RAW}/drivers/staging/android/ion/ion_cma_heap.c" \
+            --output touchgrass/ion_cma_heap.c
+          test -s touchgrass/msm_ion_of.c
+          test -s touchgrass/ion_cma_heap.c
+
+          while IFS= read -r marker; do
+            test -n "$marker"
+            grep -Fq "$marker" touchgrass/msm_ion_of.c
+          done <<'EOF'
+          ION_QSECOM_TA_HEAP_ID
+          ION_QSECOM_TA_HEAP_NAME
+          of_parse_phandle(node, "memory-region", 0)
+          of_dma_configure(&new_dev->dev, node, true)
+          heaps[i] = ion_heap_create(heap_data)
+          ion_device_add_heap(new_dev, heaps[i])
+          subsys_initcall(msm_ion_init)
+          EOF
+          grep -Fq 'cma_alloc(cma_heap->cma' touchgrass/ion_cma_heap.c
+          grep -Fq 'cma_release(cma_heap->cma' touchgrass/ion_cma_heap.c
+          sha256sum touchgrass/msm_ion_of.c touchgrass/ion_cma_heap.c \
+            > touchgrass/SHA256SUMS
+
+      - name: Restore audited active source and apply heap-19 parity
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          git -C gki/common apply --check \
+            "$PWD/active/extracted/stage/refgen-active-display-scopes-source.patch"
+          git -C gki/common apply \
+            "$PWD/active/extracted/stage/refgen-active-display-scopes-source.patch"
+
+          OUT="$PWD/artifacts/a52xq-qseecom-ta-heap19"
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" \
+            "$OUT/package" "$OUT/tools" "$OUT/touchgrass-reference"
+          cp touchgrass/* "$OUT/touchgrass-reference/"
+
+          python3 scripts/166_apply_a52_qseecom_ta_heap19.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/qseecom-ta-heap19-stage.log"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path(
+              'artifacts/a52xq-qseecom-ta-heap19/stage/'
+              'phase29-a52-qseecom-ta-heap19-report.json'
+          ).read_text())
+          assert report['status'] == 'a52-qseecom-ta-heap19-touchgrass-parity-v1-staged'
+          assert report['functional_change'] == 'register-touchgrass-qseecom-ta-ion-heap19'
+          assert report['capture_sha256'] == (
+              'e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad'
+          )
+          assert report['observed_failure']['heap_mask'] == '0x80000'
+          assert report['observed_failure']['allocation_return'] == -19
+          assert report['touchgrass_reference']['commit'] == (
+              '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+          )
+          assert report['dt_contract']['heap_id'] == 19
+          assert report['dt_contract']['heap_type'] == 'DMA'
+          assert report['dt_contract']['reserved_bytes'] == 0x1000000
+          assert report['ack_adaptation']['other_dma_heap_ids_unchanged'] is True
+          assert report['ack_adaptation']['other_ion_masks_unchanged'] is True
+          assert report['ack_adaptation']['legacy_system_bit25_compat_unchanged'] is True
+          assert report['ack_adaptation']['refgen_logic_unchanged'] is True
+          assert report['ack_adaptation']['display_logic_unchanged'] is True
+          PY
+
+          grep -Fq 'A52_QSEECOM_TA_DMA_ID19_COMPAT' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'obj-$(CONFIG_ION) += a52_qseecom_ta_heap.o' \
+            gki/common/drivers/staging/android/ion/heaps/Makefile
+          test -s gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c
+          grep -Fq 'A52_QSEECOM_TA_HEAP_ID 19U' \
+            gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c
+          grep -Fq 'a52_ta_heap.heap.type = ION_HEAP_TYPE_DMA' \
+            gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c
+          grep -Fq 'a52_ta_heap.heap.id = A52_QSEECOM_TA_HEAP_MASK' \
+            gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c
+          grep -Fq 'subsys_initcall_sync(a52_qseecom_ta_heap_init)' \
+            gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c
+
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/qseecom-ta-heap19-source.patch"
+          test -s "$OUT/stage/qseecom-ta-heap19-source.patch"
+
+      - name: Compile QSEECOM TA heap-19 kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-qseecom-ta-heap19"
+          BUILD="$PWD/workspace/gki-qseecom-ta-heap19-out"
+          mkdir -p "$BUILD"
+          cp active/extracted/config/final.config "$BUILD/.config"
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_ION=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_ION_SYSTEM_HEAP=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_CMA=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_DMA_CMA=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_REGULATOR_REFGEN=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo '::group::Compiler errors'
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            echo '::endgroup::'
+            tail -n 400 "$OUT/logs/compile.log" || true
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+
+          grep -Fq 'CC      drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.o' \
+            "$OUT/logs/compile.log"
+          grep -Fq 'CC      drivers/staging/android/ion/ion.o' "$OUT/logs/compile.log"
+          grep -Fq 'CC      drivers/a52_secure/qseecom.o' "$OUT/logs/compile.log"
+          grep -Fq 'CC      drivers/a52_display/msm/dsi/dsi_display.o' "$OUT/logs/compile.log"
+
+          while IFS= read -r marker; do
+            test -n "$marker"
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done <<'EOF'
+          A52_QSEECOM_TA_DMA_ID19_COMPAT
+          qsecom_ta
+          BOOT qseecom_ta_heap registered id=%u base=0x%llx size=%llu
+          BOOT qseecom_ta_heap fail stage=register rc=%d
+          policy=critical-after-capacity
+          REFGEN probe ready initial_enabled=%d
+          a52.dsi_display_prepare
+          a52.ss_panel_on_pre
+          EOF
+
+          if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" > "$OUT/logs/compiler-errors.txt"; then
+            cat "$OUT/logs/compiler-errors.txt"
+            exit 1
+          fi
+          grep -Fq 'OBJCOPY arch/arm64/boot/Image' "$OUT/logs/compile.log"
+
+      - name: Repack and audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-qseecom-ta-heap19
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+          cp active/extracted/tools/decode-a52-unified-secure-recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-qseecom-ta-heap19')
+          heap = json.loads((
+              root / 'stage/phase29-a52-qseecom-ta-heap19-report.json'
+          ).read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(
+              r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ',
+              compile_log,
+              re.M,
+          )
+          image = root / 'compile/Image'
+          image_gz = root / 'package/Image.gz'
+          boot = root / 'package/boot.img'
+          final = {
+              'status': 'a52-qseecom-ta-heap19-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'functional_change': 'touchgrass-parity-qseecom-ta-ion-heap19',
+              'source_active_artifact_id': 8654956416,
+              'source_active_artifact_sha256':
+                  'a70b7cd08c3e578415cc5289a36a4efb1ad61cfe8734c2e198b9aa8ebb763c08',
+              'third_capture_sha256':
+                  'e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad',
+              'touchgrass_commit':
+                  '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
+              'heap_id': heap['dt_contract']['heap_id'],
+              'heap_mask': heap['dt_contract']['heap_mask'],
+              'heap_name': 'qsecom_ta',
+              'heap_type': heap['dt_contract']['heap_type'],
+              'heap_reserved_bytes': heap['dt_contract']['reserved_bytes'],
+              'refgen_logic_unchanged': True,
+              'recorder_policy_unchanged': True,
+              'display_logic_unchanged': True,
+              'active_display_scopes_preserved': True,
+              'legacy_system_bit25_compat_unchanged': True,
+              'payload_capture': False,
+              'compiler_error_count': len(errors),
+              'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'image_gz_sha256': hashlib.sha256(image_gz.read_bytes()).hexdigest(),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+          }
+          if errors:
+              raise SystemExit(f'compiler errors survived audit: {len(errors)}')
+          if final['boot_bytes'] != 100663296:
+              raise SystemExit(f"unexpected boot size: {final['boot_bytes']}")
+          if not all((
+              final['dtb_preserved'],
+              final['ramdisk_preserved'],
+              final['recovery_dtbo_preserved'],
+          )):
+              raise SystemExit('boot container invariant failed')
+          (root / 'final-audit.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 TOUCHGRASS-PARITY QSEECOM TA ION HEAP 19 CANDIDATE
+
+          Hardware capture 3 showed that REFGEN is operational, the kernel stays
+          alive, and no active display prepare/enable hook runs. Samsung secure
+          services repeatedly request ION mask 0x80000 (heap ID 19) and receive
+          -ENODEV.
+
+          TouchGrass commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7 parses
+          qcom,ion-heap@19, binds qseecom_ta_region as CMA, names the heap
+          qsecom_ta, preserves numeric ID 19, and registers it during subsys init.
+
+          This ACK adaptation reproduces only that heap. It does not redirect the
+          request to the system heap, change REFGEN, alter display control flow,
+          change recorder retention, or modify DTB, ramdisk, or recovery DTBO.
+
+          Flash only package/boot.img. If the screen remains black, wait at least
+          20 seconds, enter OrangeFox directly, and collect the raw 1 MiB RAMOOPS
+          image before restoring another kernel.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
+            | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          cat "$OUT/final-audit.json"
+
+      - name: Upload QSEECOM TA heap-19 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-qseecom-ta-heap19-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-qseecom-ta-heap19
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require audited candidate
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          audit = json.loads(Path(
+              'artifacts/a52xq-qseecom-ta-heap19/final-audit.json'
+          ).read_text())
+          assert audit['status'] == 'a52-qseecom-ta-heap19-boot-audited'
+          assert audit['flashable_candidate'] is True
+          assert audit['hardware_validated'] is False
+          assert audit['functional_change'] == 'touchgrass-parity-qseecom-ta-ion-heap19'
+          assert audit['heap_id'] == 19
+          assert audit['heap_mask'] == '0x80000'
+          assert audit['heap_name'] == 'qsecom_ta'
+          assert audit['heap_type'] == 'DMA'
+          assert audit['heap_reserved_bytes'] == 0x1000000
+          assert audit['refgen_logic_unchanged'] is True
+          assert audit['recorder_policy_unchanged'] is True
+          assert audit['display_logic_unchanged'] is True
+          assert audit['active_display_scopes_preserved'] is True
+          assert audit['legacy_system_bit25_compat_unchanged'] is True
+          assert audit['boot_bytes'] == 100663296
+          assert audit['compiler_error_count'] == 0
+          assert audit['dtb_preserved'] is True
+          assert audit['ramdisk_preserved'] is True
+          assert audit['recovery_dtbo_preserved'] is True
+          PY

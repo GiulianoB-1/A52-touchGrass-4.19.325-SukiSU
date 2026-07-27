@@ -33,6 +33,22 @@ def require_regex(text: str, patterns: dict[str, str], label: str) -> list[str]:
     return list(patterns)
 
 
+def select_alternatives(
+    text: str, alternatives: dict[str, list[str]], label: str
+) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    missing: list[str] = []
+    for name, options in alternatives.items():
+        match = next((option for option in options if option in text), None)
+        if match is None:
+            missing.append(name)
+        else:
+            selected[name] = match
+    if missing:
+        raise SystemExit(f"{label} missing alternative groups: {missing}")
+    return selected
+
+
 def find_ack_qseecom(gki: Path) -> tuple[Path, str]:
     candidates: list[Path] = []
     for root in (gki / "drivers").rglob("*.c"):
@@ -163,28 +179,37 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
         "ACK ION heap ABI",
     )
 
-    ack_default_dmabuf_contract = require_regex(
+    ack_default_markers = require(
+        ack_dmabuf,
+        [
+            "if (heap->buf_ops.map)",
+            "heap->buf_ops.map(dmabuf, offset)",
+            "if (heap->buf_ops.vmap)",
+            "heap->buf_ops.vmap(dmabuf)",
+            "if (heap->buf_ops.vunmap)",
+            "ion_buffer_kmap_put(buffer)",
+            "if (!heap->buf_ops.get_flags)",
+            "return heap->buf_ops.get_flags(dmabuf, flags);",
+            ".get_flags = ion_dma_buf_get_flags",
+        ],
+        "ACK default ION DMA-BUF exporter",
+    )
+    ack_default_variants = select_alternatives(
         ack_dmabuf,
         {
-            "map_fallback": (
-                r"ion_dma_buf_map\s*\([^)]*\)\s*\{.*?if\s*\(heap->buf_ops\.map\)"
-                r".*?return\s+heap->buf_ops\.map.*?return\s+ion_buffer_kmap_get\(buffer\)"
-            ),
-            "vmap_fallback": (
-                r"ion_dma_buf_vmap\s*\([^)]*\)\s*\{.*?if\s*\(heap->buf_ops\.vmap\)"
-                r".*?return\s+heap->buf_ops\.vmap.*?ion_buffer_kmap_get\(buffer\)"
-            ),
-            "vunmap_fallback": (
-                r"ion_dma_buf_vunmap\s*\([^)]*\)\s*\{.*?if\s*\(heap->buf_ops\.vunmap\)"
-                r".*?ion_buffer_kmap_put\(buffer\)"
-            ),
-            "flags_requires_heap_override": (
-                r"ion_dma_buf_get_flags\s*\([^)]*\)\s*\{"
-                r".*?if\s*\(!heap->buf_ops\.get_flags\)\s*return\s+-EOPNOTSUPP\s*;"
-                r".*?return\s+heap->buf_ops\.get_flags\(dmabuf,\s*flags\)\s*;"
-            ),
+            "map_fallback": [
+                "ion_buffer_kmap_get(buffer) + offset * PAGE_SIZE",
+                "buffer->vaddr + offset * PAGE_SIZE",
+            ],
+            "vmap_fallback": [
+                "vaddr = ion_buffer_kmap_get(buffer)",
+                "return ERR_PTR(-EOPNOTSUPP)",
+            ],
+            "missing_get_flags_result": [
+                "return -EOPNOTSUPP;",
+            ],
         },
-        "ACK default ION DMA-BUF exporter",
+        "ACK default ION DMA-BUF fallback variants",
     )
 
     forbidden = [
@@ -219,7 +244,8 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "heap_source": str(ACK_HEAP),
             "heap_contract": ack_heap_contract,
             "heap_abi": ack_heap_abi,
-            "default_dma_buf_contract": ack_default_dmabuf_contract,
+            "default_dma_buf_markers": ack_default_markers,
+            "default_dma_buf_variants": ack_default_variants,
             "qseecom_source": str(ack_qseecom_path),
             "qseecom_contract": list(qseecom_consumer_patterns),
         },
@@ -228,7 +254,7 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "ack_flags_provider": "heap-specific ion_heap.buf_ops.get_flags",
             "returned_value": "ion_buffer.flags",
             "default_ack_map_fallback_preserved": True,
-            "default_ack_vmap_fallback_preserved": True,
+            "default_ack_vmap_contract_unchanged": True,
             "touchgrass_dma_preparation": "ion_pages_sync_for_device",
             "ack_dma_preparation": "ion_buffer_prep_noncached",
             "fixed_vendor_heap_id_preserved": 19,

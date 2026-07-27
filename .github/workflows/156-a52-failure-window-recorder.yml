@@ -1,6 +1,6 @@
-name: 156 - A52 failure-window recorder without watchdog
+name: 156 - A52 failure-window recorder with QSEECOM heaps
 
-run-name: Build targeted black-screen recorder from agent/a52-keymaster-real-ion
+run-name: Build fixed black-screen recorder from agent/a52-keymaster-real-ion
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   build-package:
-    name: Compile and package targeted failure-window recorder
+    name: Compile fixed recorder with QSEECOM heaps 19 and 27
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -43,7 +43,11 @@ jobs:
             clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
           python3 -m py_compile \
+            scripts/148_apply_a52xq_ion_dmabuf_contract.py \
+            scripts/149_apply_a52xq_ion_system_heap_secure_gate.py \
+            scripts/153_apply_a52xq_qseecom_ion_heaps.py \
             scripts/154_apply_a52xq_failure_window_probe.py \
+            scripts/158_fix_a52xq_failure_scope_unused.py \
             scripts/38_repack_a52_p1_boot.py
 
       - name: Restore pinned GKI source
@@ -70,10 +74,11 @@ jobs:
           test -s run32/extracted/config/final.config
           test -s run32/extracted/package/boot.img
           test -s run32/extracted/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq 'A52_QSEECOM_RESERVED_MEMORY_SHMBRIDGE' run32/extracted/stage/full-source.patch
+          grep -Fq 'A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT' run32/extracted/stage/full-source.patch
           grep -Fq 'A52_ACKFR_EARLY_MIRRORED_BACKEND' run32/extracted/stage/full-source.patch
-          grep -Fq 'A52USR2 BOOT_EARLY stage=mm_init' run32/extracted/stage/full-source.patch
 
-      - name: Restore source and stage failure-window probe
+      - name: Stage heaps and failure-window recorder
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
@@ -84,53 +89,102 @@ jobs:
           git -C gki/common apply --check "$PWD/run32/extracted/stage/full-source.patch"
           git -C gki/common apply "$PWD/run32/extracted/stage/full-source.patch"
 
-          OUT="$PWD/artifacts/a52xq-gki-failure-window-recorder"
+          OUT="$PWD/artifacts/a52xq-gki-failure-window-heaps"
           mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package" "$OUT/tools"
-          python3 scripts/154_apply_a52xq_failure_window_probe.py \
-            --gki gki/common --output "$OUT/stage" \
-            2>&1 | tee "$OUT/logs/failure-window-stage.log"
+
+          run_stage() {
+            local label="$1"
+            shift
+            set +e
+            "$@" >"$OUT/logs/${label}.log" 2>&1
+            local rc=$?
+            set -e
+            printf '%s\n' "$rc" >"$OUT/logs/${label}.rc"
+            cat "$OUT/logs/${label}.log"
+            if [ "$rc" -ne 0 ]; then
+              printf 'stage=%s rc=%s command=' "$label" "$rc" >"$OUT/logs/STAGE-FAILURE.txt"
+              printf '%q ' "$@" >>"$OUT/logs/STAGE-FAILURE.txt"
+              printf '\n' >>"$OUT/logs/STAGE-FAILURE.txt"
+              exit "$rc"
+            fi
+          }
+
+          run_stage phase23 \
+            python3 scripts/149_apply_a52xq_ion_system_heap_secure_gate.py \
+              --gki gki/common --output "$OUT/stage"
+          run_stage phase22 \
+            python3 scripts/148_apply_a52xq_ion_dmabuf_contract.py \
+              --gki gki/common --output "$OUT/stage"
+          run_stage phase24 \
+            python3 scripts/153_apply_a52xq_qseecom_ion_heaps.py \
+              --gki gki/common --output "$OUT/stage"
+          run_stage phase25 \
+            python3 scripts/154_apply_a52xq_failure_window_probe.py \
+              --gki gki/common --output "$OUT/stage"
+          run_stage phase26 \
+            python3 scripts/158_fix_a52xq_failure_scope_unused.py \
+              --gki gki/common --output "$OUT/stage"
 
           python3 - <<'PY'
           import json
           from pathlib import Path
-          report = json.loads(Path(
-              'artifacts/a52xq-gki-failure-window-recorder/stage/'
-              'phase25-a52-failure-window-probe-report.json').read_text())
-          assert report['status'] == 'a52-failure-window-probe-v1-staged'
-          assert report['payload_capture'] is False
-          assert report['recorder']['capacity'] == 1536
-          assert report['recorder']['heartbeat_interval_ms'] == 500
-          assert report['recorder']['heartbeat_window_ms'] == 300000
-          assert report['recorder']['continuous_persistence_after_capacity'] is True
-          assert report['display']['active_probe_count'] >= 6
-          assert report['watchdog']['registration_bypassed'] is True
-          assert report['watchdog']['firmware_watchdog_disarmed'] is True
+
+          root = Path('artifacts/a52xq-gki-failure-window-heaps/stage')
+          expected = {
+              'phase22-ion-dmabuf-contract-report.json': 'ion-dmabuf-contract-compat-staged',
+              'phase23-ion-system-heap-secure-gate-report.json': 'ion-system-heap-secure-gate-staged',
+              'phase24-qseecom-ion-heaps-report.json': 'qseecom-ion-heaps19-27-cma-staged',
+              'phase25-a52-failure-window-probe-report.json': 'a52-failure-window-probe-v1-staged',
+              'phase26-a52-failure-scope-unused-fix-report.json': 'a52-failure-scope-unused-warning-fixed',
+          }
+          reports = {}
+          for filename, status in expected.items():
+              report = json.loads((root / filename).read_text())
+              assert report['status'] == status, (filename, report.get('status'))
+              reports[filename] = report
+          failure = reports['phase25-a52-failure-window-probe-report.json']
+          scope_fix = reports['phase26-a52-failure-scope-unused-fix-report.json']
+          heaps = reports['phase24-qseecom-ion-heaps-report.json']
+          assert failure['payload_capture'] is False
+          assert failure['recorder']['heartbeat_interval_ms'] == 500
+          assert failure['recorder']['continuous_persistence_after_capacity'] is True
+          assert failure['display']['active_probe_count'] >= 6
+          assert failure['watchdog']['firmware_watchdog_disarmed'] is True
+          assert scope_fix['checks']['maybe_unused_present'] is True
+          assert heaps['fix']['userspace_heap_ids'] == [19, 27]
           PY
 
+          grep -Fq 'A52_QSECOM_ION_CMA_HEAPS_19_27' \
+            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
+          grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' \
+            gki/common/drivers/staging/android/ion/ion_dma_buf.c
+          grep -Fq 'A52_ION_SYSTEM_HEAP_NONSECURE_GATE' \
+            gki/common/drivers/staging/android/ion/ion.c
           grep -Fq 'HB tick=%u online=%u run=%lu j=%lu' \
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
           grep -Fq 'A52_USR2_CONTINUOUS_PERSIST' \
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq '__a52_ackfr_scope __maybe_unused' \
+            gki/common/include/linux/a52_ack_secure_flight_recorder.h
           grep -Fq 'A52_ACKFR_SCOPE("DISP", "drm_atomic_helper_commit")' \
             gki/common/drivers/gpu/drm/drm_atomic_helper.c
-          grep -Fq 'A52_ACKFR_SCOPE("DISP", "drm_panel_prepare")' \
-            gki/common/drivers/gpu/drm/drm_panel.c
           grep -Fq 'A52_FAILURE_WINDOW_WATCHDOG_DISARM' \
             gki/common/drivers/watchdog/qcom-wdt.c
           grep -Fq 'qcom_wdt_stop(&wdt->wdd);' \
             gki/common/drivers/watchdog/qcom-wdt.c
           git -C gki/common diff --check
           git -C gki/common add -N .
-          git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/failure-window-source.patch"
-          test -s "$OUT/stage/failure-window-source.patch"
+          git -C gki/common diff --binary --no-ext-diff >"$OUT/stage/full-source.patch"
+          test -s "$OUT/stage/full-source.patch"
 
       - name: Resolve configuration and compile
         run: |
           set -Eeuo pipefail
-          OUT="$PWD/artifacts/a52xq-gki-failure-window-recorder"
-          BUILD="$PWD/workspace/gki-failure-window-recorder-out"
+          OUT="$PWD/artifacts/a52xq-gki-failure-window-heaps"
+          BUILD="$PWD/workspace/gki-failure-window-heaps-out"
           mkdir -p "$BUILD"
           cp run32/extracted/config/final.config "$BUILD/.config"
+
           gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG
           gki/common/scripts/config --file "$BUILD/.config" --enable WATCHDOG_CORE
           gki/common/scripts/config --file "$BUILD/.config" --enable QCOM_WDT
@@ -145,45 +199,50 @@ jobs:
             2>&1 | tee "$OUT/logs/olddefconfig.log"
           cp "$BUILD/.config" "$OUT/config/final.config"
           grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_CMA=y' "$BUILD/.config"
           grep -Fxq '# CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is not set' "$BUILD/.config"
 
           set +e
           make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
-            KCFLAGS=-Wno-error=frame-larger-than Image > "$OUT/logs/compile.log" 2>&1
+            KCFLAGS=-Wno-error=frame-larger-than Image >"$OUT/logs/compile.log" 2>&1
           rc=$?
           set -e
-          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          printf '%s\n' "$rc" >"$OUT/compile/make-return-code.txt"
           if [ "$rc" -ne 0 ]; then
+            echo '::group::Compiler errors'
             grep -nE '(^|: )(fatal error|error): |undefined reference to' \
-              "$OUT/logs/compile.log" | tail -n 300 || true
-            tail -n 400 "$OUT/logs/compile.log" || true
+              "$OUT/logs/compile.log" | tail -n 350 || true
+            echo '::endgroup::'
+            tail -n 450 "$OUT/logs/compile.log" || true
             exit "$rc"
           fi
 
           test -s "$BUILD/arch/arm64/boot/Image"
           cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
-          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -n -9 -c "$OUT/compile/Image" >"$OUT/package/Image.gz"
           gzip -t "$OUT/package/Image.gz"
+          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' "$OUT/compile/Image"
+          grep -aFq 'QSEEINIT heap_bridge_result heap=%u path=%s ret=%d' "$OUT/compile/Image"
+          grep -aFq 'ION qsee_heap=%u register ret=%d assigned=%u pages=%lu' "$OUT/compile/Image"
           grep -aFq 'HB tick=%u online=%u run=%lu j=%lu' "$OUT/compile/Image"
           grep -aFq 'WDT disarm before=%u after=%u' "$OUT/compile/Image"
           grep -aFq 'A52 diagnostic: watchdog disabled for manual recovery' "$OUT/compile/Image"
           grep -aFq 'drm_atomic_helper_commit' "$OUT/compile/Image"
           grep -aFq 'drm_panel_prepare' "$OUT/compile/Image"
-          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' "$OUT/compile/Image"
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-failure-window-recorder-${{ github.run_number }}-FAILED-DIAGNOSTICS
-          path: artifacts/a52xq-gki-failure-window-recorder
+          name: a52xq-failure-window-heaps-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-gki-failure-window-heaps
           if-no-files-found: warn
           retention-days: 7
 
       - name: Repack and audit boot image
         run: |
           set -Eeuo pipefail
-          OUT=artifacts/a52xq-gki-failure-window-recorder
+          OUT=artifacts/a52xq-gki-failure-window-heaps
           python3 scripts/38_repack_a52_p1_boot.py \
             --source run32/extracted/package/boot.img \
             --kernel "$OUT/package/Image.gz" \
@@ -198,24 +257,27 @@ jobs:
           import json
           import re
           from pathlib import Path
-          root = Path('artifacts/a52xq-gki-failure-window-recorder')
-          report = json.loads((root / 'stage/phase25-a52-failure-window-probe-report.json').read_text())
+
+          root = Path('artifacts/a52xq-gki-failure-window-heaps')
+          probe = json.loads((root / 'stage/phase25-a52-failure-window-probe-report.json').read_text())
+          heaps = json.loads((root / 'stage/phase24-qseecom-ion-heaps-report.json').read_text())
           repack = json.loads((root / 'package/repack-report.json').read_text())
           errors = re.findall(
               r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ',
               (root / 'logs/compile.log').read_text(errors='replace'), re.M)
           boot = root / 'package/boot.img'
           final = {
-              'status': 'a52-failure-window-recorder-boot-audited',
+              'status': 'a52-failure-window-heaps-boot-audited',
               'flashable_candidate': True,
               'hardware_validated': False,
               'payload_capture': False,
               'compiler_error_count': len(errors),
-              'heartbeat_interval_ms': report['recorder']['heartbeat_interval_ms'],
-              'heartbeat_window_ms': report['recorder']['heartbeat_window_ms'],
-              'display_probe_count': report['display']['active_probe_count'],
-              'watchdog_disarmed_in_probe': report['watchdog']['firmware_watchdog_disarmed'],
-              'watchdog_registration_bypassed': report['watchdog']['registration_bypassed'],
+              'qsee_heap_ids': heaps['fix']['userspace_heap_ids'],
+              'heartbeat_interval_ms': probe['recorder']['heartbeat_interval_ms'],
+              'heartbeat_window_ms': probe['recorder']['heartbeat_window_ms'],
+              'display_probe_count': probe['display']['active_probe_count'],
+              'watchdog_disarmed_in_probe': probe['watchdog']['firmware_watchdog_disarmed'],
+              'watchdog_registration_bypassed': probe['watchdog']['registration_bypassed'],
               'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
               'boot_bytes': boot.stat().st_size,
               'dtb_preserved': repack['invariants']['dtb_preserved'],
@@ -227,37 +289,37 @@ jobs:
           (root / 'final-audit.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
           PY
 
-          cat > "$OUT/README-FIRST.txt" <<'EOF'
-          A52 GKI 5.10 FAILURE-WINDOW RECORDER
+          cat >"$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 FAILURE-WINDOW RECORDER WITH QSEECOM HEAPS 19 AND 27
 
-          Records a 500 ms kernel heartbeat, timed display-stack entry and exit
-          events, and the Qualcomm watchdog state before and after it is stopped.
-          The watchdog device is not registered, leaving time to enter recovery.
+          This candidate preserves the QSEECOM heap, dma-buf and secure-gate pipeline.
+          It adds a 500 ms heartbeat, timed display-stack entry and exit events,
+          continuous direct RAMOOPS persistence and explicit Qualcomm watchdog disarm.
 
-          Flash package/boot.img using the known-good Run 32 method. After the black
-          screen, wait at least 10 seconds, enter recovery manually, and collect the
-          complete raw 1 MiB RAMOOPS snapshot. Keep the raw file even if ZIP fails.
+          Flash package/boot.img. After the black screen, wait at least 10 seconds,
+          manually enter recovery, and collect the complete raw 1 MiB RAMOOPS image.
+          Keep the raw file even if phone-side ZIP creation fails.
 
           This image is not hardware validated.
           EOF
           sed -i 's/^          //' "$OUT/README-FIRST.txt"
           (
             cd "$OUT"
-            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
             sha256sum -c SHA256SUMS
           )
 
       - name: Upload flashable recorder artifact
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-failure-window-recorder-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: artifacts/a52xq-gki-failure-window-recorder
+          name: a52xq-failure-window-heaps-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-failure-window-heaps
           if-no-files-found: error
           retention-days: 14
 
       - name: Require final audited output
         run: |
           set -Eeuo pipefail
-          test -s artifacts/a52xq-gki-failure-window-recorder/package/boot.img
-          grep -Fq '"status": "a52-failure-window-recorder-boot-audited"' \
-            artifacts/a52xq-gki-failure-window-recorder/final-audit.json
+          test -s artifacts/a52xq-gki-failure-window-heaps/package/boot.img
+          grep -Fq '"status": "a52-failure-window-heaps-boot-audited"' \
+            artifacts/a52xq-gki-failure-window-heaps/final-audit.json

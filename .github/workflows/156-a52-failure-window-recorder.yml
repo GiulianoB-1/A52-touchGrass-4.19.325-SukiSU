@@ -4,6 +4,13 @@ run-name: Build targeted black-screen recorder from agent/a52-keymaster-real-ion
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/154_apply_a52xq_failure_window_probe.py
+      - scripts/141_apply_a52xq_ack_secure_parameter_probe.py
+      - .github/workflows/156-a52-failure-window-recorder.yml
   push:
     branches:
       - main
@@ -15,7 +22,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: a52-failure-window-recorder
+  group: a52-failure-window-recorder-${{ github.event.pull_request.number || 'main' }}
   cancel-in-progress: true
 
 env:

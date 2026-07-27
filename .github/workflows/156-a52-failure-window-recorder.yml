@@ -1,0 +1,19 @@
+name: 156 - A52 failure-window recorder without watchdog
+
+run-name: Select the failure-window recorder feature branch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-feature-branch:
+    name: Select the recorder branch when dispatching
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prevent accidental main-branch build
+        run: |
+          echo "This default-branch file registers Workflow 156 in the Actions UI."
+          echo "Run it with branch agent/a52-keymaster-real-ion to use the full workflow."

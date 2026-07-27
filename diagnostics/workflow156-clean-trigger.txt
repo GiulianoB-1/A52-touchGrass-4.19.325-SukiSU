@@ -1,1 +1,1 @@
-Trigger Workflow 158 to compare the active ACK drivers/a52_display initialization path against the exact working TouchGrass 4.19 source.
+Trigger Workflow 158 extended audit for active display source, device tree, clocks, regulators, continuous splash and configuration parity.

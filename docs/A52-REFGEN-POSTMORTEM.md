@@ -34,10 +34,44 @@ a warning.
 
 No further speculative REFGEN change should be made before the device test.
 
+## Non-destructive hardware-test validation
+
+Before flashing, validate the extracted hardware-test kit locally:
+
+```bash
+python3 tools/a52-refgen/validate-a52-refgen-hardware-inputs.py candidate /path/to/extracted-kit
+```
+
+On Windows, the packaged kit provides:
+
+```bat
+tools\preflight_a52_refgen_candidate.bat
+```
+
+The preflight verifies the exact audited `boot.img` size and SHA-256, required
+analysis tools, and the complete kit checksum manifest. It never communicates
+with the phone and never flashes anything.
+
+After collection, validate the untouched collector ZIP or directory before
+analysis:
+
+```bash
+python3 tools/a52-refgen/validate-a52-refgen-hardware-inputs.py capture A52_RAW_RAMOOPS_*.zip
+```
+
+A full capture must include the raw 1 MiB image, exporter status, recovery
+identity, recovery dmesg, pstore listing, and collector checksum manifest. A raw
+image by itself remains analysable, but the validator reports that the recovery
+and exporter context is incomplete.
+
+The validator rejects incorrect boot hashes, incorrect RAMOOPS size, checksum
+mismatches, missing full-capture evidence, malformed archives, and ZIP path
+traversal. It is metadata-only and non-destructive.
+
 ## Inputs
 
 The preferred input is the untouched `ramoops-raw-1MiB.bin` capture. Place the
-analyzer beside these existing tools from the v2 test kit:
+analyzer beside these existing tools from the hardware-test kit:
 
 - `decode-a52-unified-secure-recorder.py`
 - `decode-a52-mirrored-ramoops-v2.py`
@@ -65,15 +99,17 @@ python3 diagnose-a52-refgen-display.py \
 - `diagnosis.md`: readable verdict and next action
 - `diagnosis.json`: complete structured evidence, including task context for display scopes
 - `critical-timeline.csv`: ordered REFGEN, display, heartbeat, and watchdog events
+- `candidate-preflight.json`: local candidate and kit-integrity result
+- `a52-refgen-capture-intake.json`: collector completeness and checksum result
 
 ## Decision boundary
 
 A stable screen after a successful REFGEN enable supports the missing-provider
 hypothesis. A black screen with an unmatched display scope moves the next patch
 to that one function and task context. A REFGEN probe failure moves the patch to
-the recorded probe stage. Missing recorder evidence triggers a collection retry,
-not another kernel change.
+the recorded probe stage. Missing or damaged recorder evidence triggers a
+collection retry, not another kernel change.
 
-The analyzer processes recorder metadata only. It does not recover secure
-payloads, keys, authentication tokens, command buffers, response buffers, or
-process memory.
+The analyzer and validator process recorder metadata only. They do not recover
+secure payloads, keys, authentication tokens, command buffers, response buffers,
+or process memory.

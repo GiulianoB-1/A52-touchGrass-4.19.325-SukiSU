@@ -1,6 +1,6 @@
 name: 162 - A52 REFGEN postmortem analyzer
 
-run-name: Validate metadata-only REFGEN and display diagnosis tooling
+run-name: Validate metadata-only REFGEN hardware-test and diagnosis tooling
 
 on:
   workflow_dispatch:
@@ -9,14 +9,21 @@ on:
       - agent/a52-keymaster-real-ion
     paths:
       - tools/a52-refgen/diagnose-a52-refgen-display.py
+      - tools/a52-refgen/validate-a52-refgen-hardware-inputs.py
+      - tools/a52-refgen/preflight_a52_refgen_candidate.bat
+      - tools/a52-refgen/validate_a52_refgen_capture.bat
       - docs/A52-REFGEN-POSTMORTEM.md
       - .github/workflows/162-a52-refgen-postmortem-analyzer.yml
   push:
     branches:
       - agent/a52-refgen-postmortem-analyzer
       - agent/a52-refgen-context-aware-analyzer
+      - agent/a52-refgen-hardware-intake-validator
     paths:
       - tools/a52-refgen/diagnose-a52-refgen-display.py
+      - tools/a52-refgen/validate-a52-refgen-hardware-inputs.py
+      - tools/a52-refgen/preflight_a52_refgen_candidate.bat
+      - tools/a52-refgen/validate_a52_refgen_capture.bat
       - docs/A52-REFGEN-POSTMORTEM.md
       - .github/workflows/162-a52-refgen-postmortem-analyzer.yml
 
@@ -29,7 +36,7 @@ concurrency:
 
 jobs:
   analyzer-self-test:
-    name: Compile and self-test REFGEN diagnosis
+    name: Compile and self-test REFGEN hardware-test tooling
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
@@ -37,10 +44,22 @@ jobs:
       - name: Check out tooling branch
         uses: actions/checkout@v4
 
-      - name: Compile analyzer
+      - name: Compile Python tools
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile tools/a52-refgen/diagnose-a52-refgen-display.py
+          python3 -m py_compile \
+            tools/a52-refgen/diagnose-a52-refgen-display.py \
+            tools/a52-refgen/validate-a52-refgen-hardware-inputs.py
+
+      - name: Run validator safety tests
+        run: |
+          set -Eeuo pipefail
+          python3 tools/a52-refgen/validate-a52-refgen-hardware-inputs.py self-test \
+            | tee validator-self-test.json
+          grep -Fq '"status": "self-test-passed"' validator-self-test.json
+          grep -Fq '"name": "candidate_corruption"' validator-self-test.json
+          grep -Fq '"name": "capture_corruption"' validator-self-test.json
+          grep -Fq '"name": "zip_traversal_rejected"' validator-self-test.json
 
       - name: Run built-in verdict tests
         run: |
@@ -107,11 +126,20 @@ jobs:
           assert unmatched[0]['tgid'] == 200
           PY
 
-      - name: Enforce metadata-only contract
+      - name: Enforce non-destructive metadata-only contract
         run: |
           set -Eeuo pipefail
           grep -Fq 'metadata-only; no secure payloads' \
             tools/a52-refgen/diagnose-a52-refgen-display.py
+          grep -Fq 'This tool is deliberately non-destructive' \
+            tools/a52-refgen/validate-a52-refgen-hardware-inputs.py
+          if grep -niE 'adb[[:space:]]+shell[[:space:]]+(dd|flash)|fastboot[[:space:]]+flash|heimdall[[:space:]]+flash|(^|[^[:alnum:]_])odin([^[:alnum:]_]|$)' \
+              tools/a52-refgen/validate-a52-refgen-hardware-inputs.py \
+              tools/a52-refgen/preflight_a52_refgen_candidate.bat \
+              tools/a52-refgen/validate_a52_refgen_capture.bat; then
+            echo 'Unexpected flashing command found in validation tooling' >&2
+            exit 1
+          fi
           if grep -nE 'command buffer|response buffer|key material|process memory dump' \
               tools/a52-refgen/diagnose-a52-refgen-display.py; then
             echo 'Unexpected payload-capture language found' >&2

@@ -1,0 +1,300 @@
+name: 137 - Fix RAMOOPS writer tabs and rebuild
+
+on:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/137-fix-ramoops-writer-tabs-and-build.yml
+
+permissions:
+  actions: write
+  contents: write
+  statuses: write
+
+jobs:
+  fix-build-observe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    steps:
+      - name: Check out current diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-keymaster-real-ion
+          fetch-depth: 0
+
+      - name: Normalize raw indentation in generated RAMOOPS writer
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py')
+          text = path.read_text(encoding='utf-8')
+          marker = 'addition = addition.replace(r"\\t", "\t")'
+          if marker not in text:
+              anchor = '''    updated, changed = replace_once_or_verify(
+              text,
+              anchor,
+              addition,
+              MARKER,
+              "ramoops persistent writer",
+          )
+          '''
+              if text.count(anchor) != 1:
+                  raise SystemExit(
+                      f'expected one RAMOOPS writer replacement anchor, found {text.count(anchor)}'
+                  )
+              replacement = (
+                  '    # The writer template is raw. Convert only indentation escapes '
+                  'before inserting C source.\n'
+                  '    addition = addition.replace(r"\\t", "\t")\n'
+                  '    if r"\\t" in addition:\n'
+                  '        raise SystemExit("RAMOOPS writer still contains literal tab escapes")\n\n'
+                  + anchor
+              )
+              text = text.replace(anchor, replacement, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py
+          python3 - <<'PY'
+          import runpy
+          ns = runpy.run_path(
+              'scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py',
+              run_name='a52_persistence_validation',
+          )
+          ns['self_test']()
+          print('persistence self-test: PASS')
+          PY
+          grep -Fq 'addition = addition.replace(r"\t", "' \
+            scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py
+
+      - name: Commit focused generator fix
+        id: commit
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/127_apply_touchgrass_failed_boot_keymaster_persistence.py
+          git commit -m 'Normalize generated RAMOOPS writer indentation'
+          fix_sha="$(git rev-parse HEAD)"
+          git push origin HEAD:agent/a52-keymaster-real-ion
+          printf 'fix_sha=%s\n' "$fix_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Publish queued status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIX_SHA: ${{ steps.commit.outputs.fix_sha }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${FIX_SHA}" \
+            --data "{\"state\":\"pending\",\"context\":\"workflow-125-persistent\",\"description\":\"RAMOOPS writer fix build is queued\",\"target_url\":\"https://github.com/${GITHUB_REPOSITORY}/actions\"}"
+
+      - name: Dispatch corrected Workflow 125
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/125-touchgrass-4.19-keymaster-flight-recorder.yml/dispatches" \
+            --data "{\"ref\":\"${GITHUB_REF_NAME}\"}"
+
+      - name: Discover, link and wait for Workflow 125
+        id: observe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIX_SHA: ${{ steps.commit.outputs.fix_sha }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.parse
+          import urllib.request
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = os.environ['GITHUB_REF_NAME']
+          sha = os.environ['FIX_SHA']
+          token = os.environ['GH_TOKEN']
+          output = os.environ['GITHUB_OUTPUT']
+          workflow = '125-touchgrass-4.19-keymaster-flight-recorder.yml'
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'workflow-137-observer',
+              'Content-Type': 'application/json',
+          }
+
+          def api(url: str, data: dict | None = None) -> dict:
+              body = None if data is None else json.dumps(data).encode()
+              request = urllib.request.Request(url, data=body, headers=headers)
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else {}
+
+          encoded_branch = urllib.parse.quote(branch, safe='')
+          list_url = (
+              f'https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs'
+              f'?branch={encoded_branch}&event=workflow_dispatch&per_page=40'
+          )
+          selected = None
+          for _ in range(90):
+              candidates = [
+                  run for run in api(list_url).get('workflow_runs', [])
+                  if run.get('head_sha') == sha
+                  and run.get('event') == 'workflow_dispatch'
+              ]
+              if candidates:
+                  selected = max(candidates, key=lambda run: run['id'])
+                  break
+              time.sleep(5)
+
+          if selected is None:
+              with open(output, 'a', encoding='utf-8') as handle:
+                  handle.write('conclusion=not_found\n')
+                  handle.write(f'run_url=https://github.com/{repo}/actions\n')
+              raise SystemExit(0)
+
+          run_id = selected['id']
+          run_url = selected['html_url']
+          api(
+              f'https://api.github.com/repos/{repo}/statuses/{sha}',
+              {
+                  'state': 'pending',
+                  'context': 'workflow-125-persistent',
+                  'description': f'Workflow 125 run {run_id} is active',
+                  'target_url': run_url,
+              },
+          )
+          conclusion = 'timeout'
+          for _ in range(360):
+              run = api(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}')
+              if run.get('status') == 'completed':
+                  conclusion = run.get('conclusion') or 'unknown'
+                  break
+              time.sleep(10)
+
+          with open(output, 'a', encoding='utf-8') as handle:
+              handle.write(f'run_id={run_id}\n')
+              handle.write(f'run_url={run_url}\n')
+              handle.write(f'conclusion={conclusion}\n')
+          print(f'Workflow 125 run {run_id}: {conclusion} - {run_url}')
+          PY
+
+      - name: Extract failure diagnostics
+        if: steps.observe.outputs.conclusion != 'success' && steps.observe.outputs.run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.observe.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p diagnostics .workflow137
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            > .workflow137/jobs.json
+          job_id="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          jobs = json.loads(Path('.workflow137/jobs.json').read_text()).get('jobs', [])
+          selected = [job for job in jobs if job.get('conclusion') == 'failure'] or jobs
+          if not selected:
+              raise SystemExit('no job found')
+          print(selected[0]['id'])
+          PY
+          )"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" \
+            --output .workflow137/job-log.bin
+          python3 - <<'PY'
+          import io
+          import os
+          import re
+          import zipfile
+          from pathlib import Path
+          run_id = os.environ['RUN_ID']
+          raw = Path('.workflow137/job-log.bin').read_bytes()
+          if zipfile.is_zipfile(io.BytesIO(raw)):
+              chunks = []
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  for name in sorted(archive.namelist()):
+                      if not name.endswith('/'):
+                          chunks.append(archive.read(name).decode('utf-8', errors='replace'))
+              text = '\n'.join(chunks)
+          else:
+              text = raw.decode('utf-8', errors='replace')
+          lines = text.splitlines()
+          pattern = re.compile(
+              r'(error|failed|failure|traceback|systemexit|assertion|calledprocess|'
+              r'expected|missing|audit|exception|non-zero|exit code)', re.I
+          )
+          interesting = [line for line in lines if pattern.search(line)]
+          report = [
+              f'Workflow 125 failed run: {run_id}',
+              f'Total decoded log lines: {len(lines)}',
+              '', '=== Interesting lines ===', *interesting[-240:],
+              '', '=== Final 340 lines ===', *lines[-340:], ''
+          ]
+          Path(f'diagnostics/workflow125-run-{run_id}-failure.txt').write_text(
+              '\n'.join(report), encoding='utf-8'
+          )
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "diagnostics/workflow125-run-${RUN_ID}-failure.txt"
+          git commit -m "Record Workflow 125 run ${RUN_ID} failure"
+          git push origin HEAD:agent/a52-keymaster-real-ion
+
+      - name: Publish final status
+        if: always() && steps.commit.outputs.fix_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIX_SHA: ${{ steps.commit.outputs.fix_sha }}
+          CONCLUSION: ${{ steps.observe.outputs.conclusion }}
+          RUN_URL: ${{ steps.observe.outputs.run_url }}
+        run: |
+          set -Eeuo pipefail
+          conclusion="${CONCLUSION:-observer_failed}"
+          run_url="${RUN_URL:-https://github.com/${GITHUB_REPOSITORY}/actions}"
+          if [ "$conclusion" = success ]; then
+            state=success
+            description='Persistent Workflow 125 passed'
+          else
+            state=failure
+            description="Persistent Workflow 125: ${conclusion}"
+          fi
+          payload="$(python3 - "$state" "$description" "$run_url" <<'PY'
+          import json
+          import sys
+          print(json.dumps({
+              'state': sys.argv[1],
+              'context': 'workflow-125-persistent',
+              'description': sys.argv[2][:140],
+              'target_url': sys.argv[3],
+          }))
+          PY
+          )"
+          curl --fail --silent --show-error --location \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${FIX_SHA}" \
+            --data "$payload"
+          test "$state" = success

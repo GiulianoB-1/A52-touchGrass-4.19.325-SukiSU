@@ -1,0 +1,422 @@
+name: 140 - A52 GKI 5.10 unified secure startup recorder
+
+run-name: Build one mirrored persistent ACK secure-startup recorder
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/140-a52-gki-5.10-unified-secure-recorder.yml
+      - scripts/140_apply_a52xq_unified_secure_startup_recorder.py
+      - scripts/140_decode_a52xq_unified_secure_recorder.py
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/140-a52-gki-5.10-unified-secure-recorder.yml
+      - scripts/140_apply_a52xq_unified_secure_startup_recorder.py
+      - scripts/140_decode_a52xq_unified_secure_recorder.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-unified-secure-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+  WORKFLOW115_ARTIFACT_ID: '8611526403'
+  DT_BACKED_BOOT_ARTIFACT_ID: '8619563453'
+  DT_BACKED_BOOT_SHA256: '51fb690590be4a6c79e01953de6b648868431e73e50974827b584b9f214fbb78'
+
+jobs:
+  build-package:
+    name: Compile and package one audited unified ACK recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate recorder tools
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves device-tree-compiler
+          python3 -m py_compile \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/103_apply_a52xq_phase1_compat.py \
+            scripts/104_apply_a52xq_phase2_kernel_api.py \
+            scripts/105_apply_a52xq_display_contract.py \
+            scripts/106_apply_a52xq_prfmt_pm_qos.py \
+            scripts/107_apply_a52xq_clk_div_debugfs.py \
+            scripts/108_apply_a52xq_v4l2_format_abi.py \
+            scripts/109_apply_a52xq_mmio_drm_helpers.py \
+            scripts/110_apply_a52xq_cache_fallbacks.py \
+            scripts/111_apply_a52xq_secure_ion_highmem.py \
+            scripts/112_apply_a52xq_ddr_topology.py \
+            scripts/113_apply_a52xq_clk_set_flags.py \
+            scripts/114_apply_a52xq_drm_legacy_fields.py \
+            scripts/115_apply_a52xq_all_known_compat.py \
+            scripts/115_apply_a52xq_all_known_compat_base.py \
+            scripts/115_apply_a52xq_secondary_compat.py \
+            scripts/116_apply_a52xq_final_residuals.py \
+            scripts/123_apply_a52xq_legacy_ion_free_compat.py \
+            scripts/124_apply_a52xq_ion_qsee_runtime_trace.py \
+            scripts/140_apply_a52xq_unified_secure_startup_recorder.py \
+            scripts/140_decode_a52xq_unified_secure_recorder.py \
+            scripts/38_repack_a52_p1_boot.py
+          rm -rf /tmp/a52-decoder-test
+          mkdir -p /tmp/a52-decoder-test
+          cat > /tmp/a52-decoder-test/raw.bin <<'EOF'
+          A52USR2 seq=1 ns=100 pid=1 tgid=1 cpu=0 comm=init msg=QSEEINIT A52USR2 enter fn=qseecom_probe stage=probe commit=5a52c0de
+          A52USR2 seq=1 ns=100 pid=1 tgid=1 cpu=0 comm=init msg=QSEEINIT A52USR2 enter fn=qseecom_probe stage=probe commit=5a52c0de
+          A52USR2 seq=2 ns=200 pid=2 tgid=2 cpu=1 comm=skeymast msg=QSEE exit fn=qseecom_ioctl cmd=0xc0209703 ret=0 commit=5a52c0de
+          A52USR2 seq=2 ns=200 pid=2 tgid=2 cpu=1 comm=skeymast msg=QSEE exit fn=qseecom_ioctl cmd=0xc0209703 ret=0 commit=5a52c0de
+          EOF
+          python3 scripts/140_decode_a52xq_unified_secure_recorder.py \
+            /tmp/a52-decoder-test/raw.bin --output /tmp/a52-decoder-test/out
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          state = json.loads(Path('/tmp/a52-decoder-test/out/summary.json').read_text())
+          assert state['stats']['unique_events'] == 2
+          assert state['stats']['raw_event_copies'] == 4
+          assert state['mirroring']['events_with_two_or_more_copies'] == 2
+          assert state['sequence']['gaps'] == []
+          assert state['domains']['QSEEINIT'] == 1
+          assert state['domains']['QSEE'] == 1
+          PY
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download verified baseline artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          download() {
+            local name="$1" id="$2"
+            mkdir -p "${name}/extracted"
+            curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "${name}/artifact.zip"
+            unzip -q "${name}/artifact.zip" -d "${name}/extracted"
+            (cd "${name}/extracted" && sha256sum -c SHA256SUMS)
+          }
+          download workflow99 "${WORKFLOW99_ARTIFACT_ID}"
+          download workflow100 "${WORKFLOW100_ARTIFACT_ID}"
+          download workflow115 "${WORKFLOW115_ARTIFACT_ID}"
+          download dtboot "${DT_BACKED_BOOT_ARTIFACT_ID}"
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow115/extracted/config/final.config
+          test -s dtboot/extracted/boot.img
+          echo "${DT_BACKED_BOOT_SHA256}  dtboot/extracted/boot.img" | sha256sum -c -
+
+      - name: Recreate source and stage unified secure recorder
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply "$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+
+          OUT=artifacts/a52xq-gki-unified-secure-recorder
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package" "$OUT/tools"
+          python3 scripts/a52xq_downstream_port_probe_v3.py \
+            --touchgrass touchgrass --gki gki/common \
+            --dts workflow100/extracted/preserved.dts --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage-port.log"
+          python3 scripts/103_apply_a52xq_phase1_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/104_apply_a52xq_phase2_kernel_api.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/105_apply_a52xq_display_contract.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/106_apply_a52xq_prfmt_pm_qos.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/107_apply_a52xq_clk_div_debugfs.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/108_apply_a52xq_v4l2_format_abi.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/109_apply_a52xq_mmio_drm_helpers.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/110_apply_a52xq_cache_fallbacks.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/111_apply_a52xq_secure_ion_highmem.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/112_apply_a52xq_ddr_topology.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/113_apply_a52xq_clk_set_flags.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/114_apply_a52xq_drm_legacy_fields.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/115_apply_a52xq_all_known_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/116_apply_a52xq_final_residuals.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/123_apply_a52xq_legacy_ion_free_compat.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/140_apply_a52xq_unified_secure_startup_recorder.py \
+            --gki gki/common --output "$OUT/stage"
+          cp scripts/140_decode_a52xq_unified_secure_recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-unified-secure-recorder/stage')
+          ion = json.loads((root / 'phase15-legacy-ion-free-report.json').read_text())
+          trace = json.loads((root / 'phase17-ack-unified-secure-recorder-report.json').read_text())
+          assert ion['status'] == 'legacy-ion-free-compat-retired'
+          assert ion['checks']['disproven_noop_absent'] is True
+          assert ion['checks']['fd_returning_allocation_present'] is True
+          assert trace['status'] == 'ack-unified-secure-startup-recorder-v2-staged'
+          assert trace['recorder']['capacity'] == 768
+          assert trace['recorder']['checks']['immediate_write'] is True
+          assert trace['recorder']['checks']['early_retry'] is True
+          assert trace['recorder']['checks']['event_driven_early_retry'] is True
+          assert trace['recorder']['checks']['device_retry'] is True
+          assert trace['recorder']['checks']['late_retry'] is True
+          assert trace['recorder']['checks']['no_delayed_work'] is True
+          assert trace['recorder']['checks']['real_newline_delimiter'] is True
+          assert trace['ramoops']['checks']['direct_writer_exported'] is True
+          assert trace['ramoops']['checks']['console_bank_reserved'] is True
+          assert trace['ramoops']['checks']['ftrace_bank_reserved'] is True
+          for group in ('qsee_init', 'qsee_memory', 'qsee_scm', 'shmbridge', 'secure_buffer'):
+              item = trace['boundaries'][group]
+              assert item['missing_file'] is False
+              assert any(fn['entry'] != 'missing' for fn in item['functions'])
+          assert trace['privacy']['metadata_only'] is True
+          assert trace['privacy']['captures_key_material'] is False
+          PY
+
+          grep -Fq 'A52_ACK_UNIFIED_SECURE_RECORDER_V2' gki/common/fs/pstore/ram.c
+          grep -Fq 'reserve mirrored bank A' gki/common/fs/pstore/ram.c
+          grep -Fq 'reserve mirrored bank B' gki/common/fs/pstore/ram.c
+          grep -Fq 'a52_usr2_persist_event(&event, A52_USR2_BANK_BOTH)' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          ! grep -Fq 'schedule_delayed_work' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'A52USR2 enter fn=qseecom_probe' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'A52USR2 enter fn=qseecom_dmabuf_map' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'A52USR2 enter fn=qtee_shmbridge_register' \
+            gki/common/drivers/a52_secure/qtee_shmbridge.c
+          grep -Fq 'A52USR2 enter fn=__hyp_assign_table' \
+            gki/common/drivers/a52_secure/secure_buffer.c
+          grep -Fq 'A52USR2 enter fn=__qseecom_scm_call2_locked' \
+            gki/common/drivers/a52_secure/qseecom.c
+          ! grep -R -F 'a52_persistent_diag_mark("A52' \
+            gki/common --include='*.c' --include='*.h'
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/full-source.patch"
+
+      - name: Resolve configuration and compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-unified-secure-recorder"
+          BUILD="$PWD/workspace/gki-unified-secure-recorder-out"
+          mkdir -p "$BUILD"
+          cp workflow115/extracted/config/final.config "$BUILD/.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "::group::Compiler errors"
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            echo "::endgroup::"
+            echo "::group::Compile log tail"
+            tail -n 400 "$OUT/logs/compile.log" || true
+            echo "::endgroup::"
+            exit "$rc"
+          fi
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          grep -aFq 'A52USR2 seq=%llu' "$OUT/compile/Image"
+          grep -aFq 'unified secure recorder enabled' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=qseecom_probe' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=qseecom_dmabuf_map' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=qtee_shmbridge_register' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=__hyp_assign_table' "$OUT/compile/Image"
+          grep -aFq 'A52USR2 enter fn=__qseecom_scm_call2_locked' "$OUT/compile/Image"
+          grep -aFq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' "$OUT/compile/Image"
+          grep -aFq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' "$OUT/compile/Image"
+          ! grep -aFq 'A52ACKFR BEGIN pass=%u' "$OUT/compile/Image"
+          ! grep -aFq 'a52_ion_compat: accepted legacy ION_IOC_FREE' "$OUT/compile/Image"
+
+      - name: Upload failed compile diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-unified-secure-recorder-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-unified-secure-recorder/logs
+            artifacts/a52xq-gki-unified-secure-recorder/compile/make-return-code.txt
+            artifacts/a52xq-gki-unified-secure-recorder/config/final.config
+            artifacts/a52xq-gki-unified-secure-recorder/stage/full-source.patch
+            artifacts/a52xq-gki-unified-secure-recorder/stage/phase17-ack-unified-secure-recorder-report.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Audit compile and package boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-unified-secure-recorder
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-unified-secure-recorder')
+          pattern = re.compile(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', re.M)
+          text = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = pattern.findall(text)
+          state = {
+              'status': 'ack-unified-secure-recorder-compile-complete',
+              'compiler_error_count': len(errors),
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'image_built': (root / 'compile/Image').stat().st_size > 0,
+              'hardware_validated': False,
+          }
+          (root / 'compile/compile-state.json').write_text(json.dumps(state, indent=2) + '\n')
+          if state['compiler_error_count'] or state['make_return_code']:
+              raise SystemExit(f'compile audit failed: {state}')
+          PY
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source dtboot/extracted/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+          grep -Fq '"dtb_preserved": true' "$OUT/package/repack-report.json"
+          grep -Fq '"flashable_candidate": true' "$OUT/package/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-gki-unified-secure-recorder')
+          boot = root / 'package/boot.img'
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          trace = json.loads((root / 'stage/phase17-ack-unified-secure-recorder-report.json').read_text())
+          final = {
+              'status': 'ack-unified-secure-recorder-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'reference_ion_free_result': '-ENOTTY',
+              'reference_ion_alloc_ioctl': '0xc0184900',
+              'reference_qsee_send_cmd_ioctl': '0xc0209703',
+              'recorder_format': 'A52USR2',
+              'recorder_capacity': trace['recorder']['capacity'],
+              'persistent_banks': trace['recorder']['banks'],
+              'immediate_persistence': trace['recorder']['checks']['immediate_write'],
+              'delayed_dump_dependency': False,
+              'metadata_only': trace['privacy']['metadata_only'],
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'source_boot_sha256': repack['source_sha256'],
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
+          }
+          (root / 'final-audit.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 UNIFIED SECURE-STARTUP RECORDER V2
+
+          This supersedes the delayed A52ACKFR recorder. Each bounded event is
+          written immediately into two mirrored RAMOOPS zones: console and ftrace.
+          The in-memory array retries only events emitted before RAMOOPS is ready.
+
+          Captured metadata includes:
+          - exact QSEECOM probe and initialization stages
+          - ION ioctl and allocation entry/return data
+          - QSEECOM open, ioctl, app lifecycle and SEND_CMD paths
+          - dma-buf mapping, CPU mapping, cache and unmap paths
+          - QTEE shared-memory bridge operations
+          - secure-buffer and hyp_assign transitions
+          - QSEECOM-specific SCM IDs, argument descriptors and return values
+          - timestamp, sequence, PID, TGID, CPU and task name
+
+          It never records command/response buffers, keys, authentication tokens,
+          process memory or payload contents.
+
+          Test procedure:
+          1. Back up the current boot partition.
+          2. Flash package/boot.img to boot.
+          3. Attempt one Android boot. No timed dump wait is required.
+          4. Reboot directly to OrangeFox without flashing another kernel.
+          5. Run the expanded RAMOOPS collector.
+          6. Upload the collector archive. The included decoder can also be run as:
+             python3 tools/decode-a52-unified-secure-recorder.py <archive-or-files> --output decoded
+
+          This image is compiled and audited but not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload single unified recorder artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-unified-secure-recorder-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-unified-secure-recorder
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final audited output
+        run: |
+          set -Eeuo pipefail
+          test -s artifacts/a52xq-gki-unified-secure-recorder/package/boot.img
+          test -s artifacts/a52xq-gki-unified-secure-recorder/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq '"status": "ack-unified-secure-recorder-boot-audited"' \
+            artifacts/a52xq-gki-unified-secure-recorder/final-audit.json
+          grep -Fq '"delayed_dump_dependency": false' \
+            artifacts/a52xq-gki-unified-secure-recorder/final-audit.json

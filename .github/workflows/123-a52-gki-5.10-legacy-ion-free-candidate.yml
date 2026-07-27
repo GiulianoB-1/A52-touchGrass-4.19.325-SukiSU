@@ -1,0 +1,338 @@
+name: 123 - A52 GKI 5.10 secure flight recorder
+
+run-name: Build ACK secure-startup flight recorder against the TouchGrass reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-keymaster-real-ion
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-gki-secure-flight-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  WORKFLOW99_ARTIFACT_ID: '8590238316'
+  WORKFLOW100_ARTIFACT_ID: '8591698036'
+  WORKFLOW115_ARTIFACT_ID: '8611526403'
+  DT_BACKED_BOOT_ARTIFACT_ID: '8619563453'
+  DT_BACKED_BOOT_SHA256: '51fb690590be4a6c79e01953de6b648868431e73e50974827b584b9f214fbb78'
+
+jobs:
+  build-package:
+    name: Compile and package one audited ACK recorder candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves device-tree-compiler
+          python3 -m py_compile \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/103_apply_a52xq_phase1_compat.py \
+            scripts/104_apply_a52xq_phase2_kernel_api.py \
+            scripts/105_apply_a52xq_display_contract.py \
+            scripts/106_apply_a52xq_prfmt_pm_qos.py \
+            scripts/107_apply_a52xq_clk_div_debugfs.py \
+            scripts/108_apply_a52xq_v4l2_format_abi.py \
+            scripts/109_apply_a52xq_mmio_drm_helpers.py \
+            scripts/110_apply_a52xq_cache_fallbacks.py \
+            scripts/111_apply_a52xq_secure_ion_highmem.py \
+            scripts/112_apply_a52xq_ddr_topology.py \
+            scripts/113_apply_a52xq_clk_set_flags.py \
+            scripts/114_apply_a52xq_drm_legacy_fields.py \
+            scripts/115_apply_a52xq_all_known_compat.py \
+            scripts/115_apply_a52xq_all_known_compat_base.py \
+            scripts/115_apply_a52xq_secondary_compat.py \
+            scripts/116_apply_a52xq_final_residuals.py \
+            scripts/123_apply_a52xq_legacy_ion_free_compat.py \
+            scripts/124_apply_a52xq_ion_qsee_runtime_trace.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download verified baseline artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          download() {
+            local name="$1" id="$2"
+            mkdir -p "${name}/extracted"
+            curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              --output "${name}/artifact.zip"
+            unzip -q "${name}/artifact.zip" -d "${name}/extracted"
+            (cd "${name}/extracted" && sha256sum -c SHA256SUMS)
+          }
+          download workflow99 "${WORKFLOW99_ARTIFACT_ID}"
+          download workflow100 "${WORKFLOW100_ARTIFACT_ID}"
+          download workflow115 "${WORKFLOW115_ARTIFACT_ID}"
+          download dtboot "${DT_BACKED_BOOT_ARTIFACT_ID}"
+          test -s workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch
+          test -s workflow100/extracted/preserved.dts
+          test -s workflow115/extracted/config/final.config
+          test -s dtboot/extracted/boot.img
+          echo "${DT_BACKED_BOOT_SHA256}  dtboot/extracted/boot.img" | sha256sum -c -
+
+      - name: Recreate source and stage secure recorder
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply "$PWD/workflow99/extracted/full-integrated-rpmh-mode-abi-fix.patch"
+
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+
+          OUT=artifacts/a52xq-gki-secure-flight-recorder
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" "$OUT/package"
+          python3 scripts/a52xq_downstream_port_probe_v3.py \
+            --touchgrass touchgrass --gki gki/common \
+            --dts workflow100/extracted/preserved.dts --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/stage-port.log"
+          python3 scripts/103_apply_a52xq_phase1_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/104_apply_a52xq_phase2_kernel_api.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/105_apply_a52xq_display_contract.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/106_apply_a52xq_prfmt_pm_qos.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/107_apply_a52xq_clk_div_debugfs.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/108_apply_a52xq_v4l2_format_abi.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/109_apply_a52xq_mmio_drm_helpers.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/110_apply_a52xq_cache_fallbacks.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/111_apply_a52xq_secure_ion_highmem.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/112_apply_a52xq_ddr_topology.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/113_apply_a52xq_clk_set_flags.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/114_apply_a52xq_drm_legacy_fields.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/115_apply_a52xq_all_known_compat.py \
+            --touchgrass touchgrass --gki gki/common --output "$OUT/stage"
+          python3 scripts/116_apply_a52xq_final_residuals.py \
+            --gki gki/common --output "$OUT/stage"
+          python3 scripts/123_apply_a52xq_legacy_ion_free_compat.py \
+            --gki gki/common --output "$OUT/stage"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder/stage')
+          ion = json.loads((root / 'phase15-legacy-ion-free-report.json').read_text())
+          trace = json.loads((root / 'phase16-ack-secure-flight-recorder-report.json').read_text())
+          assert ion['status'] == 'legacy-ion-free-compat-retired'
+          assert ion['checks']['disproven_noop_absent'] is True
+          assert ion['checks']['fd_returning_allocation_present'] is True
+          assert trace['status'] == 'ack-secure-first-events-flight-recorder-staged'
+          assert trace['recorder']['capacity'] == 512
+          assert trace['recorder']['dump_delays_ms'] == [12000, 45000, 90000]
+          assert trace['breadcrumb_cleanup']['removed_calls'] > 0
+          assert trace['breadcrumb_cleanup']['remaining'] == 0
+          PY
+
+          ! grep -Fq 'A52_LEGACY_ION_FREE_IOCTL_COMPAT' \
+            gki/common/drivers/staging/android/ion/ion.c
+          grep -Fq 'A52_ACK_SECURE_FLIGHT_RECORDER' \
+            gki/common/drivers/a52_secure/Makefile
+          grep -Fq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' \
+            gki/common/drivers/a52_secure/qseecom.c
+          grep -Fq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' \
+            gki/common/drivers/staging/android/ion/ion.c
+          ! grep -R -F 'a52_persistent_diag_mark("A52' \
+            gki/common --include='*.c' --include='*.h'
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/full-source.patch"
+
+      - name: Resolve configuration and compile
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-gki-secure-flight-recorder"
+          BUILD="$PWD/workspace/gki-secure-flight-recorder-out"
+          mkdir -p "$BUILD"
+          cp workflow115/extracted/config/final.config "$BUILD/.config"
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "::group::Compiler errors"
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 250 || true
+            echo "::endgroup::"
+            echo "::group::Compile log tail"
+            tail -n 300 "$OUT/logs/compile.log" || true
+            echo "::endgroup::"
+            exit "$rc"
+          fi
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          grep -aFq 'A52 ACK 5.10 secure-startup flight recorder' "$OUT/compile/Image"
+          grep -aFq 'A52ACKFR BEGIN pass=%u' "$OUT/compile/Image"
+          grep -aFq 'QSEE exit fn=qseecom_ioctl cmd=0x%x ret=%ld' "$OUT/compile/Image"
+          grep -aFq 'ION enter fn=ion_alloc len=%zu heap_mask=0x%x flags=0x%x' "$OUT/compile/Image"
+          ! grep -aFq 'a52_ion_compat: accepted legacy ION_IOC_FREE' "$OUT/compile/Image"
+
+      - name: Upload failed compile diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-secure-flight-recorder-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: |
+            artifacts/a52xq-gki-secure-flight-recorder/logs
+            artifacts/a52xq-gki-secure-flight-recorder/compile/make-return-code.txt
+            artifacts/a52xq-gki-secure-flight-recorder/config/final.config
+            artifacts/a52xq-gki-secure-flight-recorder/stage/full-source.patch
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Audit compile and package boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-gki-secure-flight-recorder
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder')
+          pattern = re.compile(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', re.M)
+          text = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = pattern.findall(text)
+          state = {
+              'status': 'ack-secure-flight-recorder-compile-complete',
+              'compiler_error_count': len(errors),
+              'make_return_code': int((root / 'compile/make-return-code.txt').read_text()),
+              'image_built': (root / 'compile/Image').stat().st_size > 0,
+              'hardware_validated': False,
+          }
+          (root / 'compile/compile-state.json').write_text(json.dumps(state, indent=2) + '\n')
+          if state['compiler_error_count'] or state['make_return_code']:
+              raise SystemExit(f'compile audit failed: {state}')
+          PY
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source dtboot/extracted/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+          grep -Fq '"dtb_preserved": true' "$OUT/package/repack-report.json"
+          grep -Fq '"flashable_candidate": true' "$OUT/package/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-gki-secure-flight-recorder')
+          boot = root / 'package/boot.img'
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          trace = json.loads((root / 'stage/phase16-ack-secure-flight-recorder-report.json').read_text())
+          final = {
+              'status': 'ack-secure-flight-recorder-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'reference_ion_free_result': '-ENOTTY',
+              'reference_ion_alloc_ioctl': '0xc0184900',
+              'reference_qsee_send_cmd_ioctl': '0xc0209703',
+              'recorder_capacity': trace['recorder']['capacity'],
+              'persistent_dump_delays_ms': trace['recorder']['dump_delays_ms'],
+              'removed_obsolete_breadcrumb_calls': trace['breadcrumb_cleanup']['removed_calls'],
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'source_boot_sha256': repack['source_sha256'],
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+              'cmdline_preserved': repack['invariants']['cmdline_preserved'],
+          }
+          (root / 'final-audit.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 SECURE-STARTUP FLIGHT RECORDER
+
+          The successful TouchGrass reference rejects ION_IOC_FREE with -ENOTTY,
+          allocates through the 24-byte fd-returning ION_IOC_ALLOC ABI, and completes
+          QSEECOM SEND_CMD ioctl 0xc0209703 with return 0.
+
+          This ACK candidate keeps the same ION behaviour, removes obsolete high-volume
+          bring-up breadcrumbs, preserves the first 512 ION/QSEECOM events, and dumps
+          them directly into the existing persistent console at 12, 45 and 90 seconds.
+
+          This image is not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload single recorder artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-gki-5.10-secure-flight-recorder-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-gki-secure-flight-recorder
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final audited output
+        run: |
+          set -Eeuo pipefail
+          test -s artifacts/a52xq-gki-secure-flight-recorder/package/boot.img
+          grep -Fq '"status": "ack-secure-flight-recorder-boot-audited"' \
+            artifacts/a52xq-gki-secure-flight-recorder/final-audit.json

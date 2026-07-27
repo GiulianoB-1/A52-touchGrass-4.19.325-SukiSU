@@ -1,0 +1,289 @@
+name: 171 - A52 TouchGrass QSEECOM parity gate
+
+run-name: Build heap-19 mapping candidate after full TouchGrass contract audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-qseecom-ta-heap19-kmap
+    paths:
+      - .github/workflows/171-a52-touchgrass-qseecom-parity.yml
+      - scripts/169_apply_a52_heap19_kernel_map.py
+      - scripts/171_audit_touchgrass_qseecom_contract.py
+      - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-qseecom-ta-heap19
+    paths:
+      - .github/workflows/171-a52-touchgrass-qseecom-parity.yml
+      - scripts/169_apply_a52_heap19_kernel_map.py
+      - scripts/171_audit_touchgrass_qseecom_contract.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-touchgrass-qseecom-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+  HEAP19_ARTIFACT_ID: '8661555402'
+  HEAP19_ARTIFACT_SHA256: b36d0f0827027aa65e3d6ee5354101e2ba2036b422514b54150438c9490b7e5d
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  CAPTURE_SHA256: 27a71572dc1a7ed4212dedfc96900c932c2a9d5563b159a3b616c128a0c16c7d
+
+jobs:
+  build-package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner and validate tools
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/169_apply_a52_heap19_kernel_map.py \
+            scripts/171_audit_touchgrass_qseecom_contract.py \
+            scripts/38_repack_a52_p1_boot.py
+          python3 scripts/169_apply_a52_heap19_kernel_map.py --self-test
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download audited inputs and pinned TouchGrass sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          mkdir -p heap19/extracted run32/extracted touchgrass
+
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${HEAP19_ARTIFACT_ID}/zip" \
+            --output heap19/artifact.zip
+          printf '%s  %s\n' "${HEAP19_ARTIFACT_SHA256}" heap19/artifact.zip \
+            | sha256sum -c -
+
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+
+          unzip -q heap19/artifact.zip -d heap19/extracted
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd heap19/extracted && sha256sum -c SHA256SUMS)
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+
+          test -s heap19/extracted/stage/qseecom-ta-heap19-source.patch
+          test -s heap19/extracted/config/final.config
+          test -s run32/extracted/package/boot.img
+          test "$(tr -d '\r\n' < heap19/extracted/compile/make-return-code.txt)" = 0
+
+          TG_RAW="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/${TOUCHGRASS_COMMIT}"
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            "${TG_RAW}/drivers/staging/android/ion/ion_cma_heap.c" \
+            --output touchgrass/ion_cma_heap.c
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            "${TG_RAW}/drivers/staging/android/ion/msm/msm_ion_of.c" \
+            --output touchgrass/msm_ion_of.c
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            "${TG_RAW}/drivers/misc/qseecom.c" \
+            --output touchgrass/qseecom.c
+          test -s touchgrass/ion_cma_heap.c
+          test -s touchgrass/msm_ion_of.c
+          test -s touchgrass/qseecom.c
+          sha256sum touchgrass/*.c > touchgrass/SHA256SUMS
+
+      - name: Restore heap-19 source, add mappings and enforce parity
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          SOURCE_PATCH="$PWD/heap19/extracted/stage/qseecom-ta-heap19-source.patch"
+          git -C gki/common apply --check "$SOURCE_PATCH"
+          git -C gki/common apply "$SOURCE_PATCH"
+
+          OUT="$PWD/artifacts/a52xq-heap19-parity"
+          mkdir -p "$OUT"/{logs,stage,config,compile,package,tools,touchgrass-reference}
+          cp touchgrass/* "$OUT/touchgrass-reference/"
+
+          python3 scripts/169_apply_a52_heap19_kernel_map.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/heap19-kmap-stage.log"
+
+          python3 scripts/171_audit_touchgrass_qseecom_contract.py \
+            --gki gki/common --touchgrass touchgrass --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/touchgrass-contract-audit.log"
+
+          grep -Fq '"status": "touchgrass-qseecom-contract-parity-pass"' \
+            "$OUT/stage/phase31-touchgrass-qseecom-contract-audit.json"
+          grep -Fq '"system_heap_redirect": false' \
+            "$OUT/stage/phase31-touchgrass-qseecom-contract-audit.json"
+          grep -Fq '"fixed_vendor_heap_id_preserved": 19' \
+            "$OUT/stage/phase31-touchgrass-qseecom-contract-audit.json"
+
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/heap19-touchgrass-parity-source.patch"
+          test -s "$OUT/stage/heap19-touchgrass-parity-source.patch"
+
+      - name: Compile parity-gated kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-heap19-parity"
+          BUILD="$PWD/workspace/gki-heap19-parity-out"
+          mkdir -p "$BUILD"
+          cp heap19/extracted/config/final.config "$BUILD/.config"
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            > "$OUT/logs/olddefconfig.log" 2>&1
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            tail -n 500 "$OUT/logs/compile.log" || true
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+
+          grep -Fq 'CC      drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.o' \
+            "$OUT/logs/compile.log"
+          for marker in \
+            'profile=heap19-kmap-v1' \
+            'ION heap19 map_kernel ret=%ld' \
+            'BOOT qseecom_ta_heap registered id=%u' \
+            'a52.dsi_bridge_pre_enable'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" > "$OUT/logs/compiler-errors.txt"; then
+            cat "$OUT/logs/compiler-errors.txt"
+            exit 1
+          fi
+          grep -Fq 'OBJCOPY arch/arm64/boot/Image' "$OUT/logs/compile.log"
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-heap19-parity-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-heap19-parity
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Repack and audit parity candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-heap19-parity
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          cp heap19/extracted/tools/decode-a52-unified-secure-recorder.py "$OUT/tools/"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-heap19-parity')
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          parity = json.loads((root / 'stage/phase31-touchgrass-qseecom-contract-audit.json').read_text())
+          boot = root / 'package/boot.img'
+          image = root / 'compile/Image'
+          audit = {
+              'status': 'a52-heap19-touchgrass-parity-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'persistent_profile': 'heap19-kmap-v1',
+              'capture_sha256': '27a71572dc1a7ed4212dedfc96900c932c2a9d5563b159a3b616c128a0c16c7d',
+              'touchgrass_commit': '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
+              'touchgrass_contract_status': parity['status'],
+              'source_heap19_artifact_id': 8661555402,
+              'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+          }
+          assert audit['boot_bytes'] == 100663296
+          assert audit['touchgrass_contract_status'] == 'touchgrass-qseecom-contract-parity-pass'
+          assert audit['dtb_preserved'] and audit['ramdisk_preserved'] and audit['recovery_dtbo_preserved']
+          (root / 'final-audit.json').write_text(json.dumps(audit, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 HEAP-19 TOUCHGRASS-PARITY DIAGNOSTIC
+
+          This image passed the static TouchGrass heap and QSEECOM contract gate.
+          Flash only package/boot.img using the proven Run 32 method.
+          Do not flash DTBO, vendor boot, recovery, or data.
+          If the screen is black, wait at least 15 seconds, enter OrangeFox
+          directly, and export the untouched raw 1 MiB RAMOOPS image.
+
+          Accept the capture only when BOOT contains profile=heap19-kmap-v1.
+          Decisive markers are ION heap19 map_kernel ret=0 and the first
+          subsequent QSEECOM or display lifecycle result.
+          EOF
+
+          find "$OUT" -type f ! -name SHA256SUMS -print0 \
+            | sort -z | xargs -0 sha256sum \
+            | sed "s#  $OUT/#  ./#" > "$OUT/SHA256SUMS"
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-heap19-touchgrass-parity-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-heap19-parity
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require audited parity candidate
+        run: |
+          set -Eeuo pipefail
+          test "$(tr -d '\r\n' < artifacts/a52xq-heap19-parity/compile/make-return-code.txt)" = 0
+          grep -Fq '"status": "a52-heap19-touchgrass-parity-boot-audited"' \
+            artifacts/a52xq-heap19-parity/final-audit.json
+          grep -Fq '"touchgrass_contract_status": "touchgrass-qseecom-contract-parity-pass"' \
+            artifacts/a52xq-heap19-parity/final-audit.json

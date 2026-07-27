@@ -37,6 +37,10 @@ class Event:
     confidence: str
     source: str
     offset: int | None = None
+    pid: int | None = None
+    tgid: int | None = None
+    cpu: int | None = None
+    comm: str | None = None
 
     def sort_key(self) -> tuple[int, int, int]:
         if self.ns is not None:
@@ -65,9 +69,11 @@ def read_csv(path: Path, source: str, default_confidence: str) -> list[Event]:
             if not message:
                 continue
             confidence = (row.get("confidence") or default_confidence).lower()
+            comm = (row.get("comm") or "").strip() or None
             events.append(Event(order, number(row.get("seq")), number(row.get("monotonic_ns")),
                                 message, confidence if confidence in RANK else "unknown",
-                                source, number(row.get("offset"))))
+                                source, number(row.get("offset")), number(row.get("pid")),
+                                number(row.get("tgid")), number(row.get("cpu")), comm))
     return events
 
 
@@ -87,7 +93,8 @@ def merge(standard: Path, mirrored: Path) -> tuple[list[Event], dict[str, int]]:
             continue
         selected.append(item)
     selected.sort(key=Event.sort_key)
-    selected = [Event(i, e.seq, e.ns, e.message, e.confidence, e.source, e.offset)
+    selected = [Event(i, e.seq, e.ns, e.message, e.confidence, e.source, e.offset,
+                      e.pid, e.tgid, e.cpu, e.comm)
                 for i, e in enumerate(selected)]
     return selected, {
         "standard_events": len(exact), "mirrored_events": len(recovered),
@@ -106,33 +113,53 @@ def best_confidence(events: list[Event]) -> str:
     return min((e.confidence for e in events), key=lambda x: RANK.get(x, 99), default="none")
 
 
+def scope_context(event: Event) -> tuple[object, ...]:
+    # Scope begin and cleanup execute in the same task. CPU is deliberately not
+    # part of the key because a task may migrate while the function is running.
+    if event.pid is not None or event.tgid is not None:
+        return ("task", event.pid, event.tgid)
+    if event.comm:
+        return ("comm", event.comm)
+    return ("unknown",)
+
+
 def display_summary(events: list[Event]) -> dict[str, object]:
-    open_scopes: list[tuple[str, Event]] = []
+    open_scopes: dict[tuple[object, ...], list[tuple[str, Event]]] = {}
     completed: list[dict[str, object]] = []
     last = None
     for event in events:
         enter, exit_match = RX["enter"].fullmatch(event.message), RX["exit"].fullmatch(event.message)
         if enter:
             last = event
-            open_scopes.append((enter.group(1), event))
+            open_scopes.setdefault(scope_context(event), []).append((enter.group(1), event))
         elif exit_match:
             last = event
             function = exit_match.group(1)
-            index = next((i for i in range(len(open_scopes) - 1, -1, -1)
-                          if open_scopes[i][0] == function), None)
+            context = scope_context(event)
+            context_scopes = open_scopes.setdefault(context, [])
+            index = next((i for i in range(len(context_scopes) - 1, -1, -1)
+                          if context_scopes[i][0] == function), None)
             if index is None:
                 completed.append({"function": function, "orphan_exit": True,
-                                  "duration_us": int(exit_match.group(2)), "exit_order": event.order})
+                                  "duration_us": int(exit_match.group(2)), "exit_order": event.order,
+                                  "context": list(context)})
             else:
-                _, entered = open_scopes.pop(index)
+                _, entered = context_scopes.pop(index)
                 completed.append({"function": function, "orphan_exit": False,
                                   "duration_us": int(exit_match.group(2)),
-                                  "enter_order": entered.order, "exit_order": event.order})
+                                  "enter_order": entered.order, "exit_order": event.order,
+                                  "context": list(context)})
+    unmatched = []
+    for context, scopes in open_scopes.items():
+        for function, event in scopes:
+            unmatched.append({"function": function, "context": list(context), **asdict(event)})
+    unmatched.sort(key=lambda item: int(item["order"]))
     return {
         "event_count": sum(e.message.startswith("DISP ") for e in events),
         "completed": completed,
-        "unmatched_entries": [{"function": fn, **asdict(event)} for fn, event in open_scopes],
+        "unmatched_entries": unmatched,
         "last_event": asdict(last) if last else None,
+        "pairing": "per-task-pid-tgid-with-comm-fallback",
     }
 
 
@@ -297,12 +324,18 @@ def diagnose(standard: Path, mirrored: Path, output: Path, screen: str,
 
 
 def fixture(path: Path, messages: list[str]) -> None:
+    fixture_rows(path, [{"message": message} for message in messages])
+
+
+def fixture_rows(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["seq", "monotonic_ns", "pid", "tgid", "cpu", "comm", "message"]
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["seq", "monotonic_ns", "message"])
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for index, message in enumerate(messages, 1):
-            writer.writerow({"seq": index, "monotonic_ns": index * 1_000_000, "message": message})
+        for index, row in enumerate(rows, 1):
+            item = {"seq": index, "monotonic_ns": index * 1_000_000, **row}
+            writer.writerow(item)
 
 
 def self_test() -> None:
@@ -314,15 +347,28 @@ def self_test() -> None:
                 "REFGEN probe ready initial_enabled=0", "REFGEN kona_enable raw=0x0->0x1 enabled=1"]
         fixture(root / "black.csv", base + ["DISP enter fn=dsi_display_enable", "HB tick=1 online=8 run=2 j=100"])
         report = diagnose(root / "black.csv", root / "none.csv", root / "black", "black")
-        assert report["verdict"]["code"] == "refgen_operational_display_scope_stalled"
-        assert report["refgen"]["mapping"]["stock_lagoon_0x60_layout"] is True
+        assert report["verdict"]["code"] == "refgen_operational_display_scope_stalled"  # type: ignore[index]
+        assert report["refgen"]["mapping"]["stock_lagoon_0x60_layout"] is True  # type: ignore[index]
         assert report["warnings"]
         fixture(root / "failed.csv", ["REFGEN driver_register rc=0",
                                       "REFGEN probe enter compat=qcom,refgen-kona-regulator",
                                       "REFGEN probe fail stage=ioremap rc=-16"])
-        assert diagnose(root / "failed.csv", root / "none.csv", root / "failed", "unknown")["verdict"]["code"] == "refgen_probe_failed"
+        assert diagnose(root / "failed.csv", root / "none.csv", root / "failed", "unknown")["verdict"]["code"] == "refgen_probe_failed"  # type: ignore[index]
         fixture(root / "stable.csv", base)
-        assert diagnose(root / "stable.csv", root / "none.csv", root / "stable", "stable")["verdict"]["code"] == "refgen_hypothesis_supported"
+        assert diagnose(root / "stable.csv", root / "none.csv", root / "stable", "stable")["verdict"]["code"] == "refgen_hypothesis_supported"  # type: ignore[index]
+        fixture_rows(root / "interleaved.csv", [
+            {"pid": 100, "tgid": 100, "comm": "surfaceflinger",
+             "message": "DISP enter fn=dsi_display_enable"},
+            {"pid": 200, "tgid": 200, "comm": "composer",
+             "message": "DISP enter fn=dsi_display_enable"},
+            {"pid": 100, "tgid": 100, "comm": "surfaceflinger",
+             "message": "DISP exit fn=dsi_display_enable us=250"},
+        ])
+        interleaved = diagnose(root / "interleaved.csv", root / "none.csv",
+                               root / "interleaved", "unknown")
+        unmatched = interleaved["display"]["unmatched_entries"]  # type: ignore[index]
+        assert len(unmatched) == 1 and unmatched[0]["pid"] == 200
+        assert interleaved["display"]["pairing"] == "per-task-pid-tgid-with-comm-fallback"  # type: ignore[index]
 
 
 def main() -> int:
@@ -352,7 +398,7 @@ def main() -> int:
     report = diagnose((standard or Path("missing-standard.csv")).resolve(),
                       (mirrored or Path("missing-mirrored.csv")).resolve(),
                       output, args.screen_result, runs)
-    print(json.dumps({"status": report["status"], "verdict": report["verdict"]["code"], "output": str(output)}, sort_keys=True))
+    print(json.dumps({"status": report["status"], "verdict": report["verdict"]["code"], "output": str(output)}, sort_keys=True))  # type: ignore[index]
     return 0 if report["status"] == "diagnosed" else 2
 
 

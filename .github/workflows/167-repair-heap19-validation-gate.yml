@@ -1,0 +1,21 @@
+name: 167 - Repair heap-19 validation gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/167-repair-heap19-validation-gate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  register-feature-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Register Workflow 167
+        run: |
+          echo "Workflow 167 is registered on main."
+          echo "The feature-branch definition performs the one-shot validation-gate repair."

@@ -11,7 +11,9 @@ DRIVER_REL = Path("drivers/regulator/refgen.c")
 RECORDER_HEADER_REL = Path("include/linux/a52_ack_secure_flight_recorder.h")
 REPORT_NAME = "phase26-a52-refgen-regulator-report.json"
 MARKER = "A52_REFGEN_DISPLAY_SUPPLY_V1"
-TRIGGER_REVISION = 2
+TRIGGER_REVISION = 3
+SCOPE_OLD = "struct a52_ackfr_scope __a52_ackfr_scope \\\n"
+SCOPE_NEW = "struct a52_ackfr_scope __a52_ackfr_scope __maybe_unused \\\n"
 
 KCONFIG_BLOCK = r'''
 config REGULATOR_REFGEN
@@ -19,17 +21,14 @@ config REGULATOR_REFGEN
 	depends on OF
 	help
 	  This driver controls the REFGEN reference-bias generator used by
-	  internal Qualcomm PHY blocks.  The Galaxy A52 5G stock device tree
+	  internal Qualcomm PHY blocks. The Galaxy A52 5G stock device tree
 	  exposes a qcom,refgen-kona-regulator provider consumed by DSI.
 '''.strip("\n")
 
 DRIVER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Qualcomm REFGEN regulator.
- *
- * Downstream implementation ported for the Galaxy A52 5G ACK 5.10
- * display bring-up.  The stock DTB exposes qcom,refgen-kona-regulator
- * as the DSI refgen-supply provider.
+ * Qualcomm Kona REFGEN regulator for the Galaxy A52 5G ACK 5.10 port.
+ * The stock DTB exposes qcom,refgen-kona-regulator as DSI refgen-supply.
  */
 
 #include <linux/bitops.h>
@@ -49,17 +48,6 @@ DRIVER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/a52_ack_secure_flight_recorder.h>
 
 #define A52_REFGEN_DISPLAY_SUPPLY_V1
-
-#define REFGEN_REG_BIAS_EN               0x08
-#define REFGEN_BIAS_EN_MASK              GENMASK(2, 0)
-#define REFGEN_BIAS_EN_ENABLE            0x7
-#define REFGEN_BIAS_EN_DISABLE           0x6
-
-#define REFGEN_REG_BG_CTRL               0x14
-#define REFGEN_BG_CTRL_MASK              GENMASK(2, 1)
-#define REFGEN_BG_CTRL_ENABLE            0x6
-#define REFGEN_BG_CTRL_DISABLE           0x4
-
 #define REFGEN_REG_PWRDWN_CTRL5          0x80
 #define REFGEN_PWRDWN_CTRL5_MASK         BIT(0)
 #define REFGEN_PWRDWN_CTRL5_ENABLE       BIT(0)
@@ -80,66 +68,6 @@ static void refgen_masked_writel(u32 val, u32 mask, void __iomem *addr)
 	writel_relaxed(reg, addr);
 }
 
-static int refgen_enable(struct regulator_dev *rdev)
-{
-	struct refgen *vreg = rdev_get_drvdata(rdev);
-	u32 bg_before, bias_before, bg_after, bias_after;
-
-	bg_before = readl_relaxed(vreg->addr + REFGEN_REG_BG_CTRL);
-	bias_before = readl_relaxed(vreg->addr + REFGEN_REG_BIAS_EN);
-	refgen_masked_writel(REFGEN_BG_CTRL_ENABLE, REFGEN_BG_CTRL_MASK,
-			       vreg->addr + REFGEN_REG_BG_CTRL);
-	writel_relaxed(REFGEN_BIAS_EN_ENABLE,
-		       vreg->addr + REFGEN_REG_BIAS_EN);
-	bg_after = readl_relaxed(vreg->addr + REFGEN_REG_BG_CTRL);
-	bias_after = readl_relaxed(vreg->addr + REFGEN_REG_BIAS_EN);
-	a52_ackfr_record("REFGEN generic_enable bg=0x%x->0x%x bias=0x%x->0x%x",
-			  bg_before, bg_after, bias_before, bias_after);
-
-	return 0;
-}
-
-static int refgen_disable(struct regulator_dev *rdev)
-{
-	struct refgen *vreg = rdev_get_drvdata(rdev);
-	u32 bg_before, bias_before, bg_after, bias_after;
-
-	bg_before = readl_relaxed(vreg->addr + REFGEN_REG_BG_CTRL);
-	bias_before = readl_relaxed(vreg->addr + REFGEN_REG_BIAS_EN);
-	writel_relaxed(REFGEN_BIAS_EN_DISABLE,
-		       vreg->addr + REFGEN_REG_BIAS_EN);
-	refgen_masked_writel(REFGEN_BG_CTRL_DISABLE, REFGEN_BG_CTRL_MASK,
-			       vreg->addr + REFGEN_REG_BG_CTRL);
-	bg_after = readl_relaxed(vreg->addr + REFGEN_REG_BG_CTRL);
-	bias_after = readl_relaxed(vreg->addr + REFGEN_REG_BIAS_EN);
-	a52_ackfr_record("REFGEN generic_disable bg=0x%x->0x%x bias=0x%x->0x%x",
-			  bg_before, bg_after, bias_before, bias_after);
-
-	return 0;
-}
-
-static int refgen_is_enabled(struct regulator_dev *rdev)
-{
-	struct refgen *vreg = rdev_get_drvdata(rdev);
-	u32 bg, bias;
-	int enabled;
-
-	bg = readl_relaxed(vreg->addr + REFGEN_REG_BG_CTRL);
-	bias = readl_relaxed(vreg->addr + REFGEN_REG_BIAS_EN);
-	enabled = ((bg & REFGEN_BG_CTRL_MASK) == REFGEN_BG_CTRL_ENABLE) &&
-		  ((bias & REFGEN_BIAS_EN_MASK) == REFGEN_BIAS_EN_ENABLE);
-	a52_ackfr_record("REFGEN generic_state bg=0x%x bias=0x%x enabled=%d",
-			  bg, bias, enabled);
-
-	return enabled;
-}
-
-static const struct regulator_ops refgen_ops = {
-	.enable = refgen_enable,
-	.disable = refgen_disable,
-	.is_enabled = refgen_is_enabled,
-};
-
 static int refgen_kona_enable(struct regulator_dev *rdev)
 {
 	struct refgen *vreg = rdev_get_drvdata(rdev);
@@ -153,7 +81,6 @@ static int refgen_kona_enable(struct regulator_dev *rdev)
 	a52_ackfr_record("REFGEN kona_enable raw=0x%x->0x%x enabled=%u",
 			  before, after,
 			  !!(after & REFGEN_PWRDWN_CTRL5_MASK));
-
 	return 0;
 }
 
@@ -170,7 +97,6 @@ static int refgen_kona_disable(struct regulator_dev *rdev)
 	a52_ackfr_record("REFGEN kona_disable raw=0x%x->0x%x enabled=%u",
 			  before, after,
 			  !!(after & REFGEN_PWRDWN_CTRL5_MASK));
-
 	return 0;
 }
 
@@ -184,7 +110,6 @@ static int refgen_kona_is_enabled(struct regulator_dev *rdev)
 	enabled = (raw & REFGEN_PWRDWN_CTRL5_MASK) ==
 		  REFGEN_PWRDWN_CTRL5_ENABLE;
 	a52_ackfr_record("REFGEN kona_state raw=0x%x enabled=%d", raw, enabled);
-
 	return enabled;
 }
 
@@ -195,9 +120,7 @@ static const struct regulator_ops refgen_kona_ops = {
 };
 
 static const struct of_device_id refgen_match_table[] = {
-	{ .compatible = "qcom,refgen-regulator", .data = &refgen_ops },
-	{ .compatible = "qcom,refgen-sdm845-regulator", .data = &refgen_ops },
-	{ .compatible = "qcom,refgen-kona-regulator", .data = &refgen_kona_ops },
+	{ .compatible = "qcom,refgen-kona-regulator" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, refgen_match_table);
@@ -210,28 +133,21 @@ static int refgen_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct resource *res;
 	struct refgen *vreg;
-	u32 raw = 0;
+	u32 raw;
 	int rc;
 
 	match = of_match_device(refgen_match_table, dev);
 	a52_ackfr_record("REFGEN probe enter compat=%s",
 			  match ? match->compatible : "none");
+	if (!match || !dev->of_node) {
+		a52_ackfr_record("REFGEN probe fail stage=match rc=%d", -ENODEV);
+		return -ENODEV;
+	}
 
 	vreg = devm_kzalloc(dev, sizeof(*vreg), GFP_KERNEL);
 	if (!vreg) {
 		a52_ackfr_record("REFGEN probe fail stage=alloc rc=%d", -ENOMEM);
 		return -ENOMEM;
-	}
-
-	if (!dev->of_node) {
-		a52_ackfr_record("REFGEN probe fail stage=of_node rc=%d", -ENODEV);
-		return -ENODEV;
-	}
-
-	vreg->rdesc.ops = of_device_get_match_data(dev);
-	if (!vreg->rdesc.ops) {
-		a52_ackfr_record("REFGEN probe fail stage=match rc=%d", -ENODEV);
-		return -ENODEV;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -247,11 +163,16 @@ static int refgen_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	if (match && match->data == &refgen_kona_ops)
-		raw = readl_relaxed(vreg->addr + REFGEN_REG_PWRDWN_CTRL5);
+	raw = readl_relaxed(vreg->addr + REFGEN_REG_PWRDWN_CTRL5);
 	a52_ackfr_record("REFGEN mapped start=0x%llx size=%llu raw=0x%x",
 			  (unsigned long long)res->start,
 			  (unsigned long long)resource_size(res), raw);
+
+	vreg->rdesc.name = "refgen";
+	vreg->rdesc.id = pdev->id;
+	vreg->rdesc.owner = THIS_MODULE;
+	vreg->rdesc.type = REGULATOR_VOLTAGE;
+	vreg->rdesc.ops = &refgen_kona_ops;
 
 	init_data = of_get_regulator_init_data(dev, dev->of_node,
 					       &vreg->rdesc);
@@ -259,25 +180,17 @@ static int refgen_probe(struct platform_device *pdev)
 		a52_ackfr_record("REFGEN probe fail stage=init_data rc=%d", -ENOMEM);
 		return -ENOMEM;
 	}
-
 	if (!init_data->constraints.name) {
 		a52_ackfr_record("REFGEN probe fail stage=name rc=%d", -EINVAL);
 		return -EINVAL;
 	}
-
 	if (of_get_property(dev->of_node, "parent-supply", NULL))
 		init_data->supply_regulator = "parent";
-
-	vreg->rdesc.name = "refgen";
-	vreg->rdesc.id = pdev->id;
-	vreg->rdesc.owner = THIS_MODULE;
-	vreg->rdesc.type = REGULATOR_VOLTAGE;
 
 	config.dev = dev;
 	config.init_data = init_data;
 	config.driver_data = vreg;
 	config.of_node = dev->of_node;
-
 	vreg->rdev = devm_regulator_register(dev, &vreg->rdesc, &config);
 	if (IS_ERR(vreg->rdev)) {
 		rc = PTR_ERR(vreg->rdev);
@@ -285,10 +198,9 @@ static int refgen_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	rc = vreg->rdesc.ops->is_enabled(vreg->rdev);
+	rc = refgen_kona_is_enabled(vreg->rdev);
 	a52_ackfr_record("REFGEN probe ready initial_enabled=%d", rc);
 	dev_info(dev, "A52 REFGEN regulator registered, initial state=%d\n", rc);
-
 	return 0;
 }
 
@@ -330,13 +242,24 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def patch_scope_header(path: Path) -> str:
+    text = read(path)
+    if SCOPE_NEW in text:
+        if text.count(SCOPE_NEW) != 1:
+            raise SystemExit("fixed recorder scope declaration count mismatch")
+        return "already-present"
+    if text.count(SCOPE_OLD) != 1:
+        raise SystemExit("recorder scope declaration anchor mismatch")
+    write(path, text.replace(SCOPE_OLD, SCOPE_NEW, 1))
+    return "inserted"
+
+
 def patch_kconfig(path: Path) -> bool:
     text = read(path)
     if "config REGULATOR_REFGEN" in text:
         if KCONFIG_BLOCK not in text:
             raise SystemExit("an unexpected REGULATOR_REFGEN definition already exists")
         return False
-
     anchors = (
         "config REGULATOR_RPMH\n",
         "config REGULATOR_QCOM_RPMH\n",
@@ -344,15 +267,12 @@ def patch_kconfig(path: Path) -> bool:
     )
     for anchor in anchors:
         if anchor in text:
-            text = text.replace(anchor, KCONFIG_BLOCK + "\n\n" + anchor, 1)
-            write(path, text)
+            write(path, text.replace(anchor, KCONFIG_BLOCK + "\n\n" + anchor, 1))
             return True
-
     end = text.rfind("endmenu")
     if end < 0:
         raise SystemExit("regulator Kconfig anchor missing")
-    text = text[:end] + KCONFIG_BLOCK + "\n\n" + text[end:]
-    write(path, text)
+    write(path, text[:end] + KCONFIG_BLOCK + "\n\n" + text[end:])
     return True
 
 
@@ -361,7 +281,6 @@ def patch_makefile(path: Path) -> bool:
     line = "obj-$(CONFIG_REGULATOR_REFGEN) += refgen.o\n"
     if line in text:
         return False
-
     anchors = (
         "obj-$(CONFIG_REGULATOR_RPMH) += rpmh-regulator.o\n",
         "obj-$(CONFIG_REGULATOR_QCOM_RPMH) += qcom-rpmh-regulator.o\n",
@@ -369,12 +288,9 @@ def patch_makefile(path: Path) -> bool:
     )
     for anchor in anchors:
         if anchor in text:
-            text = text.replace(anchor, line + anchor, 1)
-            write(path, text)
+            write(path, text.replace(anchor, line + anchor, 1))
             return True
-
-    text += "\n" + line
-    write(path, text)
+    write(path, text + "\n" + line)
     return True
 
 
@@ -392,16 +308,24 @@ def main() -> int:
         if not (root / rel).is_file():
             raise SystemExit(f"required source file missing: {rel}")
 
-    recorder_header = read(root / RECORDER_HEADER_REL)
-    if "a52_ackfr_record" not in recorder_header:
+    header_path = root / RECORDER_HEADER_REL
+    if "a52_ackfr_record" not in read(header_path):
         raise SystemExit("A52 recorder API is not available")
+    scope_fix = patch_scope_header(header_path)
+    header = read(header_path)
+    if SCOPE_NEW not in header or SCOPE_OLD in header:
+        raise SystemExit("recorder __maybe_unused audit failed")
 
     driver_path = root / DRIVER_REL
     if driver_path.exists():
         existing = read(driver_path)
         if MARKER not in existing:
             raise SystemExit("unexpected existing drivers/regulator/refgen.c")
-        driver_changed = False
+        if existing != DRIVER_SOURCE:
+            write(driver_path, DRIVER_SOURCE)
+            driver_changed = True
+        else:
+            driver_changed = False
     else:
         write(driver_path, DRIVER_SOURCE)
         driver_changed = True
@@ -410,7 +334,7 @@ def main() -> int:
     makefile_changed = patch_makefile(root / MAKEFILE_REL)
 
     driver = read(driver_path)
-    required_driver_tokens = (
+    required = (
         MARKER,
         '"qcom,refgen-kona-regulator"',
         "REFGEN_REG_PWRDWN_CTRL5",
@@ -422,15 +346,14 @@ def main() -> int:
         'a52_ackfr_record("REFGEN kona_disable',
         "arch_initcall(refgen_init)",
     )
-    missing = [token for token in required_driver_tokens if token not in driver]
+    missing = [token for token in required if token not in driver]
     if missing:
         raise SystemExit("REFGEN driver audit failed: " + ", ".join(missing))
-
-    kconfig = read(root / KCONFIG_REL)
-    makefile = read(root / MAKEFILE_REL)
-    if kconfig.count("config REGULATOR_REFGEN") != 1:
+    if read(root / KCONFIG_REL).count("config REGULATOR_REFGEN") != 1:
         raise SystemExit("REGULATOR_REFGEN Kconfig count mismatch")
-    if makefile.count("obj-$(CONFIG_REGULATOR_REFGEN) += refgen.o") != 1:
+    if read(root / MAKEFILE_REL).count(
+        "obj-$(CONFIG_REGULATOR_REFGEN) += refgen.o"
+    ) != 1:
         raise SystemExit("REGULATOR_REFGEN Makefile count mismatch")
 
     report = {
@@ -440,10 +363,12 @@ def main() -> int:
         "hypothesis": "missing qcom,refgen-kona-regulator provider for DSI refgen-supply",
         "stock_dtb_compatible": "qcom,refgen-kona-regulator",
         "config": "CONFIG_REGULATOR_REFGEN=y",
+        "recorder_scope_fix": scope_fix,
         "files": {
             str(DRIVER_REL): {"changed": driver_changed},
             str(KCONFIG_REL): {"changed": kconfig_changed},
             str(MAKEFILE_REL): {"changed": makefile_changed},
+            str(RECORDER_HEADER_REL): {"maybe_unused": True},
         },
         "instrumentation": {
             "probe": True,

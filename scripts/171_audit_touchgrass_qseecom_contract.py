@@ -10,6 +10,10 @@ TG_COMMIT = "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7"
 ACK_HEAP = Path("drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c")
 ACK_ION_HEADER = Path("include/linux/ion.h")
 ACK_ION_DMABUF = Path("drivers/staging/android/ion/ion_dma_buf.c")
+ACK_DMABUF_CORE = Path("drivers/dma-buf/dma-buf.c")
+ACK_DMABUF_HEADER = Path("include/linux/dma-buf.h")
+ACK_PORT_COMPAT = Path("a52-port-compat.h")
+ACK_SECURE_MAKEFILE = Path("drivers/a52_secure/Makefile")
 REPORT = "phase31-touchgrass-qseecom-contract-audit.json"
 
 
@@ -31,22 +35,6 @@ def require_regex(text: str, patterns: dict[str, str], label: str) -> list[str]:
     if missing:
         raise SystemExit(f"{label} missing semantic patterns: {missing}")
     return list(patterns)
-
-
-def select_alternatives(
-    text: str, alternatives: dict[str, list[str]], label: str
-) -> dict[str, str]:
-    selected: dict[str, str] = {}
-    missing: list[str] = []
-    for name, options in alternatives.items():
-        match = next((option for option in options if option in text), None)
-        if match is None:
-            missing.append(name)
-        else:
-            selected[name] = match
-    if missing:
-        raise SystemExit(f"{label} missing alternative groups: {missing}")
-    return selected
 
 
 def find_ack_qseecom(gki: Path) -> tuple[Path, str]:
@@ -75,7 +63,11 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
 
     ack_heap = read(gki / ACK_HEAP)
     ack_header = read(gki / ACK_ION_HEADER)
-    ack_dmabuf = read(gki / ACK_ION_DMABUF)
+    ack_ion_dmabuf = read(gki / ACK_ION_DMABUF)
+    ack_dmabuf_core = read(gki / ACK_DMABUF_CORE)
+    ack_dmabuf_header = read(gki / ACK_DMABUF_HEADER)
+    ack_port_compat = read(gki / ACK_PORT_COMPAT)
+    ack_secure_makefile = read(gki / ACK_SECURE_MAKEFILE)
     ack_qseecom_path, ack_qseecom = find_ack_qseecom(gki)
 
     tg_cma_contract = require(
@@ -120,7 +112,7 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
         "TouchGrass global ION exporter",
     )
 
-    qseecom_consumer_patterns = {
+    qseecom_contract = {
         "get_flags_before_secure_bridge_decision": (
             r"qseecom_create_bridge_for_secbuf\s*\([^)]*\)\s*\{"
             r".*?dma_buf_get_flags\s*\(\s*dmabuf\s*,\s*&dma_buf_flags\s*\)"
@@ -131,7 +123,7 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             r".*?dma_buf_get\s*\(.*?dma_buf_attach\s*\("
             r".*?dma_buf_map_attachment\s*\(.*?qseecom_create_bridge_for_secbuf\s*\("
         ),
-        "cpu_access_then_kmap": (
+        "cpu_access_then_page_map": (
             r"qseecom_vaddr_map\s*\([^)]*\)\s*\{"
             r".*?qseecom_dmabuf_map\s*\(.*?dma_buf_begin_cpu_access\s*\("
             r".*?dma_buf_kmap\s*\("
@@ -140,8 +132,8 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             r"dma_buf_unmap_attachment\s*\(.*?dma_buf_detach\s*\(.*?dma_buf_put\s*\("
         ),
     }
-    require_regex(tg_qseecom, qseecom_consumer_patterns, "TouchGrass QSEECOM")
-    require_regex(ack_qseecom, qseecom_consumer_patterns, "ACK QSEECOM")
+    require_regex(tg_qseecom, qseecom_contract, "TouchGrass QSEECOM")
+    require_regex(ack_qseecom, qseecom_contract, "ACK QSEECOM")
 
     ack_heap_contract = require(
         ack_heap,
@@ -179,62 +171,94 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
         "ACK ION heap ABI",
     )
 
-    ack_default_markers = require(
-        ack_dmabuf,
-        [
-            "ion_dma_buf_vmap(",
-            "ion_dma_buf_vunmap(",
-            "ion_buffer_kmap_put(buffer)",
-            "if (!heap->buf_ops.get_flags)",
-            "return heap->buf_ops.get_flags(dmabuf, flags);",
-            ".get_flags = ion_dma_buf_get_flags",
-        ],
-        "ACK default ION DMA-BUF exporter",
-    )
-    ack_default_variants = select_alternatives(
-        ack_dmabuf,
+    ack_ion_exporter = require_regex(
+        ack_ion_dmabuf,
         {
-            "map_function": [
-                "ion_dma_buf_map(",
-                "ion_dma_buf_kmap(",
-            ],
-            "map_fallback": [
-                "ion_buffer_kmap_get(buffer) + offset * PAGE_SIZE",
-                "buffer->vaddr + offset * PAGE_SIZE",
-            ],
-            "vmap_behavior": [
-                "vaddr = ion_buffer_kmap_get(buffer)",
-                "return ERR_PTR(-EOPNOTSUPP)",
-            ],
-            "missing_get_flags_result": [
-                "return -EOPNOTSUPP;",
-            ],
+            "vmap_uses_heap_override_or_core_kmap": (
+                r"static\s+void\s*\*\s*ion_dma_buf_vmap\s*\([^)]*\)\s*\{"
+                r".*?if\s*\(heap->buf_ops\.vmap\).*?return\s+heap->buf_ops\.vmap\(dmabuf\)\s*;"
+                r".*?vaddr\s*=\s*ion_buffer_kmap_get\(buffer\)\s*;"
+            ),
+            "vunmap_releases_core_kmap": (
+                r"static\s+void\s+ion_dma_buf_vunmap\s*\([^)]*\)\s*\{"
+                r".*?if\s*\(heap->buf_ops\.vunmap\).*?heap->buf_ops\.vunmap\(dmabuf,\s*vaddr\)"
+                r".*?ion_buffer_kmap_put\(buffer\)\s*;"
+            ),
+            "get_flags_requires_heap_callback": (
+                r"static\s+int\s+ion_dma_buf_get_flags\s*\([^)]*\)\s*\{"
+                r".*?if\s*\(!heap->buf_ops\.get_flags\)\s*return\s+-EOPNOTSUPP\s*;"
+                r".*?return\s+heap->buf_ops\.get_flags\(dmabuf,\s*flags\)\s*;"
+            ),
+            "exporter_registers_vmap_and_flags": (
+                r"static\s+const\s+struct\s+dma_buf_ops\s+dma_buf_ops\s*=\s*\{"
+                r".*?\.vmap\s*=\s*ion_dma_buf_vmap\s*,"
+                r".*?\.vunmap\s*=\s*ion_dma_buf_vunmap\s*,"
+                r".*?\.get_flags\s*=\s*ion_dma_buf_get_flags\s*,"
+            ),
         },
-        "ACK default ION DMA-BUF fallback variants",
+        "ACK ION DMA-BUF exporter",
     )
-    map_override_model = (
-        "heap-specific-optional"
-        if "heap->buf_ops.map" in ack_dmabuf
-        else "core-owned"
+
+    ack_generic_dmabuf = require_regex(
+        ack_dmabuf_core,
+        {
+            "generic_vmap_calls_exporter": (
+                r"void\s*\*\s*dma_buf_vmap\s*\([^)]*\)\s*\{"
+                r".*?if\s*\(!dmabuf->ops->vmap\)\s*return\s+NULL\s*;"
+                r".*?ptr\s*=\s*dmabuf->ops->vmap\(dmabuf\)\s*;"
+            ),
+            "generic_vunmap_calls_exporter": (
+                r"void\s+dma_buf_vunmap\s*\([^)]*\)\s*\{"
+                r".*?dmabuf->ops->vunmap\(dmabuf,\s*vaddr\)\s*;"
+            ),
+            "generic_flags_calls_exporter": (
+                r"int\s+dma_buf_get_flags\s*\([^)]*\)\s*\{"
+                r".*?if\s*\(dmabuf->ops->get_flags\)"
+                r".*?ret\s*=\s*dmabuf->ops->get_flags\(dmabuf,\s*flags\)\s*;"
+            ),
+        },
+        "ACK generic DMA-BUF core",
     )
-    vmap_override_model = (
-        "heap-specific-optional"
-        if "heap->buf_ops.vmap" in ack_dmabuf
-        else "core-owned"
+    if "dma_buf_kmap" in ack_dmabuf_header:
+        raise SystemExit("unexpected upstream dma_buf_kmap declaration; compat chain changed")
+
+    ack_kmap_compat = require_regex(
+        ack_port_compat,
+        {
+            "compat_kmap_uses_vmap_and_offset": (
+                r"static\s+inline\s+void\s*\*\s*a52_kmap\s*\([^)]*\)\s*\{"
+                r".*?void\s*\*\s*v\s*=\s*dma_buf_vmap\(b\)\s*;"
+                r".*?return\s+v\s*\?\s*\(char\s*\*\)v\s*\+\s*n\s*\*\s*PAGE_SIZE\s*:\s*NULL\s*;"
+            ),
+            "compat_kunmap_uses_vunmap": (
+                r"static\s+inline\s+void\s+a52_kunmap\s*\([^)]*\)\s*\{"
+                r".*?dma_buf_vunmap\(b,\s*\(char\s*\*\)v\s*-\s*n\s*\*\s*PAGE_SIZE\)\s*;"
+            ),
+            "legacy_api_macros": (
+                r"#ifndef\s+dma_buf_kmap.*?#define\s+dma_buf_kmap\(b,n\)\s+a52_kmap\(\(b\),\(n\)\)"
+                r".*?#define\s+dma_buf_kunmap\(b,n,v\)\s+a52_kunmap\(\(b\),\(n\),\(v\)\)"
+            ),
+        },
+        "A52 DMA-BUF page-map compatibility shim",
+    )
+    require(
+        ack_secure_makefile,
+        ["ccflags-y += -include $(srctree)/a52-port-compat.h"],
+        "A52 secure-service forced compatibility include",
     )
 
     forbidden = [
         ".map_user = ion_heap_map_user",
         ".map_kernel =",
         ".unmap_kernel =",
-        ".buf_ops.map =",
         ".buf_ops.vmap =",
+        ".buf_ops.vunmap =",
         "ION_HEAP_SYSTEM_MASK",
         "redirect heap 19",
     ]
     forbidden_hits = [marker for marker in forbidden if marker in ack_heap]
     if forbidden_hits:
-        raise SystemExit(f"heap-19 isolation/default-fallback audit failed: {forbidden_hits}")
+        raise SystemExit(f"heap-19 isolation/default-mapping audit failed: {forbidden_hits}")
 
     report: dict[str, object] = {
         "status": "touchgrass-qseecom-dmabuf-contract-parity-pass",
@@ -249,25 +273,37 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "cma_heap_contract": tg_cma_contract,
             "registration_contract": tg_registration_contract,
             "global_exporter_contract": tg_flags_contract,
-            "qseecom_contract": list(qseecom_consumer_patterns),
+            "qseecom_contract": list(qseecom_contract),
         },
         "ack": {
             "heap_source": str(ACK_HEAP),
             "heap_contract": ack_heap_contract,
             "heap_abi": ack_heap_abi,
-            "default_dma_buf_markers": ack_default_markers,
-            "default_dma_buf_variants": ack_default_variants,
-            "map_override_model": map_override_model,
-            "vmap_override_model": vmap_override_model,
+            "ion_exporter_contract": ack_ion_exporter,
+            "generic_dma_buf_contract": ack_generic_dmabuf,
+            "kmap_compatibility_contract": ack_kmap_compat,
             "qseecom_source": str(ack_qseecom_path),
-            "qseecom_contract": list(qseecom_consumer_patterns),
+            "qseecom_contract": list(qseecom_contract),
         },
         "semantic_adaptations": {
             "touchgrass_flags_provider": "global ION dma_buf_ops.get_flags",
             "ack_flags_provider": "heap-specific ion_heap.buf_ops.get_flags",
             "returned_value": "ion_buffer.flags",
-            "default_ack_map_path_preserved": True,
-            "default_ack_vmap_path_preserved": True,
+            "qseecom_page_map_chain": [
+                "dma_buf_kmap compatibility macro",
+                "a52_kmap",
+                "dma_buf_vmap",
+                "ion_dma_buf_vmap",
+                "ion_buffer_kmap_get",
+            ],
+            "qseecom_page_unmap_chain": [
+                "dma_buf_kunmap compatibility macro",
+                "a52_kunmap",
+                "dma_buf_vunmap",
+                "ion_dma_buf_vunmap",
+                "ion_buffer_kmap_put",
+            ],
+            "default_ack_mapping_preserved": True,
             "touchgrass_dma_preparation": "ion_pages_sync_for_device",
             "ack_dma_preparation": "ion_buffer_prep_noncached",
             "fixed_vendor_heap_id_preserved": 19,
@@ -278,7 +314,7 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "heap19 get_flags returns zero and flags=0x1",
             "qseecom_create_bridge_for_secbuf advances past dma_buf_get_flags",
             "dma_buf_begin_cpu_access result",
-            "dma_buf_kmap result",
+            "a52_kmap/dma_buf_vmap result",
             "secure application load result",
             "first display lifecycle scope after secure services become ready",
         ],
@@ -293,8 +329,8 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Gate the ACK heap-19 DMA-BUF exporter against TouchGrass and "
-            "Samsung QSEECOM behavior."
+            "Gate the ACK heap-19 DMA-BUF exporter and A52 kmap shim against "
+            "TouchGrass and Samsung QSEECOM behavior."
         )
     )
     parser.add_argument("--gki", type=Path, required=True)

@@ -24,7 +24,7 @@ env:
 
 jobs:
   compare:
-    name: Compare active display source and initialization functions
+    name: Compare active display source, DT and configuration
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
@@ -39,7 +39,9 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git curl unzip python3
-          python3 -m py_compile scripts/157_compare_a52_display_to_touchgrass.py
+          python3 -m py_compile \
+            scripts/157_compare_a52_display_to_touchgrass.py \
+            scripts/159_compare_a52_display_dt_to_touchgrass.py
 
       - name: Restore pinned GKI source
         id: gki-cache
@@ -68,11 +70,13 @@ jobs:
           unzip -q run32/artifact.zip -d run32/extracted
           (cd run32/extracted && sha256sum -c SHA256SUMS)
           test -s run32/extracted/stage/full-source.patch
+          test -s run32/extracted/config/final.config
           git -C gki/common apply --check "$PWD/run32/extracted/stage/full-source.patch"
           git -C gki/common apply "$PWD/run32/extracted/stage/full-source.patch"
           test -f gki/common/drivers/a52_display/msm/dsi/dsi_clk_manager.c
           test -f gki/common/drivers/a52_display/msm/dsi/dsi_display.c
           test -f gki/common/drivers/a52_display/msm/sde/sde_kms.c
+          test -f gki/common/arch/arm64/boot/dts/qcom/lagoon-sde.dtsi
 
       - name: Fetch exact working TouchGrass source
         run: |
@@ -87,6 +91,10 @@ jobs:
           test -f touchgrass/techpack/display/msm/dsi/dsi_clk_manager.c
           test -f touchgrass/techpack/display/msm/dsi/dsi_display.c
           test -f touchgrass/techpack/display/msm/sde/sde_kms.c
+          test -f touchgrass/arch/arm64/boot/dts/vendor/qcom/lagoon-sde.dtsi
+          make -s -C touchgrass O="$PWD/workspace/touchgrass-config" \
+            ARCH=arm64 a52xq_defconfig
+          test -s workspace/touchgrass-config/.config
 
       - name: Compare active display initialization
         run: |
@@ -96,19 +104,30 @@ jobs:
             --ack gki/common \
             --touchgrass touchgrass \
             --output "$OUT" \
-            2>&1 | tee "$OUT/audit.log"
+            2>&1 | tee "$OUT/source-audit.log"
+
+          python3 scripts/159_compare_a52_display_dt_to_touchgrass.py \
+            --ack gki/common \
+            --touchgrass touchgrass \
+            --ack-config run32/extracted/config/final.config \
+            --touch-config workspace/touchgrass-config/.config \
+            --output "$OUT" \
+            2>&1 | tee "$OUT/dt-config-audit.log"
 
           python3 - <<'PY'
           import json
           from pathlib import Path
-          path = Path('artifacts/a52-display-parity/a52-display-touchgrass-parity-report.json')
-          report = json.loads(path.read_text())
-          assert report['status'] == 'a52-display-touchgrass-parity-audit-v1'
-          assert report['summary']['files_compared'] >= 6
-          assert report['summary']['functions_compared'] >= 15
-          assert report['clock_combination']['touchgrass_has_and'] is True
-          assert report['clock_combination']['ack_has_and'] is True
-          assert report['clock_combination']['conclusion'] == 'shared-with-working-touchgrass-not-a-standalone-root-cause'
+          root = Path('artifacts/a52-display-parity')
+          source = json.loads((root / 'a52-display-touchgrass-parity-report.json').read_text())
+          dt = json.loads((root / 'a52-display-dt-touchgrass-parity-report.json').read_text())
+          assert source['status'] == 'a52-display-touchgrass-parity-audit-v1'
+          assert source['summary']['files_compared'] >= 6
+          assert source['summary']['functions_compared'] >= 15
+          assert source['clock_combination']['touchgrass_has_and'] is True
+          assert source['clock_combination']['ack_has_and'] is True
+          assert source['clock_combination']['conclusion'] == 'shared-with-working-touchgrass-not-a-standalone-root-cause'
+          assert dt['status'] == 'a52-display-dt-touchgrass-parity-audit-v1'
+          assert dt['summary']['matched_files'] >= 2
           PY
 
       - name: Upload parity report

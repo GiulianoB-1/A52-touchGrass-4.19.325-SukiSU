@@ -1,0 +1,88 @@
+name: 162 - A52 REFGEN postmortem analyzer
+
+run-name: Validate metadata-only REFGEN and display diagnosis tooling
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - tools/a52-refgen/diagnose-a52-refgen-display.py
+      - docs/A52-REFGEN-POSTMORTEM.md
+      - .github/workflows/162-a52-refgen-postmortem-analyzer.yml
+  push:
+    branches:
+      - agent/a52-refgen-postmortem-analyzer
+    paths:
+      - tools/a52-refgen/diagnose-a52-refgen-display.py
+      - docs/A52-REFGEN-POSTMORTEM.md
+      - .github/workflows/162-a52-refgen-postmortem-analyzer.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-refgen-postmortem-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyzer-self-test:
+    name: Compile and self-test REFGEN diagnosis
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out tooling branch
+        uses: actions/checkout@v4
+
+      - name: Compile analyzer
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/a52-refgen/diagnose-a52-refgen-display.py
+
+      - name: Run built-in verdict tests
+        run: |
+          set -Eeuo pipefail
+          python3 tools/a52-refgen/diagnose-a52-refgen-display.py --self-test \
+            | tee analyzer-self-test.json
+          grep -Fq '"status": "self-test-passed"' analyzer-self-test.json
+
+      - name: Run decoded-CSV integration test
+        run: |
+          set -Eeuo pipefail
+          mkdir -p fixture output
+          cat > fixture/standard.csv <<'EOF'
+          seq,monotonic_ns,message
+          1,1000000,WDT disarm before=1 after=0
+          2,2000000,REFGEN driver_register rc=0
+          3,3000000,"REFGEN probe enter compat=qcom,refgen-kona-regulator"
+          4,4000000,REFGEN mapped start=0x88e7000 size=132 raw=0x0
+          5,5000000,REFGEN probe ready initial_enabled=0
+          6,6000000,REFGEN kona_enable raw=0x0->0x1 enabled=1
+          7,7000000,DISP enter fn=dsi_display_enable
+          8,8000000,HB tick=1 online=8 run=2 j=100
+          EOF
+          sed -i 's/^          //' fixture/standard.csv
+          python3 tools/a52-refgen/diagnose-a52-refgen-display.py \
+            --standard-csv fixture/standard.csv \
+            --screen-result black \
+            --output output \
+            | tee integration-result.json
+          grep -Fq '"verdict": "refgen_operational_display_scope_stalled"' \
+            integration-result.json
+          grep -Fq '"code": "refgen_operational_display_scope_stalled"' \
+            output/diagnosis.json
+          test -s output/diagnosis.md
+          test -s output/critical-timeline.csv
+
+      - name: Enforce metadata-only contract
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'metadata-only; no secure payloads' \
+            tools/a52-refgen/diagnose-a52-refgen-display.py
+          if grep -nE 'command buffer|response buffer|key material|process memory dump' \
+              tools/a52-refgen/diagnose-a52-refgen-display.py; then
+            echo 'Unexpected payload-capture language found' >&2
+            exit 1
+          fi

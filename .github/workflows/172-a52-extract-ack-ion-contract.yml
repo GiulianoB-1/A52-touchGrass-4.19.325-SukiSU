@@ -8,6 +8,12 @@ on:
     paths:
       - .github/workflows/172-a52-extract-ack-ion-contract.yml
       - scripts/169_apply_a52_heap19_kernel_map.py
+  pull_request:
+    branches:
+      - agent/a52-qseecom-ta-heap19
+    paths:
+      - .github/workflows/172-a52-extract-ack-ion-contract.yml
+      - scripts/169_apply_a52_heap19_kernel_map.py
 
 permissions:
   contents: read

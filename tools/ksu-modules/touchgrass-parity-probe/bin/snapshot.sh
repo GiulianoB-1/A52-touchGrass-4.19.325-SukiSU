@@ -6,7 +6,8 @@ export MODDIR
 session=$1
 phase=$2
 out="$session/$phase"
-mkdir -p "$out"/{proc,commands,debugfs,sysfs,firmware,devices,android}
+mkdir -p "$out/proc" "$out/commands" "$out/debugfs" "$out/sysfs" \
+  "$out/firmware" "$out/devices" "$out/android"
 
 # Core identity and boot contract
 run_capture "$out/commands" uname uname -a
@@ -74,7 +75,9 @@ done
 
 [ -r /proc/config.gz ] && copy_binary_capped /proc/config.gz "$out/proc/config.gz" 4194304
 if [ -r /proc/kallsyms ]; then
-  if have gzip; then
+  if have gzip && have timeout; then
+    timeout 30 gzip -c /proc/kallsyms >"$out/proc/kallsyms.gz" 2>/dev/null || true
+  elif have gzip; then
     gzip -c /proc/kallsyms >"$out/proc/kallsyms.gz" 2>/dev/null || true
   else
     copy_capped /proc/kallsyms "$out/proc/kallsyms.txt" 16777216
@@ -146,7 +149,9 @@ if [ "$phase" = "before" ]; then
     [ -d "$base" ] || continue
     {
       echo "source=$base"
-      find "$base" -maxdepth 12 -printf '%y %m %s %p -> %l\n' 2>/dev/null
+      find "$base" -maxdepth 12 2>/dev/null | head -n 10000 | while IFS= read -r p; do
+        ls -ldZ "$p" 2>/dev/null || ls -ld "$p" 2>/dev/null || true
+      done
     } >"$session/device-tree-listing.txt" 2>/dev/null || true
     if have tar; then
       tar -czf "$session/device-tree.tar.gz" -C "${base%/*}" "${base##*/}" 2>"$session/device-tree-tar-errors.txt" || true
@@ -158,8 +163,13 @@ if [ "$phase" = "before" ]; then
           rel=${f#"$base"/}
           dst="$session/device-tree-decoded/$(echo "$rel" | tr '/' '_')"
           mkdir -p "${dst%/*}"
-          od -An -tx1 "$f" >"$dst.hex.txt" 2>/dev/null || true
-          strings "$f" >"$dst.strings.txt" 2>/dev/null || true
+          if have timeout; then
+            timeout 5 od -An -tx1 "$f" >"$dst.hex.txt" 2>/dev/null || true
+            timeout 5 strings "$f" >"$dst.strings.txt" 2>/dev/null || true
+          else
+            od -An -tx1 "$f" >"$dst.hex.txt" 2>/dev/null || true
+            strings "$f" >"$dst.strings.txt" 2>/dev/null || true
+          fi
         done
     break
   done

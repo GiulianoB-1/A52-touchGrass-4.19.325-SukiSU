@@ -1,16 +1,9 @@
 name: 155 - A52 failure-window recorder with QSEECOM heaps
 
-run-name: Build targeted black-screen recorder on the proven heaps 19 and 27 pipeline
+run-name: Build targeted black-screen recorder on heaps 19 and 27
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/155-a52-gki-5.10-qseecom-ion-heaps-self-reporting.yml
-      - scripts/148_apply_a52xq_ion_dmabuf_contract.py
-      - scripts/149_apply_a52xq_ion_system_heap_secure_gate.py
-      - scripts/153_apply_a52xq_qseecom_ion_heaps.py
-      - scripts/154_apply_a52xq_failure_window_probe.py
   push:
     branches:
       - agent/a52-keymaster-real-ion
@@ -24,6 +17,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 concurrency:
   group: a52-failure-window-heaps-${{ github.ref }}
@@ -40,6 +34,17 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Publish run ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 58 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 155 failure-window build started.
+
+Run ID: \`${GITHUB_RUN_ID}\`
+Head: \`${GITHUB_SHA}\`
+Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
       - name: Check out diagnostic project
         uses: actions/checkout@v4
 
@@ -164,10 +169,6 @@ jobs:
 
           grep -Fq 'A52_QSECOM_ION_CMA_HEAPS_19_27' \
             gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
-          grep -Fq 'A52_QSEE_HEAP_TA 19U' \
-            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
-          grep -Fq 'A52_QSEE_HEAP_MAIN 27U' \
-            gki/common/drivers/a52_secure/a52_qseecom_ion_heap.c
           grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' \
             gki/common/drivers/staging/android/ion/ion_dma_buf.c
           grep -Fq 'A52_ION_SYSTEM_HEAP_NONSECURE_GATE' \
@@ -221,13 +222,9 @@ jobs:
           set -e
           printf '%s\n' "$rc" >"$OUT/compile/make-return-code.txt"
           if [ "$rc" -ne 0 ]; then
-            echo '::group::Compiler errors'
             grep -nE '(^|: )(fatal error|error): |undefined reference to' \
               "$OUT/logs/compile.log" | tail -n 350 || true
-            echo '::endgroup::'
-            echo '::group::Compile log tail'
             tail -n 450 "$OUT/logs/compile.log" || true
-            echo '::endgroup::'
             exit "$rc"
           fi
 

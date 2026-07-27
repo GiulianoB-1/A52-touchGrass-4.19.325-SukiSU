@@ -1,0 +1,36 @@
+name: 163 - A52 REFGEN evidence session
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - tools/a52-refgen/manage-a52-refgen-test-session.py
+      - tools/a52-refgen/start_a52_refgen_test_session.bat
+      - tools/a52-refgen/finish_a52_refgen_test_session.bat
+      - tools/a52-refgen/verify_a52_refgen_evidence_bundle.bat
+      - docs/A52-REFGEN-EVIDENCE-SESSION.md
+      - .github/workflows/163-a52-refgen-evidence-session.yml
+  push:
+    branches:
+      - agent/a52-refgen-evidence-session
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile
+        run: python3 -m py_compile tools/a52-refgen/manage-a52-refgen-test-session.py
+      - name: Test
+        run: |
+          python3 tools/a52-refgen/manage-a52-refgen-test-session.py self-test > result.json
+          grep -Fq '"status": "self-test-passed"' result.json
+          grep -Fq '"name": "start"' result.json
+          grep -Fq '"name": "finish"' result.json
+          grep -Fq '"name": "verify"' result.json

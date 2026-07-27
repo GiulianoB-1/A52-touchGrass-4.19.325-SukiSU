@@ -12,6 +12,13 @@ on:
       - scripts/160_apply_a52xq_refgen_regulator.py
       - scripts/154_apply_a52xq_failure_window_probe.py
       - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - diagnostics/refgen-build-trigger.txt
+      - .github/workflows/160-a52-gki-5.10-refgen-display-fix.yml
+      - scripts/160_apply_a52xq_refgen_regulator.py
 
 permissions:
   contents: read

@@ -15,6 +15,12 @@ Exact records take priority. Mirrored records fill sequence gaps only when an
 exact copy is unavailable. Low-confidence recovered records are excluded from
 verdict decisions.
 
+Display scope entry and exit events are paired within the recorded task context.
+PID and TGID are the primary key, with `comm` used only when numeric task identity
+is unavailable. CPU is deliberately excluded because a task may migrate while a
+function is running. This prevents concurrent display calls from different tasks
+from being paired together and producing a false stalled-function verdict.
+
 ## REFGEN parity result
 
 The Kona downstream implementation uses register offset `0x80`, bit 0 as the
@@ -57,16 +63,16 @@ python3 diagnose-a52-refgen-display.py \
 ## Outputs
 
 - `diagnosis.md`: readable verdict and next action
-- `diagnosis.json`: complete structured evidence
+- `diagnosis.json`: complete structured evidence, including task context for display scopes
 - `critical-timeline.csv`: ordered REFGEN, display, heartbeat, and watchdog events
 
 ## Decision boundary
 
 A stable screen after a successful REFGEN enable supports the missing-provider
 hypothesis. A black screen with an unmatched display scope moves the next patch
-to that one function. A REFGEN probe failure moves the patch to the recorded
-probe stage. Missing recorder evidence triggers a collection retry, not another
-kernel change.
+to that one function and task context. A REFGEN probe failure moves the patch to
+the recorded probe stage. Missing recorder evidence triggers a collection retry,
+not another kernel change.
 
 The analyzer processes recorder metadata only. It does not recover secure
 payloads, keys, authentication tokens, command buffers, response buffers, or

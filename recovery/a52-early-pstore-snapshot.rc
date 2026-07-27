@@ -1,0 +1,14 @@
+# Import this file from the recovery ramdisk init configuration.
+# The service runs before recovery UI, ADB, decryption and log collection.
+
+on post-fs
+    mkdir /tmp/a52-early-boot-evidence 0700 root root
+    start a52_save_previous_boot
+
+service a52_save_previous_boot /system/bin/sh /system/bin/a52_collect_boot_evidence.sh --snapshot-only
+    class core
+    user root
+    group root system log readproc
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0

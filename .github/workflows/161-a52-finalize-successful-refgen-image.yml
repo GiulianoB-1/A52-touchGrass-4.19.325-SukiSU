@@ -1,0 +1,213 @@
+name: 161 - Finalize successful A52 REFGEN image
+
+run-name: Verify, repack and publish the compiled REFGEN kernel
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - diagnostics/refgen-finalize-trigger.txt
+      - .github/workflows/161-a52-finalize-successful-refgen-image.yml
+      - scripts/38_repack_a52_p1_boot.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  REFGEN_DIAGNOSTIC_ARTIFACT_ID: '8646194609'
+  RUN32_ARTIFACT_ID: '8635093061'
+
+jobs:
+  finalize:
+    name: Audit and package compiled REFGEN image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out packaging project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl ca-certificates unzip python3 gzip file
+          python3 -m py_compile scripts/38_repack_a52_p1_boot.py
+
+      - name: Download successful compile output from Workflow 160
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p refgen-compile
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${REFGEN_DIAGNOSTIC_ARTIFACT_ID}/zip" \
+            --output refgen-compile/artifact.zip
+          unzip -q refgen-compile/artifact.zip -d refgen-compile/extracted
+
+          test "$(cat refgen-compile/extracted/compile/make-return-code.txt)" = 0
+          test -s refgen-compile/extracted/compile/Image
+          test -s refgen-compile/extracted/package/Image.gz
+          test -s refgen-compile/extracted/config/final.config
+          test -s refgen-compile/extracted/stage/phase25-a52-failure-window-probe-report.json
+          test -s refgen-compile/extracted/stage/phase26-a52-refgen-regulator-report.json
+          gzip -t refgen-compile/extracted/package/Image.gz
+          cmp \
+            <(gzip -dc refgen-compile/extracted/package/Image.gz) \
+            refgen-compile/extracted/compile/Image
+
+          grep -Fxq 'CONFIG_REGULATOR_REFGEN=y' \
+            refgen-compile/extracted/config/final.config
+          grep -aFq 'qcom,refgen-kona-regulator' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'REFGEN driver_register rc=%d' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'REFGEN probe enter compat=%s' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'REFGEN kona_state raw=0x%x enabled=%d' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'REFGEN kona_enable raw=0x%x->0x%x enabled=%u' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'REFGEN kona_disable raw=0x%x->0x%x enabled=%u' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'HB tick=%u online=%u run=%lu j=%lu' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'WDT disarm before=%u after=%u' \
+            refgen-compile/extracted/compile/Image
+          grep -aFq 'A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored' \
+            refgen-compile/extracted/compile/Image
+
+          if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              refgen-compile/extracted/logs/compile.log; then
+            echo 'compiler errors found despite make return code zero' >&2
+            exit 1
+          fi
+
+      - name: Download and verify Run 32 boot container
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p run32/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+          test -s run32/extracted/package/boot.img
+          test -s run32/extracted/tools/decode-a52-unified-secure-recorder.py
+
+      - name: Repack and independently audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-refgen-display-fix-final
+          mkdir -p "$OUT/package" "$OUT/config" "$OUT/logs" "$OUT/stage" "$OUT/tools"
+
+          cp refgen-compile/extracted/package/Image.gz "$OUT/package/Image.gz"
+          cp refgen-compile/extracted/compile/Image "$OUT/package/Image"
+          cp refgen-compile/extracted/config/final.config "$OUT/config/final.config"
+          cp refgen-compile/extracted/logs/compile.log "$OUT/logs/compile.log"
+          cp refgen-compile/extracted/stage/phase25-a52-failure-window-probe-report.json "$OUT/stage/"
+          cp refgen-compile/extracted/stage/phase26-a52-refgen-regulator-report.json "$OUT/stage/"
+          cp run32/extracted/tools/decode-a52-unified-secure-recorder.py "$OUT/tools/"
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-refgen-display-fix-final')
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          recorder = json.loads((root / 'stage/phase25-a52-failure-window-probe-report.json').read_text())
+          refgen = json.loads((root / 'stage/phase26-a52-refgen-regulator-report.json').read_text())
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ', compile_log, re.M)
+          boot = root / 'package/boot.img'
+          image = root / 'package/Image'
+          image_gz = root / 'package/Image.gz'
+          invariants = repack['invariants']
+          required = ('dtb_preserved', 'ramdisk_preserved', 'recovery_dtbo_preserved')
+          if errors:
+              raise SystemExit(f'compiler errors survived audit: {len(errors)}')
+          if not all(invariants[name] for name in required):
+              raise SystemExit('boot-container preservation audit failed')
+          final = {
+              'status': 'a52-refgen-display-fix-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'source_compile_artifact_id': 8646194609,
+              'source_compile_make_return_code': 0,
+              'source_boot_artifact_id': 8635093061,
+              'root_cause_status': 'leading-hypothesis-requires-device-test',
+              'stock_dtb_provider': refgen['stock_dtb_compatible'],
+              'refgen_built_in': True,
+              'refgen_instrumented': True,
+              'payload_capture': False,
+              'compiler_error_count': 0,
+              'heartbeat_interval_ms': recorder['recorder']['heartbeat_interval_ms'],
+              'watchdog_disarmed_in_probe': recorder['watchdog']['firmware_watchdog_disarmed'],
+              'watchdog_registration_bypassed': recorder['watchdog']['registration_bypassed'],
+              'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'image_gz_sha256': hashlib.sha256(image_gz.read_bytes()).hexdigest(),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': invariants['dtb_preserved'],
+              'ramdisk_preserved': invariants['ramdisk_preserved'],
+              'recovery_dtbo_preserved': invariants['recovery_dtbo_preserved'],
+          }
+          (root / 'final-audit.json').write_text(json.dumps(final, indent=2, sort_keys=True) + '\n')
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 REFGEN DISPLAY-SUPPLY CANDIDATE
+
+          This package uses the successfully compiled Workflow 160 kernel image.
+          The earlier red status was caused only by checking MODULE_DESCRIPTION text
+          that is omitted from a built-in kernel. Functional REFGEN markers, the
+          final configuration and make return code are independently verified here.
+
+          Flash only package/boot.img. Keep the known-working rollback image.
+          If the screen still turns black, wait at least 15 seconds, enter recovery
+          without flashing another kernel, and collect the untouched 1 MiB RAMOOPS.
+
+          This image is not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload audited REFGEN candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-refgen-display-fix-final-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-refgen-display-fix-final
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require final output
+        run: |
+          set -Eeuo pipefail
+          test -s artifacts/a52xq-refgen-display-fix-final/package/boot.img
+          grep -Fq '"status": "a52-refgen-display-fix-boot-audited"' \
+            artifacts/a52xq-refgen-display-fix-final/final-audit.json
+          grep -Fq '"source_compile_make_return_code": 0' \
+            artifacts/a52xq-refgen-display-fix-final/final-audit.json

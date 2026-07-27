@@ -11,12 +11,12 @@ DRIVER_REL = Path("drivers/regulator/refgen.c")
 RECORDER_HEADER_REL = Path("include/linux/a52_ack_secure_flight_recorder.h")
 REPORT_NAME = "phase26-a52-refgen-regulator-report.json"
 MARKER = "A52_REFGEN_DISPLAY_SUPPLY_V1"
+TRIGGER_REVISION = 2
 
 KCONFIG_BLOCK = r'''
 config REGULATOR_REFGEN
 	bool "Qualcomm Technologies, Inc. REFGEN regulator driver"
 	depends on OF
-	default y if ARCH_QCOM
 	help
 	  This driver controls the REFGEN reference-bias generator used by
 	  internal Qualcomm PHY blocks.  The Galaxy A52 5G stock device tree
@@ -435,6 +435,7 @@ def main() -> int:
 
     report = {
         "status": "a52-refgen-display-supply-v1-staged",
+        "trigger_revision": TRIGGER_REVISION,
         "hardware_validated": False,
         "hypothesis": "missing qcom,refgen-kona-regulator provider for DSI refgen-supply",
         "stock_dtb_compatible": "qcom,refgen-kona-regulator",

@@ -1,0 +1,350 @@
+name: 164 - A52 REFGEN critical evidence retention
+
+run-name: Build REFGEN candidate that preserves the hardware failure window
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-refgen-critical-retention
+    paths:
+      - .github/workflows/164-a52-refgen-critical-retention.yml
+      - scripts/164_apply_a52_refgen_critical_retention.py
+      - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - .github/workflows/164-a52-refgen-critical-retention.yml
+      - scripts/164_apply_a52_refgen_critical_retention.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-refgen-critical-retention-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+  REFGEN_SOURCE_ARTIFACT_ID: '8646194609'
+  REFGEN_SOURCE_ARTIFACT_SHA256: 8a27edf20e407ebea237b60ae736312b07a6c20eae0e42f764c8d3d5f39dafb8
+  FAILED_CAPTURE_SHA256: 797f1e95958032b0f4052373b2920fc4c12c0ef77f2c8d544e171d4b36e12f10
+
+jobs:
+  build-package:
+    name: Compile and package evidence-preserving REFGEN candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out diagnostic project
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and validate patcher
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/164_apply_a52_refgen_critical_retention.py \
+            scripts/38_repack_a52_p1_boot.py
+          python3 scripts/164_apply_a52_refgen_critical_retention.py --self-test
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Download audited REFGEN source and Run 32 boot container
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p refgen/extracted run32/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${REFGEN_SOURCE_ARTIFACT_ID}/zip" \
+            --output refgen/artifact.zip
+          printf '%s  %s\n' "${REFGEN_SOURCE_ARTIFACT_SHA256}" refgen/artifact.zip \
+            | sha256sum -c -
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q refgen/artifact.zip -d refgen/extracted
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+
+          test -s refgen/extracted/stage/refgen-display-source.patch
+          test -s refgen/extracted/config/final.config
+          test -s refgen/extracted/compile/Image
+          test -s refgen/extracted/package/Image.gz
+          test "$(tr -d '\r\n' < refgen/extracted/compile/make-return-code.txt)" = 0
+          test -s run32/extracted/package/boot.img
+          test -s run32/extracted/tools/decode-a52-unified-secure-recorder.py
+          grep -Fq '#define A52_USR2_CAPACITY 1536U' \
+            refgen/extracted/stage/refgen-display-source.patch
+          grep -Fq 'A52_USR2_CONTINUOUS_PERSIST' \
+            refgen/extracted/stage/refgen-display-source.patch
+          grep -Fq 'REFGEN kona_enable raw=0x%x->0x%x enabled=%u' \
+            refgen/extracted/stage/refgen-display-source.patch
+
+      - name: Restore audited REFGEN source and apply retention policy
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          git -C gki/common apply --check \
+            "$PWD/refgen/extracted/stage/refgen-display-source.patch"
+          git -C gki/common apply \
+            "$PWD/refgen/extracted/stage/refgen-display-source.patch"
+
+          OUT="$PWD/artifacts/a52xq-refgen-critical-retention"
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/compile" \
+            "$OUT/package" "$OUT/tools"
+          python3 scripts/164_apply_a52_refgen_critical_retention.py \
+            --gki gki/common --output "$OUT/stage" \
+            2>&1 | tee "$OUT/logs/critical-retention-stage.log"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path(
+              'artifacts/a52xq-refgen-critical-retention/stage/'
+              'phase27-a52-refgen-critical-retention-report.json'
+          ).read_text())
+          assert report['status'] == 'a52-refgen-critical-retention-v1-staged'
+          assert report['capacity'] == 768
+          assert report['critical_after_capacity_persisted'] is True
+          assert report['routine_after_capacity_dropped'] is True
+          assert report['payload_capture'] is False
+          assert report['evidence_basis']['capture_sha256'] == (
+              '797f1e95958032b0f4052373b2920fc4c12c0ef77f2c8d544e171d4b36e12f10'
+          )
+          PY
+
+          grep -Fq '#define A52_USR2_CAPACITY 768U' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'A52_USR2_CRITICAL_PERSIST_V1' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'policy=critical-after-capacity' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          ! grep -Fq 'A52_USR2_CONTINUOUS_PERSIST' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff \
+            > "$OUT/stage/refgen-critical-retention-source.patch"
+          test -s "$OUT/stage/refgen-critical-retention-source.patch"
+
+      - name: Compile evidence-preserving REFGEN kernel
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-refgen-critical-retention"
+          BUILD="$PWD/workspace/gki-refgen-critical-retention-out"
+          mkdir -p "$BUILD"
+          cp refgen/extracted/config/final.config "$BUILD/.config"
+
+          CLANG="$(readlink -f "$(command -v clang)")"
+          export PATH="$(dirname "$CLANG"):$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          grep -Fxq 'CONFIG_REGULATOR_REFGEN=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_WATCHDOG=y' "$BUILD/.config"
+
+          set +e
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image \
+            > "$OUT/logs/compile.log" 2>&1
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo '::group::Compiler errors'
+            grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" | tail -n 300 || true
+            echo '::endgroup::'
+            echo '::group::Compile log tail'
+            tail -n 400 "$OUT/logs/compile.log" || true
+            echo '::endgroup::'
+            exit "$rc"
+          fi
+
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+          gzip -t "$OUT/package/Image.gz"
+
+          while IFS= read -r marker; do
+            test -n "$marker"
+            if ! grep -aFq "$marker" "$OUT/compile/Image"; then
+              printf 'Missing compiled runtime marker: %s\n' "$marker" >&2
+              exit 1
+            fi
+          done <<'EOF'
+          policy=critical-after-capacity
+          qcom,refgen-kona-regulator
+          REFGEN driver_register rc=%d
+          REFGEN probe enter compat=%s
+          REFGEN mapped start=0x%llx size=%llu raw=0x%x
+          REFGEN probe ready initial_enabled=%d
+          REFGEN kona_state raw=0x%x enabled=%d
+          REFGEN kona_enable raw=0x%x->0x%x enabled=%u
+          REFGEN kona_disable raw=0x%x->0x%x enabled=%u
+          HB tick=%u online=%u run=%lu j=%lu
+          WDT disarm before=%u after=%u
+          %s enter fn=%s
+          %s exit fn=%s us=%llu
+          A52USR2 BOOT_EARLY stage=mm_init backend=early-mirrored
+          EOF
+
+          if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" > "$OUT/logs/compiler-errors.txt"; then
+            cat "$OUT/logs/compiler-errors.txt"
+            exit 1
+          fi
+          grep -Fq 'OBJCOPY arch/arm64/boot/Image' "$OUT/logs/compile.log"
+
+      - name: Repack and audit boot image
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52xq-refgen-critical-retention
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test -s "$OUT/package/boot.img"
+          cp run32/extracted/tools/decode-a52-unified-secure-recorder.py \
+            "$OUT/tools/decode-a52-unified-secure-recorder.py"
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path('artifacts/a52xq-refgen-critical-retention')
+          retention = json.loads((
+              root / 'stage/phase27-a52-refgen-critical-retention-report.json'
+          ).read_text())
+          refgen = json.loads(Path(
+              'refgen/extracted/stage/phase26-a52-refgen-regulator-report.json'
+          ).read_text())
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          compile_log = (root / 'logs/compile.log').read_text(errors='replace')
+          errors = re.findall(
+              r'^[^:\s][^:]*:\d+:\d+: (?:fatal error|error): ',
+              compile_log,
+              re.M,
+          )
+          image = root / 'compile/Image'
+          image_gz = root / 'package/Image.gz'
+          boot = root / 'package/boot.img'
+          final = {
+              'status': 'a52-refgen-critical-retention-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'functional_change': 'recorder-retention-policy-only',
+              'refgen_logic_unchanged': True,
+              'source_refgen_artifact_id': 8646194609,
+              'source_refgen_artifact_sha256':
+                  '8a27edf20e407ebea237b60ae736312b07a6c20eae0e42f764c8d3d5f39dafb8',
+              'failed_capture_sha256':
+                  '797f1e95958032b0f4052373b2920fc4c12c0ef77f2c8d544e171d4b36e12f10',
+              'recorder_capacity': retention['capacity'],
+              'recorder_policy': retention['policy'],
+              'refgen_built_in': refgen['config'] == 'CONFIG_REGULATOR_REFGEN=y',
+              'payload_capture': False,
+              'compiler_error_count': len(errors),
+              'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'image_gz_sha256': hashlib.sha256(image_gz.read_bytes()).hexdigest(),
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+          }
+          if errors:
+              raise SystemExit(f'compiler errors survived audit: {len(errors)}')
+          if not all((
+              final['dtb_preserved'],
+              final['ramdisk_preserved'],
+              final['recovery_dtbo_preserved'],
+              final['refgen_built_in'],
+          )):
+              raise SystemExit('candidate preservation audit failed')
+          (root / 'final-audit.json').write_text(
+              json.dumps(final, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 GKI 5.10 REFGEN CRITICAL-EVIDENCE RETENTION CANDIDATE
+
+          The first REFGEN hardware test reached Android and kept the kernel alive,
+          but continuous ION/QSEE recorder traffic overwrote the early REFGEN,
+          display, and watchdog records. This build keeps the REFGEN implementation,
+          configuration, DTB, ramdisk, recovery DTBO, heartbeat, and watchdog policy
+          unchanged. It changes only recorder retention:
+
+          - retain the first 768 metadata-only events
+          - after that window, persist only BOOT, HB, REFGEN, DISP, and WDT records
+          - drop routine ION/QSEE traffic after the bounded window
+
+          Flash only package/boot.img. If the screen is black, leave it running for
+          at least 15 seconds, enter recovery directly, and collect the raw 1 MiB
+          RAMOOPS snapshot before flashing another kernel.
+
+          This image is not hardware validated.
+          EOF
+          sed -i 's/^          //' "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload evidence-preserving REFGEN candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-refgen-critical-retention-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-refgen-critical-retention
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require audited candidate
+        run: |
+          set -Eeuo pipefail
+          ROOT=artifacts/a52xq-refgen-critical-retention
+          test -s "$ROOT/package/boot.img"
+          test "$(tr -d '\r\n' < "$ROOT/compile/make-return-code.txt")" = 0
+          grep -Fq '"status": "a52-refgen-critical-retention-boot-audited"' \
+            "$ROOT/final-audit.json"
+          grep -Fq '"refgen_logic_unchanged": true' "$ROOT/final-audit.json"
+          grep -Fq '"recorder_capacity": 768' "$ROOT/final-audit.json"
+          grep -Fq '"compiler_error_count": 0' "$ROOT/final-audit.json"

@@ -1,0 +1,56 @@
+name: 157 - Dispatch failure-window recorder
+
+run-name: Dispatch Workflow 156 and publish its run ID
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/157-dispatch-failure-window-recorder.yml
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Workflow 156
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 156-a52-failure-window-recorder.yml \
+            --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Publish latest Workflow 156 run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 12); do
+            RUN_JSON="$(gh run list --repo "$GITHUB_REPOSITORY" \
+              --workflow 156-a52-failure-window-recorder.yml \
+              --branch main --limit 1 \
+              --json databaseId,status,conclusion,url,headSha,createdAt)"
+            RUN_ID="$(printf '%s' "$RUN_JSON" | jq -r '.[0].databaseId // empty')"
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test -n "${RUN_ID:-}"
+          URL="$(printf '%s' "$RUN_JSON" | jq -r '.[0].url')"
+          STATUS="$(printf '%s' "$RUN_JSON" | jq -r '.[0].status')"
+          HEAD="$(printf '%s' "$RUN_JSON" | jq -r '.[0].headSha')"
+          gh issue comment 45 --repo "$GITHUB_REPOSITORY" --body \
+            "Workflow 156 failure-window recorder dispatched.
+
+Run ID: \`${RUN_ID}\`
+Status: \`${STATUS}\`
+Head: \`${HEAD}\`
+Run: ${URL}"

@@ -2,6 +2,7 @@
 
 A broad, bounded and read-only KernelSU module for capturing the working
 TouchGrass 4.19 kernel as a behavioral reference for the ACK/GKI 5.10 port.
+Run it only while booted into the known-working TouchGrass kernel.
 
 ## What it captures
 

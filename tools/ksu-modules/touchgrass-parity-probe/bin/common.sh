@@ -107,10 +107,12 @@ copy_capped() {
   {
     echo "source=$src"
     echo "limit_bytes=$limit"
-    echo "source_bytes=$(wc -c <"$src" 2>/dev/null)"
+    echo "reported_source_bytes=$(stat -c %s "$src" 2>/dev/null || echo unknown)"
     echo "---"
   } >"$dst.meta" 2>/dev/null || true
-  if have head; then
+  if have timeout && have head; then
+    timeout 5 head -c "$limit" "$src" >"$dst" 2>/dev/null || true
+  elif have head; then
     head -c "$limit" "$src" >"$dst" 2>/dev/null || true
   else
     dd if="$src" of="$dst" bs=4096 count=$((limit / 4096)) 2>/dev/null || true
@@ -123,7 +125,9 @@ copy_binary_capped() {
   limit=${3:-$DEFAULT_FILE_LIMIT}
   [ -r "$src" ] || return 0
   mkdir -p "${dst%/*}"
-  if have head; then
+  if have timeout && have head; then
+    timeout 10 head -c "$limit" "$src" >"$dst" 2>/dev/null || true
+  elif have head; then
     head -c "$limit" "$src" >"$dst" 2>/dev/null || true
   else
     dd if="$src" of="$dst" bs=4096 count=$((limit / 4096)) 2>/dev/null || true
@@ -166,7 +170,9 @@ list_tree() {
   mkdir -p "${dst%/*}"
   {
     echo "base=$base"
-    find "$base" -maxdepth 8 -printf '%y %m %u %g %s %p -> %l\n' 2>/dev/null
+    find "$base" -maxdepth 8 2>/dev/null | head -n 5000 | while IFS= read -r p; do
+      ls -ldZ "$p" 2>/dev/null || ls -ld "$p" 2>/dev/null || true
+    done
   } >"$dst" 2>/dev/null || true
 }
 
@@ -179,7 +185,11 @@ hash_or_stat() {
     ls -lZ "$src" 2>/dev/null || ls -l "$src" 2>/dev/null
     stat "$src" 2>/dev/null || true
     if [ -f "$src" ] && [ -r "$src" ]; then
-      sha256sum "$src" 2>/dev/null || true
+      if have timeout; then
+        timeout 30 sha256sum "$src" 2>/dev/null || true
+      else
+        sha256sum "$src" 2>/dev/null || true
+      fi
     fi
   } >"$dst" 2>&1
 }

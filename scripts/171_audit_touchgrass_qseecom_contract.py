@@ -182,7 +182,6 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
     ack_default_markers = require(
         ack_dmabuf,
         [
-            "ion_dma_buf_map(",
             "ion_dma_buf_vmap(",
             "ion_dma_buf_vunmap(",
             "ion_buffer_kmap_put(buffer)",
@@ -195,6 +194,10 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
     ack_default_variants = select_alternatives(
         ack_dmabuf,
         {
+            "map_function": [
+                "ion_dma_buf_map(",
+                "ion_dma_buf_kmap(",
+            ],
             "map_fallback": [
                 "ion_buffer_kmap_get(buffer) + offset * PAGE_SIZE",
                 "buffer->vaddr + offset * PAGE_SIZE",

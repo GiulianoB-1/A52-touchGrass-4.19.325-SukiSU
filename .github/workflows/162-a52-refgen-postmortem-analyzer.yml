@@ -14,6 +14,7 @@ on:
   push:
     branches:
       - agent/a52-refgen-postmortem-analyzer
+      - agent/a52-refgen-context-aware-analyzer
     paths:
       - tools/a52-refgen/diagnose-a52-refgen-display.py
       - docs/A52-REFGEN-POSTMORTEM.md
@@ -52,17 +53,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p fixture output
-          cat > fixture/standard.csv <<'EOF'
-          seq,monotonic_ns,message
-          1,1000000,WDT disarm before=1 after=0
-          2,2000000,REFGEN driver_register rc=0
-          3,3000000,"REFGEN probe enter compat=qcom,refgen-kona-regulator"
-          4,4000000,REFGEN mapped start=0x88e7000 size=96 raw=0x0
-          5,5000000,REFGEN probe ready initial_enabled=0
-          6,6000000,REFGEN kona_enable raw=0x0->0x1 enabled=1
-          7,7000000,DISP enter fn=dsi_display_enable
-          8,8000000,HB tick=1 online=8 run=2 j=100
-          EOF
+          cat > fixture/standard.csv <<'EOF_CSV'
+          seq,monotonic_ns,pid,tgid,cpu,comm,message
+          1,1000000,1,1,0,swapper,WDT disarm before=1 after=0
+          2,2000000,1,1,0,swapper,REFGEN driver_register rc=0
+          3,3000000,1,1,0,swapper,"REFGEN probe enter compat=qcom,refgen-kona-regulator"
+          4,4000000,1,1,0,swapper,REFGEN mapped start=0x88e7000 size=96 raw=0x0
+          5,5000000,1,1,0,swapper,REFGEN probe ready initial_enabled=0
+          6,6000000,100,100,3,surfaceflinger,REFGEN kona_enable raw=0x0->0x1 enabled=1
+          7,7000000,100,100,3,surfaceflinger,DISP enter fn=dsi_display_enable
+          8,8000000,2,2,1,kworker,HB tick=1 online=8 run=2 j=100
+          EOF_CSV
           sed -i 's/^          //' fixture/standard.csv
           python3 tools/a52-refgen/diagnose-a52-refgen-display.py \
             --standard-csv fixture/standard.csv \
@@ -78,6 +79,33 @@ jobs:
           grep -Fq '"stock_lagoon_0x60_layout": true' output/diagnosis.json
           grep -Fq '"resource_covers_ctrl5": false' output/diagnosis.json
           grep -Fq 'outside the declared resource span' output/diagnosis.json
+          grep -Fq '"pairing": "per-task-pid-tgid-with-comm-fallback"' output/diagnosis.json
+
+      - name: Reject cross-task display scope pairing
+        run: |
+          set -Eeuo pipefail
+          mkdir -p interleaved-output
+          cat > fixture/interleaved.csv <<'EOF_CSV'
+          seq,monotonic_ns,pid,tgid,cpu,comm,message
+          1,1000000,100,100,2,surfaceflinger,DISP enter fn=dsi_display_enable
+          2,2000000,200,200,4,composer,DISP enter fn=dsi_display_enable
+          3,3000000,100,100,6,surfaceflinger,DISP exit fn=dsi_display_enable us=250
+          EOF_CSV
+          sed -i 's/^          //' fixture/interleaved.csv
+          python3 tools/a52-refgen/diagnose-a52-refgen-display.py \
+            --standard-csv fixture/interleaved.csv \
+            --output interleaved-output \
+            > interleaved-result.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('interleaved-output/diagnosis.json').read_text())
+          unmatched = report['display']['unmatched_entries']
+          assert report['display']['pairing'] == 'per-task-pid-tgid-with-comm-fallback'
+          assert len(unmatched) == 1
+          assert unmatched[0]['pid'] == 200
+          assert unmatched[0]['tgid'] == 200
+          PY
 
       - name: Enforce metadata-only contract
         run: |

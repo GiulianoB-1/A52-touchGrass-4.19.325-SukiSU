@@ -1,5 +1,6 @@
 name: 167 - Repair heap-19 validation gate
 
+# Registered on main; this feature definition performs the one-shot repair.
 on:
   push:
     branches:

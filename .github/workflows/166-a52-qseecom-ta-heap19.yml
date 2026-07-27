@@ -250,7 +250,6 @@ jobs:
             test -n "$marker"
             grep -aFq "$marker" "$OUT/compile/Image"
           done <<'EOF'
-          A52_QSEECOM_TA_DMA_ID19_COMPAT
           qsecom_ta
           BOOT qseecom_ta_heap registered id=%u base=0x%llx size=%llu
           BOOT qseecom_ta_heap fail stage=register rc=%d

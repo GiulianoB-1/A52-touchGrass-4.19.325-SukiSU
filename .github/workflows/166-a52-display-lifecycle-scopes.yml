@@ -1,0 +1,198 @@
+name: 166 - A52 display lifecycle scopes
+run-name: Build REFGEN candidate with display probe, bind, KMS and clock scopes
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/a52-display-lifecycle-scopes]
+    paths:
+      - .github/workflows/166-a52-display-lifecycle-scopes.yml
+      - scripts/166_apply_a52_display_lifecycle_scopes.py
+  pull_request:
+    branches: [agent/a52-active-display-scopes]
+    paths:
+      - .github/workflows/166-a52-display-lifecycle-scopes.yml
+      - scripts/166_apply_a52_display_lifecycle_scopes.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-display-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+  ACTIVE_ARTIFACT_ID: '8654956416'
+  ACTIVE_ARTIFACT_SHA256: a70b7cd08c3e578415cc5289a36a4efb1ad61cfe8734c2e198b9aa8ebb763c08
+  CAPTURE_SHA256: e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad
+
+jobs:
+  build-package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare and self-test
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/165_apply_a52_active_display_scopes.py \
+            scripts/166_apply_a52_display_lifecycle_scopes.py scripts/38_repack_a52_p1_boot.py
+          python3 scripts/166_apply_a52_display_lifecycle_scopes.py --self-test
+
+      - name: Restore pinned GKI
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore source and stage lifecycle scopes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          mkdir -p active/extracted run32/extracted
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ACTIVE_ARTIFACT_ID}/zip" \
+            -o active/artifact.zip
+          printf '%s  %s\n' "${ACTIVE_ARTIFACT_SHA256}" active/artifact.zip | sha256sum -c -
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            -o run32/artifact.zip
+          unzip -q active/artifact.zip -d active/extracted
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd active/extracted && sha256sum -c SHA256SUMS)
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+          SRC=active/extracted/stage/refgen-active-display-scopes-source.patch
+          test -s "$SRC"
+          grep -Fq 'a52.dsi_bridge_pre_enable' "$SRC"
+          grep -Fq 'A52_USR2_CRITICAL_PERSIST_V1' "$SRC"
+          grep -Fq 'REFGEN probe ready initial_enabled=%d' "$SRC"
+          test -s active/extracted/config/final.config
+          test -s active/extracted/tools/decode-a52-unified-secure-recorder.py
+          test -s run32/extracted/package/boot.img
+
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+          git -C gki/common apply --check "$PWD/$SRC"
+          git -C gki/common apply "$PWD/$SRC"
+
+          OUT="$PWD/artifacts/a52xq-refgen-display-lifecycle-scopes"
+          mkdir -p "$OUT"/{logs,stage,config,compile,package,tools}
+          python3 scripts/166_apply_a52_display_lifecycle_scopes.py \
+            --gki gki/common --output "$OUT/stage" | tee "$OUT/logs/stage.log"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('artifacts/a52xq-refgen-display-lifecycle-scopes/stage/phase29-a52-display-lifecycle-scopes-report.json')
+          r = json.loads(p.read_text())
+          assert r['status'] == 'a52-display-lifecycle-scopes-v1-staged'
+          assert r['persistent_profile'] == 'display-lifecycle-v1'
+          assert r['target_file_count'] == 8
+          assert r['target_function_count'] == r['inserted_function_count'] == 24
+          assert r['refgen_logic_unchanged'] and r['display_control_flow_unchanged']
+          assert r['recorder_retention_policy_unchanged']
+          assert r['evidence_basis']['capture_sha256'] == 'e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad'
+          PY
+          git -C gki/common diff --check
+          git -C gki/common add -N .
+          git -C gki/common diff --binary --no-ext-diff > "$OUT/stage/refgen-display-lifecycle-scopes-source.patch"
+
+      - name: Compile, repack and audit
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/a52xq-refgen-display-lifecycle-scopes"
+          BUILD="$PWD/workspace/gki-display-lifecycle-out"
+          mkdir -p "$BUILD"
+          cp active/extracted/config/final.config "$BUILD/.config"
+          export CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+            > "$OUT/logs/olddefconfig.log" 2>&1
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          make -k -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+            KCFLAGS=-Wno-error=frame-larger-than Image > "$OUT/logs/compile.log" 2>&1
+          test -s "$BUILD/arch/arm64/boot/Image"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          printf '0\n' > "$OUT/compile/make-return-code.txt"
+          gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+
+          for marker in \
+            'policy=critical-after-capacity profile=display-lifecycle-v1' \
+            'a52.life.msm_drm_register' 'a52.life.msm_pdev_probe' \
+            'a52.life.dsi_display_dev_probe' 'a52.life.dsi_display_bind' \
+            'a52.life.sde_kms_hw_init' 'a52.life.sde_kms_commit' \
+            'a52.life.dsi_clk_update_link_clk_state' 'a52.life.ss_panel_init'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+              "$OUT/logs/compile.log" > "$OUT/logs/compiler-errors.txt"; then
+            cat "$OUT/logs/compiler-errors.txt"
+            exit 1
+          fi
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source run32/extracted/package/boot.img --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
+          cp active/extracted/tools/decode-a52-unified-secure-recorder.py "$OUT/tools/"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('artifacts/a52xq-refgen-display-lifecycle-scopes')
+          repack = json.loads((root / 'package/repack-report.json').read_text())
+          boot = root / 'package/boot.img'
+          audit = {
+              'status': 'a52-refgen-display-lifecycle-scopes-boot-audited',
+              'flashable_candidate': True,
+              'hardware_validated': False,
+              'persistent_profile': 'display-lifecycle-v1',
+              'lifecycle_scope_count': 24,
+              'source_active_artifact_id': 8654956416,
+              'latest_capture_sha256': 'e3daa915eddb43433735127c987f2c3febb9549b1fb8b42b7d67d1315acf84ad',
+              'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+              'boot_bytes': boot.stat().st_size,
+              'dtb_preserved': repack['invariants']['dtb_preserved'],
+              'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+              'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
+          }
+          assert audit['boot_bytes'] == 100663296
+          assert audit['dtb_preserved'] and audit['ramdisk_preserved'] and audit['recovery_dtbo_preserved']
+          (root / 'final-audit.json').write_text(json.dumps(audit, indent=2, sort_keys=True) + '\n')
+          PY
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 DISPLAY LIFECYCLE DIAGNOSTIC
+          Flash only package/boot.img. On a black screen, wait at least 15 seconds,
+          enter recovery directly, and collect the untouched raw 1 MiB RAMOOPS image.
+          Accept the capture only if BOOT contains profile=display-lifecycle-v1.
+          EOF
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-lifecycle-${{ github.run_number }}-FAILED
+          path: artifacts/a52xq-refgen-display-lifecycle-scopes
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-refgen-display-lifecycle-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-refgen-display-lifecycle-scopes
+          if-no-files-found: error
+          retention-days: 30

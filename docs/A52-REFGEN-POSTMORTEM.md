@@ -19,9 +19,12 @@ verdict decisions.
 
 The Kona downstream implementation uses register offset `0x80`, bit 0 as the
 enable mask, writes 1 to enable, writes 0 to disable, and reads the same bit for
-`is_enabled`. The stock node maps `0x84` bytes, so the final 32-bit register at
-`0x80` is inside the resource. The diagnostic port preserves that behaviour and
-adds metadata-only before/after records.
+`is_enabled`. The exact A52 Lagoon node declares only `0x60` bytes at
+`0x88e7000`, while the working downstream driver still accesses offset `0x80`.
+This is an inherited DT/driver resource-span inconsistency, not a different
+register choice introduced by the ACK candidate. The diagnostic port preserves
+the working downstream behaviour and the analyzer reports the inconsistency as
+a warning.
 
 No further speculative REFGEN change should be made before the device test.
 

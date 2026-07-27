@@ -26,7 +26,7 @@ trap 'rmdir "$OUTROOT/.capture-lock" 2>/dev/null' EXIT HUP INT TERM
 
 stamp=$(timestamp)
 session="$OUTROOT/$stamp-$mode"
-mkdir -p "$session"/{before,after,trace,state}
+mkdir -p "$session/before" "$session/after" "$session/trace" "$session/state"
 
 {
   echo "profile=touchgrass-parity-probe-v1.1"

@@ -133,7 +133,7 @@ jobs:
             tools/a52-refgen/diagnose-a52-refgen-display.py
           grep -Fq 'This tool is deliberately non-destructive' \
             tools/a52-refgen/validate-a52-refgen-hardware-inputs.py
-          if grep -nE 'adb shell (dd|flash)|fastboot flash|heimdall flash|odin' \
+          if grep -niE 'adb[[:space:]]+shell[[:space:]]+(dd|flash)|fastboot[[:space:]]+flash|heimdall[[:space:]]+flash|(^|[^[:alnum:]_])odin([^[:alnum:]_]|$)' \
               tools/a52-refgen/validate-a52-refgen-hardware-inputs.py \
               tools/a52-refgen/preflight_a52_refgen_candidate.bat \
               tools/a52-refgen/validate_a52_refgen_capture.bat; then

@@ -10,6 +10,12 @@ on:
     paths:
       - .github/workflows/161-a52-gki-5.10-finalize-refgen-candidate.yml
       - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-keymaster-real-ion
+    paths:
+      - diagnostics/refgen-finalize-trigger.txt
+      - .github/workflows/161-a52-gki-5.10-finalize-refgen-candidate.yml
 
 permissions:
   contents: read

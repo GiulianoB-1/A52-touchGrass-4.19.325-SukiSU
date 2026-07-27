@@ -1,0 +1,120 @@
+name: 158 - A52 display parity audit against TouchGrass
+
+run-name: Compare active ACK display initialization with working TouchGrass
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-legacy-gdsc-regulator
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-display-parity-${{ github.event.pull_request.number || 'manual' }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  RUN32_ARTIFACT_ID: '8635093061'
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  RECORDER_BRANCH: agent/a52-keymaster-real-ion
+
+jobs:
+  compare:
+    name: Compare active display source and initialization functions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out diagnostic scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RECORDER_BRANCH }}
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl unzip python3
+          python3 -m py_compile scripts/157_compare_a52_display_to_touchgrass.py
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore audited ACK source from Run 32
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          mkdir -p run32/extracted artifacts/a52-display-parity
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${RUN32_ARTIFACT_ID}/zip" \
+            --output run32/artifact.zip
+          unzip -q run32/artifact.zip -d run32/extracted
+          (cd run32/extracted && sha256sum -c SHA256SUMS)
+          test -s run32/extracted/stage/full-source.patch
+          git -C gki/common apply --check "$PWD/run32/extracted/stage/full-source.patch"
+          git -C gki/common apply "$PWD/run32/extracted/stage/full-source.patch"
+          test -f gki/common/drivers/a52_display/msm/dsi/dsi_clk_manager.c
+          test -f gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+          test -f gki/common/drivers/a52_display/msm/sde/sde_kms.c
+
+      - name: Fetch exact working TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+          test -f touchgrass/techpack/display/msm/dsi/dsi_clk_manager.c
+          test -f touchgrass/techpack/display/msm/dsi/dsi_display.c
+          test -f touchgrass/techpack/display/msm/sde/sde_kms.c
+
+      - name: Compare active display initialization
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-display-parity
+          python3 scripts/157_compare_a52_display_to_touchgrass.py \
+            --ack gki/common \
+            --touchgrass touchgrass \
+            --output "$OUT" \
+            2>&1 | tee "$OUT/audit.log"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('artifacts/a52-display-parity/a52-display-touchgrass-parity-report.json')
+          report = json.loads(path.read_text())
+          assert report['status'] == 'a52-display-touchgrass-parity-audit-v1'
+          assert report['summary']['files_compared'] >= 6
+          assert report['summary']['functions_compared'] >= 15
+          assert report['clock_combination']['touchgrass_has_and'] is True
+          assert report['clock_combination']['ack_has_and'] is True
+          assert report['clock_combination']['conclusion'] == 'shared-with-working-touchgrass-not-a-standalone-root-cause'
+          PY
+
+      - name: Upload parity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52-display-touchgrass-parity-${{ github.run_number }}
+          path: artifacts/a52-display-parity
+          if-no-files-found: error
+          retention-days: 14

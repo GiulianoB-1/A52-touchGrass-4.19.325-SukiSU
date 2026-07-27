@@ -1,0 +1,134 @@
+name: 172 - Extract pinned ACK ION contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-qseecom-ta-heap19-kmap
+    paths:
+      - .github/workflows/172-a52-extract-ack-ion-contract.yml
+      - scripts/169_apply_a52_heap19_kernel_map.py
+  pull_request:
+    branches:
+      - agent/a52-qseecom-ta-heap19
+    paths:
+      - .github/workflows/172-a52-extract-ack-ion-contract.yml
+      - scripts/169_apply_a52_heap19_kernel_map.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  HEAP19_ARTIFACT_ID: '8661555402'
+  HEAP19_ARTIFACT_SHA256: b36d0f0827027aa65e3d6ee5354101e2ba2036b422514b54150438c9490b7e5d
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Reconstruct exact heap-19 source and export contracts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fd
+
+          mkdir -p heap19/extracted artifacts/ack-ion-contract
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${HEAP19_ARTIFACT_ID}/zip" \
+            --output heap19/artifact.zip
+          printf '%s  %s\n' "${HEAP19_ARTIFACT_SHA256}" heap19/artifact.zip \
+            | sha256sum -c -
+          unzip -q heap19/artifact.zip -d heap19/extracted
+          (cd heap19/extracted && sha256sum -c SHA256SUMS)
+
+          PATCH="$PWD/heap19/extracted/stage/qseecom-ta-heap19-source.patch"
+          git -C gki/common apply --check "$PATCH"
+          git -C gki/common apply "$PATCH"
+          python3 scripts/169_apply_a52_heap19_kernel_map.py \
+            --gki gki/common --output artifacts/ack-ion-contract
+
+          OUT=artifacts/ack-ion-contract
+          mkdir -p "$OUT/source" "$OUT/source/qseecom-headers" "$OUT/source/kmap-definitions"
+          cp gki/common/include/linux/ion.h "$OUT/source/include-linux-ion.h"
+          cp gki/common/include/linux/dma-buf.h "$OUT/source/include-linux-dma-buf.h"
+          cp gki/common/drivers/dma-buf/dma-buf.c "$OUT/source/dma-buf-core.c"
+          cp gki/common/drivers/staging/android/ion/ion_dma_buf.c \
+            "$OUT/source/ion_dma_buf.c"
+          cp gki/common/drivers/staging/android/ion/ion_heap.c \
+            "$OUT/source/ion_heap.c"
+          cp gki/common/drivers/staging/android/ion/ion.c \
+            "$OUT/source/ion.c"
+          cp gki/common/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c \
+            "$OUT/source/a52_qseecom_ta_heap.c"
+          QSEECOM=$(grep -Rl --include='*.c' \
+            'qseecom_create_bridge_for_secbuf' gki/common/drivers | head -n 1)
+          test -n "$QSEECOM"
+          cp "$QSEECOM" "$OUT/source/qseecom.c"
+          QSEECOM_DIR=$(dirname "$QSEECOM")
+          find "$QSEECOM_DIR" -maxdepth 1 -type f -name '*.h' -exec \
+            cp {} "$OUT/source/qseecom-headers/" \;
+
+          grep -RIl --include='*.h' --include='*.c' \
+            'dma_buf_kmap' gki/common/include gki/common/drivers \
+            > "$OUT/source/kmap-definition-paths.txt" || true
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            safe=$(echo "${path#gki/common/}" | tr '/' '_')
+            cp "$path" "$OUT/source/kmap-definitions/$safe"
+          done < "$OUT/source/kmap-definition-paths.txt"
+
+          {
+            echo "GKI_COMMON_SHA=${GKI_COMMON_SHA}"
+            echo "QSEECOM_SOURCE=${QSEECOM#gki/common/}"
+            echo
+            echo '=== ion.h: heap and ops ==='
+            grep -nE 'struct ion_heap_ops|struct ion_heap \{|buf_ops|get_flags' \
+              "$OUT/source/include-linux-ion.h" || true
+            echo
+            echo '=== ION DMA-BUF exporter ==='
+            grep -nE 'kmap|kunmap|vmap|vunmap|get_flags|buf_ops|ion_buffer_kmap' \
+              "$OUT/source/ion_dma_buf.c" || true
+            echo
+            echo '=== generic DMA-BUF contract ==='
+            grep -nE 'dma_buf_kmap|dma_buf_kunmap|dma_buf_vmap|dma_buf_vunmap|ops->map|ops->vmap|get_flags' \
+              "$OUT/source/dma-buf-core.c" "$OUT/source/include-linux-dma-buf.h" || true
+            echo
+            echo '=== compatibility dma_buf_kmap definitions ==='
+            cat "$OUT/source/kmap-definition-paths.txt" || true
+            grep -RIn 'dma_buf_kmap\|dma_buf_kunmap' \
+              "$OUT/source/kmap-definitions" "$OUT/source/qseecom-headers" || true
+            echo
+            echo '=== qseecom consumer ==='
+            grep -nE 'qseecom_create_bridge_for_secbuf|qseecom_dmabuf_map|qseecom_vaddr_map|dma_buf_get_flags|dma_buf_kmap' \
+              "$OUT/source/qseecom.c" || true
+          } > "$OUT/CONTRACT-SUMMARY.txt"
+
+          find "$OUT" -type f ! -name SHA256SUMS -print0 \
+            | sort -z | xargs -0 sha256sum \
+            | sed "s#  $OUT/#  ./#" > "$OUT/SHA256SUMS"
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a52-pinned-ack-ion-contract
+          path: artifacts/ack-ion-contract
+          if-no-files-found: error
+          retention-days: 30

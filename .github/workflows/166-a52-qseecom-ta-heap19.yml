@@ -93,7 +93,7 @@ jobs:
           test -s active/extracted/package/boot.img
           test "$(tr -d '\r\n' < active/extracted/compile/make-return-code.txt)" = 0
           test -s run32/extracted/package/boot.img
-          grep -Fq 'A52_ACTIVE_DISPLAY_SCOPES_V1' \
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_bridge_pre_enable")' \
             active/extracted/stage/refgen-active-display-scopes-source.patch
           grep -Fq 'A52_USR2_CRITICAL_PERSIST_V1' \
             active/extracted/stage/refgen-active-display-scopes-source.patch

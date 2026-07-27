@@ -182,11 +182,9 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
     ack_default_markers = require(
         ack_dmabuf,
         [
-            "if (heap->buf_ops.map)",
-            "heap->buf_ops.map(dmabuf, offset)",
-            "if (heap->buf_ops.vmap)",
-            "heap->buf_ops.vmap(dmabuf)",
-            "if (heap->buf_ops.vunmap)",
+            "ion_dma_buf_map(",
+            "ion_dma_buf_vmap(",
+            "ion_dma_buf_vunmap(",
             "ion_buffer_kmap_put(buffer)",
             "if (!heap->buf_ops.get_flags)",
             "return heap->buf_ops.get_flags(dmabuf, flags);",
@@ -201,7 +199,7 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
                 "ion_buffer_kmap_get(buffer) + offset * PAGE_SIZE",
                 "buffer->vaddr + offset * PAGE_SIZE",
             ],
-            "vmap_fallback": [
+            "vmap_behavior": [
                 "vaddr = ion_buffer_kmap_get(buffer)",
                 "return ERR_PTR(-EOPNOTSUPP)",
             ],
@@ -210,6 +208,16 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             ],
         },
         "ACK default ION DMA-BUF fallback variants",
+    )
+    map_override_model = (
+        "heap-specific-optional"
+        if "heap->buf_ops.map" in ack_dmabuf
+        else "core-owned"
+    )
+    vmap_override_model = (
+        "heap-specific-optional"
+        if "heap->buf_ops.vmap" in ack_dmabuf
+        else "core-owned"
     )
 
     forbidden = [
@@ -246,6 +254,8 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "heap_abi": ack_heap_abi,
             "default_dma_buf_markers": ack_default_markers,
             "default_dma_buf_variants": ack_default_variants,
+            "map_override_model": map_override_model,
+            "vmap_override_model": vmap_override_model,
             "qseecom_source": str(ack_qseecom_path),
             "qseecom_contract": list(qseecom_consumer_patterns),
         },
@@ -253,8 +263,8 @@ def audit(gki: Path, touchgrass: Path, output: Path) -> dict[str, object]:
             "touchgrass_flags_provider": "global ION dma_buf_ops.get_flags",
             "ack_flags_provider": "heap-specific ion_heap.buf_ops.get_flags",
             "returned_value": "ion_buffer.flags",
-            "default_ack_map_fallback_preserved": True,
-            "default_ack_vmap_contract_unchanged": True,
+            "default_ack_map_path_preserved": True,
+            "default_ack_vmap_path_preserved": True,
             "touchgrass_dma_preparation": "ion_pages_sync_for_device",
             "ack_dma_preparation": "ion_buffer_prep_noncached",
             "fixed_vendor_heap_id_preserved": 19,

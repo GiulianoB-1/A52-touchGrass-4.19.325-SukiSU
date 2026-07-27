@@ -66,7 +66,7 @@ jobs:
             --gki gki/common --output artifacts/ack-ion-contract
 
           OUT=artifacts/ack-ion-contract
-          mkdir -p "$OUT/source"
+          mkdir -p "$OUT/source" "$OUT/source/qseecom-headers" "$OUT/source/kmap-definitions"
           cp gki/common/include/linux/ion.h "$OUT/source/include-linux-ion.h"
           cp gki/common/include/linux/dma-buf.h "$OUT/source/include-linux-dma-buf.h"
           cp gki/common/drivers/dma-buf/dma-buf.c "$OUT/source/dma-buf-core.c"
@@ -82,6 +82,18 @@ jobs:
             'qseecom_create_bridge_for_secbuf' gki/common/drivers | head -n 1)
           test -n "$QSEECOM"
           cp "$QSEECOM" "$OUT/source/qseecom.c"
+          QSEECOM_DIR=$(dirname "$QSEECOM")
+          find "$QSEECOM_DIR" -maxdepth 1 -type f -name '*.h' -exec \
+            cp {} "$OUT/source/qseecom-headers/" \;
+
+          grep -RIl --include='*.h' --include='*.c' \
+            'dma_buf_kmap' gki/common/include gki/common/drivers \
+            > "$OUT/source/kmap-definition-paths.txt" || true
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            safe=$(echo "${path#gki/common/}" | tr '/' '_')
+            cp "$path" "$OUT/source/kmap-definitions/$safe"
+          done < "$OUT/source/kmap-definition-paths.txt"
 
           {
             echo "GKI_COMMON_SHA=${GKI_COMMON_SHA}"
@@ -95,9 +107,14 @@ jobs:
             grep -nE 'kmap|kunmap|vmap|vunmap|get_flags|buf_ops|ion_buffer_kmap' \
               "$OUT/source/ion_dma_buf.c" || true
             echo
-            echo '=== generic DMA-BUF kmap contract ==='
-            grep -nE 'dma_buf_kmap|dma_buf_kunmap|dma_buf_vmap|dma_buf_vunmap|ops->map|ops->vmap' \
+            echo '=== generic DMA-BUF contract ==='
+            grep -nE 'dma_buf_kmap|dma_buf_kunmap|dma_buf_vmap|dma_buf_vunmap|ops->map|ops->vmap|get_flags' \
               "$OUT/source/dma-buf-core.c" "$OUT/source/include-linux-dma-buf.h" || true
+            echo
+            echo '=== compatibility dma_buf_kmap definitions ==='
+            cat "$OUT/source/kmap-definition-paths.txt" || true
+            grep -RIn 'dma_buf_kmap\|dma_buf_kunmap' \
+              "$OUT/source/kmap-definitions" "$OUT/source/qseecom-headers" || true
             echo
             echo '=== qseecom consumer ==='
             grep -nE 'qseecom_create_bridge_for_secbuf|qseecom_dmabuf_map|qseecom_vaddr_map|dma_buf_get_flags|dma_buf_kmap' \

@@ -108,6 +108,7 @@ AUDIT='''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/workqueue.h>
 #include <linux/a52_ack_secure_flight_recorder.h>
 
+/* driver_find(name, &platform_bus_type) is deliberately not used here. */
 struct a52_bind_target { const char *tag; const char *compatible; };
 static const struct a52_bind_target targets[] = {
 \t{ "sde", "qcom,sde-kms" }, { "dsi", "qcom,dsi-display" },

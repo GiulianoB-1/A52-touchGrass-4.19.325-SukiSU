@@ -1,6 +1,6 @@
-name: 176 - A52 display recorder FEC PRZ mapping
+name: 176 - A52 display recorder FEC persistent-RAM ring
 
-run-name: Build recorder v3 through persistent RAM mapping
+run-name: Build recorder v3 through persistent-RAM circular writer
 
 on:
   workflow_dispatch:
@@ -9,28 +9,34 @@ on:
       - agent/a52-display-recorder-fec-v1
     paths:
       - .github/workflows/176-a52-display-recorder-fec.yml
-      - scripts/176_ci.sh
+      - scripts/177_ci_ring_v3.sh
+      - scripts/177_materialize_ring_v3.py
+      - scripts/177_ring_payload/**
       - scripts/176_apply_a52_recorder_fec.py
       - scripts/176_payload.py
       - scripts/176_payload_chunks/**
       - scripts/38_repack_a52_p1_boot.py
+      - tools/decode-a52-recorder-v3.py
   pull_request:
     branches:
       - agent/a52-heap19-display-bindcore
     paths:
       - .github/workflows/176-a52-display-recorder-fec.yml
-      - scripts/176_ci.sh
+      - scripts/177_ci_ring_v3.sh
+      - scripts/177_materialize_ring_v3.py
+      - scripts/177_ring_payload/**
       - scripts/176_apply_a52_recorder_fec.py
       - scripts/176_payload.py
       - scripts/176_payload_chunks/**
       - scripts/38_repack_a52_p1_boot.py
+      - tools/decode-a52-recorder-v3.py
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-display-recorder-fec-prz-v2-${{ github.ref }}
+  group: a52-display-recorder-fec-prz-ring-v3-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -40,7 +46,7 @@ env:
 
 jobs:
   build-package:
-    name: Compile and package recorder v3 PRZ mapping
+    name: Compile and package recorder v3 persistent-RAM ring
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -55,26 +61,26 @@ jobs:
           path: gki
           key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
 
-      - name: Build and audit PRZ-mapped recorder candidate
+      - name: Build and audit persistent-RAM ring recorder candidate
         env:
           GH_TOKEN: ${{ github.token }}
           GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
-        run: bash scripts/176_ci.sh
+        run: bash scripts/177_ci_ring_v3.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-display-recorder-fec-prz-v2-${{ github.run_number }}-FAILED-DIAGNOSTICS
-          path: artifacts/a52xq-display-recorder-fec-prz-v2
+          name: a52xq-display-recorder-fec-prz-ring-v3-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-recorder-fec-prz-ring-v3
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload recorder FEC PRZ candidate
+      - name: Upload recorder FEC ring candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-display-recorder-fec-prz-v2-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: artifacts/a52xq-display-recorder-fec-prz-v2
+          name: a52xq-display-recorder-fec-prz-ring-v3-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-recorder-fec-prz-ring-v3
           if-no-files-found: error
           retention-days: 30

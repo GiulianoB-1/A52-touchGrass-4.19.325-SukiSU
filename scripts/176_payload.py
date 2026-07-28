@@ -13,7 +13,11 @@ def main() -> int:
     args = parser.parse_args()
     root = args.root.resolve()
     encoded = ''.join((root / name).read_text().strip() for name in CHUNKS)
-    archive = base64.b64decode(encoded)
+    # The repository stores the payload in independently editable text chunks.
+    # Restore canonical Base64 padding after concatenation rather than requiring
+    # the final chunk to retain trailing '=' characters through every editor.
+    encoded += '=' * (-len(encoded) % 4)
+    archive = base64.b64decode(encoded, validate=True)
     if hashlib.sha256(archive).hexdigest() != ARCHIVE_SHA256:
         raise SystemExit('payload archive checksum mismatch')
     payload = gzip.decompress(archive)

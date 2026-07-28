@@ -8,17 +8,20 @@ EXPECTED_PATCH_SHA256="9412b28da19c71e7bc97e767e83ce717e146313d32321c7429e6d4050
 
 mkdir -p "$(dirname "$PATCH")" "$OUT/logs"
 {
-  printf '%s  %s\n' \
-    3ae80dacd67c540df6fe2c31521e57699b0a72fdea4986ee8c4effbc07bdd9df "$CHUNK_DIR/00.txt" \
-    fc1829cb8f8fde72419cf134917326cf2367160bd568f85e9008431e52795ae7 "$CHUNK_DIR/01.txt" \
-    24648bc687d4849f43c7624e68f89a091cfc9be46342a921b841651d8a3c9f1e "$CHUNK_DIR/02.txt" \
-    513ab3fb354264ce2d6e3dc475eb410b2d4e9288d230a143adf954884a05e0b7 "$CHUNK_DIR/03.txt" \
-    | sha256sum -c -
-  for chunk in "$CHUNK_DIR"/00.txt "$CHUNK_DIR"/01.txt "$CHUNK_DIR"/02.txt "$CHUNK_DIR"/03.txt; do
-    test "$(wc -c < "$chunk")" = 2432
+  for item in \
+    '00.txt 3ae80dacd67c540df6fe2c31521e57699b0a72fdea4986ee8c4effbc07bdd9df' \
+    '01.txt fc1829cb8f8fde72419cf134917326cf2367160bd568f85e9008431e52795ae7' \
+    '02.txt 24648bc687d4849f43c7624e68f89a091cfc9be46342a921b841651d8a3c9f1e' \
+    '03.txt 513ab3fb354264ce2d6e3dc475eb410b2d4e9288d230a143adf954884a05e0b7'; do
+    set -- $item
+    src="$CHUNK_DIR/$1"
+    normal="$OUT/logs/$1.normalised"
+    tr -d '\r\n' < "$src" > "$normal"
+    test "$(wc -c < "$normal")" = 2432
+    printf '%s  %s\n' "$2" "$normal" | sha256sum -c -
   done
-  cat "$CHUNK_DIR"/00.txt "$CHUNK_DIR"/01.txt \
-      "$CHUNK_DIR"/02.txt "$CHUNK_DIR"/03.txt \
+  cat "$OUT/logs/00.txt.normalised" "$OUT/logs/01.txt.normalised" \
+      "$OUT/logs/02.txt.normalised" "$OUT/logs/03.txt.normalised" \
       > "$OUT/logs/trace-patch.gz.b64"
   printf 'payload_bytes=%s\n' "$(wc -c < "$OUT/logs/trace-patch.gz.b64")"
   test "$(wc -c < "$OUT/logs/trace-patch.gz.b64")" = 9728

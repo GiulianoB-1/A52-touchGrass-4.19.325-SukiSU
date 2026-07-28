@@ -3,12 +3,12 @@ set -Eeuo pipefail
 
 PAYLOAD="$PWD/scripts/177_patch_payload.b64"
 PATCH="$PWD/patches/177-a52-display-init-recorder-plain.patch"
-EXPECTED_PATCH_SHA256="40d003f18d0d738f7bb9baaa942b33b54d32d038ad5649ffa91da70201d08c30"
+EXPECTED_PATCH_SHA256="04d57ae9bca9bdb8119ab2a1d6632690cb520e79454f339423427af887d292cb"
 
 mkdir -p "$(dirname "$PATCH")"
 base64 --decode "$PAYLOAD" | gzip -dc > "$PATCH"
 printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" "$PATCH" | sha256sum -c -
-test "$(wc -l < "$PATCH")" = 817
+test "$(wc -l < "$PATCH")" = 816
 
 python3 - <<'PY'
 from pathlib import Path
@@ -16,8 +16,6 @@ path = Path('scripts/177_ci.sh')
 text = path.read_text()
 old = 'git -C gki/common apply --check "$PATCH"\n'
 new = (
-    'sed -n \'3270,3390p\' gki/common/techpack/display/msm/dsi/dsi_ctrl.c '
-    '> "$OUT/logs/dsi-ctrl-pinned-context.txt"\n'
     'git -C gki/common apply --check --verbose "$PATCH" 2>&1 | '
     'tee "$OUT/logs/trace-patch-check.log"\n'
 )

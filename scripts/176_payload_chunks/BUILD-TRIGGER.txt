@@ -1,0 +1,2 @@
+Recorder v3 PR gate registration trigger.
+This file is not consumed by the payload loader.

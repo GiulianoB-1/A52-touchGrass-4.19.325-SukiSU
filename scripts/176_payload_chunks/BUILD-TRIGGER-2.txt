@@ -1,0 +1,2 @@
+Recorder v3 registered workflow synchronization trigger 2.
+This file is not consumed by the payload loader.

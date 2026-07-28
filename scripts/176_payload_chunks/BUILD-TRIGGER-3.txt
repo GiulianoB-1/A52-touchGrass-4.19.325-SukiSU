@@ -1,0 +1,1 @@
+Trigger the split recorder preflight workflow after the registered main-branch gate was updated.

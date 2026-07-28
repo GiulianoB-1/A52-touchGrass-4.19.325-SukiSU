@@ -34,16 +34,26 @@ test "$(wc -l < "$PATCH")" = 816
 
 python3 - <<'PY'
 from pathlib import Path
+
 path = Path('scripts/177_ci.sh')
 text = path.read_text()
-old = 'git -C gki/common apply --check "$PATCH"\n'
-new = (
+
+old_check = 'git -C gki/common apply --check "$PATCH"\n'
+new_check = (
     'git -C gki/common apply --check --verbose "$PATCH" 2>&1 | '
     'tee "$OUT/logs/trace-patch-check.log"\n'
 )
-if text.count(old) != 1:
-    raise SystemExit(f'expected one trace patch check, found {text.count(old)}')
-path.write_text(text.replace(old, new, 1))
+if text.count(old_check) != 1:
+    raise SystemExit(f'expected one trace patch check, found {text.count(old_check)}')
+text = text.replace(old_check, new_check, 1)
+
+old_prefix = "'CC      techpack/display/msm/dsi/"
+new_prefix = "'CC      drivers/a52_display/msm/dsi/"
+if text.count(old_prefix) != 6:
+    raise SystemExit(f'expected six old object paths, found {text.count(old_prefix)}')
+text = text.replace(old_prefix, new_prefix)
+
+path.write_text(text)
 PY
 
 exec bash scripts/177_ci.sh

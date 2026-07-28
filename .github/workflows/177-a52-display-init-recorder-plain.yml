@@ -14,6 +14,16 @@ on:
       - tools/decode-a52-display-init-trace.py
       - scripts/38_repack_a52_p1_boot.py
 
+  pull_request:
+    branches:
+      - agent/a52-heap19-display-bindcore
+    paths:
+      - .github/workflows/177-a52-display-init-recorder-plain.yml
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/177_ci.sh
+      - tools/decode-a52-display-init-trace.py
+      - scripts/38_repack_a52_p1_boot.py
+
 permissions:
   contents: read
   actions: read

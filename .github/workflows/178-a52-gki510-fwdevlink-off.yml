@@ -19,6 +19,21 @@ on:
       - scripts/177_patch_payload_chunks/**
       - tools/decode-a52-display-init-trace.py
       - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/178-a52-gki510-fwdevlink-off.yml
+      - scripts/178_ci.sh
+      - tools/patch-a52-gki510-boot.py
+      - .github/workflows/177-a52-display-init-recorder-plain.yml
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload.b64
+      - scripts/177_patch_payload_chunks/**
+      - tools/decode-a52-display-init-trace.py
+      - scripts/38_repack_a52_p1_boot.py
 
 permissions:
   contents: read

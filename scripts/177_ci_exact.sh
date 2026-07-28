@@ -9,19 +9,25 @@ EXPECTED_PATCH_SHA256="9412b28da19c71e7bc97e767e83ce717e146313d32321c7429e6d4050
 mkdir -p "$(dirname "$PATCH")" "$OUT/logs"
 {
   for item in \
-    '00.txt 3ae80dacd67c540df6fe2c31521e57699b0a72fdea4986ee8c4effbc07bdd9df' \
-    '01.txt fc1829cb8f8fde72419cf134917326cf2367160bd568f85e9008431e52795ae7' \
-    '02.txt 24648bc687d4849f43c7624e68f89a091cfc9be46342a921b841651d8a3c9f1e' \
-    '03.txt 513ab3fb354264ce2d6e3dc475eb410b2d4e9288d230a143adf954884a05e0b7'; do
+    '00.txt 2e2e8773465271521302902aeedd3c0779c3eba750e191881eb0649654402a39' \
+    '01.txt 2cc8aa74d1080a38f3deabaa790ba6cec24accfe542d9747c3f4c6eda00699ba' \
+    '02.txt 640c2ce3842ecb8120e14494bb23b5d2e4a1c68700c2a67bab2ba55a04e36731' \
+    '03.txt 3799c05943d31375851b3e0680f61fcde892d96272edad98454b641589fd69e0' \
+    '04.txt 9e18d44f8df3abe72ac2c67a42919f8acbf90590acdb424ba609d0086c7cfc47' \
+    '05.txt 9f0a5026d1a78d096b73ff97f3c785a9fd807999a36decb7a89e7fa851477945' \
+    '06.txt b62056e0d393a7969bfac6c60295eb3fb6e78228f6955196e9326cdb90ea1f82' \
+    '07.txt da48f50560314b78ef184d7910d5b5a8026164cae8227997a3795e457c16180a'; do
     set -- $item
     src="$CHUNK_DIR/$1"
     normal="$OUT/logs/$1.normalised"
     tr -d '\r\n' < "$src" > "$normal"
-    test "$(wc -c < "$normal")" = 2432
+    test "$(wc -c < "$normal")" = 1216
     printf '%s  %s\n' "$2" "$normal" | sha256sum -c -
   done
   cat "$OUT/logs/00.txt.normalised" "$OUT/logs/01.txt.normalised" \
       "$OUT/logs/02.txt.normalised" "$OUT/logs/03.txt.normalised" \
+      "$OUT/logs/04.txt.normalised" "$OUT/logs/05.txt.normalised" \
+      "$OUT/logs/06.txt.normalised" "$OUT/logs/07.txt.normalised" \
       > "$OUT/logs/trace-patch.gz.b64"
   printf 'payload_bytes=%s\n' "$(wc -c < "$OUT/logs/trace-patch.gz.b64")"
   test "$(wc -c < "$OUT/logs/trace-patch.gz.b64")" = 9728

@@ -4,24 +4,24 @@ set -Eeuo pipefail
 CHUNK_DIR="$PWD/scripts/177_patch_payload_chunks"
 PATCH="$PWD/patches/177-a52-display-init-recorder-plain.patch"
 OUT="$PWD/artifacts/a52xq-display-init-recorder-plain"
-EXPECTED_PATCH_SHA256="79c00e5e6051097ab451b3d00cfa593dbcb6675013a777ea5caa5d5c6df2e8e9"
+EXPECTED_PATCH_SHA256="9412b28da19c71e7bc97e767e83ce717e146313d32321c7429e6d4050a4f0d00"
 
 mkdir -p "$(dirname "$PATCH")" "$OUT/logs"
 {
   printf '%s  %s\n' \
-    87ae7a09a96e5bc9549d33fee2ad76227a78a0813dc2751787557970a0aa382c "$CHUNK_DIR/00.txt" \
-    8c6c35e83621caefc6653ff70c244c86851c68ba0a6981d9b2c9d3a171d4dd37 "$CHUNK_DIR/01.txt" \
-    ad2e50d5e4d5dd48747e6970193f3be2023626aed26520a774cca9e7062cfccb "$CHUNK_DIR/02.txt" \
-    c4af4b8ef0c3a709d024aa65b4a6fa8f10285f2d91d3ca1f5af71d8cd8c19e31 "$CHUNK_DIR/03.txt" \
+    3ae80dacd67c540df6fe2c31521e57699b0a72fdea4986ee8c4effbc07bdd9df "$CHUNK_DIR/00.txt" \
+    fc1829cb8f8fde72419cf134917326cf2367160bd568f85e9008431e52795ae7 "$CHUNK_DIR/01.txt" \
+    24648bc687d4849f43c7624e68f89a091cfc9be46342a921b841651d8a3c9f1e "$CHUNK_DIR/02.txt" \
+    513ab3fb354264ce2d6e3dc475eb410b2d4e9288d230a143adf954884a05e0b7 "$CHUNK_DIR/03.txt" \
     | sha256sum -c -
   for chunk in "$CHUNK_DIR"/00.txt "$CHUNK_DIR"/01.txt "$CHUNK_DIR"/02.txt "$CHUNK_DIR"/03.txt; do
-    test "$(wc -c < "$chunk")" = 2423
+    test "$(wc -c < "$chunk")" = 2432
   done
   cat "$CHUNK_DIR"/00.txt "$CHUNK_DIR"/01.txt \
       "$CHUNK_DIR"/02.txt "$CHUNK_DIR"/03.txt \
       > "$OUT/logs/trace-patch.gz.b64"
   printf 'payload_bytes=%s\n' "$(wc -c < "$OUT/logs/trace-patch.gz.b64")"
-  test "$(wc -c < "$OUT/logs/trace-patch.gz.b64")" = 9692
+  test "$(wc -c < "$OUT/logs/trace-patch.gz.b64")" = 9728
   base64 --decode "$OUT/logs/trace-patch.gz.b64" > "$OUT/logs/trace-patch.gz"
   gzip -t "$OUT/logs/trace-patch.gz"
   gzip -dc "$OUT/logs/trace-patch.gz" > "$PATCH"
@@ -30,7 +30,7 @@ mkdir -p "$(dirname "$PATCH")" "$OUT/logs"
 } > "$OUT/logs/patch-payload-verification.txt" 2>&1
 
 printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" "$PATCH" | sha256sum -c -
-test "$(wc -l < "$PATCH")" = 793
+test "$(wc -l < "$PATCH")" = 796
 
 python3 - <<'PY'
 from pathlib import Path

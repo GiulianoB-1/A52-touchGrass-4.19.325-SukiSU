@@ -18,9 +18,15 @@ def main() -> int:
     # the final chunk to retain trailing '=' characters through every editor.
     encoded += '=' * (-len(encoded) % 4)
     archive = base64.b64decode(encoded, validate=True)
-    if hashlib.sha256(archive).hexdigest() != ARCHIVE_SHA256:
-        raise SystemExit('payload archive checksum mismatch')
+    actual_archive_sha = hashlib.sha256(archive).hexdigest()
+    if actual_archive_sha != ARCHIVE_SHA256:
+        print(
+            'payload archive digest differs from the generation-time container: '
+            f'expected={ARCHIVE_SHA256} actual={actual_archive_sha}; '
+            'continuing with mandatory per-file SHA-256 verification'
+        )
     payload = gzip.decompress(archive)
+    seen = set()
     with tarfile.open(fileobj=io.BytesIO(payload), mode='r:') as tf:
         for member in tf.getmembers():
             if member.name not in FILES or not member.isfile():
@@ -36,7 +42,11 @@ def main() -> int:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             path.chmod(0o755)
+            seen.add(member.name)
             print(f'extracted {member.name} sha256={actual}')
+    missing = sorted(set(FILES) - seen)
+    if missing:
+        raise SystemExit(f'missing payload members: {missing}')
     if args.verify:
         for name, expected in FILES.items():
             actual = hashlib.sha256((root / name).read_bytes()).hexdigest()

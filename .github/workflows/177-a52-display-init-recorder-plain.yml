@@ -11,6 +11,8 @@ on:
       - .github/workflows/177-a52-display-init-recorder-plain.yml
       - patches/177-a52-display-init-recorder-plain.patch
       - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload.b64
       - tools/decode-a52-display-init-trace.py
       - scripts/38_repack_a52_p1_boot.py
 
@@ -21,6 +23,8 @@ on:
       - .github/workflows/177-a52-display-init-recorder-plain.yml
       - patches/177-a52-display-init-recorder-plain.patch
       - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload.b64
       - tools/decode-a52-display-init-trace.py
       - scripts/38_repack_a52_p1_boot.py
 
@@ -58,7 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
-        run: bash scripts/177_ci.sh
+        run: bash scripts/177_ci_exact.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}

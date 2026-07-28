@@ -129,16 +129,9 @@ static void audit_compat(const struct a52_bind_target *t, unsigned int pass)
 \t}
 \tif (!n) a52_ackfr_record("DISP bind p=%u c=%s nodes=0", pass, t->tag);
 }
-static void audit_driver(const char *name, unsigned int pass)
-{
-\tstruct device_driver *d = driver_find(name, &platform_bus_type);
-\ta52_ackfr_record("DISP bind p=%u driver=%s reg=%u", pass, name, !!d);
-\tif (d) put_driver(d);
-}
 static void audit_all(unsigned int pass)
 {
 \tunsigned int i;
-\taudit_driver("msm_drm", pass); audit_driver("msm-dsi-display", pass);
 \tfor (i = 0; i < ARRAY_SIZE(targets); i++) audit_compat(&targets[i], pass);
 }
 static atomic_t pass_count = ATOMIC_INIT(0);

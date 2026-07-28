@@ -1,0 +1,83 @@
+name: 177 - A52 plain display initialization recorder
+
+run-name: Build plain-text display initialization recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/177-a52-display-init-recorder-plain.yml
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload.b64
+      - tools/decode-a52-display-init-trace.py
+      - scripts/38_repack_a52_p1_boot.py
+
+  pull_request:
+    branches:
+      - agent/a52-heap19-display-bindcore
+    paths:
+      - .github/workflows/177-a52-display-init-recorder-plain.yml
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload.b64
+      - tools/decode-a52-display-init-trace.py
+      - scripts/38_repack_a52_p1_boot.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-display-init-recorder-plain-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Compile and package plain display recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out display recorder branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Build and audit plain display recorder candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: bash scripts/177_ci_exact.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-init-recorder-plain-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-init-recorder-plain
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload plain display recorder candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-init-recorder-plain-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-init-recorder-plain
+          if-no-files-found: error
+          retention-days: 30

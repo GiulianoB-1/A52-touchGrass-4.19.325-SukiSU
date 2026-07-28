@@ -1,0 +1,817 @@
+diff --git a/drivers/a52_secure/a52_ack_secure_flight_recorder.c b/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+index 7e4fcca..5f68f42 100644
+--- a/drivers/a52_secure/a52_ack_secure_flight_recorder.c
++++ b/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+@@ -84,7 +84,7 @@ static void a52_usr2_write_control(const char *kind)
+ 	size_t len;
+ 
+ 	len = scnprintf(line, sizeof(line),
+-		"A52USR2 %s release=%s capacity=%u line_len=%u banks=console,ftrace metadata_only=1 policy=critical-after-capacity profile=heap19-bufops-display-bindcore-v1 commit=%08x\n",
++		"A52USR2 %s release=%s capacity=%u line_len=%u banks=console,ftrace metadata_only=1 policy=critical-after-capacity profile=heap19-display-init-trace-plain-v1 commit=%08x\n",
+ 		kind, init_utsname()->release, A52_USR2_CAPACITY,
+ 		A52_USR2_LINE_LEN, A52_USR2_COMMIT);
+ 	a52_ackfr_ramoops_write(line, len, A52_USR2_BANK_BOTH);
+@@ -211,8 +211,8 @@ void a52_ackfr_scope_cleanup(struct a52_ackfr_scope *scope)
+ }
+ EXPORT_SYMBOL_GPL(a52_ackfr_scope_cleanup);
+ 
+-#define A52_USR2_HEARTBEAT_INTERVAL_MS 500U
+-#define A52_USR2_HEARTBEAT_LIMIT 600U
++#define A52_USR2_HEARTBEAT_INTERVAL_MS 1000U
++#define A52_USR2_HEARTBEAT_LIMIT 120U
+ 
+ static atomic_t a52_usr2_heartbeat_count = ATOMIC_INIT(0);
+ static void a52_usr2_heartbeat_fn(struct work_struct *work);
+diff --git a/techpack/display/msm/dsi/dsi_clk_manager.c b/techpack/display/msm/dsi/dsi_clk_manager.c
+index a9af12a..921c615 100644
+--- a/techpack/display/msm/dsi/dsi_clk_manager.c
++++ b/techpack/display/msm/dsi/dsi_clk_manager.c
+@@ -9,6 +9,7 @@
+ #include <linux/msm-bus.h>
+ #include <linux/pm_runtime.h>
+ #include "dsi_clk.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_defs.h"
+ #include "sde_dbg.h"
+ 
+@@ -116,10 +117,13 @@ int dsi_clk_set_link_frequencies(void *client, struct link_clk_freq freq,
+ int dsi_clk_set_pixel_clk_rate(void *client, u64 pixel_clk, u32 index)
+ {
+ 	int rc = 0;
++	/* A52_CLK_TRACE_PLAIN_V1 */
+ 	struct dsi_clk_client_info *c = client;
+ 	struct dsi_clk_mngr *mngr;
+ 
+ 	mngr = c->mngr;
++	a52_ackfr_record("DISP CLK pix i=%u hz=%llu", index,
++		(unsigned long long)pixel_clk);
+ 	rc = clk_set_rate(mngr->link_clks[index].hs_clks.pixel_clk, pixel_clk);
+ 	if (rc)
+ 		DSI_ERR("failed to set clk rate for pixel clk, rc=%d\n", rc);
+@@ -145,6 +149,9 @@ int dsi_clk_set_byte_clk_rate(void *client, u64 byte_clk,
+ 	struct dsi_clk_mngr *mngr;
+ 
+ 	mngr = c->mngr;
++	a52_ackfr_record("DISP CLK byte i=%u hz=%llu intf=%llu", index,
++		(unsigned long long)byte_clk,
++		(unsigned long long)byte_intf_clk);
+ 	rc = clk_set_rate(mngr->link_clks[index].hs_clks.byte_clk, byte_clk);
+ 	if (rc)
+ 		DSI_ERR("failed to set clk rate for byte clk, rc=%d\n", rc);
+@@ -1319,6 +1326,8 @@ int dsi_display_clk_ctrl(void *handle,
+ 	enum dsi_clk_type clk_type, enum dsi_clk_state clk_state)
+ {
+ 	int rc = 0;
++	a52_ackfr_record("DISP CLK req type=%u state=%u valid=%d",
++		clk_type, clk_state, !!handle);
+ 
+ 	if (!handle) {
+ 		DSI_ERR("Invalid arg\n");
+@@ -1330,6 +1339,8 @@ int dsi_display_clk_ctrl(void *handle,
+ 	if (rc)
+ 		DSI_ERR("failed set clk state, rc = %d\n", rc);
+ 	mutex_unlock(&dsi_mngr_clk_mutex);
++	a52_ackfr_record("DISP CLK done type=%u state=%u rc=%d",
++		clk_type, clk_state, rc);
+ 
+ 	return rc;
+ }
+diff --git a/techpack/display/msm/dsi/dsi_ctrl.c b/techpack/display/msm/dsi/dsi_ctrl.c
+index fd6a0d9..b84edeb 100644
+--- a/techpack/display/msm/dsi/dsi_ctrl.c
++++ b/techpack/display/msm/dsi/dsi_ctrl.c
+@@ -15,6 +15,7 @@
+ #include "msm_kms.h"
+ #include "msm_mmu.h"
+ #include "dsi_ctrl.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_ctrl_hw.h"
+ #include "dsi_clk.h"
+ #include "dsi_pwr.h"
+@@ -3229,6 +3230,11 @@ int dsi_ctrl_update_host_config(struct dsi_ctrl *ctrl,
+ 		return -EINVAL;
+ 	}
+ 
++	a52_ackfr_record("DISP HOST i=%d m=%u lanes=%x fmt=%u bit=%llu esc=%llu fl=%x",
++		ctrl->cell_index, config->panel_mode,
++		config->common_config.data_lanes, config->common_config.dst_format,
++		(unsigned long long)config->bit_clk_rate_hz,
++		(unsigned long long)config->esc_clk_rate_hz, flags);
+ 	mutex_lock(&ctrl->ctrl_lock);
+ 
+ 	rc = dsi_ctrl_validate_panel_info(ctrl, config);
+@@ -3264,6 +3270,7 @@ int dsi_ctrl_update_host_config(struct dsi_ctrl *ctrl,
+ 	ctrl->roi.x = 0;
+ error:
+ 	mutex_unlock(&ctrl->ctrl_lock);
++	a52_ackfr_record("DISP HOST done i=%d rc=%d", ctrl->cell_index, rc);
+ 	return rc;
+ }
+ 
+@@ -3305,6 +3312,32 @@ int dsi_ctrl_validate_timing(struct dsi_ctrl *dsi_ctrl,
+  * Return: error code.
+  */
+ 
++/* A52_DSI_CMD_TRACE_PLAIN_V1: plain text, no correction or binary format. */
++static void a52_dsi_log_msg(struct dsi_ctrl *ctrl,
++			    const struct mipi_dsi_msg *msg, u32 flags)
++{
++	const u8 *b;
++	u8 h[8] = { 0 };
++	u8 z[4] = { 0 };
++	size_t n;
++
++	if (!msg)
++		return;
++	b = msg->tx_buf;
++	n = min_t(size_t, msg->tx_len, ARRAY_SIZE(h));
++	if (b && n)
++		memcpy(h, b, n);
++	if (b && msg->tx_len) {
++		n = min_t(size_t, msg->tx_len, ARRAY_SIZE(z));
++		memcpy(z, b + msg->tx_len - n, n);
++	}
++	a52_ackfr_record(
++		"DISP DSI i=%d t=%02x c=%u f=%x n=%zu r=%zu h=%02x%02x%02x%02x%02x%02x%02x%02x z=%02x%02x%02x%02x",
++		ctrl ? ctrl->cell_index : -1, msg->type, msg->channel, flags,
++		msg->tx_len, msg->rx_len, h[0], h[1], h[2], h[3],
++		h[4], h[5], h[6], h[7], z[0], z[1], z[2], z[3]);
++}
++
+ int dsi_ctrl_cmd_transfer(struct dsi_ctrl *dsi_ctrl,
+ 			  const struct mipi_dsi_msg *msg,
+ 			  u32 *flags)
+@@ -3316,6 +3349,7 @@ int dsi_ctrl_cmd_transfer(struct dsi_ctrl *dsi_ctrl,
+ 		return -EINVAL;
+ 	}
+ 
++	a52_dsi_log_msg(dsi_ctrl, msg, flags ? *flags : 0);
+ 	mutex_lock(&dsi_ctrl->ctrl_lock);
+ 
+ 	rc = dsi_ctrl_check_state(dsi_ctrl, DSI_CTRL_OP_CMD_TX, 0x0);
+@@ -3341,6 +3375,9 @@ int dsi_ctrl_cmd_transfer(struct dsi_ctrl *dsi_ctrl,
+ 
+ error:
+ 	mutex_unlock(&dsi_ctrl->ctrl_lock);
++	if (rc < 0)
++		a52_ackfr_record("DISP DSI fail i=%d t=%02x rc=%d",
++			dsi_ctrl->cell_index, msg->type, rc);
+ 	return rc;
+ }
+ 
+diff --git a/techpack/display/msm/dsi/dsi_display.c b/techpack/display/msm/dsi/dsi_display.c
+index 930b2fa..b12f513 100644
+--- a/techpack/display/msm/dsi/dsi_display.c
++++ b/techpack/display/msm/dsi/dsi_display.c
+@@ -12,6 +12,7 @@
+ #include "sde_connector.h"
+ #include "msm_mmu.h"
+ #include "dsi_display.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_panel.h"
+ #include "dsi_ctrl.h"
+ #include "dsi_ctrl_hw.h"
+@@ -4952,6 +4953,8 @@ static int _dsi_display_dev_init(struct dsi_display *display)
+ {
+ 	int rc = 0;
+ 
++	/* A52_DISPLAY_INIT_TRACE_PLAIN_V1 */
++
+ 	if (!display) {
+ 		DSI_ERR("invalid display\n");
+ 		return -EINVAL;
+@@ -4960,6 +4963,10 @@ static int _dsi_display_dev_init(struct dsi_display *display)
+ 	if (!display->panel_node && !display->fw)
+ 		return 0;
+ 
++	a52_ackfr_record("DISP DEV start n=%s node=%s fw=%d",
++		display->name ? display->name : "unset",
++		display->panel_node ? display->panel_node->full_name : "none",
++		!!display->fw);
+ 	mutex_lock(&display->display_lock);
+ 
+ 	display->parser = dsi_parser_get(&display->pdev->dev);
+@@ -4969,18 +4976,24 @@ static int _dsi_display_dev_init(struct dsi_display *display)
+ 				display->fw->size);
+ 
+ 	rc = dsi_display_parse_dt(display);
++	a52_ackfr_record("DISP DEV dt rc=%d panel=%s ctrls=%u", rc,
++		display->panel ? display->panel->name : "none", display->ctrl_count);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to parse dt, rc=%d\n", display->name, rc);
+ 		goto error;
+ 	}
+ 
+ 	rc = dsi_display_res_init(display);
++	a52_ackfr_record("DISP DEV res rc=%d cmd=%u clk=%u", rc,
++		display->cmd_master_idx, display->clk_master_idx);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to initialize resources, rc=%d\n",
+ 		       display->name, rc);
+ 		goto error;
+ 	}
+ error:
++	a52_ackfr_record("DISP DEV done rc=%d panel=%s", rc,
++		display->panel ? display->panel->name : "none");
+ 	mutex_unlock(&display->display_lock);
+ 	return rc;
+ }
+@@ -5357,6 +5370,11 @@ static int dsi_display_bind(struct device *dev,
+ 	if (!display->fw)
+ 		display->name = display->panel_node->name;
+ 
++	a52_ackfr_record("DISP BIND start n=%s panel=%s ctrls=%u ext=%u",
++		display->name ? display->name : "unset",
++		display->panel ? display->panel->name : "none",
++		display->ctrl_count, display->ext_bridge_cnt);
++
+ 	/* defer bind if ext bridge driver is not loaded */
+ 	if (display->panel && display->panel->host_config.ext_bridge_mode) {
+ 		for (i = 0; i < display->ext_bridge_cnt; i++) {
+@@ -5392,6 +5410,7 @@ static int dsi_display_bind(struct device *dev,
+ 	display_for_each_ctrl(i, display) {
+ 		display_ctrl = &display->ctrl[i];
+ 		rc = dsi_ctrl_drv_init(display_ctrl->ctrl, display->root);
++		a52_ackfr_record("DISP BIND ctrl i=%d rc=%d", i, rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] failed to initialize ctrl[%d], rc=%d\n",
+ 			       display->name, i, rc);
+@@ -5400,6 +5419,7 @@ static int dsi_display_bind(struct device *dev,
+ 		display_ctrl->ctrl->horiz_index = i;
+ 
+ 		rc = dsi_phy_drv_init(display_ctrl->phy);
++		a52_ackfr_record("DISP BIND phy i=%d rc=%d", i, rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] Failed to initialize phy[%d], rc=%d\n",
+ 			       display->name, i, rc);
+@@ -5435,6 +5455,8 @@ static int dsi_display_bind(struct device *dev,
+ 			"DSI_MNGR-%s", display->name);
+ 
+ 	display->clk_mngr = dsi_display_clk_mngr_register(&info);
++	a52_ackfr_record("DISP BIND clk_mgr ok=%d",
++		!IS_ERR_OR_NULL(display->clk_mngr));
+ 	if (IS_ERR_OR_NULL(display->clk_mngr)) {
+ 		rc = PTR_ERR(display->clk_mngr);
+ 		display->clk_mngr = NULL;
+@@ -5485,6 +5507,7 @@ static int dsi_display_bind(struct device *dev,
+ 
+ 	dsi_display_update_byte_intf_div(display);
+ 	rc = dsi_display_mipi_host_init(display);
++	a52_ackfr_record("DISP BIND host rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to initialize mipi host, rc=%d\n",
+ 		       display->name, rc);
+@@ -5492,6 +5515,8 @@ static int dsi_display_bind(struct device *dev,
+ 	}
+ 
+ 	rc = dsi_panel_drv_init(display->panel, &display->host);
++	a52_ackfr_record("DISP BIND panel rc=%d n=%s", rc,
++		display->panel ? display->panel->name : "none");
+ 	if (rc) {
+ 		if (rc != -EPROBE_DEFER)
+ 			DSI_ERR("[%s] failed to initialize panel driver, rc=%d\n",
+@@ -5538,6 +5563,8 @@ error_ctrl_deinit:
+ 	}
+ 	(void)dsi_display_debugfs_deinit(display);
+ error:
++	a52_ackfr_record("DISP BIND done rc=%d n=%s", rc,
++		display->name ? display->name : "unset");
+ 	mutex_unlock(&display->display_lock);
+ 	return rc;
+ }
+@@ -5677,6 +5704,10 @@ int dsi_display_dev_probe(struct platform_device *pdev)
+ 
+ 	DSI_ERR("dsi_display_dev_probe ++\n");
+ 
++	if (pdev && pdev->dev.of_node)
++		a52_ackfr_record("DISP PROBE node=%s",
++			pdev->dev.of_node->full_name);
++
+ 	if (!pdev || !pdev->dev.of_node) {
+ 		DSI_ERR("pdev not found\n");
+ 		rc = -ENODEV;
+@@ -5743,6 +5774,8 @@ int dsi_display_dev_probe(struct platform_device *pdev)
+ 	boot_disp->disp = display;
+ 
+ 	display->panel_node = panel_node;
++	a52_ackfr_record("DISP PROBE panel_node=%s",
++		panel_node ? panel_node->full_name : "none");
+ 	display->pdev = pdev;
+ 	display->boot_disp = boot_disp;
+ 
+@@ -5773,9 +5806,12 @@ int dsi_display_dev_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	DSI_ERR("dsi_display_dev_probe --\n");
++	a52_ackfr_record("DISP PROBE done rc=0 type=%s panel=%s",
++		display->display_type, display->panel ? display->panel->name : "none");
+ 
+ 	return 0;
+ end:
++	a52_ackfr_record("DISP PROBE fail rc=%d", rc);
+ 	if (display)
+ 		devm_kfree(&pdev->dev, display);
+ 
+@@ -7551,6 +7587,15 @@ int dsi_display_prepare(struct dsi_display *display)
+ 	mutex_lock(&display->display_lock);
+ 
+ 	mode = display->panel->cur_mode;
++	a52_ackfr_record("DISP PREP start n=%s panel=%s splash=%d",
++		display->name ? display->name : "unset", display->panel->name,
++		display->is_cont_splash_enabled);
++	a52_ackfr_record("DISP MODE m=%u h=%u v=%u r=%u p=%u b=%llu f=%x d=%d",
++		mode->panel_mode, mode->timing.h_active, mode->timing.v_active,
++		mode->timing.refresh_rate, mode->pixel_clk_khz,
++		(unsigned long long)mode->timing.clk_rate_hz,
++		mode->dsi_mode_flags,
++		mode->priv_info ? mode->priv_info->dsc_enabled : 0);
+ 
+ 	dsi_display_set_ctrl_esd_check_flag(display, false);
+ 
+@@ -7602,6 +7647,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 		 * taken care in splash resource init
+ 		 */
+ 		rc = dsi_panel_pre_prepare(display->panel);
++		a52_ackfr_record("DISP PREP panel_pre rc=%d", rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] panel pre-prepare failed, rc=%d\n",
+ 					display->name, rc);
+@@ -7626,6 +7672,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 	 */
+ 	if (!display->panel->ulps_suspend_enabled || !display->ulps_enabled) {
+ 		rc = dsi_display_phy_sw_reset(display);
++		a52_ackfr_record("DISP PREP phy_reset rc=%d", rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] failed to reset phy, rc=%d\n",
+ 				display->name, rc);
+@@ -7633,6 +7680,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 		}
+ 
+ 		rc = dsi_display_phy_enable(display);
++		a52_ackfr_record("DISP PREP phy_on rc=%d", rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] failed to enable DSI PHY, rc=%d\n",
+ 			       display->name, rc);
+@@ -7641,6 +7689,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 	}
+ 
+ 	rc = dsi_display_set_clk_src(display);
++	a52_ackfr_record("DISP PREP clk_src rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to set DSI link clock source, rc=%d\n",
+ 			display->name, rc);
+@@ -7648,6 +7697,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 	}
+ 
+ 	rc = dsi_display_ctrl_init(display);
++	a52_ackfr_record("DISP PREP ctrl rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to setup DSI controller, rc=%d\n",
+ 		       display->name, rc);
+@@ -7657,6 +7707,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 	dsi_display_register_error_handler(display);
+ 
+ 	rc = dsi_display_ctrl_host_enable(display);
++	a52_ackfr_record("DISP PREP host_on rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%s] failed to enable DSI host, rc=%d\n",
+ 		       display->name, rc);
+@@ -7678,6 +7729,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 		 * state and panel on commands are not needed
+ 		 */
+ 		rc = dsi_display_soft_reset(display);
++		a52_ackfr_record("DISP PREP soft_reset rc=%d", rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] failed soft reset, rc=%d\n",
+ 					display->name, rc);
+@@ -7686,6 +7738,7 @@ int dsi_display_prepare(struct dsi_display *display)
+ 
+ 		if (!(mode->dsi_mode_flags & DSI_MODE_FLAG_POMS)) {
+ 			rc = dsi_panel_prepare(display->panel);
++			a52_ackfr_record("DISP PREP panel rc=%d", rc);
+ 			if (rc) {
+ 				DSI_ERR("[%s] panel prepare failed, rc=%d\n",
+ 						display->name, rc);
+@@ -7727,6 +7780,7 @@ error:
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	LCD_INFO(vdd, "--\n");
+ #endif
++	a52_ackfr_record("DISP PREP done rc=%d", rc);
+ 	return rc;
+ }
+ 
+@@ -8041,6 +8095,10 @@ int dsi_display_enable(struct dsi_display *display)
+ 		return -EINVAL;
+ 	}
+ 	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);
++	a52_ackfr_record("DISP ENABLE start n=%s mode=%u splash=%d",
++		display->name ? display->name : "unset",
++		display->panel->cur_mode->panel_mode,
++		display->is_cont_splash_enabled);
+ 
+ 	/* Engine states and panel states are populated during splash
+ 	 * resource init and hence we return early
+@@ -8119,6 +8177,7 @@ int dsi_display_enable(struct dsi_display *display)
+ 	} else if (!(display->panel->cur_mode->dsi_mode_flags &
+ 			DSI_MODE_FLAG_POMS)){
+ 		rc = dsi_panel_enable(display->panel);
++		a52_ackfr_record("DISP ENABLE panel rc=%d", rc);
+ 		if (rc) {
+ 			DSI_ERR("[%s] failed to enable DSI panel, rc=%d\n",
+ 			       display->name, rc);
+@@ -8193,6 +8252,8 @@ error:
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	LCD_INFO(vdd, "--\n");
+ #endif
++	a52_ackfr_record("DISP ENABLE done rc=%d init=%d", rc,
++		display->panel->panel_initialized);
+ 
+ 	return rc;
+ }
+@@ -8244,6 +8305,8 @@ int dsi_display_post_enable(struct dsi_display *display)
+ #endif
+ 
+ 	mutex_unlock(&display->display_lock);
++	a52_ackfr_record("DISP POST done rc=%d mode=%u", rc,
++		display->config.panel_mode);
+ 
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	LCD_INFO(vdd, "-- \n");
+diff --git a/techpack/display/msm/dsi/dsi_drm.c b/techpack/display/msm/dsi/dsi_drm.c
+index ca398fb..27c0f76 100644
+--- a/techpack/display/msm/dsi/dsi_drm.c
++++ b/techpack/display/msm/dsi/dsi_drm.c
+@@ -10,6 +10,7 @@
+ #include "msm_kms.h"
+ #include "sde_connector.h"
+ #include "dsi_drm.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "sde_trace.h"
+ #include "sde_dbg.h"
+ 
+@@ -184,6 +185,7 @@ static int dsi_bridge_attach(struct drm_bridge *bridge,
+ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
+ {
+ 	int rc = 0;
++	/* A52_DRM_DISPLAY_TRACE_PLAIN_V1 */
+ 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
+ 
+ 	if (!bridge) {
+@@ -196,11 +198,17 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
+ 		return;
+ 	}
+ 
++	a52_ackfr_record("DISP BRIDGE pre id=%d h=%u v=%u r=%u m=%u f=%x",
++		c_bridge->id, c_bridge->dsi_mode.timing.h_active,
++		c_bridge->dsi_mode.timing.v_active,
++		c_bridge->dsi_mode.timing.refresh_rate,
++		c_bridge->dsi_mode.panel_mode, c_bridge->dsi_mode.dsi_mode_flags);
+ 	atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
+ 
+ 	/* By this point mode should have been validated through mode_fixup */
+ 	rc = dsi_display_set_mode(c_bridge->display,
+ 			&(c_bridge->dsi_mode), 0x0);
++	a52_ackfr_record("DISP BRIDGE mode rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%d] failed to perform a mode set, rc=%d\n",
+ 		       c_bridge->id, rc);
+@@ -216,6 +224,7 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
+ 
+ 	SDE_ATRACE_BEGIN("dsi_display_prepare");
+ 	rc = dsi_display_prepare(c_bridge->display);
++	a52_ackfr_record("DISP BRIDGE prep rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%d] DSI display prepare failed, rc=%d\n",
+ 		       c_bridge->id, rc);
+@@ -226,6 +235,7 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
+ 
+ 	SDE_ATRACE_BEGIN("dsi_display_enable");
+ 	rc = dsi_display_enable(c_bridge->display);
++	a52_ackfr_record("DISP BRIDGE enable rc=%d", rc);
+ 	if (rc) {
+ 		DSI_ERR("[%d] DSI display enable failed, rc=%d\n",
+ 			 c_bridge->id, rc);
+@@ -234,6 +244,7 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
+ 	SDE_ATRACE_END("dsi_display_enable");
+ 
+ 	rc = dsi_display_splash_res_cleanup(c_bridge->display);
++	a52_ackfr_record("DISP BRIDGE cleanup rc=%d", rc);
+ 	if (rc)
+ 		DSI_ERR("Continuous splash pipeline cleanup failed, rc=%d\n",
+ 									rc);
+@@ -259,6 +270,7 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
+ 	display = c_bridge->display;
+ 
+ 	rc = dsi_display_post_enable(display);
++	a52_ackfr_record("DISP BRIDGE post id=%d rc=%d", c_bridge->id, rc);
+ 	if (rc)
+ 		DSI_ERR("[%d] DSI display post enabled failed, rc=%d\n",
+ 		       c_bridge->id, rc);
+diff --git a/techpack/display/msm/dsi/dsi_panel.c b/techpack/display/msm/dsi/dsi_panel.c
+index 902db8e..8f92f33 100644
+--- a/techpack/display/msm/dsi/dsi_panel.c
++++ b/techpack/display/msm/dsi/dsi_panel.c
+@@ -11,6 +11,7 @@
+ #include <video/mipi_display.h>
+ 
+ #include "dsi_panel.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_ctrl_hw.h"
+ #include "dsi_parser.h"
+ #include "sde_dbg.h"
+@@ -366,6 +367,11 @@ static int dsi_panel_reset(struct dsi_panel *panel)
+ 	struct dsi_panel_reset_config *r_config = &panel->reset_config;
+ 	int i;
+ 
++	/* A52_PANEL_INIT_TRACE_PLAIN_V1 */
++	a52_ackfr_record("DISP RESET start p=%s rst=%d en=%d mode=%d count=%u",
++		panel->name, r_config->reset_gpio, r_config->disp_en_gpio,
++		r_config->lcd_mode_sel_gpio, r_config->count);
++
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	struct samsung_display_driver_data *vdd = panel->panel_private;
+ 
+@@ -392,6 +398,8 @@ static int dsi_panel_reset(struct dsi_panel *panel)
+ 	}
+ 
+ 	for (i = 0; i < r_config->count; i++) {
++		a52_ackfr_record("DISP RESET step=%d level=%d ms=%u", i,
++			r_config->sequence[i].level, r_config->sequence[i].sleep_ms);
+ 		gpio_set_value(r_config->reset_gpio,
+ 			       r_config->sequence[i].level);
+ 
+@@ -434,6 +442,7 @@ static int dsi_panel_reset(struct dsi_panel *panel)
+ 	}
+ 
+ exit:
++	a52_ackfr_record("DISP RESET done rc=%d", rc);
+ 	return rc;
+ }
+ 
+@@ -614,7 +623,10 @@ static int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
+ 	else
+ 		state = panel->pinctrl.suspend;
+ 
++	a52_ackfr_record("DISP PIN state=%s p=%s",
++		enable ? "active" : "suspend", panel->name);
+ 	rc = pinctrl_select_state(panel->pinctrl.pinctrl, state);
++	a52_ackfr_record("DISP PIN done en=%d rc=%d", enable, rc);
+ 	if (rc)
+ 		DSI_ERR("[%s] failed to set pin state, rc=%d\n",
+ 				panel->name, rc);
+@@ -629,9 +641,14 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
+ #endif
+ {
+ 	int rc = 0;
+-
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	struct samsung_display_driver_data *vdd = panel->panel_private;
++#endif
++
++	a52_ackfr_record("DISP POWER start p=%s vregs=%u lp11=%d rst=%d",
++		panel->name, panel->power_info.count, panel->lp11_init,
++		panel->reset_config.reset_gpio);
++#if defined(CONFIG_DISPLAY_SAMSUNG)
+ 
+ 	/* Make not to turn on the panel power when ub_con_det.gpio is high (ub is not connected) */
+ 	if (unlikely(vdd->is_factory_mode)) {
+@@ -751,6 +768,7 @@ error_disable_vregs:
+ 	(void)dsi_pwr_enable_regulator(&panel->power_info, false);
+ 
+ exit:
++	a52_ackfr_record("DISP POWER done rc=%d", rc);
+ 	return rc;
+ }
+ 
+@@ -917,6 +935,8 @@ static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
+ 	state = mode->priv_info->cmd_sets[type].state;
+ #endif
+ 
++	a52_ackfr_record("DISP CMDSET start type=%d count=%u state=%u p=%s",
++		type, count, state, panel ? panel->name : "none");
+ 	SDE_EVT32(type, state, count);
+ 
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+@@ -1010,6 +1030,7 @@ error:
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	mutex_unlock(&vdd->cmd_lock);
+ #endif
++	a52_ackfr_record("DISP CMDSET done type=%d rc=%d count=%u", type, rc, count);
+ 	return rc;
+ }
+ 
+@@ -1165,6 +1186,8 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
+ 	int rc = 0;
+ 	struct dsi_backlight_config *bl = &panel->bl_config;
+ 
++	a52_ackfr_record("DISP BL p=%s level=%u type=%u",
++		panel->name, bl_lvl, panel->bl_config.type);
+ 	if (panel->host_config.ext_bridge_mode)
+ 		return 0;
+ 
+@@ -4964,6 +4987,8 @@ int dsi_panel_prepare(struct dsi_panel *panel)
+ 		DSI_ERR("invalid params\n");
+ 		return -EINVAL;
+ 	}
++	a52_ackfr_record("DISP PANEL_PREP p=%s lp11=%d init=%d",
++		panel->name, panel->lp11_init, panel->panel_initialized);
+ 
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 	vdd = panel->panel_private;
+@@ -5399,6 +5424,8 @@ int dsi_panel_enable(struct dsi_panel *panel)
+ 		DSI_ERR("Invalid params\n");
+ 		return -EINVAL;
+ 	}
++	a52_ackfr_record("DISP PANEL_ENABLE p=%s init=%d",
++		panel->name, panel->panel_initialized);
+ 
+ 	mutex_lock(&panel->panel_lock);
+ 
+diff --git a/techpack/display/msm/dsi/dsi_phy.c b/techpack/display/msm/dsi/dsi_phy.c
+index ddfdbe6..c9be312 100644
+--- a/techpack/display/msm/dsi/dsi_phy.c
++++ b/techpack/display/msm/dsi/dsi_phy.c
+@@ -13,6 +13,7 @@
+ #include "msm_drv.h"
+ #include "msm_kms.h"
+ #include "dsi_phy.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_phy_hw.h"
+ #include "dsi_clk.h"
+ #include "dsi_pwr.h"
+@@ -867,12 +868,17 @@ int dsi_phy_enable(struct msm_dsi_phy *phy,
+ 		   bool is_cont_splash_enabled)
+ {
+ 	int rc = 0;
++	/* A52_PHY_TRACE_PLAIN_V1 */
+ 
+ 	if (!phy || !config) {
+ 		DSI_PHY_ERR(phy, "Invalid params\n");
+ 		return -EINVAL;
+ 	}
+ 
++	a52_ackfr_record("DISP PHY start i=%d bit=%llu lanes=%x fmt=%u pll=%u splash=%d",
++		phy->index, (unsigned long long)config->bit_clk_rate_hz,
++		config->common_config.data_lanes, config->common_config.dst_format,
++		pll_source, is_cont_splash_enabled);
+ 	DSI_PHY_INFO(phy, "timing_check: enable dphy\n");
+ 
+ 	mutex_lock(&phy->phy_lock);
+@@ -909,6 +915,9 @@ int dsi_phy_enable(struct msm_dsi_phy *phy,
+ 
+ error:
+ 	mutex_unlock(&phy->phy_lock);
++	a52_ackfr_record("DISP PHY done i=%d rc=%d state=%u bit=%llu",
++		phy->index, rc, phy->dsi_phy_state,
++		(unsigned long long)phy->cfg.bit_clk_rate_hz);
+ 
+ 	return rc;
+ }
+diff --git a/techpack/display/msm/dsi/dsi_pwr.c b/techpack/display/msm/dsi/dsi_pwr.c
+index b4955a9..6897fdb 100644
+--- a/techpack/display/msm/dsi/dsi_pwr.c
++++ b/techpack/display/msm/dsi/dsi_pwr.c
+@@ -8,6 +8,7 @@
+ #include <linux/slab.h>
+ 
+ #include "dsi_pwr.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include "dsi_parser.h"
+ #include "dsi_defs.h"
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+@@ -155,9 +156,15 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
+ 	}
+ #endif
+ 
++	/* A52_PWR_TRACE_PLAIN_V1 */
++	a52_ackfr_record("DISP VREG batch en=%d count=%u", enable,
++		regs ? regs->count : 0);
+ 	if (enable) {
+ 		for (i = 0; i < regs->count; i++) {
+ 			vreg = &regs->vregs[i];
++			a52_ackfr_record("DISP VREG+ i=%d n=%s min=%d max=%d load=%d pre=%u post=%u",
++				i, vreg->vreg_name, vreg->min_voltage, vreg->max_voltage,
++				vreg->enable_load, vreg->pre_on_sleep, vreg->post_on_sleep);
+ 
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 			if (panel && vdd && display) {
+@@ -202,6 +209,8 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
+ 			}
+ 
+ 			rc = regulator_enable(vreg->vreg);
++			a52_ackfr_record("DISP VREG+ done i=%d n=%s rc=%d",
++				i, vreg->vreg_name, rc);
+ 			if (rc) {
+ 				DSI_ERR("enable failed for %s, rc=%d\n",
+ 				       vreg->vreg_name, rc);
+@@ -218,6 +227,9 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
+ 	} else {
+ 		for (i = (regs->count - 1); i >= 0; i--) {
+ 			vreg = &regs->vregs[i];
++			a52_ackfr_record("DISP VREG- i=%d n=%s pre=%u post=%u",
++				i, vreg->vreg_name, vreg->pre_off_sleep,
++				vreg->post_off_sleep);
+ 
+ #if defined(CONFIG_DISPLAY_SAMSUNG)
+ 			if (panel && vdd && display) {
+diff --git a/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c b/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c
+index 2d3b928..9003d3a 100644
+--- a/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c
++++ b/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c
+@@ -25,13 +25,17 @@ Copyright (C) 2017, Samsung Electronics. All rights reserved.
+ */
+ #include "ss_dsi_panel_S6E3FC3_AMS646YD01.h"
+ #include "ss_dsi_mdnie_S6E3FC3_AMS646YD01.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ 
++/* A52_PANEL_SPECIFIC_TRACE_PLAIN_V1 */
+ static int samsung_panel_on_pre(struct samsung_display_driver_data *vdd)
+ {
+ 	if (IS_ERR_OR_NULL(vdd)) {
+ 		pr_err("%s: Invalid data vdd : 0x%zx", __func__, (size_t)vdd);
+ 		return false;
+ 	}
++	a52_ackfr_record("DISP S6_PRE i=%d rev=%c id=%x",
++		vdd->ndx, vdd->panel_revision + 'A', vdd->manufacture_id_dsi);
+ 
+ 	LCD_INFO(vdd, "+: ndx=%d\n", vdd->ndx);
+ 	ss_panel_attach_set(vdd, true);
+@@ -41,6 +45,9 @@ static int samsung_panel_on_pre(struct samsung_display_driver_data *vdd)
+ 
+ static int samsung_panel_on_post(struct samsung_display_driver_data *vdd)
+ {
++	a52_ackfr_record("DISP S6_POST i=%d rev=%c state=%d",
++		vdd ? vdd->ndx : -1, vdd ? vdd->panel_revision + 'A' : '?',
++		vdd ? vdd->panel_state : -1);
+ 	/* Module info */
+ 	if (!vdd->module_info_loaded_dsi) {
+ 		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_module_info_read))
+diff --git a/techpack/display/msm/samsung/ss_dsi_panel_common.c b/techpack/display/msm/samsung/ss_dsi_panel_common.c
+index 4e07b56..3615cb8 100644
+--- a/techpack/display/msm/samsung/ss_dsi_panel_common.c
++++ b/techpack/display/msm/samsung/ss_dsi_panel_common.c
+@@ -26,6 +26,7 @@ Copyright (C) 2020, Samsung Electronics. All rights reserved.
+  */
+ 
+ #include "ss_dsi_panel_common.h"
++#include <linux/a52_ack_secure_flight_recorder.h>
+ #include <linux/preempt.h>
+ #if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+ #include "../../../drivers/input/sec_input/sec_input.h"
+@@ -2120,6 +2121,7 @@ struct dsi_panel_cmd_set *ss_get_cmds(struct samsung_display_driver_data *vdd, i
+ 	return qc_set;
+ }
+ 
++/* A52_SAMSUNG_TRACE_PLAIN_V1 */
+ int ss_send_cmd(struct samsung_display_driver_data *vdd,
+ 		int type)
+ {
+@@ -2157,6 +2159,9 @@ int ss_send_cmd(struct samsung_display_driver_data *vdd,
+ 	 * cmd_lock guarantees exclusive tx cmds without vdd_lock.
+ 	 */
+ 	set = ss_get_cmds(vdd, type);
++	a52_ackfr_record("DISP SS_CMD start i=%d type=%d name=%s count=%u state=%u ps=%d",
++		vdd->ndx, type, ss_get_cmd_name(type), set ? set->count : 0,
++		set ? set->state : 0, vdd->panel_state);
+ 
+ 	if (likely(!vdd->exclusive_tx.enable || !set->exclusive_pass)) {
+ 		mutex_lock(&vdd->vdd_lock);
+@@ -2206,6 +2211,8 @@ error:
+ 		mutex_unlock(&vdd->vdd_lock);
+ 
+ 	ss_print_rx_buf(vdd, type);
++	a52_ackfr_record("DISP SS_CMD done i=%d type=%d rc=%d ps=%d",
++		vdd->ndx, type, rc, vdd->panel_state);
+ 
+ 	return rc;
+ }
+@@ -2882,6 +2889,10 @@ void ss_stm_set_cmd(struct samsung_display_driver_data *vdd, struct STM_CMD *cmd
+ int ss_panel_on_pre(struct samsung_display_driver_data *vdd)
+ {
+ 	int lcd_id_cmdline;
++	a52_ackfr_record("DISP SS_PRE i=%d state=%d id=%x splash=%d",
++		vdd ? vdd->ndx : -1, vdd ? vdd->panel_state : -1,
++		vdd ? vdd->manufacture_id_dsi : 0,
++		vdd ? vdd->samsung_splash_enabled : 0);
+ 
+ 	if (!ss_panel_attach_get(vdd)) {
+ 		LCD_ERR(vdd, "ss_panel_attach_get NG\n");
+@@ -3197,6 +3208,9 @@ skip_read:
+ 
+ int ss_panel_on_post(struct samsung_display_driver_data *vdd)
+ {
++	a52_ackfr_record("DISP SS_POST i=%d state=%d bl=%d",
++		vdd ? vdd->ndx : -1, vdd ? vdd->panel_state : -1,
++		vdd ? vdd->br_info.common_br.bl_level : -1);
+ 	if (!ss_panel_attach_get(vdd)) {
+ 		LCD_ERR(vdd, "ss_panel_attach_get NG\n");
+ 		return false;
+@@ -4036,6 +4050,8 @@ int ss_set_backlight(struct samsung_display_driver_data *vdd, u32 bl_lvl)
+ 		ret = -EINVAL;
+ 		goto end;
+ 	}
++	a52_ackfr_record("DISP SS_BL i=%d level=%u state=%d",
++		vdd->ndx, bl_lvl, vdd->panel_state);
+ 
+ 	panel = GET_DSI_PANEL(vdd);
+ 	if (IS_ERR_OR_NULL(panel)) {

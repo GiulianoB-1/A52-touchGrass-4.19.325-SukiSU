@@ -15,8 +15,12 @@ from pathlib import Path
 path = Path('scripts/177_ci.sh')
 text = path.read_text()
 old = 'git -C gki/common apply --check "$PATCH"\n'
-new = ('git -C gki/common apply --check --verbose "$PATCH" 2>&1 | '
-       'tee "$OUT/logs/trace-patch-check.log"\n')
+new = (
+    'sed -n \'3270,3390p\' gki/common/techpack/display/msm/dsi/dsi_ctrl.c '
+    '> "$OUT/logs/dsi-ctrl-pinned-context.txt"\n'
+    'git -C gki/common apply --check --verbose "$PATCH" 2>&1 | '
+    'tee "$OUT/logs/trace-patch-check.log"\n'
+)
 if text.count(old) != 1:
     raise SystemExit(f'expected one trace patch check, found {text.count(old)}')
 path.write_text(text.replace(old, new, 1))

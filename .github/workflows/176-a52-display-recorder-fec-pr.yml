@@ -44,6 +44,22 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.event.pull_request.head.sha }}
 
+      - name: Extract and verify recorder payload
+        run: python3 scripts/176_payload.py --verify
+
+      - name: Compile recorder Python tools
+        run: |
+          python3 -m py_compile \
+            scripts/176_apply_a52_recorder_fec.py \
+            tools/decode-a52-recorder-v3.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Test recorder source patcher
+        run: python3 scripts/176_apply_a52_recorder_fec.py --self-test
+
+      - name: Test Reed-Solomon recovery decoder
+        run: python3 tools/decode-a52-recorder-v3.py --self-test
+
       - name: Restore pinned GKI source
         id: gki-cache
         uses: actions/cache/restore@v4

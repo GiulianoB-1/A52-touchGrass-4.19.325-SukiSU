@@ -62,7 +62,7 @@ git -C gki/common apply "$BASE_PATCH"
 sha256sum \
   gki/common/fs/pstore/ram.c \
   gki/common/init/main.c \
-  gki/common/drivers/soc/qcom/qseecom.c \
+  gki/common/drivers/a52_secure/qseecom.c \
   > "$OUT/stage/pre-instrumentation-invariants.sha256"
 
 git -C gki/common apply --check "$PATCH"

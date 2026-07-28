@@ -3,6 +3,13 @@ name: 176 - A52 display recorder FEC PR gate
 run-name: Compile narrow triple-mirrored display recorder with correction
 
 on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Recorder source branch
+        required: true
+        default: agent/a52-display-recorder-fec-v1
+        type: string
   pull_request:
     branches:
       - agent/a52-heap19-display-bindcore
@@ -18,7 +25,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: a52-display-recorder-fec-pr-${{ github.event.pull_request.number }}
+  group: a52-display-recorder-fec-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -32,8 +39,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
-      - name: Check out pull request source
+      - name: Check out recorder source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.event.pull_request.head.sha }}
 
       - name: Restore pinned GKI source
         id: gki-cache

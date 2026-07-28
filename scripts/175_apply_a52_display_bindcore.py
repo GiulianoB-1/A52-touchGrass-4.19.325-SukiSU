@@ -151,12 +151,12 @@ static void audit_workfn(struct work_struct *unused)
 \tif (pass < 4) schedule_delayed_work(&audit_work,
 \t\tmsecs_to_jiffies(pass == 1 ? 2000 : pass == 2 ? 8000 : 20000));
 }
-static int __init audit_init(void)
+static int __init a52_display_bind_audit_init(void)
 {
 \ta52_ackfr_record("DISP bind audit=start"); audit_all(0);
 \tschedule_delayed_work(&audit_work, msecs_to_jiffies(500)); return 0;
 }
-late_initcall(audit_init);
+late_initcall(a52_display_bind_audit_init);
 '''
 
 def add_include(s:str)->str:

@@ -1,0 +1,146 @@
+name: 184 - A52 TouchGrass display dependency parity
+
+run-name: Compare working TouchGrass display stack against phase 183
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-touchgrass-display-parity-v1
+    paths:
+      - .github/workflows/184-a52-touchgrass-display-parity.yml
+      - scripts/184_compare_touchgrass_display.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-touchgrass-display-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  PHASE183_COMMIT: a609d255be282311a86b94fd285a5dcbbf3935b0
+  PHASE183_ARTIFACT_ID: '8737297176'
+
+jobs:
+  compare:
+    name: Compare TouchGrass and phase-183 display dependencies
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out comparison branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Validate source caches
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test '${{ steps.touchgrass-cache.outputs.cache-hit }}' = true
+          test -d gki/common/.git
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Download audited phase-183 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/phase183-artifact workspace/phase183-artifact.zip
+          mkdir -p workspace/phase183-artifact
+          curl -fL --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o workspace/phase183-artifact.zip \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE183_ARTIFACT_ID}/zip"
+          unzip -q workspace/phase183-artifact.zip -d workspace/phase183-artifact
+          (
+            cd workspace/phase183-artifact
+            sha256sum -c SHA256SUMS
+          )
+          grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' workspace/phase183-artifact/config/final.config
+          grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' workspace/phase183-artifact/config/final.config
+          test -s workspace/phase183-artifact/stage/phase183-dispcc-probe-trace.patch
+
+      - name: Reconstruct exact phase-183 source tree
+        run: |
+          set -Eeuo pipefail
+          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
+          git -C gki/common clean -fdx
+          git -C gki/common apply --binary \
+            "$PWD/workspace/phase183-artifact/stage/phase183-dispcc-probe-trace.patch"
+          git -C gki/common diff --check
+          test -f gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          test -f gki/common/drivers/clk/qcom/dispcc-lagoon.c
+          test -f gki/common/drivers/gpu/drm/msm/dsi-staging/dsi_display.c \
+            -o -f gki/common/techpack/display/msm/dsi/dsi_display.c
+
+      - name: Resolve exact TouchGrass configuration
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-config-out
+          make -C workspace/touchgrass-a52xq \
+            O="$PWD/workspace/touchgrass-config-out" \
+            ARCH=arm64 a52xq_defconfig
+          test -s workspace/touchgrass-config-out/.config
+          grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' workspace/touchgrass-config-out/.config
+          grep -Fqx 'CONFIG_QCOM_PDC=y' workspace/touchgrass-config-out/.config
+
+      - name: Generate display dependency parity report
+        run: |
+          set -Eeuo pipefail
+          rm -rf artifacts/a52-touchgrass-display-parity
+          python3 scripts/184_compare_touchgrass_display.py \
+            --touchgrass workspace/touchgrass-a52xq \
+            --gki gki/common \
+            --touchgrass-config workspace/touchgrass-config-out/.config \
+            --gki-config workspace/phase183-artifact/config/final.config \
+            --phase183-artifact workspace/phase183-artifact \
+            --output artifacts/a52-touchgrass-display-parity
+
+      - name: Audit comparison artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-touchgrass-display-parity
+          test -s "$OUT/REPORT.md"
+          test -s "$OUT/comparison.json"
+          test -s "$OUT/diffs/drivers__pinctrl__qcom__pinctrl-lagoon.c.diff"
+          test -s "$OUT/phase183-preserved-base.dtb"
+          grep -Fq 'CONFIG_PINCTRL_LAGOON' "$OUT/REPORT.md"
+          grep -Fq 'CONFIG_QCOM_PDC' "$OUT/REPORT.md"
+          grep -Fq 'a52-touchgrass-display-parity-not-flashable' "$OUT/comparison.json"
+          (
+            cd "$OUT"
+            sha256sum -c SHA256SUMS
+          )
+          sed -n '1,260p' "$OUT/REPORT.md"
+
+      - name: Upload non-flashable comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52-touchgrass-display-parity-${{ github.run_number }}-NOT-FLASHABLE
+          path: artifacts/a52-touchgrass-display-parity
+          if-no-files-found: error
+          retention-days: 30

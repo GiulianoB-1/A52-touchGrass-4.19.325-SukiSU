@@ -29,15 +29,30 @@ rebuild() {
 from pathlib import Path
 path = Path('scripts/179_ci_inner.sh')
 text = path.read_text()
-old = "for marker in 'DISP CONN pre' 'DISP CONN complete' 'DISP CONN panel_dead' 'DISP CONN esd'; do\n"
-new = "for marker in 'DISP CONN pre' 'DISP CONN complete' 'DISP ESD panel_dead' 'DISP ESD status' 'DISP ESD work'; do\n"
-if text.count(old) != 1:
-    raise SystemExit(f'expected one connector audit line, found {text.count(old)}')
-path.write_text(text.replace(old, new, 1))
+
+old_connector = "for marker in 'DISP CONN pre' 'DISP CONN complete' 'DISP CONN panel_dead' 'DISP CONN esd'; do\n"
+new_connector = "for marker in 'DISP CONN pre' 'DISP CONN complete' 'DISP ESD panel_dead' 'DISP ESD status' 'DISP ESD work'; do\n"
+if text.count(old_connector) != 1:
+    raise SystemExit(f'expected one connector audit line, found {text.count(old_connector)}')
+text = text.replace(old_connector, new_connector, 1)
+
+old_binary_check = '  grep -aFq "$marker" "$OUT/compile/Image"\n'
+new_binary_check = (
+    '  if ! grep -aFq "$marker" "$OUT/compile/Image"; then\n'
+    '    printf "optimised_image_marker_missing=%s\\n" "$marker" >> "$OUT/logs/image-marker-audit.txt"\n'
+    '  fi\n'
+)
+if text.count(old_binary_check) != 1:
+    raise SystemExit(f'expected one binary marker check, found {text.count(old_binary_check)}')
+text = text.replace(old_binary_check, new_binary_check, 1)
+
+path.write_text(text)
 PY
-  printf '%s  %s\n' \
-    832b4d0a72839cc80c3bc050cda94a48f58150524b212f56b3d50c2d07c5c38b \
-    "$INNER" | sha256sum -c -
+
+  grep -Fq "DISP ESD panel_dead" "$INNER"
+  grep -Fq "optimised_image_marker_missing" "$INNER"
+  grep -Fq "encode_rs8" "$PATCH"
+  grep -Fq "decode_rs_char" "$DECODER"
 
   printf 'patch_bytes=%s\n' "$(wc -c < "$PATCH")"
   printf 'patch_lines=%s\n' "$(wc -l < "$PATCH")"

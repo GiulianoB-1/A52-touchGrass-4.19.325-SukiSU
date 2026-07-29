@@ -47,10 +47,16 @@ def main() -> int:
         text,
         "static int really_probe(struct device *dev, struct device_driver *drv)\n"
         "{\n"
-        "\tint ret = -EPROBE_DEFER;\n",
+        "\tint ret = -EPROBE_DEFER;\n"
+        "\tint local_trigger_count = atomic_read(&deferred_trigger_count);\n"
+        "\tbool test_remove = IS_ENABLED(CONFIG_DEBUG_TEST_DRIVER_REMOVE) &&\n"
+        "\t\t\t   !drv->suppress_bind_attrs;\n",
         "static int really_probe(struct device *dev, struct device_driver *drv)\n"
         "{\n"
-        "\tint ret = -EPROBE_DEFER;\n\n"
+        "\tint ret = -EPROBE_DEFER;\n"
+        "\tint local_trigger_count = atomic_read(&deferred_trigger_count);\n"
+        "\tbool test_remove = IS_ENABLED(CONFIG_DEBUG_TEST_DRIVER_REMOVE) &&\n"
+        "\t\t\t   !drv->suppress_bind_attrs;\n\n"
         "\tif (a52_display_probe_device(dev))\n"
         "\t\ta52_ackfr_record(\"DISP RP enter dev=%s drv=%s\",\n"
         "\t\t\tdev_name(dev), drv && drv->name ? drv->name : \"-\");\n",
@@ -100,10 +106,12 @@ def main() -> int:
 
     text = replace_once(
         text,
-        "\tret = driver_sysfs_add(dev);\n",
+        "\tret = driver_sysfs_add(dev);\n"
+        "\tif (a52_run40_preprobe_target(dev)) {\n",
         "\tret = driver_sysfs_add(dev);\n"
         "\tif (a52_display_probe_device(dev))\n"
-        "\t\ta52_ackfr_record(\"DISP RP sysfs dev=%s rc=%d\", dev_name(dev), ret);\n",
+        "\t\ta52_ackfr_record(\"DISP RP sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
+        "\tif (a52_run40_preprobe_target(dev)) {\n",
         "sysfs stage",
     )
 

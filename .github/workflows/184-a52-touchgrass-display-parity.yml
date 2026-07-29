@@ -83,7 +83,6 @@ jobs:
             *) printf 'unexpected TouchGrass version: %s\n' "$tg_version" >&2; exit 1 ;;
           esac
           printf 'touchgrass_version=%s\n' "$tg_version"
-          printf 'touchgrass_cache_hit=%s\n' '${{ steps.touchgrass-cache.outputs.cache-hit }}'
 
       - name: Download audited phase-183 artifact
         env:
@@ -99,10 +98,7 @@ jobs:
             -o workspace/phase183-artifact.zip \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE183_ARTIFACT_ID}/zip"
           unzip -q workspace/phase183-artifact.zip -d workspace/phase183-artifact
-          (
-            cd workspace/phase183-artifact
-            sha256sum -c SHA256SUMS
-          )
+          (cd workspace/phase183-artifact && sha256sum -c SHA256SUMS)
           grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' workspace/phase183-artifact/config/final.config
           grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' workspace/phase183-artifact/config/final.config
           test -s workspace/phase183-artifact/stage/phase183-dispcc-probe-trace.patch
@@ -117,8 +113,7 @@ jobs:
           git -C gki/common diff --check
           test -f gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
           test -f gki/common/drivers/clk/qcom/dispcc-lagoon.c
-          test -f gki/common/drivers/gpu/drm/msm/dsi-staging/dsi_display.c \
-            -o -f gki/common/techpack/display/msm/dsi/dsi_display.c
+          test -f gki/common/drivers/irqchip/qcom-pdc.c
 
       - name: Resolve exact TouchGrass configuration
         run: |
@@ -154,10 +149,7 @@ jobs:
           grep -Fq 'CONFIG_PINCTRL_LAGOON' "$OUT/REPORT.md"
           grep -Fq 'CONFIG_QCOM_PDC' "$OUT/REPORT.md"
           grep -Fq 'a52-touchgrass-display-parity-not-flashable' "$OUT/comparison.json"
-          (
-            cd "$OUT"
-            sha256sum -c SHA256SUMS
-          )
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
           sed -n '1,260p' "$OUT/REPORT.md"
 
       - name: Upload non-flashable comparison

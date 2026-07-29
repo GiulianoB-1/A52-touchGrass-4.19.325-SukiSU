@@ -30,14 +30,9 @@ git -C "$ROOT" diff --check
 # dispcc, but the final configuration did not build the Lagoon dispcc driver.
 "$ROOT/scripts/config" --file "$BUILD/.config" --enable DISP_CC_LAGOON
 
-# Enable block-backed pstore capability only. No blkdev, partition or size is
-# configured, so this cannot write to storage in this candidate.
-if grep -q '^config PSTORE_ZONE' "$ROOT/fs/pstore/Kconfig"; then
-  "$ROOT/scripts/config" --file "$BUILD/.config" --enable PSTORE_ZONE
-fi
-if grep -q '^config PSTORE_BLK' "$ROOT/fs/pstore/Kconfig"; then
-  "$ROOT/scripts/config" --file "$BUILD/.config" --enable PSTORE_BLK
-fi
+# Keep the existing RAMOOPS/pstore recorder configuration unchanged. The
+# pinned kernel does not expose PSTORE_BLK in this configuration, and phase 183
+# does not need a block-backed recorder.
 
 CLANG="$(readlink -f "$(command -v clang)")"
 export PATH="$(dirname "$CLANG"):$PATH"
@@ -49,9 +44,11 @@ make -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
 cp "$BUILD/.config" "$OUT/config/final.config"
 
 grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' "$BUILD/.config"
-if grep -q '^config PSTORE_BLK' "$ROOT/fs/pstore/Kconfig"; then
-  grep -Fqx 'CONFIG_PSTORE_BLK=y' "$BUILD/.config"
-fi
+grep -E '^(# )?CONFIG_PSTORE' "$OUT/config/before-phase183.config" \
+  > "$OUT/logs/pstore-before-phase183.txt" || true
+grep -E '^(# )?CONFIG_PSTORE' "$OUT/config/final.config" \
+  > "$OUT/logs/pstore-after-phase183.txt" || true
+cmp "$OUT/logs/pstore-before-phase183.txt" "$OUT/logs/pstore-after-phase183.txt"
 
 for marker in \
   'DISP RP defer-preserved' \
@@ -118,11 +115,11 @@ Phase 183:
   - records disp_cc-lagoon driver init and every major probe stage
   - preserves normal -EPROBE_DEFER handling for qcom,dsi-ctrl-hw-v2.4
   - does not drop the DSI controller's unresolved supplier links
-  - enables pstore/blk capability when present, but configures no block target
+  - leaves the existing RAMOOPS/pstore configuration unchanged
 
-No storage partition is written by this image. RAMOOPS remains the active
-persistent recorder. After testing, collect the untouched raw 1 MiB RAMOOPS
-ZIP before flashing another kernel.
+No storage backend is added or changed by this image. RAMOOPS remains the
+active persistent recorder. After testing, collect the untouched raw 1 MiB
+RAMOOPS ZIP before flashing another kernel.
 EOF
 
 python3 - <<'PY'
@@ -133,8 +130,11 @@ root = Path('artifacts/a52xq-dispcc-probe-trace')
 base = json.loads(Path('artifacts/a52xq-dsi-ctrl-probe-trace/final-audit.json').read_text())
 repack = json.loads((root / 'package/repack-report.json').read_text())
 config = (root / 'config/final.config').read_text()
+before_config = (root / 'config/before-phase183.config').read_text()
 image = root / 'compile/Image'
 boot = root / 'package/boot.img'
+pstore_before = [line for line in before_config.splitlines() if line.startswith('CONFIG_PSTORE') or line.startswith('# CONFIG_PSTORE')]
+pstore_after = [line for line in config.splitlines() if line.startswith('CONFIG_PSTORE') or line.startswith('# CONFIG_PSTORE')]
 audit = dict(base)
 audit.update({
     'status': 'a52-dispcc-probe-trace-audited',
@@ -150,7 +150,7 @@ audit.update({
         'driver-register', 'probe-entry', 'regmap',
         'pll-configure', 'clock-register', 'probe-complete'
     ],
-    'pstore_blk_capability_enabled': 'CONFIG_PSTORE_BLK=y' in config,
+    'pstore_configuration_changed': pstore_before != pstore_after,
     'pstore_block_target_configured': False,
     'storage_write_added': False,
     'panel_commands_changed': False,
@@ -165,6 +165,7 @@ audit.update({
     'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
 })
 assert audit['disp_cc_lagoon_enabled'] is True
+assert audit['pstore_configuration_changed'] is False
 assert audit['dtb_preserved'] is True
 assert audit['ramdisk_preserved'] is True
 assert audit['recovery_dtbo_preserved'] is True

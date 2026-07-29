@@ -1,6 +1,6 @@
 name: 184 - A52 TouchGrass display dependency parity
 
-run-name: Compare working TouchGrass display stack against phase 183
+run-name: Compare working TouchGrass display initialization against phase 183
 
 on:
   workflow_dispatch:
@@ -30,14 +30,12 @@ env:
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
-  PHASE183_COMMIT: a609d255be282311a86b94fd285a5dcbbf3935b0
-  PHASE183_ARTIFACT_ID: '8737297176'
 
 jobs:
   compare:
-    name: Compare TouchGrass and phase-183 display dependencies
+    name: Compare TouchGrass and phase-183 display initialization
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     steps:
       - name: Check out comparison branch
@@ -84,36 +82,29 @@ jobs:
           esac
           printf 'touchgrass_version=%s\n' "$tg_version"
 
-      - name: Download audited phase-183 artifact
+      - name: Install DT analysis dependency
+        run: |
+          set -Eeuo pipefail
+          if ! command -v dtc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends device-tree-compiler
+          fi
+          dtc --version
+
+      - name: Reconstruct exact audited phase 183 source and artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
         run: |
           set -Eeuo pipefail
-          rm -rf workspace/phase183-artifact workspace/phase183-artifact.zip
-          mkdir -p workspace/phase183-artifact
-          curl -fL --retry 3 --retry-all-errors \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -o workspace/phase183-artifact.zip \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE183_ARTIFACT_ID}/zip"
-          unzip -q workspace/phase183-artifact.zip -d workspace/phase183-artifact
-          (cd workspace/phase183-artifact && sha256sum -c SHA256SUMS)
-          grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' workspace/phase183-artifact/config/final.config
-          grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' workspace/phase183-artifact/config/final.config
-          test -s workspace/phase183-artifact/stage/phase183-dispcc-probe-trace.patch
-
-      - name: Reconstruct exact phase-183 source tree
-        run: |
-          set -Eeuo pipefail
-          git -C gki/common reset --hard "${GKI_COMMON_SHA}"
-          git -C gki/common clean -fdx
-          git -C gki/common apply --binary \
-            "$PWD/workspace/phase183-artifact/stage/phase183-dispcc-probe-trace.patch"
-          git -C gki/common diff --check
+          bash scripts/183_ci.sh
           test -f gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
           test -f gki/common/drivers/clk/qcom/dispcc-lagoon.c
           test -f gki/common/drivers/irqchip/qcom-pdc.c
+          test -s artifacts/a52xq-dispcc-probe-trace/package/boot.img
+          grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' artifacts/a52xq-dispcc-probe-trace/config/final.config
+          grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' artifacts/a52xq-dispcc-probe-trace/config/final.config
+          git -C gki/common diff --check
 
       - name: Resolve exact TouchGrass configuration
         run: |
@@ -126,7 +117,7 @@ jobs:
           grep -Fqx 'CONFIG_PINCTRL_LAGOON=y' workspace/touchgrass-config-out/.config
           grep -Fqx 'CONFIG_QCOM_PDC=y' workspace/touchgrass-config-out/.config
 
-      - name: Generate display dependency parity report
+      - name: Generate complete display initialization parity report
         run: |
           set -Eeuo pipefail
           rm -rf artifacts/a52-touchgrass-display-parity
@@ -134,8 +125,8 @@ jobs:
             --touchgrass workspace/touchgrass-a52xq \
             --gki gki/common \
             --touchgrass-config workspace/touchgrass-config-out/.config \
-            --gki-config workspace/phase183-artifact/config/final.config \
-            --phase183-artifact workspace/phase183-artifact \
+            --gki-config artifacts/a52xq-dispcc-probe-trace/config/final.config \
+            --phase183-artifact artifacts/a52xq-dispcc-probe-trace \
             --output artifacts/a52-touchgrass-display-parity
 
       - name: Audit comparison artifact
@@ -144,18 +135,24 @@ jobs:
           OUT=artifacts/a52-touchgrass-display-parity
           test -s "$OUT/REPORT.md"
           test -s "$OUT/comparison.json"
-          test -s "$OUT/diffs/drivers__pinctrl__qcom__pinctrl-lagoon.c.diff"
+          test -s "$OUT/critical-node-driver-matrix.json"
+          test -s "$OUT/config-comparison.json"
+          test -s "$OUT/function-locations-touchgrass.json"
+          test -s "$OUT/function-locations-phase183.json"
+          test -s "$OUT/init-registration-touchgrass.json"
+          test -s "$OUT/init-registration-phase183.json"
           test -s "$OUT/phase183-preserved-base.dtb"
-          grep -Fq 'CONFIG_PINCTRL_LAGOON' "$OUT/REPORT.md"
-          grep -Fq 'CONFIG_QCOM_PDC' "$OUT/REPORT.md"
-          grep -Fq 'a52-touchgrass-display-parity-not-flashable' "$OUT/comparison.json"
+          test -s "$OUT/phase183-preserved-base.dts"
+          grep -Fq 'a52-touchgrass-display-parity-v2-not-flashable' "$OUT/comparison.json"
+          grep -Fq 'Runtime compatible audit' "$OUT/REPORT.md"
+          ! find "$OUT" -type f \( -name boot.img -o -name Image -o -name Image.gz \) | grep -q .
           (cd "$OUT" && sha256sum -c SHA256SUMS)
-          sed -n '1,260p' "$OUT/REPORT.md"
+          sed -n '1,320p' "$OUT/REPORT.md"
 
       - name: Upload non-flashable comparison
         uses: actions/upload-artifact@v4
         with:
-          name: a52-touchgrass-display-parity-${{ github.run_number }}-NOT-FLASHABLE
+          name: a52-touchgrass-display-parity-v2-${{ github.run_number }}-NOT-FLASHABLE
           path: artifacts/a52-touchgrass-display-parity
           if-no-files-found: error
           retention-days: 30

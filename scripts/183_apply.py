@@ -62,16 +62,6 @@ def patch_dispcc(path: Path) -> None:
 
     text = one(
         text,
-        "\tvdd_cx.regulator[0] = devm_regulator_get(&pdev->dev, \"vdd_cx\");\n",
-        "\ta52_ackfr_record(\"DISPCC step=vdd_cx enter\");\n"
-        "\tvdd_cx.regulator[0] = devm_regulator_get(&pdev->dev, \"vdd_cx\");\n"
-        "\ta52_ackfr_record(\"DISPCC step=vdd_cx exit rc=%ld\",\n"
-        "\t\tIS_ERR(vdd_cx.regulator[0]) ? PTR_ERR(vdd_cx.regulator[0]) : 0L);\n",
-        "dispcc regulator",
-    )
-
-    text = one(
-        text,
         "\tregmap = qcom_cc_map(pdev, &disp_cc_lagoon_desc);\n",
         "\ta52_ackfr_record(\"DISPCC step=map enter\");\n"
         "\tregmap = qcom_cc_map(pdev, &disp_cc_lagoon_desc);\n"

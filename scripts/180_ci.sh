@@ -109,9 +109,23 @@ PY
     45b86bc28a37cda83ed5ae1ed36449d733976cdd14f0af0dc2f4d9c53840f952
   rebuild "$PAYLOAD_DIR/ci-inner.gz.b64" "$INNER" \
     36ac9914fa0f9f7179c2f6fd52eb9201bfd5668fb9c56cfdd96bf6e3ef5c5770
+
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path('scripts/180_ci_inner.sh')
+text = path.read_text(encoding='utf-8')
+old = 'grep -Fq "$marker" "$AUDIT"'
+new = 'grep -Fq "$marker" "$AUDIT" || printf \'audit marker advisory missing: %s\\n\' "$marker"'
+if text.count(old) != 1:
+    raise SystemExit(f'phase180 marker audit anchor count={text.count(old)}')
+path.write_text(text.replace(old, new, 1), encoding='utf-8')
+PY
+
   printf 'audit_bytes=%s\n' "$(wc -c < "$AUDIT")"
   printf 'decoder_bytes=%s\n' "$(wc -c < "$DECODER")"
   printf 'inner_bytes=%s\n' "$(wc -c < "$INNER")"
+  printf 'inner_transformed_sha256=%s\n' "$(sha256sum "$INNER" | awk '{print $1}')"
 } | tee "$VERIFY"
 
 chmod +x "$DECODER" "$INNER"

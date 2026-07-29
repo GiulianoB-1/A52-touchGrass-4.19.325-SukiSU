@@ -10,12 +10,14 @@ on:
     paths:
       - .github/workflows/184-a52-touchgrass-display-parity.yml
       - scripts/184_compare_touchgrass_display.py
+      - scripts/184_effective_dt_audit.py
   pull_request:
     branches:
       - agent/a52-dispcc-probe-trace-v1
     paths:
       - .github/workflows/184-a52-touchgrass-display-parity.yml
       - scripts/184_compare_touchgrass_display.py
+      - scripts/184_effective_dt_audit.py
 
 permissions:
   contents: read
@@ -92,6 +94,7 @@ jobs:
             sudo apt-get install -y --no-install-recommends device-tree-compiler
           fi
           dtc --version
+          command -v fdtoverlay
 
       - name: Reconstruct exact audited phase 183 source and artifact
         env:
@@ -131,6 +134,29 @@ jobs:
             --phase183-artifact artifacts/a52xq-dispcc-probe-trace \
             --output artifacts/a52-touchgrass-display-parity
 
+      - name: Audit A52 board revisions and effective display DT
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-touchgrass-display-parity/effective-dt
+          mkdir -p "$OUT"
+          python3 scripts/184_effective_dt_audit.py \
+            --helpers scripts/184_compare_touchgrass_display.py \
+            --touchgrass workspace/touchgrass-a52xq \
+            --gki gki/common \
+            --phase183-dtb artifacts/a52-touchgrass-display-parity/phase183-preserved-base.dtb \
+            --output "$OUT"
+          test -s "$OUT/EFFECTIVE-DT-REPORT.md"
+          test -s "$OUT/effective-dt-audit.json"
+          test -s "$OUT/touchgrass-display-dependencies.json"
+          test -s "$OUT/a52-panel-property-hashes.json"
+          grep -Fq 'a52-touchgrass-effective-dt-display-audit-not-flashable' "$OUT/effective-dt-audit.json"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          sed -n '1,260p' "$OUT/EFFECTIVE-DT-REPORT.md"
+
       - name: Audit comparison artifact
         run: |
           set -Eeuo pipefail
@@ -145,6 +171,7 @@ jobs:
           test -s "$OUT/init-registration-phase183.json"
           test -s "$OUT/phase183-preserved-base.dtb"
           test -s "$OUT/phase183-preserved-base.dts"
+          test -s "$OUT/effective-dt/EFFECTIVE-DT-REPORT.md"
           grep -Fq 'a52-touchgrass-display-parity-v2-not-flashable' "$OUT/comparison.json"
           grep -Fq 'Runtime compatible audit' "$OUT/REPORT.md"
           ! find "$OUT" -type f \( -name boot.img -o -name Image -o -name Image.gz \) | grep -q .

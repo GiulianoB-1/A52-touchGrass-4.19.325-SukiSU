@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 EXPECTED_AUDIT_SHA = "7b7adb4a0847086fb3bcfaadcebfdd667e7d610a62923429c93997ca90fc050c"
-NEW_AUDIT_SHA = "d903ec559bb1f5483f5b063cb421a4779416295734e417dbc1dabeaeeeb2c3f1"
+NEW_AUDIT_SHA = "e4102aa4d0a98a18f5c689e5b9e515c01ad0dce39f0692323157ded4f6417043"
 
 
 def sha256(path: Path) -> str:

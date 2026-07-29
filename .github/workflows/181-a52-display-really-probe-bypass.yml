@@ -11,6 +11,7 @@ on:
       - .github/workflows/181-a52-display-really-probe-bypass.yml
       - scripts/181_apply.py
       - scripts/181_ci.sh
+      - scripts/181_ci_v2.sh
       - scripts/180_ci.sh
       - scripts/180_apply.py
       - scripts/180_payloads/**
@@ -27,6 +28,7 @@ on:
       - .github/workflows/181-a52-display-really-probe-bypass.yml
       - scripts/181_apply.py
       - scripts/181_ci.sh
+      - scripts/181_ci_v2.sh
       - scripts/180_ci.sh
       - scripts/180_apply.py
       - scripts/180_payloads/**
@@ -71,7 +73,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
-        run: bash scripts/181_ci.sh
+        run: bash scripts/181_ci_v2.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}

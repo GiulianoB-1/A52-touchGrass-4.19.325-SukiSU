@@ -1,6 +1,6 @@
 name: 183 - A52 GKI 5.10 Lagoon dispcc probe trace
 
-run-name: Build GKI 5.10 Lagoon display clock controller candidate
+run-name: Build GKI 5.10 Lagoon dispcc candidate with unchanged PSTORE
 
 on:
   workflow_dispatch:

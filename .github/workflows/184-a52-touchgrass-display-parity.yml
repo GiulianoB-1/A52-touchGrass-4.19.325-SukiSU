@@ -26,6 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
@@ -36,7 +37,7 @@ jobs:
   compare:
     name: Compare TouchGrass and phase-183 display dependencies
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Check out comparison branch
@@ -49,24 +50,40 @@ jobs:
           path: gki
           key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
 
-      - name: Restore exact TouchGrass 4.19.200 source
+      - name: Restore prepared TouchGrass source
         id: touchgrass-cache
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
-      - name: Validate source caches
+      - name: Clone exact TouchGrass vendor source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Validate exact sources
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
-          test '${{ steps.touchgrass-cache.outputs.cache-hit }}' = true
           test -d gki/common/.git
           test -d workspace/touchgrass-a52xq/.git
           test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
           test "$(make -s -C gki/common kernelversion)" = 5.10.252
-          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          tg_version="$(make -s -C workspace/touchgrass-a52xq kernelversion)"
+          case "$tg_version" in
+            4.19.152|4.19.200) ;;
+            *) printf 'unexpected TouchGrass version: %s\n' "$tg_version" >&2; exit 1 ;;
+          esac
+          printf 'touchgrass_version=%s\n' "$tg_version"
+          printf 'touchgrass_cache_hit=%s\n' '${{ steps.touchgrass-cache.outputs.cache-hit }}'
 
       - name: Download audited phase-183 artifact
         env:

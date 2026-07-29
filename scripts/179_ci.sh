@@ -52,7 +52,7 @@ PY
   grep -Fq "DISP ESD panel_dead" "$INNER"
   grep -Fq "optimised_image_marker_missing" "$INNER"
   grep -Fq "encode_rs8" "$PATCH"
-  grep -Fq "decode_rs_char" "$DECODER"
+  grep -Fq "class ReedSolomon" "$DECODER"
 
   printf 'patch_bytes=%s\n' "$(wc -c < "$PATCH")"
   printf 'patch_lines=%s\n' "$(wc -l < "$PATCH")"

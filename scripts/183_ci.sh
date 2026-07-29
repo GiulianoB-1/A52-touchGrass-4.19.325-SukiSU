@@ -57,7 +57,6 @@ for marker in \
   'DISP RP defer-preserved' \
   'DISPCC init enter' \
   'DISPCC probe enter' \
-  'DISPCC step=vdd_cx enter' \
   'DISPCC step=map enter' \
   'DISPCC step=pll enter' \
   'DISPCC step=register enter' \
@@ -148,7 +147,7 @@ audit.update({
     'dsi_controller_supplier_bypass_disabled': True,
     'dsi_controller_normal_defer_preserved': True,
     'dispcc_probe_stages': [
-        'driver-register', 'probe-entry', 'vdd-cx', 'regmap',
+        'driver-register', 'probe-entry', 'regmap',
         'pll-configure', 'clock-register', 'probe-complete'
     ],
     'pstore_blk_capability_enabled': 'CONFIG_PSTORE_BLK=y' in config,

@@ -6,77 +6,79 @@ import difflib
 import hashlib
 import json
 import re
+import shutil
 import struct
+import subprocess
+from collections import defaultdict
 from pathlib import Path
+from typing import Iterable
 
-
-TARGET_CONFIG = [
-    "PINCTRL",
-    "PINCTRL_MSM",
-    "PINCTRL_LAGOON",
-    "QCOM_PDC",
-    "IRQ_DOMAIN_HIERARCHY",
-    "GENERIC_IRQ_CHIP",
-    "COMMON_CLK_QCOM",
-    "DISP_CC_LAGOON",
-    "SDM_DISPCC_LAGOON",
-    "DRM",
-    "DRM_MIPI_DSI",
-    "DRM_PANEL",
-    "BACKLIGHT_CLASS_DEVICE",
-    "BACKLIGHT_QCOM_SPMI_WLED",
-    "PANEL_S6E3FC3_AMS646YD01_FHD",
-    "REGULATOR",
-    "REGULATOR_QCOM_RPMH",
-    "QCOM_RPMH",
-    "QCOM_COMMAND_DB",
-    "INTERCONNECT",
-    "INTERCONNECT_QCOM",
-    "ARM_SMMU",
-]
+CONFIG_EXACT = {
+    "PINCTRL", "PINCTRL_MSM", "PINCTRL_LAGOON", "QCOM_PDC",
+    "IRQ_DOMAIN_HIERARCHY", "GENERIC_IRQ_CHIP", "COMMON_CLK_QCOM",
+    "DISP_CC_LAGOON", "SDM_DISPCC_LAGOON", "DRM", "DRM_MSM",
+    "DRM_MIPI_DSI", "DRM_PANEL", "BACKLIGHT_CLASS_DEVICE",
+    "BACKLIGHT_QCOM_SPMI_WLED", "PANEL_S6E3FC3_AMS646YD01_FHD",
+    "REGULATOR", "REGULATOR_QCOM_RPMH", "QCOM_RPMH",
+    "QCOM_COMMAND_DB", "INTERCONNECT", "INTERCONNECT_QCOM",
+    "ARM_SMMU", "QCOM_SCM", "SPMI", "MFD_SPMI_PMIC",
+    "PM_GENERIC_DOMAINS", "QCOM_RPMH_POWER_DOMAIN",
+}
+CONFIG_PREFIXES = (
+    "DRM", "FB", "MSM_DRM", "SDE", "DSI", "MDSS", "PANEL", "BACKLIGHT",
+    "PINCTRL", "QCOM_PDC", "DISP_CC", "SDM_DISPCC", "COMMON_CLK_QCOM",
+    "REGULATOR", "QCOM_RPMH", "QCOM_COMMAND_DB", "INTERCONNECT",
+    "ARM_SMMU", "IOMMU", "PHY_QCOM", "QCOM_SCM", "SPMI",
+)
 
 EXACT_FILES = [
     "drivers/pinctrl/qcom/pinctrl-lagoon.c",
     "drivers/pinctrl/qcom/pinctrl-msm.c",
     "drivers/pinctrl/qcom/pinctrl-msm.h",
-    "drivers/pinctrl/qcom/Kconfig",
-    "drivers/pinctrl/qcom/Makefile",
     "drivers/irqchip/qcom-pdc.c",
+    "drivers/clk/qcom/dispcc-lagoon.c",
+    "drivers/clk/qcom/gcc-lagoon.c",
 ]
 
-DISPLAY_BASENAMES = {
-    "dsi_display.c",
-    "dsi_panel.c",
-    "dsi_ctrl.c",
-    "dsi_ctrl_hw.c",
-    "dsi_phy.c",
-    "sde_kms.c",
-    "sde_connector.c",
-    "msm_drv.c",
+DISPLAY_PATH_TOKENS = (
+    "techpack/display", "drivers/gpu/drm/msm", "drivers/video/fbdev/msm",
+    "drivers/video/backlight", "drivers/clk/qcom/dispcc", "drivers/irqchip/qcom-pdc",
+    "drivers/pinctrl/qcom/pinctrl-lagoon",
+)
+DISPLAY_NAME_TOKENS = ("dsi", "sde", "mdss", "panel", "dispcc", "wled", "backlight")
+CRITICAL_NODE_TOKENS = (
+    "display", "dsi", "mdss", "panel", "dispcc", "pinctrl", "pdc",
+    "interrupt-controller@b220000", "f100000", "af00000", "phy", "wled",
+    "backlight", "smmu", "regulator", "rpmh",
+)
+FUNCTION_TARGETS = (
+    "dsi_display_probe", "dsi_ctrl_probe", "dsi_phy_probe", "dsi_panel_get",
+    "dsi_panel_drv_init", "dsi_display_dev_init", "dsi_display_bind",
+    "sde_kms_hw_init", "sde_kms_init", "msm_pinctrl_probe",
+    "lagoon_pinctrl_probe", "qcom_pdc_init", "qcom_pdc_probe",
+    "disp_cc_lagoon_probe", "disp_cc_lagoon_init",
+)
+INIT_PATTERNS = (
+    "early_initcall", "core_initcall", "postcore_initcall", "arch_initcall",
+    "subsys_initcall", "fs_initcall", "device_initcall", "late_initcall",
+    "module_init", "module_platform_driver", "builtin_platform_driver",
+    "IRQCHIP_DECLARE", "CLK_OF_DECLARE",
+)
+SELECTED_DT_PROPERTIES = {
+    "status", "compatible", "interrupt-parent", "interrupts", "interrupts-extended",
+    "pinctrl-names", "pinctrl-0", "pinctrl-1", "clocks", "clock-names",
+    "power-domains", "power-domain-names", "interconnects", "interconnect-names",
+    "phys", "phy-names", "resets", "reset-names", "qcom,platform-supply-entries",
+    "qcom,dsi-display-active", "qcom,dsi-display-primary", "qcom,dsi-ctrl",
 }
-
-DT_TOKENS = [
-    "a52xq",
-    "lagoon",
-    "sm7225",
-    "dsi-display-primary",
-    "qcom,dsi-display",
-    "qcom,lagoon-pinctrl",
-    "pinctrl@f100000",
-    "interrupt-controller@b220000",
-    "qcom,pdc",
-    "panel_active",
-    "panel_suspend",
-    "qcom,mdss_dsi",
-]
 
 
 def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
+    h = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def parse_config(path: Path) -> dict[str, str]:
@@ -91,95 +93,58 @@ def parse_config(path: Path) -> dict[str, str]:
     return result
 
 
-def find_display_files(root: Path) -> list[str]:
-    found: list[str] = []
+def relevant_symbol(symbol: str) -> bool:
+    return symbol in CONFIG_EXACT or symbol.startswith(CONFIG_PREFIXES)
+
+
+def enabled(value: str | None) -> bool:
+    return value not in (None, "n", "<absent>")
+
+
+def iter_text_files(root: Path, suffixes: set[str]) -> Iterable[Path]:
+    skip = {".git", "out", "workspace", "artifacts", "prebuilts", "toolchain"}
     for path in root.rglob("*"):
-        if path.is_file() and path.name in DISPLAY_BASENAMES:
-            found.append(path.relative_to(root).as_posix())
-    return sorted(found)
-
-
-def extract_functions(path: Path) -> list[str]:
-    if not path.is_file():
-        return []
-    text = path.read_text(errors="replace")
-    pattern = re.compile(
-        r"^(?:static\s+)?(?:inline\s+)?[\w\s\*]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{",
-        re.MULTILINE,
-    )
-    return sorted(set(pattern.findall(text)))
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        try:
+            rel_parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if any(part in skip for part in rel_parts):
+            continue
+        yield path
 
 
 def source_diff(left: Path, right: Path, left_name: str, right_name: str) -> str:
     left_lines = left.read_text(errors="replace").splitlines(keepends=True) if left.is_file() else []
     right_lines = right.read_text(errors="replace").splitlines(keepends=True) if right.is_file() else []
-    return "".join(
-        difflib.unified_diff(
-            left_lines,
-            right_lines,
-            fromfile=left_name,
-            tofile=right_name,
-            n=5,
-        )
-    )
+    return "".join(difflib.unified_diff(left_lines, right_lines, fromfile=left_name, tofile=right_name, n=5))
 
 
-def collect_dt_evidence(root: Path) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in {".dts", ".dtsi"}:
+def collect_compatible_providers(root: Path) -> dict[str, list[str]]:
+    providers: dict[str, set[str]] = defaultdict(set)
+    regexes = [
+        re.compile(r"\.compatible\s*=\s*\"([^\"]+)\""),
+        re.compile(r"IRQCHIP_DECLARE\s*\([^,]+,\s*\"([^\"]+)\""),
+        re.compile(r"(?:CLK_OF_DECLARE|TIMER_OF_DECLARE)\s*\([^,]+,\s*\"([^\"]+)\""),
+    ]
+    for path in iter_text_files(root, {".c", ".h"}):
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
             continue
         rel = path.relative_to(root).as_posix()
-        text = path.read_text(errors="replace")
-        lower_rel = rel.lower()
-        matches = [token for token in DT_TOKENS if token.lower() in lower_rel or token in text]
-        if not matches:
-            continue
-        snippets: list[str] = []
-        lines = text.splitlines()
-        for number, line in enumerate(lines, 1):
-            if any(token in line for token in DT_TOKENS):
-                start = max(0, number - 3)
-                end = min(len(lines), number + 2)
-                snippets.append(
-                    f"{rel}:{number}\n" + "\n".join(f"{idx + 1}: {lines[idx]}" for idx in range(start, end))
-                )
-                if len(snippets) >= 20:
-                    break
-        rows.append({"path": rel, "tokens": matches, "snippets": snippets})
-    return sorted(rows, key=lambda row: str(row["path"]))
+        for regex in regexes:
+            for compat in regex.findall(text):
+                providers[compat].add(rel)
+    return {key: sorted(value) for key, value in sorted(providers.items())}
 
 
-def pinctrl_soc_fields(path: Path) -> list[str]:
-    if not path.is_file():
-        return []
-    text = path.read_text(errors="replace")
-    match = re.search(
-        r"static\s+const\s+struct\s+msm_pinctrl_soc_data\s+lagoon_pinctrl\s*=\s*\{(.*?)\n\};",
-        text,
-        re.DOTALL,
-    )
-    if not match:
-        return []
-    return sorted(set(re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)\s*=", match.group(1))))
-
-
-def parse_boot_dtb(boot_path: Path, output: Path) -> dict[str, object]:
+def extract_boot_dtb(boot_path: Path, dtb_path: Path) -> dict[str, object]:
     data = boot_path.read_bytes()
     if data[:8] != b"ANDROID!":
-        raise SystemExit("phase-183 boot image has invalid Android magic")
-    (
-        kernel_size,
-        _kernel_addr,
-        ramdisk_size,
-        _ramdisk_addr,
-        second_size,
-        _second_addr,
-        _tags_addr,
-        page_size,
-        header_version,
-        _os_version,
-    ) = struct.unpack_from("<10I", data, 8)
+        raise SystemExit("invalid Android boot image")
+    kernel_size, _, ramdisk_size, _, second_size, _, _, page_size, header_version, _ = struct.unpack_from("<10I", data, 8)
     if header_version != 2:
         raise SystemExit(f"expected boot header v2, got {header_version}")
     recovery_size = struct.unpack_from("<I", data, 1632)[0]
@@ -195,21 +160,207 @@ def parse_boot_dtb(boot_path: Path, output: Path) -> dict[str, object]:
     computed_recovery = second_offset + align(second_size)
     actual_recovery = recovery_offset if recovery_size and recovery_offset else computed_recovery
     dtb_offset = align(actual_recovery + recovery_size) if recovery_size else computed_recovery
-    dtb = data[dtb_offset : dtb_offset + dtb_size]
+    dtb = data[dtb_offset:dtb_offset + dtb_size]
     if len(dtb) != dtb_size or dtb[:4] != b"\xd0\r\xfe\xed":
-        raise SystemExit("failed to extract a valid phase-183 DTB")
-    output.write_bytes(dtb)
-    strings = []
-    for match in re.finditer(rb"[ -~]{4,}", dtb):
-        value = match.group().decode("ascii", errors="replace")
-        if any(token.lower() in value.lower() for token in DT_TOKENS):
-            strings.append(value)
+        raise SystemExit("failed to extract valid DTB")
+    dtb_path.write_bytes(dtb)
     return {
         "boot_sha256": sha256(boot_path),
         "dtb_sha256": hashlib.sha256(dtb).hexdigest(),
         "dtb_bytes": len(dtb),
-        "matching_strings": sorted(set(strings)),
     }
+
+
+def decompile_dtb(dtb_path: Path, dts_path: Path) -> None:
+    dtc = shutil.which("dtc")
+    if not dtc:
+        raise SystemExit("dtc is required for display dependency analysis")
+    proc = subprocess.run(
+        [dtc, "-q", "-I", "dtb", "-O", "dts", "-o", str(dts_path), str(dtb_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode:
+        raise SystemExit(f"dtc failed: {proc.stderr.strip()}")
+
+
+def strip_comments(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return re.sub(r"//.*", "", text)
+
+
+def parse_dts_nodes(dts_path: Path) -> list[dict[str, object]]:
+    text = strip_comments(dts_path.read_text(errors="replace"))
+    nodes: list[dict[str, object]] = []
+    stack: list[dict[str, object]] = []
+    pending = ""
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("/dts-v1/") or line.startswith("/memreserve/"):
+            continue
+
+        if pending:
+            pending += " " + line
+            if ";" not in line:
+                continue
+            line = pending
+            pending = ""
+
+        if "=" in line and ";" not in line:
+            pending = line
+            continue
+
+        if line.endswith("{"):
+            head = line[:-1].strip()
+            if ":" in head:
+                _label, head = head.split(":", 1)
+                head = head.strip()
+            name = head or "/"
+            parent = str(stack[-1]["path"]) if stack else ""
+            if name == "/":
+                path = "/"
+            elif parent in ("", "/"):
+                path = "/" + name
+            else:
+                path = parent + "/" + name
+            node = {"path": path, "name": name, "properties": {}}
+            nodes.append(node)
+            stack.append(node)
+            continue
+
+        if line.startswith("}"):
+            if stack:
+                stack.pop()
+            continue
+
+        if not stack or not line.endswith(";"):
+            continue
+        statement = line[:-1].strip()
+        props = stack[-1]["properties"]
+        assert isinstance(props, dict)
+        if "=" in statement:
+            key, value = statement.split("=", 1)
+            props[key.strip()] = value.strip()
+        else:
+            props[statement] = True
+    return nodes
+
+
+def quoted_strings(value: object) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    return re.findall(r'"([^\"]+)"', value)
+
+
+def compact_value(value: object, limit: int = 360) -> object:
+    if value is True:
+        return True
+    text = str(value)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def critical_node(node: dict[str, object]) -> bool:
+    path = str(node["path"]).lower()
+    props = node["properties"]
+    assert isinstance(props, dict)
+    compat = " ".join(quoted_strings(props.get("compatible"))).lower()
+    combined = path + " " + compat
+    return any(token in combined for token in CRITICAL_NODE_TOKENS)
+
+
+def node_driver_matrix(
+    nodes: list[dict[str, object]],
+    tg_providers: dict[str, list[str]],
+    gki_providers: dict[str, list[str]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for node in nodes:
+        if not critical_node(node):
+            continue
+        props = node["properties"]
+        assert isinstance(props, dict)
+        compats = quoted_strings(props.get("compatible"))
+        tg_matches = {c: tg_providers.get(c, []) for c in compats if tg_providers.get(c)}
+        gki_matches = {c: gki_providers.get(c, []) for c in compats if gki_providers.get(c)}
+        if compats and not gki_matches and tg_matches:
+            risk = "high-touchgrass-only-compatible"
+        elif compats and not gki_matches:
+            risk = "inspect-no-source-compatible"
+        elif gki_matches:
+            risk = "matched-in-phase183"
+        else:
+            risk = "no-compatible-property"
+        selected: dict[str, object] = {}
+        for key, value in props.items():
+            if key in SELECTED_DT_PROPERTIES or key.endswith("-supply"):
+                selected[key] = compact_value(value)
+        rows.append({
+            "path": node["path"],
+            "compatibles": compats,
+            "touchgrass_matches": tg_matches,
+            "phase183_matches": gki_matches,
+            "risk": risk,
+            "properties": selected,
+        })
+    return sorted(rows, key=lambda row: str(row["path"]))
+
+
+def source_inventory(root: Path) -> list[str]:
+    rows: list[str] = []
+    for path in iter_text_files(root, {".c", ".h", ".dts", ".dtsi"}):
+        rel = path.relative_to(root).as_posix()
+        low = rel.lower()
+        if any(token in low for token in DISPLAY_PATH_TOKENS) or any(token in path.name.lower() for token in DISPLAY_NAME_TOKENS):
+            rows.append(rel)
+    return sorted(set(rows))
+
+
+def function_locations(root: Path) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {name: [] for name in FUNCTION_TARGETS}
+    patterns = {name: re.compile(rf"\b{re.escape(name)}\s*\(") for name in FUNCTION_TARGETS}
+    for path in iter_text_files(root, {".c", ".h"}):
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        rel = path.relative_to(root).as_posix()
+        for name, regex in patterns.items():
+            if regex.search(text):
+                found[name].append(rel)
+    return {key: sorted(value) for key, value in found.items()}
+
+
+def init_registrations(root: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for path in iter_text_files(root, {".c"}):
+        rel = path.relative_to(root).as_posix()
+        low = rel.lower()
+        if not (any(token in low for token in DISPLAY_PATH_TOKENS) or any(token in path.name.lower() for token in DISPLAY_NAME_TOKENS)):
+            continue
+        lines = path.read_text(errors="replace").splitlines()
+        for number, line in enumerate(lines, 1):
+            if any(pattern in line for pattern in INIT_PATTERNS):
+                rows.append({"path": rel, "line": number, "statement": line.strip()})
+    return rows
+
+
+def pinctrl_soc_fields(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    text = path.read_text(errors="replace")
+    match = re.search(
+        r"static\s+const\s+struct\s+msm_pinctrl_soc_data\s+lagoon_pinctrl\s*=\s*\{(.*?)\n\};",
+        text, re.DOTALL,
+    )
+    if not match:
+        return []
+    return sorted(set(re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)\s*=", match.group(1))))
+
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -222,13 +373,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    for path in [
-        args.touchgrass,
-        args.gki,
-        args.touchgrass_config,
-        args.gki_config,
-        args.phase183_artifact,
-    ]:
+    for path in (args.touchgrass, args.gki, args.touchgrass_config, args.gki_config, args.phase183_artifact):
         if not path.exists():
             raise SystemExit(f"missing input: {path}")
 
@@ -239,145 +384,149 @@ def main() -> int:
 
     tg_config = parse_config(args.touchgrass_config)
     gki_config = parse_config(args.gki_config)
+    symbols = sorted(symbol for symbol in set(tg_config) | set(gki_config) if relevant_symbol(symbol))
+    config_rows: list[dict[str, str]] = []
+    for symbol in symbols:
+        tv = tg_config.get(symbol, "<absent>")
+        gv = gki_config.get(symbol, "<absent>")
+        if tv == gv:
+            status = "same"
+        elif enabled(tv) and not enabled(gv):
+            status = "touchgrass-enabled-phase183-disabled"
+        elif not enabled(tv) and enabled(gv):
+            status = "phase183-enabled-touchgrass-disabled"
+        else:
+            status = "different"
+        config_rows.append({"symbol": f"CONFIG_{symbol}", "touchgrass": tv, "phase183": gv, "status": status})
 
-    config_rows = []
-    for symbol in TARGET_CONFIG:
-        config_rows.append(
-            {
-                "symbol": f"CONFIG_{symbol}",
-                "touchgrass": tg_config.get(symbol, "<absent>"),
-                "phase183": gki_config.get(symbol, "<absent>"),
-            }
-        )
-
-    exact_rows = []
+    exact_rows: list[dict[str, object]] = []
     for rel in EXACT_FILES:
-        left = args.touchgrass / rel
-        right = args.gki / rel
+        left, right = args.touchgrass / rel, args.gki / rel
         diff = source_diff(left, right, f"touchgrass/{rel}", f"phase183/{rel}")
         diff_path = diff_dir / (rel.replace("/", "__") + ".diff")
         diff_path.write_text(diff, encoding="utf-8")
-        exact_rows.append(
-            {
-                "path": rel,
-                "touchgrass_exists": left.is_file(),
-                "phase183_exists": right.is_file(),
-                "touchgrass_sha256": sha256(left) if left.is_file() else None,
-                "phase183_sha256": sha256(right) if right.is_file() else None,
-                "touchgrass_functions": extract_functions(left),
-                "phase183_functions": extract_functions(right),
-                "diff_file": diff_path.relative_to(out).as_posix(),
-                "diff_lines": len(diff.splitlines()),
-            }
-        )
-
-    tg_display = find_display_files(args.touchgrass)
-    gki_display = find_display_files(args.gki)
-    tg_dt = collect_dt_evidence(args.touchgrass)
-    gki_dt = collect_dt_evidence(args.gki)
-
-    tg_pinctrl = args.touchgrass / "drivers/pinctrl/qcom/pinctrl-lagoon.c"
-    gki_pinctrl = args.gki / "drivers/pinctrl/qcom/pinctrl-lagoon.c"
-    tg_fields = pinctrl_soc_fields(tg_pinctrl)
-    gki_fields = pinctrl_soc_fields(gki_pinctrl)
+        exact_rows.append({
+            "path": rel,
+            "touchgrass_exists": left.is_file(),
+            "phase183_exists": right.is_file(),
+            "touchgrass_sha256": sha256(left) if left.is_file() else None,
+            "phase183_sha256": sha256(right) if right.is_file() else None,
+            "diff_file": diff_path.relative_to(out).as_posix(),
+            "diff_lines": len(diff.splitlines()),
+        })
 
     boot_path = args.phase183_artifact / "package/boot.img"
-    dtb_info = parse_boot_dtb(boot_path, out / "phase183-preserved-base.dtb")
+    dtb_path = out / "phase183-preserved-base.dtb"
+    dts_path = out / "phase183-preserved-base.dts"
+    dtb_info = extract_boot_dtb(boot_path, dtb_path)
+    decompile_dtb(dtb_path, dts_path)
+    nodes = parse_dts_nodes(dts_path)
 
-    findings = []
-    if tg_pinctrl.is_file() and gki_pinctrl.is_file():
-        findings.append("Both trees contain a Lagoon TLMM driver with the same qcom,lagoon-pinctrl binding.")
-    missing_fields = sorted(set(tg_fields) - set(gki_fields))
-    extra_fields = sorted(set(gki_fields) - set(tg_fields))
-    if missing_fields:
-        findings.append("Phase 183 Lagoon pinctrl data omits TouchGrass fields: " + ", ".join(missing_fields) + ".")
-    if extra_fields:
-        findings.append("Phase 183 Lagoon pinctrl data adds fields not present in TouchGrass: " + ", ".join(extra_fields) + ".")
-    if gki_config.get("PINCTRL_LAGOON") == "y":
-        findings.append("CONFIG_PINCTRL_LAGOON is built into phase 183, so a missing module is not the explanation for the unbound TLMM device.")
-    if tg_config.get("QCOM_PDC") == "y" and gki_config.get("QCOM_PDC") == "y":
-        findings.append("CONFIG_QCOM_PDC is built into both kernels; source or binding parity must be checked rather than only toggling the symbol.")
-    if not gki_dt:
-        findings.append("The phase-183 GKI source tree has no native A52/Lagoon DTS hierarchy; runtime still depends on the preserved Samsung DTB and bootloader overlays.")
-    findings.append("The phase-183 RAMOOPS trace must be interpreted against this parity report before any supplier bypass or panel-command change.")
+    tg_providers = collect_compatible_providers(args.touchgrass)
+    gki_providers = collect_compatible_providers(args.gki)
+    matrix = node_driver_matrix(nodes, tg_providers, gki_providers)
+    high_risk = [row for row in matrix if row["risk"] == "high-touchgrass-only-compatible"]
+    no_match = [row for row in matrix if row["risk"] == "inspect-no-source-compatible"]
+
+    tg_pinctrl_fields = pinctrl_soc_fields(args.touchgrass / "drivers/pinctrl/qcom/pinctrl-lagoon.c")
+    gki_pinctrl_fields = pinctrl_soc_fields(args.gki / "drivers/pinctrl/qcom/pinctrl-lagoon.c")
+    missing_pinctrl_fields = sorted(set(tg_pinctrl_fields) - set(gki_pinctrl_fields))
+
+    tg_functions = function_locations(args.touchgrass)
+    gki_functions = function_locations(args.gki)
+    tg_init = init_registrations(args.touchgrass)
+    gki_init = init_registrations(args.gki)
+    tg_inventory = source_inventory(args.touchgrass)
+    gki_inventory = source_inventory(args.gki)
+
+    findings: list[str] = []
+    if high_risk:
+        findings.append(f"{len(high_risk)} display-critical DT nodes have compatibles provided by TouchGrass but not by phase 183.")
+        for row in high_risk[:20]:
+            findings.append(f"Unmatched runtime node {row['path']}: {', '.join(row['compatibles'])}.")
+    if no_match:
+        findings.append(f"{len(no_match)} additional display-critical DT nodes have no directly indexed compatible provider in either compared source tree and require manual binding review.")
+    config_gaps = [row for row in config_rows if row["status"] == "touchgrass-enabled-phase183-disabled"]
+    if config_gaps:
+        findings.append(f"{len(config_gaps)} relevant configuration symbols are enabled in TouchGrass but disabled or absent in phase 183.")
+    if missing_pinctrl_fields:
+        findings.append("Phase 183 Lagoon pinctrl data omits TouchGrass fields: " + ", ".join(missing_pinctrl_fields) + ".")
+    if not high_risk:
+        findings.append("No TouchGrass-only compatible mismatch remains among the parsed display-critical DT nodes.")
+    findings.append("Panel commands, timings and voltages must remain unchanged until compatible, supplier and initialization-order parity checks are clean.")
 
     result = {
-        "artifact_type": "a52-touchgrass-display-parity-not-flashable",
-        "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
-        "gki_commit": "f960ed27302b1ff8e61e152fc202554d778deccd",
-        "phase183_commit": "a609d255be282311a86b94fd285a5dcbbf3935b0",
-        "config": config_rows,
-        "exact_files": exact_rows,
-        "touchgrass_display_files": tg_display,
-        "phase183_display_files": gki_display,
-        "touchgrass_dt_evidence": tg_dt,
-        "phase183_dt_evidence": gki_dt,
-        "touchgrass_lagoon_pinctrl_fields": tg_fields,
-        "phase183_lagoon_pinctrl_fields": gki_fields,
-        "missing_lagoon_pinctrl_fields": missing_fields,
-        "extra_lagoon_pinctrl_fields": extra_fields,
-        "phase183_boot_dtb": dtb_info,
+        "artifact_type": "a52-touchgrass-display-parity-v2-not-flashable",
+        "touchgrass_commit": subprocess.check_output(["git", "-C", str(args.touchgrass), "rev-parse", "HEAD"], text=True).strip(),
+        "gki_commit": subprocess.check_output(["git", "-C", str(args.gki), "rev-parse", "HEAD"], text=True).strip(),
+        "phase": 183,
+        "dtb": dtb_info,
         "findings": findings,
+        "high_risk_compatible_mismatches": high_risk,
+        "unindexed_critical_nodes": no_match,
+        "missing_lagoon_pinctrl_fields": missing_pinctrl_fields,
+        "config_gap_count": len(config_gaps),
     }
-    (out / "comparison.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
 
-    lines = [
-        "# A52 TouchGrass display dependency parity",
+    write_json(out / "comparison.json", result)
+    write_json(out / "config-comparison.json", config_rows)
+    write_json(out / "critical-node-driver-matrix.json", matrix)
+    write_json(out / "compatible-providers-touchgrass.json", tg_providers)
+    write_json(out / "compatible-providers-phase183.json", gki_providers)
+    write_json(out / "function-locations-touchgrass.json", tg_functions)
+    write_json(out / "function-locations-phase183.json", gki_functions)
+    write_json(out / "init-registration-touchgrass.json", tg_init)
+    write_json(out / "init-registration-phase183.json", gki_init)
+    write_json(out / "source-inventory-touchgrass.json", tg_inventory)
+    write_json(out / "source-inventory-phase183.json", gki_inventory)
+    write_json(out / "exact-source-comparison.json", exact_rows)
+
+    report = [
+        "# A52 TouchGrass display initialization parity",
         "",
-        "This artifact compares the exact working TouchGrass source against the source used by phase 183. It is analysis only and contains no flashable image.",
-        "",
-        "## Fixed inputs",
-        "",
-        "- TouchGrass: `micr0softstore/samsung_android_kernel_a52xq` at `6bf351bdf18bdb228db79e66f14a7a9c0178e5d7`",
-        "- GKI common: `f960ed27302b1ff8e61e152fc202554d778deccd`",
-        "- Phase 183 branch head: `a609d255be282311a86b94fd285a5dcbbf3935b0`",
+        "This is a non-flashable comparison of the exact working TouchGrass source, the exact phase 183 runtime source, and the Samsung DTB preserved in the tested boot image.",
         "",
         "## Immediate findings",
         "",
     ]
-    lines.extend(f"- {item}" for item in findings)
-    lines.extend(["", "## Target configuration", "", "| Symbol | TouchGrass | Phase 183 |", "|---|---:|---:|"])
-    for row in config_rows:
-        lines.append(f"| `{row['symbol']}` | `{row['touchgrass']}` | `{row['phase183']}` |")
-
-    lines.extend(["", "## Lagoon pinctrl data fields", ""])
-    lines.append("TouchGrass: `" + "`, `".join(tg_fields) + "`")
-    lines.append("")
-    lines.append("Phase 183: `" + "`, `".join(gki_fields) + "`")
-
-    lines.extend(["", "## Exact source comparisons", "", "| Path | TouchGrass | Phase 183 | Diff lines |", "|---|---:|---:|---:|"])
-    for row in exact_rows:
-        lines.append(
-            f"| `{row['path']}` | `{row['touchgrass_exists']}` | `{row['phase183_exists']}` | {row['diff_lines']} |"
+    report.extend(f"- {item}" for item in findings)
+    report.extend(["", "## Runtime compatible audit", "", "| Node | Compatible | Phase 183 | TouchGrass | Risk |", "|---|---|---:|---:|---|"])
+    for row in matrix:
+        report.append(
+            f"| `{row['path']}` | `{', '.join(row['compatibles']) or '<none>'}` | "
+            f"`{bool(row['phase183_matches'])}` | `{bool(row['touchgrass_matches'])}` | `{row['risk']}` |"
         )
-
-    lines.extend(["", "## Display source inventory", "", "### TouchGrass"])
-    lines.extend(f"- `{path}`" for path in tg_display)
-    lines.extend(["", "### Phase 183"])
-    lines.extend(f"- `{path}`" for path in gki_display)
-
-    lines.extend(["", "## TouchGrass device-tree evidence", ""])
-    for row in tg_dt:
-        lines.append(f"### `{row['path']}`")
-        lines.append("")
-        lines.append("Matched: " + ", ".join(f"`{token}`" for token in row["tokens"]))
-        for snippet in row["snippets"]:
-            lines.extend(["", "```text", str(snippet), "```"])
-
-    lines.extend(["", "## Preserved phase-183 base DTB", ""])
-    lines.append(f"- Bytes: `{dtb_info['dtb_bytes']}`")
-    lines.append(f"- SHA-256: `{dtb_info['dtb_sha256']}`")
-    lines.append("- Relevant strings: " + (", ".join(f"`{value}`" for value in dtb_info["matching_strings"]) or "none"))
-
-    (out / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (out / "config-comparison.json").write_text(json.dumps(config_rows, indent=2) + "\n")
+    report.extend(["", "## Relevant configuration differences", "", "| Symbol | TouchGrass | Phase 183 | Status |", "|---|---:|---:|---|"])
+    for row in config_rows:
+        if row["status"] != "same":
+            report.append(f"| `{row['symbol']}` | `{row['touchgrass']}` | `{row['phase183']}` | `{row['status']}` |")
+    report.extend(["", "## Lagoon pinctrl parity", ""])
+    report.append("TouchGrass fields: `" + "`, `".join(tg_pinctrl_fields) + "`")
+    report.append("")
+    report.append("Phase 183 fields: `" + "`, `".join(gki_pinctrl_fields) + "`")
+    report.append("")
+    report.append("Missing from phase 183: `" + "`, `".join(missing_pinctrl_fields) + "`")
+    report.extend(["", "## Exact source comparisons", "", "| Path | TouchGrass | Phase 183 | Diff lines |", "|---|---:|---:|---:|"])
+    for row in exact_rows:
+        report.append(f"| `{row['path']}` | `{row['touchgrass_exists']}` | `{row['phase183_exists']}` | `{row['diff_lines']}` |")
+    report.extend(["", "## Generated evidence", ""])
+    report.extend([
+        "- `critical-node-driver-matrix.json`: DT node to compatible provider mapping",
+        "- `phase183-preserved-base.dts`: decompiled tested Samsung DTB",
+        "- `config-comparison.json`: display-related Kconfig parity",
+        "- `function-locations-*.json`: display probe function source mapping",
+        "- `init-registration-*.json`: initcall and driver registration ordering evidence",
+        "- `source-inventory-*.json`: display source inventory",
+        "- `diffs/`: exact source diffs for PDC, pinctrl and clock controllers",
+    ])
+    (out / "REPORT.md").write_text("\n".join(report) + "\n", encoding="utf-8")
 
     with (out / "SHA256SUMS").open("w", encoding="utf-8") as stream:
         for path in sorted(out.rglob("*")):
             if path.is_file() and path.name != "SHA256SUMS":
                 stream.write(f"{sha256(path)}  {path.relative_to(out).as_posix()}\n")
 
-    print(json.dumps({"status": "ok", "findings": findings}, indent=2))
+    print(json.dumps({"status": "ok", "high_risk": len(high_risk), "config_gaps": len(config_gaps)}, indent=2))
     return 0
 
 

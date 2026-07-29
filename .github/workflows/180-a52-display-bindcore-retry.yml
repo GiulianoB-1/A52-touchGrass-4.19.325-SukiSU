@@ -1,0 +1,88 @@
+name: 180 - A52 GKI 5.10 display bindcore retry
+
+run-name: Build GKI 5.10 display driver binding trace and bounded retry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-display-bindcore-trace-retry-v1
+    paths:
+      - .github/workflows/180-a52-display-bindcore-retry.yml
+      - scripts/180_ci.sh
+      - scripts/180_apply.py
+      - scripts/180_payloads/**
+      - scripts/179_ci.sh
+      - scripts/179_payloads/**
+      - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload_chunks/**
+      - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-display-takeover-rs-mirror-v1
+    paths:
+      - .github/workflows/180-a52-display-bindcore-retry.yml
+      - scripts/180_ci.sh
+      - scripts/180_apply.py
+      - scripts/180_payloads/**
+      - scripts/179_ci.sh
+      - scripts/179_payloads/**
+      - scripts/177_ci.sh
+      - scripts/177_ci_exact.sh
+      - scripts/177_patch_payload_chunks/**
+      - scripts/38_repack_a52_p1_boot.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-display-bindcore-retry-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Build phase-180 display bindcore retry image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out phase-180 branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Build, retry-instrument, package and audit phase 180
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: bash scripts/180_ci.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-bindcore-retry-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-bindcore-retry
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload phase-180 candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-bindcore-retry-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-bindcore-retry
+          if-no-files-found: error
+          retention-days: 30

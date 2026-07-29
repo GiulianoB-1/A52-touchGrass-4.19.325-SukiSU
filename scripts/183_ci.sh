@@ -28,7 +28,7 @@ git -C "$ROOT" diff --check
 
 # The phase-182 capture proved that the DSI controller consumes clocks from
 # dispcc, but the final configuration did not build the Lagoon dispcc driver.
-"$ROOT/scripts/config" --file "$BUILD/.config" --enable SDM_DISPCC_LAGOON
+"$ROOT/scripts/config" --file "$BUILD/.config" --enable DISP_CC_LAGOON
 
 # Enable block-backed pstore capability only. No blkdev, partition or size is
 # configured, so this cannot write to storage in this candidate.
@@ -48,7 +48,7 @@ make -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
   > "$OUT/logs/phase183-olddefconfig.log" 2>&1
 cp "$BUILD/.config" "$OUT/config/final.config"
 
-grep -Fqx 'CONFIG_SDM_DISPCC_LAGOON=y' "$BUILD/.config"
+grep -Fqx 'CONFIG_DISP_CC_LAGOON=y' "$BUILD/.config"
 if grep -q '^config PSTORE_BLK' "$ROOT/fs/pstore/Kconfig"; then
   grep -Fqx 'CONFIG_PSTORE_BLK=y' "$BUILD/.config"
 fi
@@ -111,10 +111,10 @@ FLASH ONLY:
 
 Phase 182 proved that drm_dsi_ctrl stops in dsi_ctrl_clocks_init() after its
 unavailable qcom,dispcc supplier was dropped. The previous final config built
-CONFIG_SDM_GCC_LAGOON but omitted CONFIG_SDM_DISPCC_LAGOON.
+CONFIG_SDM_GCC_LAGOON but omitted CONFIG_DISP_CC_LAGOON.
 
 Phase 183:
-  - enables CONFIG_SDM_DISPCC_LAGOON=y
+  - enables CONFIG_DISP_CC_LAGOON=y
   - records disp_cc-lagoon driver init and every major probe stage
   - preserves normal -EPROBE_DEFER handling for qcom,dsi-ctrl-hw-v2.4
   - does not drop the DSI controller's unresolved supplier links
@@ -143,7 +143,7 @@ audit.update({
     'flashable_candidate': True,
     'functional_change_from_phase182': True,
     'root_cause_hypothesis': 'Lagoon display clock controller omitted from final config',
-    'sdm_dispcc_lagoon_enabled': 'CONFIG_SDM_DISPCC_LAGOON=y' in config,
+    'disp_cc_lagoon_enabled': 'CONFIG_DISP_CC_LAGOON=y' in config,
     'dsi_controller_supplier_bypass_disabled': True,
     'dsi_controller_normal_defer_preserved': True,
     'dispcc_probe_stages': [
@@ -164,7 +164,7 @@ audit.update({
     'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
     'recovery_dtbo_preserved': repack['invariants']['recovery_dtbo_preserved'],
 })
-assert audit['sdm_dispcc_lagoon_enabled'] is True
+assert audit['disp_cc_lagoon_enabled'] is True
 assert audit['dtb_preserved'] is True
 assert audit['ramdisk_preserved'] is True
 assert audit['recovery_dtbo_preserved'] is True

@@ -91,17 +91,29 @@ def patch_display_audit(path: Path) -> None:
 
     text = one(
         text,
-        "\t\tif (!pdev->dev.driver && match > 0) {\n"
-        "\t\t\tif (force_links)\n"
-        "\t\t\t\ta52_device_links_force_probe(&pdev->dev, &kept, &dropped);\n"
-        "\t\t\trc = device_attach(&pdev->dev);\n",
-        "\t\tif (!pdev->dev.driver && match > 0) {\n"
-        "\t\t\tif (force_links)\n"
-        "\t\t\t\ta52_ackfr_record(\"DISP RETRY force-disabled p=%u c=%s\",\n"
-        "\t\t\t\t\tpass, target->tag);\n"
-        "\t\t\trc = device_attach(&pdev->dev);\n",
-        "disable dormant forced-link retry",
+        "/* Existing phase-177 helper. Phase 180 invokes it only on three display nodes. */\n"
+        "extern void a52_device_links_force_probe(struct device *dev,\n"
+        "\t\t\t\t\t unsigned int *kept,\n"
+        "\t\t\t\t\t unsigned int *dropped);\n\n",
+        "",
+        "remove display force-probe declaration",
     )
+
+    text = one(
+        text,
+        "/* Probe dependency order: controller, display aggregator, then SDE/DRM. */\n"
+        "static const unsigned int retry_order[] = { 2, 1, 0 };\n\n",
+        "",
+        "remove retry order",
+    )
+
+    retry_pattern = (
+        r"static void retry_compat\(.*?\n}\n\n"
+        r"static void retry_all\(.*?\n}\n\n"
+    )
+    text, count = re.subn(retry_pattern, "", text, count=1, flags=re.DOTALL)
+    if count != 1:
+        raise SystemExit(f"remove retry implementation: expected one match, found {count}")
 
     text = one(
         text,

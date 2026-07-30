@@ -1,0 +1,1 @@
+Phase 189 is instrumentation-only. It does not skip or alter the common-5.10 eager GPIO direction scan. The hardware decision point is the last GPIOCORE marker recovered from RAMOOPS.

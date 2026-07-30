@@ -51,6 +51,22 @@ def patch_driver_core(path: Path) -> None:
 
     text = one(
         text,
+        "static bool a52_run40_preprobe_target(const struct device *dev)\n"
+        "{\n"
+        "\tconst char *name = dev ? dev_name(dev) : NULL;\n\n"
+        "\treturn name && (!strcmp(name, \"1d84000.ufshc\") ||\n"
+        "\t\t\t!strcmp(name, \"f100000.pinctrl\"));\n"
+        "}\n",
+        "static bool a52_run40_preprobe_target(const struct device *dev)\n"
+        "{\n"
+        "\tconst char *name = dev ? dev_name(dev) : NULL;\n\n"
+        "\treturn name && !strcmp(name, \"1d84000.ufshc\");\n"
+        "}\n",
+        "remove TLMM from legacy preprobe tracing target",
+    )
+
+    text = one(
+        text,
         "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev) &&\n"
         "\t    !(dev->of_node && of_device_is_compatible(dev->of_node,\n"
         "\t\t\t\t\t\t \"qcom,dsi-ctrl-hw-v2.4\"))) {\n"

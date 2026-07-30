@@ -29,9 +29,23 @@ def patch_driver_core(path: Path) -> None:
 
     text = one(
         text,
+        "static bool a52_legacy_fw_devlink_consumer(const struct device *dev)\n"
+        "{\n"
+        "\tconst char *name;\n\n"
+        "\tif (!dev)\n"
+        "\t\treturn false;\n"
+        "\tname = dev_name(dev);\n"
         "\treturn name && (!strcmp(name, \"1d84000.ufshc\") ||\n"
-        "\t\t\t!strcmp(name, \"f100000.pinctrl\"));\n",
-        "\treturn name && !strcmp(name, \"1d84000.ufshc\");\n",
+        "\t\t\t!strcmp(name, \"f100000.pinctrl\"));\n"
+        "}\n",
+        "static bool a52_legacy_fw_devlink_consumer(const struct device *dev)\n"
+        "{\n"
+        "\tconst char *name;\n\n"
+        "\tif (!dev)\n"
+        "\t\treturn false;\n"
+        "\tname = dev_name(dev);\n"
+        "\treturn name && !strcmp(name, \"1d84000.ufshc\");\n"
+        "}\n",
         "remove TLMM from legacy supplier bypass",
     )
 

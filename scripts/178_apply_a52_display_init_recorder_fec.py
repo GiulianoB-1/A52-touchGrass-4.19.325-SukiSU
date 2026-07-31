@@ -163,6 +163,18 @@ def replace_function(text: str, signature: str, replacement: str) -> str:
 def patch_ram(text: str) -> str:
     if NEW_PROFILE in text and "a52_diag_map_all_banks" in text:
         return text
+    text = replace_once(
+        text,
+        "static const char * const a52_diag_labels",
+        "static const char * const __maybe_unused a52_diag_labels",
+        "bank label declaration",
+    )
+    text = replace_once(
+        text,
+        "static const enum pstore_type_id a52_diag_types",
+        "static const enum pstore_type_id __maybe_unused a52_diag_types",
+        "bank type declaration",
+    )
     text = replace_once(text, OLD_DECL, NEW_DECL, "mapping declarations")
     start = text.index("static int a52_diag_map_bank(unsigned int bank)")
     end = text.index("unsigned int a52_ackfr_ramoops_write_record", start)
@@ -201,6 +213,8 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         NEW_PROFILE,
         "A52_ACKFR_PARITY_BYTES 32U",
         "A52_DIAG_BANK_COUNT 3U",
+        "__maybe_unused a52_diag_labels",
+        "__maybe_unused a52_diag_types",
     ]
     for marker in required:
         if marker not in final_ram:
@@ -237,9 +251,12 @@ def self_test() -> None:
         rec = root / RECORDER_REL
         ram.parent.mkdir(parents=True)
         rec.parent.mkdir(parents=True)
+        old_arrays = '''static const char * const a52_diag_labels[3] = { "a", "b", "c" };
+static const enum pstore_type_id a52_diag_types[3] = { 0, 1, 2 };
+'''
         old_map = '''static int a52_diag_map_bank(unsigned int bank)\n{\n\treturn bank;\n}\n\n'''
         ram.write_text(
-            OLD_DECL + old_map +
+            old_arrays + OLD_DECL + old_map +
             'unsigned int a52_ackfr_ramoops_write_record(const void *d, size_t l, u64 s) { return 0; }\n' +
             OLD_INIT + f'const char *profile = "{OLD_PROFILE}";\n' +
             '#define A52_ACKFR_PARITY_BYTES 32U\n#define A52_DIAG_BANK_COUNT 3U\n'
@@ -250,6 +267,8 @@ def self_test() -> None:
         patched = ram.read_text()
         assert "\n\\t" not in patched
         assert "\n\tstruct persistent_ram_ecc_info" in patched
+        assert "__maybe_unused a52_diag_labels" in patched
+        assert "__maybe_unused a52_diag_types" in patched
         second = run(root, root / "out2")
         assert second["mapping_backend"].startswith("one-")
 

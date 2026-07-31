@@ -24,26 +24,35 @@ NEW_DECL = '''#define A52_DIAG_TOTAL_SIZE \\
 static struct persistent_ram_zone *a52_diag_prz;
 static u8 __iomem *a52_diag_banks[A52_DIAG_BANK_COUNT];
 static struct rs_control *a52_diag_rs;
+static bool a52_diag_preserve_recovery;
 static DEFINE_RAW_SPINLOCK(a52_diag_lock);
 '''
 
-NEW_MAP = r'''static int a52_diag_map_all_banks(void)
+NEW_MAP = r'''static bool __init a52_diag_is_recovery_boot(void)
+{
+\treturn saved_command_line &&
+\t\tstrstr(saved_command_line, "androidboot.boot_recovery=1");
+}
+
+static int a52_diag_map_all_banks(void)
 {
 \tstruct persistent_ram_ecc_info ecc = { };
 \tu8 __iomem *base;
+\tu32 flags;
 \tunsigned int bank;
 
 \tif (a52_diag_prz && a52_diag_banks[0])
 \t\treturn 0;
 
 \t/*
-\t * Map the three adjacent 256 KiB banks in one vmap operation. This makes
-\t * recorder initialization all-or-nothing and avoids three independent
-\t * early mappings of one contiguous reserved-RAM allocation.
+\t * A normal Android boot starts a fresh capture. Recovery must instead
+\t * attach without zapping so the failed boot remains available to the raw
+\t * exporter. The collector boots recovery before it copies reserved RAM.
 \t */
+\tflags = a52_diag_preserve_recovery ? 0 : PRZ_FLAG_ZAP_OLD;
 \ta52_diag_prz = persistent_ram_new(a52_diag_phys[0],
 \t\t\t\t\t A52_DIAG_TOTAL_SIZE, 0, &ecc,
-\t\t\t\t\t 1, PRZ_FLAG_ZAP_OLD,
+\t\t\t\t\t 1, flags,
 \t\t\t\t\t "a52-rec3-all-banks");
 \tif (IS_ERR(a52_diag_prz)) {
 \t\tint ret = PTR_ERR(a52_diag_prz);
@@ -57,9 +66,16 @@ NEW_MAP = r'''static int a52_diag_map_all_banks(void)
 \tif (!base)
 \t\treturn -ENOMEM;
 
+\tfor (bank = 0; bank < A52_DIAG_BANK_COUNT; bank++)
+\t\ta52_diag_banks[bank] = base + bank * A52_DIAG_BANK_SIZE;
+
+\tif (a52_diag_preserve_recovery) {
+\t\twmb();
+\t\treturn 0;
+\t}
+
 \tmemset_io(base, 0, A52_DIAG_TOTAL_SIZE);
 \tfor (bank = 0; bank < A52_DIAG_BANK_COUNT; bank++) {
-\t\ta52_diag_banks[bank] = base + bank * A52_DIAG_BANK_SIZE;
 \t\twritel_relaxed(A52_DIAG_PERSISTENT_RAM_SIG,
 \t\t\t       a52_diag_banks[bank]);
 \t\twritel_relaxed(0, a52_diag_banks[bank] + 4);
@@ -107,25 +123,34 @@ NEW_INIT = r'''int __init a52_persistent_diag_init(void)
 {
 \tint ret;
 
-\tif (a52_diag_rs && a52_diag_banks[0])
+\tif (a52_diag_banks[0])
 \t\treturn 0;
+
+\ta52_diag_preserve_recovery = a52_diag_is_recovery_boot();
+\tret = a52_diag_map_all_banks();
+\tif (ret) {
+\t\tpr_err("A52 recorder contiguous mapping failed: %d\n", ret);
+\t\treturn ret;
+\t}
+
+\tif (a52_diag_preserve_recovery) {
+\t\tpr_info("A52 recorder v3 recovery preserve-only mode; previous boot retained\n");
+\t\treturn 0;
+\t}
+
 \ta52_diag_rs = init_rs(8, 0x11d, 0, 1, A52_ACKFR_PARITY_BYTES);
 \tif (!a52_diag_rs)
 \t\treturn -ENOMEM;
 
-\tret = a52_diag_map_all_banks();
-\tif (ret) {
-\t\tpr_err("A52 recorder contiguous mapping failed: %d\n", ret);
-\t\tfree_rs(a52_diag_rs);
-\t\ta52_diag_rs = NULL;
-\t\treturn ret;
-\t}
 \tpr_info("A52 recorder v3 single-mapped %u banks, slots=%u, RS parity=%u\n",
 \t\tA52_DIAG_BANK_COUNT, A52_DIAG_SLOT_COUNT,
 \t\tA52_ACKFR_PARITY_BYTES);
 \treturn 0;
 }
 '''
+
+OLD_WRITE_GUARD = '''\tif (!data || len != A52_ACKFR_DATA_BYTES || !seq || !a52_diag_rs)\n\t\treturn 0;\n'''
+NEW_WRITE_GUARD = '''\tif (a52_diag_preserve_recovery || !data ||\n\t    len != A52_ACKFR_DATA_BYTES || !seq || !a52_diag_rs)\n\t\treturn 0;\n'''
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -161,8 +186,10 @@ def replace_function(text: str, signature: str, replacement: str) -> str:
 
 
 def patch_ram(text: str) -> str:
-    if NEW_PROFILE in text and "a52_diag_map_all_banks" in text:
+    if NEW_PROFILE in text and "a52_diag_preserve_recovery" in text:
         return text
+    if NEW_PROFILE in text and "a52_diag_map_all_banks" in text:
+        raise SystemExit("legacy single-map source lacks recovery preservation")
     text = replace_once(
         text,
         "static const char * const a52_diag_labels",
@@ -181,6 +208,12 @@ def patch_ram(text: str) -> str:
     map_source = NEW_MAP.replace("\\t", "\t")
     init_source = NEW_INIT.replace("\\t", "\t")
     text = text[:start] + map_source + text[end:]
+    text = replace_once(
+        text,
+        OLD_WRITE_GUARD,
+        NEW_WRITE_GUARD,
+        "recovery write guard",
+    )
     text = replace_function(
         text, "int __init a52_persistent_diag_init(void)", init_source
     )
@@ -210,6 +243,10 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         "a52_diag_map_all_banks",
         "a52-rec3-all-banks",
         "A52 recorder v3 single-mapped %u banks",
+        "A52 recorder v3 recovery preserve-only mode",
+        "androidboot.boot_recovery=1",
+        "a52_diag_preserve_recovery || !data",
+        "flags = a52_diag_preserve_recovery ? 0 : PRZ_FLAG_ZAP_OLD",
         NEW_PROFILE,
         "A52_ACKFR_PARITY_BYTES 32U",
         "A52_DIAG_BANK_COUNT 3U",
@@ -228,14 +265,16 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         "hardware_validated": False,
         "persistent_profile": NEW_PROFILE,
         "mapping_backend": "one-persistent_ram_new-vmap-three-fixed-banks",
+        "recovery_policy": "attach-preserve-disable-writes-on-androidboot.boot_recovery=1",
         "record_bytes": 256,
         "protected_data_bytes": 208,
         "reed_solomon_parity_bytes": 32,
         "copies": 3,
         "physical_bank_spacing_bytes": 262144,
         "capture_finding": (
-            "the latest plain display recorder produced no intact events; "
-            "this build combines the same probes with protected binary records"
+            "capture 20260731_232157 proved recovery erased the failed-boot "
+            "records; recovery now maps without PRZ_FLAG_ZAP_OLD, skips the "
+            "full-bank memset, and blocks recorder writes"
         ),
         "files": [str(RAM_REL), str(RECORDER_REL)],
     }
@@ -255,9 +294,15 @@ def self_test() -> None:
 static const enum pstore_type_id a52_diag_types[3] = { 0, 1, 2 };
 '''
         old_map = '''static int a52_diag_map_bank(unsigned int bank)\n{\n\treturn bank;\n}\n\n'''
+        old_write = '''unsigned int a52_ackfr_ramoops_write_record(const void *data, size_t len, u64 seq)
+{
+\tif (!data || len != A52_ACKFR_DATA_BYTES || !seq || !a52_diag_rs)
+\t\treturn 0;
+\treturn 7;
+}
+'''
         ram.write_text(
-            old_arrays + OLD_DECL + old_map +
-            'unsigned int a52_ackfr_ramoops_write_record(const void *d, size_t l, u64 s) { return 0; }\n' +
+            old_arrays + OLD_DECL + old_map + old_write +
             OLD_INIT + f'const char *profile = "{OLD_PROFILE}";\n' +
             '#define A52_ACKFR_PARITY_BYTES 32U\n#define A52_DIAG_BANK_COUNT 3U\n'
         )
@@ -269,8 +314,11 @@ static const enum pstore_type_id a52_diag_types[3] = { 0, 1, 2 };
         assert "\n\tstruct persistent_ram_ecc_info" in patched
         assert "__maybe_unused a52_diag_labels" in patched
         assert "__maybe_unused a52_diag_types" in patched
+        assert "androidboot.boot_recovery=1" in patched
+        assert "a52_diag_preserve_recovery || !data" in patched
+        assert "a52_diag_preserve_recovery ? 0 : PRZ_FLAG_ZAP_OLD" in patched
         second = run(root, root / "out2")
-        assert second["mapping_backend"].startswith("one-")
+        assert second["recovery_policy"].startswith("attach-preserve")
 
 
 def main() -> int:

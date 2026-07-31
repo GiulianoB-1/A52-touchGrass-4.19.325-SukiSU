@@ -53,6 +53,12 @@ jobs:
           path: gki
           key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
 
+      - name: Enable compiler fail-fast
+        run: |
+          sed -i 's/^make -k -C gki\/common /make -C gki\/common /' \
+            scripts/178_ci_display_init_fec.sh
+          ! grep -Fq 'make -k -C gki/common' scripts/178_ci_display_init_fec.sh
+
       - name: Build and audit protected display recorder candidate
         env:
           GH_TOKEN: ${{ github.token }}

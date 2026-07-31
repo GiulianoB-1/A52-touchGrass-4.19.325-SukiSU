@@ -14,8 +14,36 @@ trap 'rc=$?; printf "line=%s\ncommand=%s\nreturn_code=%s\n" "$LINENO" "$BASH_COM
 : "${SOURCE_ARTIFACT_SHA256:?SOURCE_ARTIFACT_SHA256 is required}"
 test "${GKI_CACHE_HIT:-false}" = true
 
-test -s "$DISPLAY_PATCH"
 test -s "$SINGLE_MAP"
+
+# Reconstruct the exact display-probe patch from the checksum-bound payload
+# chunks used by recorder 177. The tracked patch path is only the output target.
+CHUNK_DIR="$PWD/scripts/177_patch_payload_chunks"
+mkdir -p "$(dirname "$DISPLAY_PATCH")"
+for item in \
+  '00.txt 2e2e8773465271521302902aeedd3c0779c3eba750e191881eb0649654402a39' \
+  '01.txt 2cc8aa74d1080a38f3deabaa790ba6cec24accfe542d9747c3f4c6eda00699ba' \
+  '02.txt 640c2ce3842ecb8120e14494bb23b5d2e4a1c68700c2a67bab2ba55a04e36731' \
+  '03.txt 3799c05943d31375851b3e0680f61fcde892d96272edad98454b641589fd69e0' \
+  '04.txt 9e18d44f8df3abe72ac2c67a42919f8acbf90590acdb424ba609d0086c7cfc47' \
+  '05.txt 9f0a5026d1a78d096b73ff97f3c785a9fd807999a36decb7a89e7fa851477945' \
+  '06.txt b62056e0d393a7969bfac6c60295eb3fb6e78228f6955196e9326cdb90ea1f82' \
+  '07.txt da48f50560314b78ef184d7910d5b5a8026164cae8227997a3795e457c16180a'; do
+  set -- $item
+  normal="$OUT/logs/display-$1.normalised"
+  tr -d '\r\n' < "$CHUNK_DIR/$1" > "$normal"
+  test "$(wc -c < "$normal")" = 1216
+  printf '%s  %s\n' "$2" "$normal" | sha256sum -c -
+done
+cat "$OUT/logs/display-00.txt.normalised" "$OUT/logs/display-01.txt.normalised" \
+    "$OUT/logs/display-02.txt.normalised" "$OUT/logs/display-03.txt.normalised" \
+    "$OUT/logs/display-04.txt.normalised" "$OUT/logs/display-05.txt.normalised" \
+    "$OUT/logs/display-06.txt.normalised" "$OUT/logs/display-07.txt.normalised" \
+    > "$OUT/logs/display-trace-patch.gz.b64"
+base64 --decode "$OUT/logs/display-trace-patch.gz.b64" \
+  > "$OUT/logs/display-trace-patch.gz"
+gzip -t "$OUT/logs/display-trace-patch.gz"
+gzip -dc "$OUT/logs/display-trace-patch.gz" > "$DISPLAY_PATCH"
 printf '%s  %s\n' \
   '9412b28da19c71e7bc97e767e83ce717e146313d32321c7429e6d4050a4f0d00' \
   "$DISPLAY_PATCH" | sha256sum -c -
@@ -87,12 +115,10 @@ BASE_PATCH="$PWD/source/extracted/stage/heap19-display-bindcore-source.patch"
 git -C gki/common apply --check "$BASE_PATCH"
 git -C gki/common apply "$BASE_PATCH"
 
-# Add the exact display probes from the last flashed diagnostic build first.
 git -C gki/common apply --check --verbose "$DISPLAY_PATCH" \
   2>&1 | tee "$OUT/logs/display-patch-check.log"
 git -C gki/common apply "$DISPLAY_PATCH"
 
-# Replace only the recorder backend. The display call sites stay unchanged.
 python3 scripts/176_apply_a52_recorder_fec.py \
   --gki gki/common --output "$OUT/stage" \
   2>&1 | tee "$OUT/logs/recorder-v3-stage.log"
@@ -113,7 +139,6 @@ DRM=gki/common/drivers/a52_display/msm/dsi/dsi_drm.c
 SS=gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
 SPEC=gki/common/drivers/a52_display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c
 
-# Protected recorder contract.
 grep -Fq 'A52 black-screen failure-window recorder v3' "$REC"
 grep -Fq 'A52_REC3_PROFILE "heap19-display-init-fec-single-map-v1"' "$REC"
 grep -Fq 'A52_REC3_MESSAGE_LEN 128U' "$REC"
@@ -127,7 +152,6 @@ grep -Fq 'A52 recorder v3 single-mapped %u banks' "$RAM"
 ! grep -Fq 'a52_diag_map_bank(unsigned int bank)' "$RAM"
 grep -Fq 'a52_ackfr_record("BOOT phase=mm_init")' "$MAIN"
 
-# Exact display coverage retained from recorder 177.
 for marker in \
   'A52_DISPLAY_INIT_TRACE_PLAIN_V1' \
   'DISP MODE m=%u h=%u v=%u' \

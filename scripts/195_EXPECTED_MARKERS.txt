@@ -1,0 +1,21 @@
+KMSPOST splash rc=<n> regions=<n> displays=<n>
+KMSPOST pm-get exit rc=<n>
+KMSPOST blocks exit rc=<n> crtc=<n> enc=<n> conn=<n> plane=<n>
+KMSPOST power-decision displays=<n> regions=<n>
+KMSPOST pm-put enter reason=no-splash
+KMSPOST affinity enter irq=<n>
+KMSPOST hw-init success crtc=<n> enc=<n> conn=<n> plane=<n>
+DRMPOST helper exit err=<0|1> null=<0|1> crtc=<n> enc=<n> conn=<n> plane=<n>
+DRMPOST commit-thread enter i=<n> crtc=<n>
+DRMPOST commit-sched exit i=<n> rc=<n>
+DRMPOST event-thread enter i=<n> crtc=<n>
+DRMPOST event-sched exit i=<n> rc=<n>
+DRMPOST pp-thread enter
+DRMPOST thread-create exit rc=<n>
+DRMPOST vblank exit rc=<n>
+DRMPOST irq-install exit rc=<n>
+DRMPOST dev-register exit rc=<n>
+DRMPOST mode-reset exit
+DRMPOST splash-config exit rc=<n>
+DRMPOST postinit exit rc=<n>
+DRMPOST init success

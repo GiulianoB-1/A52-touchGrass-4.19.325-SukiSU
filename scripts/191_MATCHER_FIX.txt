@@ -1,0 +1,5 @@
+Phase 191 v2 matcher correction
+
+The original CI failure occurred before compilation because scripts/191_apply.py expected component_master_add_with_match() to use a two-line signature. The exact reconstructed Android 5.10 source uses a three-line signature.
+
+The corrected patcher matches the exact staged source, adds the required linux/string.h include, guards a null component match, and was locally applied to the failed diagnostics source before this CI retry.

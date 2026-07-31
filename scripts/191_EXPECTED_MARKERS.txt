@@ -1,0 +1,11 @@
+Expected phase 191 evidence
+
+1. DRMCOMP collect enter
+2. DRMCOMP connectors prop=<0|1> len=<bytes>
+3. One DRMCOMP connector and match-add record per active connector
+4. DRMCOMP master-add exit rc=<value>
+5. DRMCOMP component-add exit dev=<device> rc=<value>
+6. COMP master stage=<stage> num=<count> bound=<0|1>
+7. One COMP slot record per required component
+
+The first slot with found=0 identifies the missing component. If all slots are found but bound=0, the next trace point is the master bind return path.

@@ -1,0 +1,13 @@
+Phase 196 scope: KMS hardware-block initialization trace
+
+Hardware evidence from phase 195:
+- continuous splash is valid: one region and one display
+- DSI and Samsung panel initialization complete
+- runtime-PM acquisition succeeds
+- _sde_kms_hw_init_blocks returns -ENODEV
+- no DRM objects are created
+- GDSC collapse follows the failure and is cleanup
+
+This phase adds persistent observation checkpoints only. It does not change
+control flow, error handling, device-tree data, display commands, power policy,
+IOMMU behavior, clocks, regulator voltages, thread scheduling or partition data.

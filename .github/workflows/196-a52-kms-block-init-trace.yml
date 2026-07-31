@@ -1,0 +1,102 @@
+name: 196 - A52 GKI 5.10 KMS block initialization trace
+
+run-name: Build GKI 5.10 A52 KMS block initialization trace candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-kms-block-init-trace-v1
+    paths:
+      - .github/workflows/196-a52-kms-block-init-trace.yml
+      - scripts/196_apply.py
+      - scripts/196_ci.sh
+      - scripts/196_NOTES.txt
+      - scripts/196_EXPECTED_MARKERS.txt
+      - RAMOOPS-PHASE195-HARDWARE-RESULT.md
+  pull_request:
+    branches:
+      - agent/a52-drm-post-kms-trace-v1
+    paths:
+      - .github/workflows/196-a52-kms-block-init-trace.yml
+      - scripts/196_apply.py
+      - scripts/196_ci.sh
+      - scripts/196_NOTES.txt
+      - scripts/196_EXPECTED_MARKERS.txt
+      - RAMOOPS-PHASE195-HARDWARE-RESULT.md
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-kms-block-init-trace-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Build phase-196 KMS block initialization trace candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out phase-196 branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build, trace, package and audit phase 196
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: |
+          python3 scripts/194_fix_inherited_guard.py
+          bash scripts/196_ci.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-kms-block-init-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-kms-block-init-trace
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload phase-196 candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-kms-block-init-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-kms-block-init-trace
+          if-no-files-found: error
+          retention-days: 30

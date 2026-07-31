@@ -1,0 +1,22 @@
+KMSBLK core-rev exit rev=0x%x
+KMSBLK catalog exit rc=%ld null=%d
+KMSBLK power-helper exit rc=%d genpd=%d
+KMSBLK mmu exit rc=%d base-null=%d
+KMSMMU new exit domain=%d rc=%ld
+KMSMMU aspace exit domain=%d rc=%ld
+KMSMMU splash-map exit domain=%d rc=%d
+KMSMMU early-map exit domain=%d rc=%d
+KMSBLK reg-dma exit rc=%d
+KMSBLK rm exit rc=%d
+KMSBLK intr exit rc=%ld null=%d
+KMSBLK splash-res exit rc=%d
+KMSBLK mdp exit rc=%ld null=%d
+KMSBLK vbif exit i=%d id=%u rc=%ld null=%d
+KMSBLK sid exit rc=%ld null=%d
+KMSBLK perf exit rc=%d
+KMSBLK drm-obj exit rc=%d crtc=%d enc=%d conn=%d plane=%d
+KMSOBJ irq-domain exit rc=%d
+KMSOBJ get-displays rc=%d
+KMSOBJ setup-displays rc=%d enc=%d conn=%d
+KMSOBJ plane exit i=%d rc=%ld
+KMSOBJ crtc exit i=%d rc=%ld

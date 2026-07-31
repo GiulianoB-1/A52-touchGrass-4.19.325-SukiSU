@@ -89,7 +89,7 @@ OLD_INIT = r'''int __init a52_persistent_diag_init(void)
 \t\tif (!ret)
 \t\t\tmapped++;
 \t\telse
-\t\t\tpr_err("A52 recorder PRZ bank %u mapping failed: %d\\n",
+\t\t\tpr_err("A52 recorder PRZ bank %u mapping failed: %d\n",
 \t\t\t       bank, ret);
 \t}
 \tif (mapped < 2) {
@@ -97,7 +97,7 @@ OLD_INIT = r'''int __init a52_persistent_diag_init(void)
 \t\ta52_diag_rs = NULL;
 \t\treturn -ENOMEM;
 \t}
-\tpr_info("A52 recorder v3 PRZ-mapped %u banks, slots=%u, RS parity=%u\\n",
+\tpr_info("A52 recorder v3 PRZ-mapped %u banks, slots=%u, RS parity=%u\n",
 \t\tmapped, A52_DIAG_SLOT_COUNT, A52_ACKFR_PARITY_BYTES);
 \treturn 0;
 }
@@ -115,12 +115,12 @@ NEW_INIT = r'''int __init a52_persistent_diag_init(void)
 
 \tret = a52_diag_map_all_banks();
 \tif (ret) {
-\t\tpr_err("A52 recorder contiguous mapping failed: %d\\n", ret);
+\t\tpr_err("A52 recorder contiguous mapping failed: %d\n", ret);
 \t\tfree_rs(a52_diag_rs);
 \t\ta52_diag_rs = NULL;
 \t\treturn ret;
 \t}
-\tpr_info("A52 recorder v3 single-mapped %u banks, slots=%u, RS parity=%u\\n",
+\tpr_info("A52 recorder v3 single-mapped %u banks, slots=%u, RS parity=%u\n",
 \t\tA52_DIAG_BANK_COUNT, A52_DIAG_SLOT_COUNT,
 \t\tA52_ACKFR_PARITY_BYTES);
 \treturn 0;
@@ -135,6 +135,31 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_function(text: str, signature: str, replacement: str) -> str:
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f"function signature missing: {signature}")
+    brace = text.find("{", start + len(signature))
+    if brace < 0:
+        raise SystemExit(f"function opening brace missing: {signature}")
+    depth = 0
+    end = None
+    for index in range(brace, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit(f"function closing brace missing: {signature}")
+    while end < len(text) and text[end] == "\n":
+        end += 1
+    return text[:start] + replacement.rstrip() + "\n\n" + text[end:]
+
+
 def patch_ram(text: str) -> str:
     if NEW_PROFILE in text and "a52_diag_map_all_banks" in text:
         return text
@@ -142,7 +167,9 @@ def patch_ram(text: str) -> str:
     start = text.index("static int a52_diag_map_bank(unsigned int bank)")
     end = text.index("unsigned int a52_ackfr_ramoops_write_record", start)
     text = text[:start] + NEW_MAP + text[end:]
-    text = replace_once(text, OLD_INIT, NEW_INIT, "recorder init")
+    text = replace_function(
+        text, "int __init a52_persistent_diag_init(void)", NEW_INIT
+    )
     if OLD_PROFILE not in text:
         raise SystemExit("old recorder profile marker missing from ram.c")
     return text.replace(OLD_PROFILE, NEW_PROFILE)

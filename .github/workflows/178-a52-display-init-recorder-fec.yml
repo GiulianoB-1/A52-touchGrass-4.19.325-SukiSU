@@ -13,6 +13,15 @@ on:
       - scripts/178_apply_a52_display_init_recorder_fec.py
       - patches/177-a52-display-init-recorder-plain.patch
       - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/178-a52-display-init-recorder-fec.yml
+      - scripts/178_ci_display_init_fec.sh
+      - scripts/178_apply_a52_display_init_recorder_fec.py
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/38_repack_a52_p1_boot.py
 
 permissions:
   contents: read

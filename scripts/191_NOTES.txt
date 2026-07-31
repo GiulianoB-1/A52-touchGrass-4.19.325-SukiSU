@@ -1,0 +1,12 @@
+Phase 191 is instrumentation-only.
+
+Phase 190 hardware result:
+- secure GPIOs 13-16 were skipped
+- GPIO/TLMM registration completed
+- BOOT_READY was reached
+- the kernel remained alive through a 61.468 second heartbeat
+- Android userspace reached QSEE/ION activity
+- the screen showed an artifacted Samsung logo and then became black
+- no DRM master bind, DSI component bind, KMS initialization, panel initialization, or atomic commit scope was recorded
+
+Phase 191 traces construction and assembly of the DRM component match list. It does not change panel commands, reset timing, clocks, regulators, backlight, modes, component matching, or probe return values.

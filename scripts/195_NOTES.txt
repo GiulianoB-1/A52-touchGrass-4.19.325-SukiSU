@@ -1,0 +1,14 @@
+Phase 195 scope
+
+Hardware evidence from phase 194:
+- mdss_core_gdsc now binds.
+- RSCC probes and joins the DRM component framework.
+- msm_drm_bind, dsi_display_bind, dsi_panel_drv_init and ss_panel_init execute.
+- sde_kms_hw_init_blocks returns.
+- GDSC switches to hardware-trigger mode and is collapsed.
+- the Samsung boot logo remains visible instead of turning black.
+- the last recovered recorder event is the exit of _msm_drm_init_helper at 1113.392 ms.
+
+Phase 195 adds read-only flight-recorder checkpoints after that boundary.
+No return value, branch decision, scheduling policy, dependency, power vote,
+panel command, timing, clock rate, regulator voltage, DTB, DTBO or ramdisk is changed.

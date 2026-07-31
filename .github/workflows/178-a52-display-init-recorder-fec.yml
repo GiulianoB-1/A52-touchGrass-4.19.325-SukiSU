@@ -125,6 +125,20 @@ jobs:
               '    )\n'
           )
           patcher = patcher[:start] + robust + patcher[end:]
+
+          writer_old = (
+              '        text, "unsigned int a52_ackfr_ramoops_write_record", '
+              'write_source\n'
+          )
+          writer_new = (
+              '        text, "unsigned int a52_ackfr_ramoops_write_record'
+              '(const void *data, size_t len,", write_source\n'
+          )
+          if patcher.count(writer_old) != 1:
+              raise SystemExit(
+                  f'expected one broad writer matcher, found {patcher.count(writer_old)}'
+              )
+          patcher = patcher.replace(writer_old, writer_new, 1)
           patcher_path.write_text(patcher)
           PY
 

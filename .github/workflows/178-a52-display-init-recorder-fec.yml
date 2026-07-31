@@ -100,35 +100,31 @@ jobs:
 
           patcher_path = Path('scripts/178_apply_a52_display_init_recorder_fec.py')
           patcher = patcher_path.read_text()
-          fragile = '''    declaration = """extern unsigned int a52_ackfr_ramoops_write_record(const void *data,
-                                                    size_t len, u64 seq);
-"""
-    declaration_new = declaration + \\
-        "extern int __init a52_ackfr_ramoops_enable_rs(void);\\n"
-    text = replace_once(
-        text, declaration, declaration_new, "deferred RS declaration"
-    )
-'''
-          robust = '''    declaration_start = text.find(
-        "extern unsigned int a52_ackfr_ramoops_write_record(const void *data,"
-    )
-    if declaration_start < 0:
-        raise SystemExit("deferred RS declaration start missing")
-    declaration_end = text.find(";", declaration_start)
-    if declaration_end < 0:
-        raise SystemExit("deferred RS declaration terminator missing")
-    declaration_end += 1
-    text = (
-        text[:declaration_end]
-        + "\\nextern int __init a52_ackfr_ramoops_enable_rs(void);"
-        + text[declaration_end:]
-    )
-'''
-          if patcher.count(fragile) != 1:
-              raise SystemExit(
-                  f'expected one fragile declaration block, found {patcher.count(fragile)}'
-              )
-          patcher = patcher.replace(fragile, robust, 1)
+          start_marker = (
+              '    declaration = """extern unsigned int '
+              'a52_ackfr_ramoops_write_record(const void *data,'
+          )
+          start = patcher.find(start_marker)
+          end = patcher.find('    core = r"""', start)
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit('fragile deferred RS declaration block not found')
+          robust = (
+              '    declaration_start = text.find(\n'
+              '        "extern unsigned int a52_ackfr_ramoops_write_record(const void *data,"\n'
+              '    )\n'
+              '    if declaration_start < 0:\n'
+              '        raise SystemExit("deferred RS declaration start missing")\n'
+              '    declaration_end = text.find(";", declaration_start)\n'
+              '    if declaration_end < 0:\n'
+              '        raise SystemExit("deferred RS declaration terminator missing")\n'
+              '    declaration_end += 1\n'
+              '    text = (\n'
+              '        text[:declaration_end]\n'
+              '        + "\\nextern int __init a52_ackfr_ramoops_enable_rs(void);"\n'
+              '        + text[declaration_end:]\n'
+              '    )\n'
+          )
+          patcher = patcher[:start] + robust + patcher[end:]
           patcher_path.write_text(patcher)
           PY
 

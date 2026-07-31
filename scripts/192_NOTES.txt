@@ -1,0 +1,21 @@
+Phase 192: SDE RSCC registration and probe trace
+
+Hardware evidence from phase 191:
+- DRM component match slot 0 (writeback) was found.
+- Match slot 1 became found when primary DSI called component_add().
+- Match slot 2 remained missing.
+- Slot 2 maps to qcom,sde_rscc, compatible qcom,sde-rsc.
+- The kernel remained alive through 62.496 seconds behind a black screen.
+
+Scope:
+- instrument sde_rsc.c only
+- record RPMh and main driver registration
+- record DT/platform-device presence and current binding
+- record each RPMh and main probe stage
+- record cleanup, component_add, and component bind
+
+No behavior change:
+- no forced probe
+- no errno conversion
+- no component-list bypass
+- no panel, clock, regulator, reset, mode, DTB, ramdisk, or recovery-DTBO change

@@ -166,9 +166,11 @@ def patch_ram(text: str) -> str:
     text = replace_once(text, OLD_DECL, NEW_DECL, "mapping declarations")
     start = text.index("static int a52_diag_map_bank(unsigned int bank)")
     end = text.index("unsigned int a52_ackfr_ramoops_write_record", start)
-    text = text[:start] + NEW_MAP + text[end:]
+    map_source = NEW_MAP.replace("\\t", "\t")
+    init_source = NEW_INIT.replace("\\t", "\t")
+    text = text[:start] + map_source + text[end:]
     text = replace_function(
-        text, "int __init a52_persistent_diag_init(void)", NEW_INIT
+        text, "int __init a52_persistent_diag_init(void)", init_source
     )
     if OLD_PROFILE not in text:
         raise SystemExit("old recorder profile marker missing from ram.c")
@@ -205,6 +207,8 @@ def run(gki: Path, output: Path) -> dict[str, object]:
             raise SystemExit(f"post-patch marker missing: {marker}")
     if "a52_diag_map_bank(unsigned int bank)" in final_ram:
         raise SystemExit("legacy per-bank mapping function remains")
+    if "\n\\t" in final_ram:
+        raise SystemExit("literal backslash-t indentation remains in ram.c")
     report = {
         "status": "a52-display-init-recorder-fec-staged",
         "hardware_validated": False,
@@ -243,6 +247,9 @@ def self_test() -> None:
         rec.write_text(f'#define A52_REC3_PROFILE "{OLD_PROFILE}"\n')
         first = run(root, root / "out")
         assert first["copies"] == 3
+        patched = ram.read_text()
+        assert "\n\\t" not in patched
+        assert "\n\tstruct persistent_ram_ecc_info" in patched
         second = run(root, root / "out2")
         assert second["mapping_backend"].startswith("one-")
 

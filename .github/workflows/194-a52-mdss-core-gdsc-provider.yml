@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/194-a52-mdss-core-gdsc-provider.yml
       - scripts/194_apply.py
+      - scripts/194_fix_inherited_guard.py
       - scripts/194_ci.sh
       - scripts/194_NOTES.txt
       - RAMOOPS-PHASE193-HARDWARE-RESULT.md
@@ -19,6 +20,7 @@ on:
     paths:
       - .github/workflows/194-a52-mdss-core-gdsc-provider.yml
       - scripts/194_apply.py
+      - scripts/194_fix_inherited_guard.py
       - scripts/194_ci.sh
       - scripts/194_NOTES.txt
       - RAMOOPS-PHASE193-HARDWARE-RESULT.md
@@ -77,7 +79,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
-        run: bash scripts/194_ci.sh
+        run: |
+          python3 scripts/194_fix_inherited_guard.py
+          bash scripts/194_ci.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}

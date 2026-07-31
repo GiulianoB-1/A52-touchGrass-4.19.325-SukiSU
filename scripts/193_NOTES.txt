@@ -1,0 +1,11 @@
+Phase 193 - A52 RSCC driver-core gate trace
+
+Hardware proof from phase 192:
+- RSCC-RPMh registered and probed successfully.
+- The qcom,sde-rsc node and platform device exist.
+- platform_driver_register(sde_rsc) returned 0.
+- No sde_rsc_probe() entry was recorded.
+
+Therefore the failure is before the driver callback. This phase records the exact
+match return and every generic pre-probe gate. Supplier-link enumeration is
+strictly read-only. No probe, link, component or display behavior is changed.

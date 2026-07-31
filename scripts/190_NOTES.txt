@@ -1,0 +1,16 @@
+Phase 190 is the narrow functional response to phase 189 hardware evidence.
+
+Recovered phase-189 records are consecutive from sequence 17 through 182. GPIO
+registration reached the eager direction scan. GPIOs 0-12 returned rc=1. The
+final record is `GPIOCORE dir-read enter pin=13`; there is no matching exit.
+
+The Lagoon vendor table already identifies GPIOs 13-16 as secure-fingerprint
+reserved lines, but only when Samsung-only Kconfig symbols are defined. Those
+symbols are absent from the reconstructed common GKI configuration, so the valid
+mask incorrectly exposed the secure lines to generic 5.10 registration-time
+MMIO reads.
+
+This phase reserves only GPIOs 13-16 unconditionally for this Lagoon port. It
+keeps the phase-189 trace and all runtime GPIO direction operations for valid
+lines. GPIOs 86-87 remain conditional because the hardware evidence has not yet
+reached them.

@@ -1,0 +1,20 @@
+Phase 194 - A52 MDSS core GDSC provider
+
+Hardware evidence from phase 193:
+- qcom,sde-rsc matches sde_rsc
+- driver-core probe begins
+- dispcc supplier is ready
+- qcom,gdsc@af01004 is not bound
+- supplier check returns -EPROBE_DEFER
+- qcom,gdsc@af01004 is mdss_core_gdsc
+- the existing A52 bridge accepts gcc_ufs_phy_gdsc only
+
+Functional change:
+- preserve the UFS profile and keep-on disable policy
+- add an explicit mdss_core_gdsc profile
+- use normal software enable and collapse for MDSS
+- support normal/fast hardware-trigger modes declared by DT
+- bind the existing supplier rather than bypassing fw_devlink
+
+No DTB, panel command, display timing, clock rate, regulator voltage, supplier
+link, matching decision, or probe retry is changed.

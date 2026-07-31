@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 OLD_PROFILE = "display-bindcore-fec-prz-v2"
-NEW_PROFILE = "heap19-display-init-fec-single-map-v2"
+NEW_PROFILE = "heap19-display-init-fec-single-map-v1"
 RAM_REL = Path("fs/pstore/ram.c")
 RECORDER_REL = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 REPORT = "phase36-a52-display-init-fec-report.json"
@@ -163,8 +163,10 @@ NEW_INIT = r'''int __init a52_persistent_diag_init(void)
 \t\treturn 0;
 \t}
 
-\tpr_info("A52 recorder v3 single-mapped %u banks, slots=%u, RS deferred\n",
-\t\tA52_DIAG_BANK_COUNT, A52_DIAG_SLOT_COUNT);
+\tpr_info("A52 recorder v3 single-mapped %u banks, slots=%u, RS parity=%u\n",
+\t\tA52_DIAG_BANK_COUNT, A52_DIAG_SLOT_COUNT,
+\t\tA52_ACKFR_PARITY_BYTES);
+\tpr_info("A52 recorder v3 RS initialization deferred; zero-parity fallback active\n");
 \treturn 0;
 }
 '''
@@ -385,7 +387,8 @@ def run(gki: Path, output: Path) -> dict[str, object]:
         "A52_DIAG_TOTAL_SIZE",
         "a52_diag_map_all_banks",
         "a52-rec3-all-banks",
-        "A52 recorder v3 single-mapped %u banks, slots=%u, RS deferred",
+        "A52 recorder v3 single-mapped %u banks, slots=%u, RS parity=%u",
+        "A52 recorder v3 RS initialization deferred; zero-parity fallback active",
         "A52 recorder v3 recovery preserve-only mode",
         "androidboot.boot_recovery=1",
         "a52_diag_preserve_recovery || !data",

@@ -83,6 +83,17 @@ jobs:
           if text.count(marker) != 1:
               raise SystemExit(f'expected one preflight insertion marker, found {text.count(marker)}')
           text = text.replace(marker, preflight, 1)
+
+          audit_old = '  grep -Fq "$object" "$OUT/logs/compile.log"\ndone\n'
+          audit_new = '''  if ! grep -Fq "$object" "$OUT/logs/compile.log"; then
+            grep -Fq "$object" "$OUT/logs/recorder-object-preflight.log"
+          fi
+          done
+          '''
+          if text.count(audit_old) != 1:
+              raise SystemExit(f'expected one object audit block, found {text.count(audit_old)}')
+          text = text.replace(audit_old, audit_new, 1)
+
           if 'make -k -C gki/common' in text:
               raise SystemExit('make -k remains after fail-fast rewrite')
           path.write_text(text)

@@ -1,0 +1,224 @@
+name: A52 Linux 4.19.206 recovery keycombo audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/add_a52_recovery_keycombo.py'
+      - '.github/workflows/a52-4.19.206-recovery-keycombo-audit.yml'
+  pull_request:
+    paths:
+      - 'scripts/add_a52_recovery_keycombo.py'
+      - '.github/workflows/a52-4.19.206-recovery-keycombo-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-linux-4.19.206-recovery-keycombo-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+
+jobs:
+  build-audit:
+    name: Compile A52 physical-key recovery handler on Linux 4.19.206
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Hydrate pinned touchGrass preparation scripts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREP_REF: rebase/resukisu-linux-4.19.325
+        run: |
+          set -Eeuo pipefail
+          fetch_file() {
+            local path="$1"
+            mkdir -p "$(dirname "$path")"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${PREP_REF}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+
+          fetch_file sources.lock
+          fetch_file scripts/common.sh
+          fetch_file scripts/01_prepare_source.sh
+          fetch_file scripts/03_apply_linux_4.19.153.sh
+          fetch_file scripts/04_apply_linux_4.19.154.sh
+          fetch_file scripts/05a_diagnose_linux_checkpoint.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.159.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.164.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.180.sh
+          fetch_file scripts/checkpoint_resolve_linux_4.19.200.sh
+          fetch_file scripts/checkpoint_merge_linux_4.19.210.sh
+          fetch_file scripts/checkpoint_fix_linux_4.19.210_compile.sh
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Prepare exact touchGrass source through Linux 4.19.200
+        run: |
+          set -Eeuo pipefail
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Derive and repair Linux 4.19.206 source
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_merge_linux_4.19.210.sh \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          sed -i \
+            -e 's/TO_TAG=v4.19.210/TO_TAG=v4.19.206/' \
+            -e '/^TARGET_COMMIT=/d' \
+            -e '/test "$to_sha" = "$TARGET_COMMIT"/d' \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_merge_linux_4.19.206.generated.sh
+
+          cp scripts/checkpoint_fix_linux_4.19.210_compile.sh \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          sed -i 's/TARGET_VERSION=4.19.210/TARGET_VERSION=4.19.206/' \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_fix_linux_4.19.206.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('workspace/touchgrass-a52xq')
+
+          header = (root / 'include/linux/timerqueue.h').read_text()
+          path = root / 'drivers/soc/qcom/event_timer.c'
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          desired = newer if 'struct rb_root_cached rb_root;' in header else older
+          obsolete = older if desired == newer else newer
+          if desired not in text:
+              if obsolete not in text:
+                  raise SystemExit('event_timer initializer shape is unrecognized')
+              path.write_text(text.replace(obsolete, desired, 1))
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              path.write_text(text.replace(anchor, helper + anchor, 1))
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing')
+          PY
+
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.206
+
+      - name: Add A52 recovery key combination
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/a52-recovery-keycombo
+          python3 scripts/add_a52_recovery_keycombo.py \
+            workspace/touchgrass-a52xq \
+            --report artifacts/a52-recovery-keycombo/source-audit.json
+          git -C workspace/touchgrass-a52xq diff --check
+          git -C workspace/touchgrass-a52xq diff -- \
+            drivers/input/recovery_keycombo.c \
+            drivers/input/Kconfig \
+            drivers/input/Makefile \
+            arch/arm64/configs/a52xq_defconfig \
+            > artifacts/a52-recovery-keycombo/source.patch
+
+      - name: Build Linux 4.19.206 with recovery keycombo
+        run: |
+          set -Eeuo pipefail
+          source scripts/common.sh
+          build_kernel a52xq-linux-4.19.206-recovery-keycombo
+
+      - name: Audit compiled feature
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-recovery-keycombo
+          CONFIG=artifacts/config-a52xq-linux-4.19.206-recovery-keycombo
+          IMAGE=artifacts/Image-a52xq-linux-4.19.206-recovery-keycombo
+          OBJECT=workspace/touchgrass-a52xq/out/drivers/input/recovery_keycombo.o
+
+          test -s "$IMAGE"
+          test -s "$OBJECT"
+          grep -Fxq 'CONFIG_INPUT_RECOVERY_KEYCOMBO=y' "$CONFIG"
+          strings "$OBJECT" | grep -Fq 'a52-recovery-keycombo'
+          strings "$OBJECT" | grep -Fq 'androidboot.boot_recovery=1'
+          strings "$OBJECT" | grep -Fq 'physical Volume Up + Power held during boot'
+
+          cp "$CONFIG" "$OUT/final.config"
+          cp "$IMAGE" "$OUT/Image"
+          cp "$OBJECT" "$OUT/recovery_keycombo.o"
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS"
+
+          cat > "$OUT/NOTICE.txt" <<'EOF'
+          COMPILE-AUDITED, NOT YET HARDWARE-VALIDATED.
+
+          Device: Samsung Galaxy A52 5G (a52xq / SM-A526B)
+          Kernel: Linux 4.19.206 touchGrass source
+          Trigger: physical gpio_keys Volume Up + qpnp_pon Power
+          Hold: 800 ms
+          Active window: first 30 seconds after handler initialization
+          Action: kernel_restart("recovery")
+          Recovery-loop guard: androidboot.boot_recovery=1
+          EOF
+
+      - name: Upload compile audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.206-recovery-keycombo-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52-recovery-keycombo
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.206-recovery-keycombo-diagnostics-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

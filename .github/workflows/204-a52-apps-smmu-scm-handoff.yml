@@ -1,3 +1,4 @@
+# TouchGrass comparison is a mandatory gate before packaging.
 name: 204 - A52 Apps SMMU SCM-less handoff
 
 run-name: Build Phase 204 Lagoon Apps SMMU SCM-less handoff

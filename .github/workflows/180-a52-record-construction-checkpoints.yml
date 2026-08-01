@@ -11,12 +11,14 @@ on:
     paths:
       - .github/workflows/180-a52-record-construction-checkpoints.yml
       - scripts/180_instrument_a52_record_construction.py
+      - scripts/181_fix_construction_crc_matcher.py
   pull_request:
     branches:
       - agent/a52-display-init-recorder-v1
     paths:
       - .github/workflows/180-a52-record-construction-checkpoints.yml
       - scripts/180_instrument_a52_record_construction.py
+      - scripts/181_fix_construction_crc_matcher.py
 
 permissions:
   contents: read
@@ -49,7 +51,9 @@ jobs:
           key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
 
       - name: Apply record construction checkpoints
-        run: python3 scripts/180_instrument_a52_record_construction.py
+        run: |
+          python3 scripts/180_instrument_a52_record_construction.py
+          python3 scripts/181_fix_construction_crc_matcher.py
 
       - name: Build and audit checkpoint candidate
         env:

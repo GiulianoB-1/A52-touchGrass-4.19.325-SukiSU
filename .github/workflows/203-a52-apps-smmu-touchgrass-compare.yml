@@ -1,0 +1,200 @@
+name: 203 - Compare TouchGrass Apps SMMU
+
+run-name: Compare pinned TouchGrass Apps SMMU with Phase 202 GKI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-apps-smmu-touchgrass-compare-v1
+    paths:
+      - .github/workflows/203-a52-apps-smmu-touchgrass-compare.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-apps-smmu-touchgrass-compare-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE202_ARTIFACT_ID: '8823289525'
+
+jobs:
+  compare:
+    name: Compare exact TouchGrass and Phase 202 SMMU inputs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out comparison branch
+        uses: actions/checkout@v4
+
+      - name: Prepare tools
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git unzip python3
+
+      - name: Clone exact TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+
+      - name: Download audited Phase 202 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/phase202-artifact workspace/phase202.zip
+          mkdir -p workspace/phase202-artifact
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE202_ARTIFACT_ID}/zip" \
+            > workspace/phase202.zip
+          unzip -q workspace/phase202.zip -d workspace/phase202-artifact
+          test -s workspace/phase202-artifact/config/final.config
+          (cd workspace/phase202-artifact && sha256sum -c SHA256SUMS)
+
+      - name: Generate exact comparison package
+        run: |
+          set -Eeuo pipefail
+          TG="$PWD/workspace/touchgrass-a52xq"
+          P202="$PWD/workspace/phase202-artifact"
+          OUT="$PWD/artifacts/phase203-touchgrass-apps-smmu-compare"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{touchgrass-files,phase202,logs}
+
+          git -C "$TG" show -s --format=fuller HEAD > "$OUT/TOUCHGRASS-COMMIT.txt"
+          cp "$P202/config/final.config" "$OUT/phase202/final.config"
+          cp "$P202/final-audit.json" "$OUT/phase202/final-audit.json"
+
+          git -C "$TG" grep -n -I -E \
+            '15000000|apps[-_]?smmu|apps_smmu|qcom,[A-Za-z0-9_-]*smmu|arm,smmu|ARM_SMMU|QCOM_IOMMU' \
+            -- arch/arm64/boot/dts arch/arm64/configs drivers/iommu drivers/firmware drivers/soc \
+            > "$OUT/logs/touchgrass-all-hits.txt" || true
+
+          git -C "$TG" grep -n -I -E \
+            '15000000|apps[-_]?smmu|apps_smmu' \
+            -- arch/arm64/boot/dts \
+            > "$OUT/logs/touchgrass-apps-smmu-dts-hits.txt" || true
+
+          git -C "$TG" grep -n -I -E \
+            'arm_smmu_of_match|qcom.*smmu|smmu.*of_match|platform_driver.*smmu' \
+            -- drivers/iommu \
+            > "$OUT/logs/touchgrass-driver-match-hits.txt" || true
+
+          grep -nE '^(CONFIG_(ARM_SMMU|ARM_SMMU_V3|IOMMU_SUPPORT|OF_IOMMU|QCOM_IOMMU|QCOM_SMMU|IOMMU_IO_PGTABLE|IOMMU_DEFAULT_PASSTHROUGH|IOMMU_DEFAULT_DMA_STRICT|IOMMU_DEFAULT_DMA_LAZY|IOMMU_DEBUGFS|IOMMU_IOVA))=' \
+            "$P202/config/final.config" > "$OUT/phase202/iommu-config.txt" || true
+
+          find "$TG/arch/arm64/configs" -type f -print0 | sort -z | \
+            xargs -0 grep -HnE '^(CONFIG_(ARM_SMMU|ARM_SMMU_V3|IOMMU_SUPPORT|OF_IOMMU|QCOM_IOMMU|QCOM_SMMU|IOMMU_IO_PGTABLE|IOMMU_DEFAULT_PASSTHROUGH|IOMMU_DEFAULT_DMA_STRICT|IOMMU_DEFAULT_DMA_LAZY|IOMMU_DEBUGFS|IOMMU_IOVA))=' \
+            > "$OUT/logs/touchgrass-iommu-config-hits.txt" || true
+
+          python3 - "$TG" "$OUT" <<'PY'
+          from pathlib import Path
+          import re, shutil, sys
+
+          tg = Path(sys.argv[1])
+          out = Path(sys.argv[2])
+          hit_file = out / 'logs/touchgrass-apps-smmu-dts-hits.txt'
+          driver_file = out / 'logs/touchgrass-driver-match-hits.txt'
+          lines = hit_file.read_text(errors='replace').splitlines() if hit_file.exists() else []
+          paths = []
+          for line in lines:
+              m = re.match(r'([^:]+):(\d+):(.*)', line)
+              if m and m.group(1) not in paths:
+                  paths.append(m.group(1))
+
+          contexts = []
+          for rel in paths:
+              src = tg / rel
+              if not src.is_file():
+                  continue
+              dst = out / 'touchgrass-files' / rel
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+              text = src.read_text(errors='replace').splitlines()
+              hit_nums = []
+              for line in lines:
+                  m = re.match(rf'{re.escape(rel)}:(\d+):', line)
+                  if m:
+                      hit_nums.append(int(m.group(1)))
+              for n in hit_nums:
+                  start = max(1, n - 24)
+                  end = min(len(text), n + 45)
+                  contexts.append(f'===== {rel}:{start}-{end} (hit {n}) =====')
+                  contexts.extend(f'{i:6d}: {text[i-1]}' for i in range(start, end + 1))
+                  contexts.append('')
+          (out / 'TOUCHGRASS-APPS-SMMU-DTS-CONTEXT.txt').write_text('\n'.join(contexts) + '\n')
+
+          driver_lines = driver_file.read_text(errors='replace').splitlines() if driver_file.exists() else []
+          driver_paths = []
+          for line in driver_lines:
+              m = re.match(r'([^:]+):(\d+):(.*)', line)
+              if m and m.group(1) not in driver_paths:
+                  driver_paths.append(m.group(1))
+          for rel in driver_paths:
+              src = tg / rel
+              if src.is_file():
+                  dst = out / 'touchgrass-files' / rel
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(src, dst)
+
+          p202_cfg = (out / 'phase202/iommu-config.txt').read_text(errors='replace')
+          tg_cfg = (out / 'logs/touchgrass-iommu-config-hits.txt').read_text(errors='replace')
+          dts_hits = hit_file.read_text(errors='replace') if hit_file.exists() else ''
+          drv_hits = driver_file.read_text(errors='replace') if driver_file.exists() else ''
+
+          report = [
+              'Phase 203 exact TouchGrass vs Phase 202 Apps SMMU comparison',
+              '',
+              'TouchGrass commit:',
+              '  6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
+              '',
+              'Phase 202 artifact:',
+              '  8823289525',
+              '',
+              'TouchGrass Apps SMMU DTS hits:',
+              dts_hits or '  NONE',
+              '',
+              'TouchGrass ARM/Qualcomm SMMU driver-match hits:',
+              drv_hits or '  NONE',
+              '',
+              'Phase 202 final IOMMU config:',
+              p202_cfg or '  NONE',
+              '',
+              'TouchGrass defconfig IOMMU options:',
+              tg_cfg or '  NONE',
+          ]
+          (out / 'COMPARISON-REPORT.txt').write_text('\n'.join(report) + '\n')
+          PY
+
+          test -s "$OUT/COMPARISON-REPORT.txt"
+          test -s "$OUT/TOUCHGRASS-APPS-SMMU-DTS-CONTEXT.txt"
+          test -s "$OUT/logs/touchgrass-driver-match-hits.txt"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload exact comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase203-touchgrass-apps-smmu-exact-comparison
+          path: artifacts/phase203-touchgrass-apps-smmu-compare
+          if-no-files-found: error
+          retention-days: 30

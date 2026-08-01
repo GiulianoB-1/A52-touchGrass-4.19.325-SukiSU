@@ -10,6 +10,12 @@ on:
     paths:
       - .github/workflows/179-a52-recorder-checkpoints.yml
       - scripts/179_instrument_a52_recorder_checkpoints.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/179-a52-recorder-checkpoints.yml
+      - scripts/179_instrument_a52_recorder_checkpoints.py
 
 permissions:
   contents: read

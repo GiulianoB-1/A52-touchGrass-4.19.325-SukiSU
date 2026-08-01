@@ -16,7 +16,7 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def patch_msm_drv(text: str) -> str:
-    if "DRMCOMP smmu-match ready=" in text:
+    if "DRMCOMP smmu-match added node=%s" in text:
         return text
 
     text = replace_once(
@@ -43,6 +43,7 @@ def patch_msm_drv(text: str) -> str:
         "\t\t{\n"
         "\t\t\tstruct device_node *smmu_node;\n"
         "\t\t\tstruct platform_device *smmu_pdev;\n"
+        "\t\t\tbool smmu_existing = false;\n"
         "\n"
         "\t\t\tsmmu_node = of_find_compatible_node(np, NULL,\n"
         "\t\t\t\t\t\t\"qcom,smmu_sde_unsec\");\n"
@@ -52,11 +53,15 @@ def patch_msm_drv(text: str) -> str:
         "\t\t\t}\n"
         "\n"
         "\t\t\tsmmu_pdev = of_find_device_by_node(smmu_node);\n"
-        "\t\t\tif (!smmu_pdev)\n"
+        "\t\t\tif (smmu_pdev) {\n"
+        "\t\t\t\tsmmu_existing = true;\n"
+        "\t\t\t} else {\n"
         "\t\t\t\tsmmu_pdev = of_platform_device_create(smmu_node,\n"
         "\t\t\t\t\t\tNULL, dev);\n"
-        "\t\t\ta52_ackfr_record(\"DRMCOMP smmu-match ready=%d driver=%d client=%d\",\n"
-        "\t\t\t\t\t!!smmu_pdev, smmu_pdev && !!smmu_pdev->dev.driver,\n"
+        "\t\t\t}\n"
+        "\t\t\ta52_ackfr_record(\"DRMCOMP smmu-match ready=%d existing=%d driver=%d client=%d\",\n"
+        "\t\t\t\t\t!!smmu_pdev, smmu_existing,\n"
+        "\t\t\t\t\tsmmu_pdev && !!smmu_pdev->dev.driver,\n"
         "\t\t\t\t\tsmmu_pdev && !!platform_get_drvdata(smmu_pdev));\n"
         "\t\t\tif (!smmu_pdev) {\n"
         "\t\t\t\tof_node_put(smmu_node);\n"
@@ -66,7 +71,8 @@ def patch_msm_drv(text: str) -> str:
         "\t\t\tcomponent_match_add(dev, matchptr, compare_of, smmu_node);\n"
         "\t\t\ta52_ackfr_record(\"DRMCOMP smmu-match added node=%s\",\n"
         "\t\t\t\t\tsmmu_node->full_name);\n"
-        "\t\t\tput_device(&smmu_pdev->dev);\n"
+        "\t\t\tif (smmu_existing)\n"
+        "\t\t\t\tput_device(&smmu_pdev->dev);\n"
         "\t\t}\n"
         "\n"
         "\t\ta52_ackfr_record(\"DRMCOMP collect exit rc=0 match=%u\",\n"
@@ -112,21 +118,19 @@ def patch_msm_smmu(text: str) -> str:
         "\tkfree(smmu);\n",
         "conditional context-device unregister",
     )
-
-    old_create_decls = (
+    text = replace_once(
+        text,
         "\tstruct device_node *child;\n"
         "\tstruct platform_device *pdev;\n"
         "\tint i;\n"
-        "\tconst char *compat = NULL;\n"
-    )
-    new_create_decls = (
+        "\tconst char *compat = NULL;\n",
         "\tstruct device_node *child;\n"
         "\tstruct platform_device *pdev;\n"
         "\tbool existing = false;\n"
         "\tint i;\n"
-        "\tconst char *compat = NULL;\n"
+        "\tconst char *compat = NULL;\n",
+        "create declarations",
     )
-    text = replace_once(text, old_create_decls, new_create_decls, "create declarations")
 
     old_create = (
         "\tpdev = of_platform_device_create(child, NULL, dev);\n"
@@ -218,7 +222,15 @@ static const struct component_ops msm_smmu_component_ops = {
         component_ops + "/**\n * msm_smmu_probe()\n",
         "component ops insertion",
     )
-
+    text = replace_once(
+        text,
+        "\tstruct msm_smmu_client *client;\n"
+        "\tconst struct msm_smmu_domain *domain;\n",
+        "\tstruct msm_smmu_client *client;\n"
+        "\tconst struct msm_smmu_domain *domain;\n"
+        "\tint ret;\n",
+        "probe return declaration",
+    )
     text = replace_once(
         text,
         "\tplatform_set_drvdata(pdev, client);\n"
@@ -236,15 +248,6 @@ static const struct component_ops msm_smmu_component_ops = {
         "\ta52_ackfr_record(\"SMMU component-add exit rc=%d\", ret);\n"
         "\treturn ret;\n",
         "component registration",
-    )
-    text = replace_once(
-        text,
-        "\tstruct msm_smmu_client *client;\n"
-        "\tconst struct msm_smmu_domain *domain;\n",
-        "\tstruct msm_smmu_client *client;\n"
-        "\tconst struct msm_smmu_domain *domain;\n"
-        "\tint ret;\n",
-        "probe return declaration",
     )
     text = replace_once(
         text,
@@ -266,24 +269,33 @@ static const struct component_ops msm_smmu_component_ops = {
 def run(root: Path) -> None:
     drv_path = root / MSM_DRV
     smmu_path = root / MSM_SMMU
-    drv_path.write_text(patch_msm_drv(drv_path.read_text()), encoding="utf-8")
-    smmu_path.write_text(patch_msm_smmu(smmu_path.read_text()), encoding="utf-8")
+    drv_path.write_text(patch_msm_drv(drv_path.read_text(encoding="utf-8")), encoding="utf-8")
+    smmu_path.write_text(patch_msm_smmu(smmu_path.read_text(encoding="utf-8")), encoding="utf-8")
 
 
 def self_test() -> None:
-    root = Path(__file__).resolve().parents[1]
-    drv_fixture = root / "stage" / "msm-drv-after-phase195.c"
-    smmu_fixture = root / "stage" / "msm-smmu-after-phase200.c"
-    if not drv_fixture.is_file() or not smmu_fixture.is_file():
-        print("phase201 patcher self-test: fixtures unavailable, syntax-only PASS")
-        return
-    drv = patch_msm_drv(drv_fixture.read_text())
-    smmu = patch_msm_smmu(smmu_fixture.read_text())
-    assert "DRMPOST helper propagate rc=%d" in drv
-    assert "DRMCOMP smmu-match added node=%s" in drv
-    assert "SMMU component-add exit rc=%d" in smmu
-    assert "client_dev_owned" in smmu
-    print("phase201 SMMU component dependency patcher self-test: PASS")
+    repo = Path(__file__).resolve().parents[1]
+    candidates = [
+        (
+            repo / "workspace/phase198-artifact/stage/msm-drv-after-phase195.c",
+            repo / "artifacts/a52xq-smmu-defer-trace/stage/msm-smmu-after-phase200.c",
+        ),
+        (
+            repo / "stage/msm-drv-after-phase195.c",
+            repo / "stage/msm-smmu-after-phase200.c",
+        ),
+    ]
+    for drv_fixture, smmu_fixture in candidates:
+        if drv_fixture.is_file() and smmu_fixture.is_file():
+            drv = patch_msm_drv(drv_fixture.read_text(encoding="utf-8"))
+            smmu = patch_msm_smmu(smmu_fixture.read_text(encoding="utf-8"))
+            assert "DRMPOST helper propagate rc=%d" in drv
+            assert "DRMCOMP smmu-match added node=%s" in drv
+            assert "SMMU component-add exit rc=%d" in smmu
+            assert "client_dev_owned" in smmu
+            print("phase201 SMMU component dependency patcher self-test: PASS")
+            return
+    raise SystemExit("phase201 self-test fixtures unavailable")
 
 
 def main() -> int:

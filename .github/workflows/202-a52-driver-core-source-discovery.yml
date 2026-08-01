@@ -9,6 +9,11 @@ on:
       - agent/a52-smmu-driver-core-trace-v1
     paths:
       - .github/workflows/202-a52-driver-core-source-discovery.yml
+  pull_request:
+    branches:
+      - agent/a52-smmu-component-dependency-v1
+    paths:
+      - .github/workflows/202-a52-driver-core-source-discovery.yml
 
 permissions:
   contents: read

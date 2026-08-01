@@ -10,6 +10,12 @@ on:
     paths:
       - .github/workflows/181-a52-recorder-timekeeping-fix.yml
       - scripts/181_fix_a52_recorder_timekeeping_init.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/181-a52-recorder-timekeeping-fix.yml
+      - scripts/181_fix_a52_recorder_timekeeping_init.py
 
 permissions:
   contents: read

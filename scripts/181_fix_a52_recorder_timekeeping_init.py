@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 CI = Path("scripts/178_ci_display_init_fec.sh")
+PATCHER = Path("scripts/178_apply_a52_display_init_recorder_fec.py")
 MAIN_REL = Path("init/main.c")
 REPORT = "phase37-a52-recorder-timekeeping-fix.json"
 
@@ -54,6 +55,50 @@ def patch_main(text: str) -> str:
         'a52_ackfr_record("BOOT phase=timekeeping_init")'
     ):
         raise SystemExit("post-timekeeping recorder event ordering is invalid")
+    return text
+
+
+def patch_recorder_patcher(text: str) -> str:
+    start_marker = (
+        '    declaration = """extern unsigned int '
+        'a52_ackfr_ramoops_write_record(const void *data,'
+    )
+    start = text.find(start_marker)
+    end = text.find('    core = r"""', start)
+    if start < 0 or end < 0 or end <= start:
+        raise SystemExit("fragile deferred RS declaration block not found")
+    robust = (
+        '    declaration_start = text.find(\n'
+        '        "extern unsigned int a52_ackfr_ramoops_write_record(const void *data,"\n'
+        '    )\n'
+        '    if declaration_start < 0:\n'
+        '        raise SystemExit("deferred RS declaration start missing")\n'
+        '    declaration_end = text.find(";", declaration_start)\n'
+        '    if declaration_end < 0:\n'
+        '        raise SystemExit("deferred RS declaration terminator missing")\n'
+        '    declaration_end += 1\n'
+        '    text = (\n'
+        '        text[:declaration_end]\n'
+        '        + "\\nextern int __init a52_ackfr_ramoops_enable_rs(void);"\n'
+        '        + text[declaration_end:]\n'
+        '    )\n'
+    )
+    text = text[:start] + robust + text[end:]
+
+    old_writer_matcher = (
+        '        text, "unsigned int a52_ackfr_ramoops_write_record", '
+        'write_source\n'
+    )
+    new_writer_matcher = (
+        '        text, "unsigned int a52_ackfr_ramoops_write_record'
+        '(const void *data, size_t len,", write_source\n'
+    )
+    text = replace_once(
+        text,
+        old_writer_matcher,
+        new_writer_matcher,
+        "specific writer definition matcher",
+    )
     return text
 
 
@@ -174,6 +219,31 @@ def self_test() -> None:
         'BOOT phase=timekeeping_init'
     )
 
+    patcher_source = '''def patch_recorder(text: str) -> str:
+    declaration = """extern unsigned int a52_ackfr_ramoops_write_record(const void *data,
+                                                    size_t len, u64 seq);
+"""
+    declaration_new = declaration + "extern int __init a52_ackfr_ramoops_enable_rs(void);\\n"
+    text = replace_once(text, declaration, declaration_new, "deferred RS declaration")
+    core = r"""static int __init a52_rec3_core(void)
+{
+}
+"""
+    return text
+
+def patch_ram(text: str) -> str:
+    text = replace_function(
+        text, "unsigned int a52_ackfr_ramoops_write_record", write_source
+    )
+    return text
+'''
+    hardened = patch_recorder_patcher(patcher_source)
+    assert "declaration_start = text.find" in hardened
+    assert (
+        'a52_ackfr_ramoops_write_record(const void *data, size_t len,'
+        in hardened
+    )
+
     with tempfile.TemporaryDirectory(prefix="a52-timekeeping-") as td:
         root = Path(td)
         main = root / MAIN_REL
@@ -197,6 +267,9 @@ def main() -> int:
         return 0
     if args.prepare_ci:
         CI.write_text(patch_ci(CI.read_text()), encoding="utf-8")
+        PATCHER.write_text(
+            patch_recorder_patcher(PATCHER.read_text()), encoding="utf-8"
+        )
         print("timekeeping-fix CI preparation applied")
         return 0
     if args.gki is None or args.output is None:

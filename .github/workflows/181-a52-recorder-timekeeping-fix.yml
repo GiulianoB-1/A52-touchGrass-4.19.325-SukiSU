@@ -1,0 +1,71 @@
+name: 181 - A52 recorder timekeeping ordering fix
+
+run-name: Build A52 recorder after timekeeping initialization
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-display-init-recorder-fec-v1
+    paths:
+      - .github/workflows/181-a52-recorder-timekeeping-fix.yml
+      - scripts/181_fix_a52_recorder_timekeeping_init.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-recorder-timekeeping-fix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Compile and package timekeeping-safe recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out recorder branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Prepare timekeeping-safe recorder build
+        run: |
+          python3 scripts/181_fix_a52_recorder_timekeeping_init.py --self-test
+          python3 scripts/181_fix_a52_recorder_timekeeping_init.py --prepare-ci
+
+      - name: Build and audit timekeeping-safe candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: bash scripts/178_ci_display_init_fec.sh
+
+      - name: Upload failed timekeeping diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-recorder-timekeeping-fix-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload timekeeping-safe candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-recorder-timekeeping-fix-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: error
+          retention-days: 30

@@ -10,12 +10,14 @@ on:
     paths:
       - .github/workflows/203-a52-apps-smmu-touchgrass-compare.yml
       - scripts/203_compare_touchgrass_apps_smmu.sh
+      - scripts/203_compare_exact_gki_smmu.sh
   pull_request:
     branches:
       - agent/a52-smmu-driver-core-trace-v1
     paths:
       - .github/workflows/203-a52-apps-smmu-touchgrass-compare.yml
       - scripts/203_compare_touchgrass_apps_smmu.sh
+      - scripts/203_compare_exact_gki_smmu.sh
 
 permissions:
   contents: read
@@ -28,6 +30,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   PHASE202_ARTIFACT_ID: '8823289525'
@@ -47,6 +50,19 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git unzip python3
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Verify pinned GKI source
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
 
       - name: Clone exact TouchGrass source
         run: |
@@ -78,10 +94,16 @@ jobs:
       - name: Generate exact comparison package
         run: |
           set -Eeuo pipefail
+          OUT="$PWD/artifacts/phase203-touchgrass-apps-smmu-compare"
           bash scripts/203_compare_touchgrass_apps_smmu.sh \
             "$PWD/workspace/touchgrass-a52xq" \
             "$PWD/workspace/phase202-artifact" \
-            "$PWD/artifacts/phase203-touchgrass-apps-smmu-compare"
+            "$OUT"
+          bash scripts/203_compare_exact_gki_smmu.sh \
+            "$PWD/gki/common" \
+            "$PWD/workspace/touchgrass-a52xq" \
+            "$PWD/workspace/phase202-artifact" \
+            "$OUT"
 
       - name: Upload exact comparison
         id: upload
@@ -103,6 +125,6 @@ jobs:
           COMMENT=artifacts/phase203-touchgrass-apps-smmu-compare/PR-COMMENT-WITH-ARTIFACT.md
           {
             printf 'Artifact ID: `%s`\n\n' "$ARTIFACT_ID"
-            cat artifacts/phase203-touchgrass-apps-smmu-compare/PR-COMMENT.md
+            cat artifacts/phase203-touchgrass-apps-smmu-compare/PR-COMMENT-V2.md
           } > "$COMMENT"
           gh pr comment "$PR_NUMBER" --body-file "$COMMENT"

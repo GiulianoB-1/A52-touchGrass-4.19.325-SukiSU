@@ -11,6 +11,7 @@ on:
       - .github/workflows/199-a52-post-kms-crc32c.yml
       - scripts/199_apply_recorder_crc32c.py
       - scripts/199_ci.sh
+      - stage/recorder-after-phase197.c
       - tools/decode-a52-r199-crc32c-base.py
       - tools/decode-a52-r199-crc32c-triple.py
   pull_request:
@@ -20,6 +21,7 @@ on:
       - .github/workflows/199-a52-post-kms-crc32c.yml
       - scripts/199_apply_recorder_crc32c.py
       - scripts/199_ci.sh
+      - stage/recorder-after-phase197.c
       - tools/decode-a52-r199-crc32c-base.py
       - tools/decode-a52-r199-crc32c-triple.py
 

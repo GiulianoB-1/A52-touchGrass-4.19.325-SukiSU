@@ -11,6 +11,12 @@ on:
     paths:
       - .github/workflows/180-a52-record-construction-checkpoints.yml
       - scripts/180_instrument_a52_record_construction.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/180-a52-record-construction-checkpoints.yml
+      - scripts/180_instrument_a52_record_construction.py
 
 permissions:
   contents: read

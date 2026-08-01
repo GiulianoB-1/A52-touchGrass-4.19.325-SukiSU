@@ -1,6 +1,6 @@
-name: 203 - A52 Apps SMMU qsmmuv500 compatibility
+name: 203 - A52 Apps SMMU parent trace
 
-run-name: Build Phase 203 Lagoon Apps SMMU compatibility candidate
+run-name: Build Phase 203 Lagoon Apps SMMU parent trace candidate
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
       - .github/workflows/203-a52-apps-smmu-qsmmuv500-compat.yml
       - scripts/203_apply_apps_smmu_qsmmuv500_compat.py
       - scripts/203_ci.sh
+      - scripts/203_ci_parent_trace.sh
   pull_request:
     branches:
       - agent/a52-smmu-driver-core-trace-v1
@@ -18,13 +19,14 @@ on:
       - .github/workflows/203-a52-apps-smmu-qsmmuv500-compat.yml
       - scripts/203_apply_apps_smmu_qsmmuv500_compat.py
       - scripts/203_ci.sh
+      - scripts/203_ci_parent_trace.sh
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-apps-smmu-qsmmuv500-compat-${{ github.ref }}
+  group: a52-apps-smmu-parent-trace-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -38,7 +40,7 @@ env:
 
 jobs:
   build-package:
-    name: Build Phase 203 Lagoon Apps SMMU compatibility candidate
+    name: Build Phase 203 Lagoon Apps SMMU parent trace candidate
     runs-on: ubuntu-22.04
     timeout-minutes: 300
 
@@ -67,6 +69,7 @@ jobs:
             tools/decode-a52-r199-crc32c-base.py \
             tools/decode-a52-r199-crc32c-triple.py
           bash -n scripts/203_ci.sh
+          bash -n scripts/203_ci_parent_trace.sh
 
       - name: Restore pinned GKI source
         id: gki-cache
@@ -103,13 +106,13 @@ jobs:
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
           python3 scripts/199_runtime_fix_crc_anchor_v2.py
           python3 scripts/199_runtime_fix_binary_audit.py
-          bash scripts/203_ci.sh
+          bash scripts/203_ci_parent_trace.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-apps-smmu-qsmmuv500-compat-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          name: a52xq-apps-smmu-parent-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
           path: artifacts/a52xq-apps-smmu-qsmmuv500-compat
           if-no-files-found: warn
           retention-days: 7
@@ -118,7 +121,7 @@ jobs:
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-apps-smmu-qsmmuv500-compat-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: a52xq-apps-smmu-parent-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: artifacts/a52xq-apps-smmu-qsmmuv500-compat
           if-no-files-found: error
           retention-days: 30

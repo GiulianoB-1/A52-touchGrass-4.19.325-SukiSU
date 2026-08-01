@@ -1,0 +1,96 @@
+name: 197 - A52 KMS block trace triple-copy RS recorder
+
+run-name: Build Phase 197 triple-copy Reed-Solomon KMS trace candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-kms-block-init-triple-rs-v1
+    paths:
+      - .github/workflows/197-a52-kms-block-init-triple-rs.yml
+      - scripts/197_apply_triple_rs.py
+      - scripts/197_ci.sh
+      - tools/decode-a52-r197-triple-rs.py
+  pull_request:
+    branches:
+      - agent/a52-kms-block-init-trace-v1
+    paths:
+      - .github/workflows/197-a52-kms-block-init-triple-rs.yml
+      - scripts/197_apply_triple_rs.py
+      - scripts/197_ci.sh
+      - tools/decode-a52-r197-triple-rs.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-kms-block-init-triple-rs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+jobs:
+  build-package:
+    name: Build Phase 197 triple-copy RS candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 197 branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build, package and audit Phase 197
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: |
+          python3 scripts/194_fix_inherited_guard.py
+          bash scripts/197_ci.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-kms-block-init-triple-rs-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-kms-block-init-triple-rs
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Phase 197 candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-kms-block-init-triple-rs-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-kms-block-init-triple-rs
+          if-no-files-found: error
+          retention-days: 30

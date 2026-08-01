@@ -1,0 +1,77 @@
+name: 202 - A52 driver-core source discovery
+
+run-name: Export exact Phase 202 driver-core source inputs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-smmu-driver-core-trace-v1
+    paths:
+      - .github/workflows/202-a52-driver-core-source-discovery.yml
+  pull_request:
+    branches:
+      - agent/a52-smmu-component-dependency-v1
+    paths:
+      - .github/workflows/202-a52-driver-core-source-discovery.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-driver-core-discovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+jobs:
+  export-source:
+    name: Export pinned GKI driver-core files
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Phase 202 branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Export exact source files
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test "$(git -C gki/common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
+          OUT=artifacts/phase202-driver-core-source
+          rm -rf "$OUT"
+          mkdir -p "$OUT/drivers/base" "$OUT/drivers/iommu" "$OUT/drivers/of" "$OUT/kernel/dma" "$OUT/include/linux"
+          cp gki/common/drivers/base/dd.c "$OUT/drivers/base/"
+          cp gki/common/drivers/base/core.c "$OUT/drivers/base/"
+          cp gki/common/drivers/base/platform.c "$OUT/drivers/base/"
+          cp gki/common/drivers/iommu/of_iommu.c "$OUT/drivers/iommu/"
+          cp gki/common/drivers/iommu/iommu.c "$OUT/drivers/iommu/"
+          cp gki/common/drivers/of/device.c "$OUT/drivers/of/"
+          cp gki/common/kernel/dma/mapping.c "$OUT/kernel/dma/"
+          cp gki/common/include/linux/device.h "$OUT/include/linux/"
+          cp gki/common/include/linux/device/driver.h "$OUT/include/linux-device-driver.h"
+          find gki/common -type f \( -path '*/dma/*mapping*.c' -o -path '*/iommu/*of*.c' \) | sort > "$OUT/relevant-source-paths.txt"
+          git -C gki/common show -s --format=fuller HEAD > "$OUT/GKI-COMMIT.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload exact source inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase202-exact-driver-core-source
+          path: artifacts/phase202-driver-core-source
+          if-no-files-found: error
+          retention-days: 7

@@ -31,6 +31,8 @@ concurrency:
 
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
 

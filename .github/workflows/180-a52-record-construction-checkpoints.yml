@@ -2,6 +2,7 @@ name: 180 - A52 record construction checkpoints
 
 run-name: Build A52 record construction checkpoint image
 
+# Hardware capture 20260801_110808 stopped after event classification.
 on:
   workflow_dispatch:
   push:

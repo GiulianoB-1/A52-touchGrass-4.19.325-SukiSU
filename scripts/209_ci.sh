@@ -97,9 +97,8 @@ for marker in \
   grep -Fq "$marker" "$OUT/stage/sde-kms-after-phase209.c"
 done
 
-git -C "$ROOT" diff --binary --no-ext-diff -- \
-  drivers/a52_display/msm/sde/sde_kms.c \
-  > "$OUT/stage/phase209-splash-takeover-trace.patch"
+cp "$PWD/patches/209-splash-takeover-trace.patch" \
+  "$OUT/stage/phase209-splash-takeover-trace.patch"
 test -s "$OUT/stage/phase209-splash-takeover-trace.patch"
 
 CLANG="$(readlink -f "$(command -v clang)")"

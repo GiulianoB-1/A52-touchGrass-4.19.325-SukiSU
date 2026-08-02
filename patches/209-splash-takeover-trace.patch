@@ -1,6 +1,8 @@
+diff --git a/drivers/a52_display/msm/sde/sde_kms.c b/drivers/a52_display/msm/sde/sde_kms.c
+index 3ef3c85..8251589 100755
 --- a/drivers/a52_display/msm/sde/sde_kms.c
 +++ b/drivers/a52_display/msm/sde/sde_kms.c
-@@ -2792,7 +2792,9 @@
+@@ -2792,7 +2792,9 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  	struct sde_connector *sde_conn = NULL;
  	struct sde_splash_display *splash_display;
  
@@ -10,7 +12,7 @@
  		SDE_ERROR("invalid kms\n");
  		return -EINVAL;
  	}
-@@ -2800,12 +2802,18 @@
+@@ -2800,12 +2802,18 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  	sde_kms = to_sde_kms(kms);
  	dev = sde_kms->dev;
  	if (!dev) {
@@ -29,7 +31,7 @@
  		DRM_INFO("cont_splash feature not enabled\n");
  		return rc;
  	}
-@@ -2819,8 +2827,12 @@
+@@ -2819,8 +2827,12 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  		display = sde_kms->dsi_displays[i];
  		dsi_display = (struct dsi_display *)display;
  		splash_display = &sde_kms->splash_data.splash_display[i];
@@ -42,7 +44,7 @@
  			SDE_DEBUG("display->name = %s splash not enabled\n",
  					dsi_display->name);
  			continue;
-@@ -2833,7 +2845,10 @@
+@@ -2833,7 +2845,10 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  			SDE_DEBUG("encoder name = %s\n", encoder->name);
  		}
  		memset(&info, 0x0, sizeof(info));
@@ -53,7 +55,7 @@
  		if (rc) {
  			SDE_ERROR("dsi get_info %d failed\n", i);
  			encoder = NULL;
-@@ -2844,6 +2859,8 @@
+@@ -2844,6 +2859,8 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  			info.display_type);
  
  		if (!encoder) {
@@ -62,7 +64,7 @@
  			SDE_ERROR("encoder not initialized\n");
  			return -EINVAL;
  		}
-@@ -2852,10 +2869,14 @@
+@@ -2852,10 +2869,14 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  		encoder->crtc = priv->crtcs[i];
  		crtc = encoder->crtc;
  		splash_display->encoder =  encoder;
@@ -77,7 +79,7 @@
  		mutex_lock(&dev->mode_config.mutex);
  		drm_connector_list_iter_begin(dev, &conn_iter);
  		drm_for_each_connector_iter(connector, &conn_iter) {
-@@ -2870,18 +2891,28 @@
+@@ -2870,18 +2891,28 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  				break;
  		}
  		drm_connector_list_iter_end(&conn_iter);
@@ -106,7 +108,7 @@
  			SDE_ERROR("fill_modes api not defined\n");
  			mutex_unlock(&dev->mode_config.mutex);
  			return -EINVAL;
-@@ -2891,15 +2922,21 @@
+@@ -2891,15 +2922,21 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  		crtc->state->encoder_mask = (1 << drm_encoder_index(encoder));
  
  		/* currently consider modes[0] as the preferred mode */
@@ -128,7 +130,7 @@
  		if (rc) {
  			SDE_ERROR("Failed: set mode for crtc. rc = %d\n", rc);
  			return rc;
-@@ -2908,23 +2945,34 @@
+@@ -2908,23 +2945,34 @@ static int sde_kms_cont_splash_config(struct msm_kms *kms)
  		drm_mode_copy(&crtc->mode, drm_mode);
  
  		/* Update encoder structure */

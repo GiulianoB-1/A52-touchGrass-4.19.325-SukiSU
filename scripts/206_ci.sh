@@ -53,6 +53,8 @@ cmp "$OUT/config/before-phase206.config" "$BUILD/.config"
 cmp "$OUT/stage/recorder-before-phase206.c" "$OUT/stage/recorder-after-phase206.c"
 
 python3 - <<'PY' | tee "$OUT/logs/phase206-touchgrass-comparison.log"
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 root = Path('gki/common')
@@ -65,8 +67,28 @@ dma = (root / 'drivers/iommu/dma-iommu.c').read_text()
 msm = (root / 'drivers/a52_display/msm/msm_smmu.c').read_text()
 tg_smmu = (tg / 'drivers/iommu/arm-smmu.c').read_text()
 tg_dma = (tg / 'arch/arm64/mm/dma-mapping.c').read_text()
-lagoon = (tg / 'arch/arm64/boot/dts/vendor/qcom/lagoon.dtsi').read_text()
 
+# The display context-bank properties are supplied by Samsung's preserved
+# board DTB and overlays, not necessarily by the base lagoon.dtsi source.
+spec = importlib.util.spec_from_file_location(
+    'phase205_dt', 'scripts/205_compare_post_smmu_touchgrass.py')
+phase205_dt = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(phase205_dt)
+boot = Path('artifacts/a52xq-apps-smmu-scm-handoff/package/boot.img')
+dtb = phase205_dt.boot_dtb(boot)
+nodes = phase205_dt.parse_fdt(dtb)
+unsecure_nodes = phase205_dt.find_compat(nodes, 'qcom,smmu_sde_unsec')
+secure_nodes = phase205_dt.find_compat(nodes, 'qcom,smmu_sde_sec')
+assert len(unsecure_nodes) == 1, unsecure_nodes
+assert len(secure_nodes) == 1, secure_nodes
+unsecure_path, unsecure_props = unsecure_nodes[0]
+secure_path, secure_props = secure_nodes[0]
+unsecure_pool = phase205_dt.u32s(
+    unsecure_props.get('qcom,iommu-dma-addr-pool'))
+secure_pool = phase205_dt.u32s(
+    secure_props.get('qcom,iommu-dma-addr-pool'))
+
+# EARLY_MAP is stateful and clears by enabling SCTLR.M, matching TouchGrass.
 for marker in ('DOMAIN_ATTR_EARLY_MAP', 'arm_smmu_enable_s1_translations',
                'qcom,iommu-earlymap', '~BIT(DOMAIN_ATTR_EARLY_MAP)',
                'cfg_to_smmu_domain(cfg)->attributes'):
@@ -75,14 +97,35 @@ assert 'ARM_SMMU_SCTLR_TRE | ARM_SMMU_SCTLR_M' not in core
 assert 'arm_smmu_enable_s1_translations' in tg_smmu
 assert 'qcom,iommu-earlymap' in tg_smmu
 
+# The downstream aperture is applied at the 5.10 dma-iommu setup boundary.
 for marker in ('a52_iommu_get_dma_window', 'qcom,iommu-dma-addr-pool',
                'of_read_number(ranges, naddr)',
                'iommu_dma_init_domain(domain, dma_base, size, dev)'):
     assert marker in dma, marker
 assert 'arm_iommu_get_dma_window' in tg_dma
 assert 'qcom,iommu-dma-addr-pool' in tg_dma
-assert 'qcom,iommu-dma-addr-pool = <0x00020000 0xfffe0000>' in lagoon
+assert unsecure_pool == [0x00020000, 0xfffe0000], unsecure_pool
+assert secure_pool == [0x00020000, 0xfffe0000], secure_pool
+assert 'qcom,iommu-earlymap' in unsecure_props
+assert 'non-fatal' in phase205_dt.strings(
+    unsecure_props.get('qcom,iommu-faults'))
+assert phase205_dt.u32s(secure_props.get('qcom,iommu-vmid')) == [10]
+active_dt = {
+    'dtb_sha256': hashlib.sha256(dtb).hexdigest(),
+    'unsecure': {
+        'path': unsecure_path,
+        'properties': phase205_dt.compact(unsecure_props),
+    },
+    'secure': {
+        'path': secure_path,
+        'properties': phase205_dt.compact(secure_props),
+    },
+}
+(out / 'phase206-active-display-dt.json').write_text(
+    json.dumps(active_dt, indent=2, sort_keys=True) + '\n')
 
+# Non-fatal is an explicit API/DT contract. Upstream 5.10 already logs and
+# clears context faults rather than panicking, so no fault-handler weakening is needed.
 assert 'DOMAIN_ATTR_NON_FATAL_FAULTS' in iommu_h
 assert 'BIT(DOMAIN_ATTR_NON_FATAL_FAULTS)' in core
 assert 'qcom,iommu-faults' in core
@@ -90,11 +133,14 @@ fault = core[core.find('static irqreturn_t arm_smmu_context_fault'):
              core.find('static irqreturn_t arm_smmu_global_fault')]
 assert 'panic(' not in fault
 
+# Secure VMID cannot be emulated safely without secure page-table assignment.
 assert 'secure display SMMU is fail-closed' in msm
 assert 'return ERR_PTR(-EOPNOTSUPP);' in msm
 assert 'DOMAIN_ATTR_SECURE_VMID' in tg_smmu
 assert 'arm_smmu_assign_table' in tg_smmu
 
+# Until the downstream TBU backend is ported, prevent power collapse rather
+# than silently losing the bootloader-owned distributed translation state.
 for marker in ('a52_apps_smmu_has_unmanaged_tbus', 'qcom,qsmmuv500-tbu',
                'runtime PM disabled until qsmmuv500 TBU support is ported',
                'system suspend blocked until qsmmuv500 TBU support is ported',
@@ -109,8 +155,9 @@ report = {
     'early_map_semantics_ported': True,
     'early_map_sctlr_m_transition_ported': True,
     'display_iova_pool_parser_ported': True,
-    'display_iova_base': '0x00020000',
-    'display_iova_size': '0xfffe0000',
+    'display_iova_base': f'0x{unsecure_pool[0]:08x}',
+    'display_iova_size': f'0x{unsecure_pool[1]:08x}',
+    'active_dtb_sha256': hashlib.sha256(dtb).hexdigest(),
     'non_fatal_fault_contract_ported': True,
     'upstream_fault_handler_already_nonfatal': True,
     'secure_vmid_backend_ported': False,

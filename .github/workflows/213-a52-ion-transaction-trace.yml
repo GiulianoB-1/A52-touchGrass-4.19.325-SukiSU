@@ -1,6 +1,6 @@
-name: 213 - A52 bounded ION transaction trace
+name: 214 - A52 qsecom ION heap-27 compatibility
 
-run-name: Build Phase 213 bounded ION transaction trace
+run-name: Build Phase 214 qsecom ION heap-27 compatibility
 
 on:
   workflow_dispatch:
@@ -8,14 +8,14 @@ on:
     branches:
       - agent/a52-ion-transaction-trace-ci-base-v1
     paths:
-      - scripts/213_trigger.txt
+      - scripts/214_trigger.txt
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-ion-transaction-trace-${{ github.ref }}
+  group: a52-qsecom-heap27-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -29,15 +29,15 @@ env:
 
 jobs:
   build-package:
-    name: Build and audit Phase 213 ION trace
+    name: Build and audit Phase 214 qsecom heap 27
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out dedicated Phase 213 branch
+      - name: Check out dedicated Phase 214 branch
         uses: actions/checkout@v4
 
-      - name: Materialize and verify Phase 213 scripts
+      - name: Materialize and verify Phase 213 and 214 scripts
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
@@ -59,8 +59,10 @@ jobs:
           PY
           python3 -m py_compile \
             scripts/213_payload.py \
-            scripts/213_apply_ion_transaction_trace.py
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py
           bash -n scripts/213_ci.sh
+          bash -n scripts/214_ci.sh
 
       - name: Prepare runner
         run: |
@@ -87,11 +89,13 @@ jobs:
             scripts/211_decode_r210_rs48_transport_fusion.py \
             scripts/212_apply_graphics_startup_trace.py \
             scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
           bash -n scripts/209_prepare_phase206.sh
           bash -n scripts/212_ci.sh
           bash -n scripts/213_ci.sh
+          bash -n scripts/214_ci.sh
 
       - name: Restore pinned GKI source
         id: gki-cache
@@ -118,7 +122,7 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build, package and audit Phase 213
+      - name: Build, package and audit Phase 214
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -130,21 +134,22 @@ jobs:
           python3 scripts/199_runtime_fix_binary_audit.py
           bash scripts/209_prepare_phase206.sh
           bash scripts/213_ci.sh
+          bash scripts/214_ci.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-ion-transaction-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
-          path: artifacts/a52xq-ion-transaction-trace
+          name: a52xq-qsecom-heap27-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-qsecom-heap27
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload Phase 213 candidate
+      - name: Upload Phase 214 candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-ion-transaction-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: artifacts/a52xq-ion-transaction-trace
+          name: a52xq-qsecom-heap27-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-qsecom-heap27
           if-no-files-found: error
           retention-days: 30

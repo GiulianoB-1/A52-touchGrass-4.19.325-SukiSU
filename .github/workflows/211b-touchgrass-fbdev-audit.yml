@@ -8,6 +8,11 @@ on:
       - agent/a52-drm-client-trace-v1
     paths:
       - .github/workflows/211b-touchgrass-fbdev-audit.yml
+  pull_request:
+    branches:
+      - agent/a52-drm-client-trace-ci-base-v1
+    paths:
+      - .github/workflows/211b-touchgrass-fbdev-audit.yml
 
 permissions:
   contents: read

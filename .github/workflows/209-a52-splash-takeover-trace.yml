@@ -1,0 +1,94 @@
+name: 209 - A52 splash takeover recorder
+
+run-name: Build Phase 209 splash takeover recorder
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-splash-takeover-trace-ci-base-v1
+    paths:
+      - patches/209-splash-takeover-trace.patch
+      - scripts/209_ci.sh
+      - .github/workflows/209-a52-splash-takeover-trace.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-splash-takeover-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+jobs:
+  build-package:
+    name: Build Phase 209 splash takeover recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out Phase 209 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/199_runtime_fix_crc_anchor_v2.py \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/199_apply_recorder_crc32c.py \
+            scripts/200_apply_smmu_defer_trace.py \
+            scripts/201_apply_smmu_component_dependency.py \
+            scripts/202_apply_driver_core_trace.py \
+            scripts/203_apply_apps_smmu_qsmmuv500_compat.py \
+            scripts/204_apply_apps_smmu_scm_handoff.py \
+            scripts/206_apply_smmu_display_contracts.py \
+            scripts/208_apply_secure_vmid.py \
+            scripts/38_repack_a52_p1_boot.py \
+            tools/decode-a52-r179-rs-recorder.py \
+            tools/decode-a52-r199-crc32c-base.py \
+            tools/decode-a52-r199-crc32c-triple.py
+          bash -n scripts/208_reconstruct_phase206_source.sh
+          bash -n scripts/209_ci.sh
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Build, package and audit Phase 209
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          bash scripts/209_ci.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-splash-takeover-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-splash-takeover-trace
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Phase 209 candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-splash-takeover-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-splash-takeover-trace
+          if-no-files-found: error
+          retention-days: 30

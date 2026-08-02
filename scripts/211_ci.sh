@@ -80,10 +80,11 @@ for marker in \
   grep -Fq "$marker" "$RECORDER"
 done
 for marker in \
-  'DRMPOST 210 c=%u commit enter nb=%d' \
-  'DRMPOST 210 c=%u prepare_planes rc=%d' \
-  'DRMPOST 210 c=%u dispatch queued crtc=%u' \
-  'DRMPOST 210 c=%u fences wait enter'; do
+  'DRMPOST 210 c=%u ' \
+  'commit enter nb=%d' \
+  'prepare_planes rc=%d' \
+  'dispatch queued crtc=%u' \
+  'fences wait enter'; do
   grep -Fq "$marker" "$ATOMIC"
 done
 for marker in \

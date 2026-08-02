@@ -106,6 +106,8 @@ jobs:
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
           test -d workspace/touchgrass-a52xq/.git
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
           bash scripts/209_prepare_phase206.sh
           bash scripts/209_ci.sh
 

@@ -60,10 +60,7 @@ jobs:
             scripts/204_apply_apps_smmu_scm_handoff.py \
             scripts/206_apply_smmu_display_contracts.py \
             scripts/208_apply_secure_vmid.py \
-            scripts/38_repack_a52_p1_boot.py \
-            tools/decode-a52-r179-rs-recorder.py \
-            tools/decode-a52-r199-crc32c-base.py \
-            tools/decode-a52-r199-crc32c-triple.py
+            scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
           bash -n scripts/209_ci.sh
 

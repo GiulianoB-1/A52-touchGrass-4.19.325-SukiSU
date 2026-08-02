@@ -88,7 +88,6 @@ unsecure_pool = phase205_dt.u32s(
 secure_pool = phase205_dt.u32s(
     secure_props.get('qcom,iommu-dma-addr-pool'))
 
-# EARLY_MAP is stateful and clears by enabling SCTLR.M, matching TouchGrass.
 for marker in ('DOMAIN_ATTR_EARLY_MAP', 'arm_smmu_enable_s1_translations',
                'qcom,iommu-earlymap', '~BIT(DOMAIN_ATTR_EARLY_MAP)',
                'cfg_to_smmu_domain(cfg)->attributes'):
@@ -97,7 +96,6 @@ assert 'ARM_SMMU_SCTLR_TRE | ARM_SMMU_SCTLR_M' not in core
 assert 'arm_smmu_enable_s1_translations' in tg_smmu
 assert 'qcom,iommu-earlymap' in tg_smmu
 
-# The downstream aperture is applied at the 5.10 dma-iommu setup boundary.
 for marker in ('a52_iommu_get_dma_window', 'qcom,iommu-dma-addr-pool',
                'of_read_number(ranges, naddr)',
                'iommu_dma_init_domain(domain, dma_base, size, dev)'):
@@ -124,8 +122,6 @@ active_dt = {
 (out / 'phase206-active-display-dt.json').write_text(
     json.dumps(active_dt, indent=2, sort_keys=True) + '\n')
 
-# Non-fatal is an explicit API/DT contract. Upstream 5.10 already logs and
-# clears context faults rather than panicking, so no fault-handler weakening is needed.
 assert 'DOMAIN_ATTR_NON_FATAL_FAULTS' in iommu_h
 assert 'BIT(DOMAIN_ATTR_NON_FATAL_FAULTS)' in core
 assert 'qcom,iommu-faults' in core
@@ -133,14 +129,14 @@ fault = core[core.find('static irqreturn_t arm_smmu_context_fault'):
              core.find('static irqreturn_t arm_smmu_global_fault')]
 assert 'panic(' not in fault
 
-# Secure VMID cannot be emulated safely without secure page-table assignment.
 assert 'secure display SMMU is fail-closed' in msm
 assert 'return ERR_PTR(-EOPNOTSUPP);' in msm
+assert 'a52_unported_secure_display' in core
+assert 'SMMU secure-attach blocked dev=%s' in core
+assert 'return -EOPNOTSUPP;' in core
 assert 'DOMAIN_ATTR_SECURE_VMID' in tg_smmu
 assert 'arm_smmu_assign_table' in tg_smmu
 
-# Until the downstream TBU backend is ported, prevent power collapse rather
-# than silently losing the bootloader-owned distributed translation state.
 for marker in ('a52_apps_smmu_has_unmanaged_tbus', 'qcom,qsmmuv500-tbu',
                'runtime PM disabled until qsmmuv500 TBU support is ported',
                'system suspend blocked until qsmmuv500 TBU support is ported',
@@ -162,6 +158,7 @@ report = {
     'upstream_fault_handler_already_nonfatal': True,
     'secure_vmid_backend_ported': False,
     'secure_display_fail_closed': True,
+    'secure_display_default_domain_blocked': True,
     'tbu_backend_ported': False,
     'tbu_power_collapse_fail_closed': True,
     'runtime_pm_blocked_for_unmanaged_tbus': True,
@@ -215,6 +212,7 @@ for marker in \
   'qcom,iommu-earlymap' \
   'qcom,iommu-dma-addr-pool' \
   'SMMU secure-domain unavailable domain=%d' \
+  'SMMU secure-attach blocked dev=%s' \
   'runtime PM disabled until qsmmuv500 TBU support is ported' \
   'system suspend blocked until qsmmuv500 TBU support is ported' \
   'SMMU parent-qcom scm=%d handoff=%d' \
@@ -246,7 +244,7 @@ Implemented from the exact TouchGrass comparison:
   - SCTLR.M remains clear during bootloader handoff and is enabled when KMS clears EARLY_MAP
   - qcom,iommu-dma-addr-pool initializes the DMA IOVA aperture
   - qcom,iommu-faults = "non-fatal" is represented by the IOMMU attribute API
-  - secure display domains fail closed because secure VMID/page-table ownership is not yet ported
+  - secure display default-domain attach and KMS domain creation both fail closed because secure VMID/page-table ownership is not yet ported
   - Apps SMMU runtime PM and system suspend fail closed while qsmmuv500 TBU power support is absent
 
 Normal unsecure display is the target of this candidate. Protected display and system suspend are intentionally unavailable rather than silently unsafe.
@@ -276,6 +274,7 @@ base.update({
     'display_iova_pool_parser_ported': comparison['display_iova_pool_parser_ported'],
     'non_fatal_fault_contract_ported': comparison['non_fatal_fault_contract_ported'],
     'secure_display_fail_closed': comparison['secure_display_fail_closed'],
+    'secure_display_default_domain_blocked': comparison['secure_display_default_domain_blocked'],
     'secure_vmid_backend_ported': comparison['secure_vmid_backend_ported'],
     'tbu_power_collapse_fail_closed': comparison['tbu_power_collapse_fail_closed'],
     'tbu_backend_ported': comparison['tbu_backend_ported'],
@@ -302,6 +301,7 @@ base.update({
 })
 for key in ('early_map_semantics_ported', 'display_iova_pool_parser_ported',
             'non_fatal_fault_contract_ported', 'secure_display_fail_closed',
+            'secure_display_default_domain_blocked',
             'tbu_power_collapse_fail_closed', 'dtb_preserved',
             'ramdisk_preserved', 'recovery_dtbo_preserved'):
     assert base[key] is True, key

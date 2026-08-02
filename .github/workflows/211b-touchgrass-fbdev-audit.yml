@@ -1,0 +1,83 @@
+name: 211b - TouchGrass fbdev audit
+
+run-name: Audit TouchGrass framebuffer configuration
+
+on:
+  push:
+    branches:
+      - agent/a52-drm-client-trace-v1
+    paths:
+      - .github/workflows/211b-touchgrass-fbdev-audit.yml
+  pull_request:
+    branches:
+      - agent/a52-drm-client-trace-ci-base-v1
+    paths:
+      - .github/workflows/211b-touchgrass-fbdev-audit.yml
+
+permissions:
+  contents: read
+
+env:
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Audit fbdev configuration and source
+        run: |
+          set -Eeuo pipefail
+          ROOT=workspace/touchgrass-a52xq
+          OUT=artifacts/touchgrass-fbdev-audit
+          mkdir -p "$OUT"
+          test "$(git -C "$ROOT" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          {
+            echo "touchgrass_commit=$TOUCHGRASS_COMMIT"
+            echo
+            echo "== configuration matches =="
+            grep -RnsE '^(CONFIG_DRM_FBDEV_EMULATION|CONFIG_DRM_KMS_FB_HELPER|CONFIG_FB|CONFIG_FRAMEBUFFER_CONSOLE|CONFIG_DRM_FBDEV_OVERALLOC)=' \
+              "$ROOT/arch/arm64/configs" "$ROOT"/build*.sh "$ROOT"/*.sh 2>/dev/null || true
+            echo
+            echo "== explicit disabled matches =="
+            grep -RnsE '^# (CONFIG_DRM_FBDEV_EMULATION|CONFIG_DRM_KMS_FB_HELPER|CONFIG_FB|CONFIG_FRAMEBUFFER_CONSOLE) is not set' \
+              "$ROOT/arch/arm64/configs" 2>/dev/null || true
+            echo
+            echo "== msm fbdev build wiring =="
+            grep -RnsE 'msm_fbdev|CONFIG_DRM_FBDEV_EMULATION' \
+              "$ROOT/techpack/display/msm/Makefile" \
+              "$ROOT/techpack/display/msm/Kconfig" \
+              "$ROOT/techpack/display/msm/msm_drv.c" 2>/dev/null || true
+          } | tee "$OUT/report.txt"
+          cp "$ROOT/techpack/display/msm/msm_fbdev.c" "$OUT/touchgrass-msm_fbdev.c"
+          cp "$ROOT/techpack/display/msm/msm_drv.c" "$OUT/touchgrass-msm_drv.c"
+          find "$ROOT/arch/arm64/configs" -type f -print | sort > "$OUT/config-files.txt"
+          grep -RlsE 'CONFIG_DRM_FBDEV_EMULATION=y|CONFIG_FB=y' "$ROOT/arch/arm64/configs" | sort > "$OUT/fbdev-enabled-config-files.txt" || true
+          test -s "$OUT/report.txt"
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchgrass-fbdev-audit
+          path: artifacts/touchgrass-fbdev-audit
+          retention-days: 7

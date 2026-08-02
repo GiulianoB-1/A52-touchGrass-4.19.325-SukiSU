@@ -22,8 +22,10 @@ def replace_one(text: str, old: str, new: str, label: str) -> str:
 def patch_iommu_h(text: str) -> str:
     if 'DOMAIN_ATTR_NON_FATAL_FAULTS' in text:
         return text
-    old = '''\tDOMAIN_ATTR_CONTEXTIDR,\n\tDOMAIN_ATTR_SECURE_VMID,\n'''
-    new = '''\tDOMAIN_ATTR_CONTEXTIDR,\n\tDOMAIN_ATTR_NON_FATAL_FAULTS,\n\tDOMAIN_ATTR_SECURE_VMID,\n'''
+    # Append the new compatibility attribute immediately before MAX so all
+    # existing vendor attribute numbers remain unchanged.
+    old = '''\tDOMAIN_ATTR_USE_UPSTREAM_HINT,\n\tDOMAIN_ATTR_MAX,\n'''
+    new = '''\tDOMAIN_ATTR_USE_UPSTREAM_HINT,\n\tDOMAIN_ATTR_NON_FATAL_FAULTS,\n\tDOMAIN_ATTR_MAX,\n'''
     return replace_one(text, old, new, 'IOMMU non-fatal attribute enum')
 
 
@@ -136,8 +138,27 @@ def self_test(root: Path) -> None:
             target = tmp / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(root / rel, target)
+
+        iommu_before = (tmp / IOMMU_H).read_text()
+        enum_before = iommu_before.split('enum iommu_attr {', 1)[1].split('};', 1)[0]
+        attrs_before = [line.strip().rstrip(',').split()[0]
+                        for line in enum_before.splitlines()
+                        if line.strip().startswith('DOMAIN_ATTR_')]
+
         apply(tmp)
         once = {rel: (tmp / rel).read_text() for rel in FILES}
+        enum_after = once[IOMMU_H].split('enum iommu_attr {', 1)[1].split('};', 1)[0]
+        attrs_after = [line.strip().rstrip(',').split()[0]
+                       for line in enum_after.splitlines()
+                       if line.strip().startswith('DOMAIN_ATTR_')]
+        for name in attrs_before:
+            if name == 'DOMAIN_ATTR_MAX':
+                continue
+            if attrs_before.index(name) != attrs_after.index(name):
+                raise AssertionError(f'IOMMU attribute ABI moved: {name}')
+        if attrs_after[-2:] != ['DOMAIN_ATTR_NON_FATAL_FAULTS',
+                                'DOMAIN_ATTR_MAX']:
+            raise AssertionError('non-fatal attribute is not appended before MAX')
         apply(tmp)
         twice = {rel: (tmp / rel).read_text() for rel in FILES}
         if once != twice:

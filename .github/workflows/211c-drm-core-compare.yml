@@ -1,0 +1,97 @@
+name: 211c - DRM core comparison
+
+run-name: Compare pinned GKI DRM core with TouchGrass
+
+on:
+  pull_request:
+    branches:
+      - agent/a52-drm-client-trace-ci-base-v1
+    paths:
+      - .github/workflows/211c-drm-core-compare.yml
+  push:
+    branches:
+      - agent/a52-drm-client-trace-v1
+    paths:
+      - .github/workflows/211c-drm-core-compare.yml
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Compare DRM core
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          GKI=gki/common
+          TG=workspace/touchgrass-a52xq
+          OUT=artifacts/drm-core-comparison
+          mkdir -p "$OUT/gki" "$OUT/touchgrass" "$OUT/diffs"
+          test "$(git -C "$GKI" rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          test "$(git -C "$TG" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          for file in drm_drv.c drm_file.c drm_ioctl.c drm_auth.c drm_sysfs.c; do
+            cp "$GKI/drivers/gpu/drm/$file" "$OUT/gki/$file"
+            cp "$TG/drivers/gpu/drm/$file" "$OUT/touchgrass/$file"
+            diff -u "$OUT/touchgrass/$file" "$OUT/gki/$file" > "$OUT/diffs/$file.diff" || true
+          done
+          {
+            echo "gki_commit=$GKI_COMMON_SHA"
+            echo "touchgrass_commit=$TOUCHGRASS_COMMIT"
+            echo
+            for file in drm_drv.c drm_file.c drm_ioctl.c drm_auth.c drm_sysfs.c; do
+              echo "== $file =="
+              sha256sum "$OUT/touchgrass/$file" "$OUT/gki/$file"
+              echo "hunks=$(grep -c '^@@' "$OUT/diffs/$file.diff" || true)"
+              echo "changed_lines=$(grep -Ec '^[+-][^+-]' "$OUT/diffs/$file.diff" || true)"
+              echo
+            done
+            echo "== key TouchGrass functions =="
+            grep -nE '^(int drm_open|static int drm_open_helper|struct drm_minor \*drm_minor_acquire|static int drm_minor_register|int drm_dev_register|long drm_ioctl)' \
+              "$OUT/touchgrass"/*.c || true
+            echo
+            echo "== key GKI functions =="
+            grep -nE '^(int drm_open|static int drm_open_helper|struct drm_minor \*drm_minor_acquire|static int drm_minor_register|int drm_dev_register|long drm_ioctl)' \
+              "$OUT/gki"/*.c || true
+          } | tee "$OUT/report.txt"
+          test -s "$OUT/report.txt"
+
+      - name: Upload comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: drm-core-comparison
+          path: artifacts/drm-core-comparison
+          retention-days: 7

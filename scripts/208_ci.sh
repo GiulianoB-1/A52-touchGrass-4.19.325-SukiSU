@@ -9,11 +9,40 @@ TG="$PWD/workspace/touchgrass-a52xq"
 mkdir -p "$OUT/logs"
 trap 'rc=$?; mkdir -p "$OUT/logs"; printf "line=%s\ncommand=%s\nreturn_code=%s\n" "$LINENO" "$BASH_COMMAND" "$rc" > "$OUT/logs/ci-failure.txt"; exit "$rc"' ERR
 
-bash scripts/206_ci.sh
+download_phase206() {
+  local zip="$PWD/workspace/phase206-success.zip"
+  rm -rf "$BASE_OUT" "$zip"
+  mkdir -p "$BASE_OUT" "$PWD/workspace"
+  curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+    -H "Authorization: Bearer ${GH_TOKEN}" \
+    -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8830356785/zip" \
+    --output "$zip"
+  printf '%s  %s\n' \
+    f5e5c51cee21b1548aa19660f57e7b3f5cf05abee80035c7915d42d891d322e4 \
+    "$zip" | sha256sum -c -
+  unzip -q "$zip" -d "$BASE_OUT"
+  (cd "$BASE_OUT" && sha256sum -c SHA256SUMS)
+}
+
+download_phase206
 rm -rf "$OUT"
 cp -a "$BASE_OUT" "$OUT"
 rm -f "$OUT/SHA256SUMS"
 mkdir -p "$OUT"/{config,logs,stage,compile,package,tools,comparison}
+
+bash scripts/208_reconstruct_phase206_source.sh
+cp "$BASE_OUT/config/final.config" "$BUILD/.config"
+for pair in \
+  'include/linux/iommu.h stage/include-linux-iommu.h-after-phase206' \
+  'drivers/iommu/arm/arm-smmu/arm-smmu.h stage/drivers-iommu-arm-arm-smmu-arm-smmu.h-after-phase206' \
+  'drivers/iommu/arm/arm-smmu/arm-smmu.c stage/drivers-iommu-arm-arm-smmu-arm-smmu.c-after-phase206' \
+  'drivers/iommu/dma-iommu.c stage/drivers-iommu-dma-iommu.c-after-phase206' \
+  'drivers/a52_display/msm/msm_smmu.c stage/drivers-a52_display-msm-msm_smmu.c-after-phase206' \
+  'drivers/a52_secure/a52_ack_secure_flight_recorder.c stage/recorder-after-phase206.c'; do
+  set -- $pair
+  cmp "$ROOT/$1" "$BASE_OUT/$2"
+done
 
 cp "$BUILD/.config" "$OUT/config/before-phase208.config"
 for rel in \

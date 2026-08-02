@@ -5,15 +5,9 @@ run-name: Audit Phase 207 secure VMID and TBU dependencies
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/a52-secure-tbu-audit-v1
-    paths:
-      - .github/workflows/207-a52-secure-tbu-dependency-audit.yml
-      - scripts/207_ci.sh
   pull_request:
     branches:
-      - agent/a52-smmu-contracts-v1
+      - agent/a52-secure-tbu-audit-base-v1
     paths:
       - .github/workflows/207-a52-secure-tbu-dependency-audit.yml
       - scripts/207_ci.sh

@@ -1,0 +1,72 @@
+\t\t\t\t      &source_vmid, 1, dest_vmids, dest_perms, 2);
+\t\tif (WARN_ON(ret))
+\t\t\tbreak;
+\t\tlist_del(&info->entry);
+\t\tkfree(info);
+\t}
+\treturn ret;
+}
+
+static int arm_smmu_unassign_pages(struct arm_smmu_domain *smmu_domain,
+\t\t\t\t   void *addr, size_t size)
+{
+\tu32 source_vmids[2] = { VMID_HLOS, smmu_domain->secure_vmid };
+\tint dest_vmid = VMID_HLOS;
+\tint dest_perm = PERM_READ | PERM_WRITE | PERM_EXEC;
+
+\treturn hyp_assign_phys(virt_to_phys(addr), size, source_vmids, 2,
+\t\t\t       &dest_vmid, &dest_perm, 1);
+}
+
+static void arm_smmu_unassign_table(struct arm_smmu_domain *smmu_domain)
+{
+\tstruct arm_smmu_pte_info *info, *tmp;
+\tint ret;
+
+\tif (!arm_smmu_has_secure_vmid(smmu_domain))
+\t\treturn;
+
+\tlist_for_each_entry_safe(info, tmp, &smmu_domain->unassign_list, entry) {
+\t\tret = arm_smmu_unassign_pages(smmu_domain, info->virt_addr,
+\t\t\t\t\t      info->size);
+\t\tif (WARN_ON(ret))
+\t\t\tbreak;
+\t\tfree_pages_exact(info->virt_addr, info->size);
+\t\tlist_del(&info->entry);
+\t\tkfree(info);
+\t}
+}
+
+static bool arm_smmu_forget_unassigned_pgtable(
+\t\tstruct arm_smmu_domain *smmu_domain, void *addr)
+{
+\tstruct arm_smmu_pte_info *info, *tmp;
+
+\tlist_for_each_entry_safe(info, tmp, &smmu_domain->pte_info_list, entry) {
+\t\tif (info->virt_addr == addr) {
+\t\t\tlist_del(&info->entry);
+\t\t\tkfree(info);
+\t\t\treturn true;
+\t\t}
+\t}
+\treturn false;
+}
+
+static void arm_smmu_secure_pool_destroy(struct arm_smmu_domain *smmu_domain)
+{
+\tstruct arm_smmu_secure_pool_chunk *chunk, *tmp;
+\tint ret;
+
+\tlist_for_each_entry_safe(chunk, tmp, &smmu_domain->secure_pool_list, list) {
+\t\tif (arm_smmu_forget_unassigned_pgtable(smmu_domain, chunk->addr)) {
+\t\t\tfree_pages_exact(chunk->addr, chunk->size);
+\t\t} else {
+\t\t\t/* Pool destruction runs outside the io-pgtable allocator.
+\t\t\t * Return ownership directly instead of allocating deferred
+\t\t\t * unassign metadata which could fail during teardown.
+\t\t\t */
+\t\t\tret = arm_smmu_unassign_pages(smmu_domain, chunk->addr,
+\t\t\t\t\t\t      chunk->size);
+\t\t\tif (!WARN_ON(ret))
+\t\t\t\tfree_pages_exact(chunk->addr, chunk->size);
+\t\t}

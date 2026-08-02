@@ -45,7 +45,7 @@ def patch_smmu_c(text: str) -> str:
     # parent and its bootloader-programmed TBUs out of power collapse and reject
     # system suspend instead of losing translation state silently.
     old = '''static bool a52_apps_smmu(const struct device *dev)\n{\n\treturn dev && dev->of_node &&\n\t\tof_device_is_compatible(dev->of_node, "qcom,qsmmu-v500");\n}\n\n'''
-    new = '''static bool a52_apps_smmu(const struct device *dev)\n{\n\treturn dev && dev->of_node &&\n\t\tof_device_is_compatible(dev->of_node, "qcom,qsmmu-v500");\n}\n\nstatic bool a52_apps_smmu_has_unmanaged_tbus(const struct device *dev)\n{\n\tstruct device_node *child;\n\n\tif (!a52_apps_smmu(dev))\n\t\treturn false;\n\n\tfor_each_available_child_of_node(dev->of_node, child) {\n\t\tif (of_device_is_compatible(child, "qcom,qsmmuv500-tbu")) {\n\t\t\tof_node_put(child);\n\t\t\treturn true;\n\t\t}\n\t}\n\n\treturn false;\n}\n\n'''
+    new = '''static bool a52_apps_smmu(const struct device *dev)\n{\n\treturn dev && dev->of_node &&\n\t\tof_device_is_compatible(dev->of_node, "qcom,qsmmu-v500");\n}\n\nstatic bool a52_unported_secure_display(const struct device *dev)\n{\n\treturn dev && dev->of_node &&\n\t\t(of_device_is_compatible(dev->of_node, "qcom,smmu_sde_sec") ||\n\t\t of_device_is_compatible(dev->of_node, "qcom,smmu_sde_nrt_sec"));\n}\n\nstatic bool a52_apps_smmu_has_unmanaged_tbus(const struct device *dev)\n{\n\tstruct device_node *child;\n\n\tif (!a52_apps_smmu(dev))\n\t\treturn false;\n\n\tfor_each_available_child_of_node(dev->of_node, child) {\n\t\tif (of_device_is_compatible(child, "qcom,qsmmuv500-tbu")) {\n\t\t\tof_node_put(child);\n\t\t\treturn true;\n\t\t}\n\t}\n\n\treturn false;\n}\n\n'''
     text = replace_one(text, old, new, 'Apps SMMU unmanaged TBU detector')
 
     old = '''static struct arm_smmu_domain *to_smmu_domain(struct iommu_domain *dom)\n{\n\treturn container_of(dom, struct arm_smmu_domain, domain);\n}\n\n'''
@@ -59,6 +59,10 @@ def patch_smmu_c(text: str) -> str:
     old = '''static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)\n{\n'''
     helper = '''static void a52_arm_smmu_apply_dt_domain_attrs(\n\t\tstruct arm_smmu_domain *smmu_domain, struct device *dev)\n{\n\tstruct device_node *np;\n\n\tif (!dev->of_node)\n\t\treturn;\n\n\tnp = of_parse_phandle(dev->of_node, "qcom,iommu-group", 0);\n\tif (!np)\n\t\tnp = of_node_get(dev->of_node);\n\n\tif (of_property_read_bool(np, "qcom,iommu-earlymap"))\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_EARLY_MAP);\n\n\t/* Upstream faults are already non-fatal. Keep the downstream DT/API\n\t * contract explicit so clients can query it without changing policy.\n\t */\n\tif (of_property_match_string(np, "qcom,iommu-faults",\n\t\t\t\t     "non-fatal") >= 0)\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\n\tof_node_put(np);\n}\n\nstatic int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)\n{\n'''
     text = replace_one(text, old, helper, 'ARM SMMU DT domain attribute parser')
+
+    old = '''\tif (!fwspec || fwspec->ops != &arm_smmu_ops) {\n\t\tdev_err(dev, "cannot attach to SMMU, is it on the same bus?\\n");\n\t\treturn -ENXIO;\n\t}\n\n\t/*\n'''
+    new = '''\tif (!fwspec || fwspec->ops != &arm_smmu_ops) {\n\t\tdev_err(dev, "cannot attach to SMMU, is it on the same bus?\\n");\n\t\treturn -ENXIO;\n\t}\n\n\t/* Do not let the IOMMU core attach a secure display context as an\n\t * ordinary HLOS-owned DMA domain before the full VMID/page-table\n\t * ownership backend is available. Normal display contexts are unaffected.\n\t */\n\tif (a52_unported_secure_display(dev)) {\n\t\ta52_ackfr_record("SMMU secure-attach blocked dev=%s",\n\t\t\tdev_name(dev));\n\t\treturn -EOPNOTSUPP;\n\t}\n\n\t/*\n'''
+    text = replace_one(text, old, new, 'Secure display default-domain gate')
 
     old = '''\tcfg = dev_iommu_priv_get(dev);\n\tif (!cfg)\n\t\treturn -ENODEV;\n\n\tsmmu = cfg->smmu;\n\n\tret = arm_smmu_rpm_get(smmu);\n'''
     new = '''\tcfg = dev_iommu_priv_get(dev);\n\tif (!cfg)\n\t\treturn -ENODEV;\n\n\tsmmu = cfg->smmu;\n\ta52_arm_smmu_apply_dt_domain_attrs(smmu_domain, dev);\n\n\tret = arm_smmu_rpm_get(smmu);\n'''
@@ -169,6 +173,8 @@ def self_test(root: Path) -> None:
             'DOMAIN_ATTR_NON_FATAL_FAULTS',
             'unsigned long\t\t\tattributes;',
             'cfg_to_smmu_domain',
+            'a52_unported_secure_display',
+            'SMMU secure-attach blocked dev=%s',
             'a52_apps_smmu_has_unmanaged_tbus',
             'system suspend blocked until qsmmuv500 TBU support is ported',
             'a52_arm_smmu_apply_dt_domain_attrs',

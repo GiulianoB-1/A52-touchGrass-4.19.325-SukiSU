@@ -1,0 +1,165 @@
+--- a/drivers/a52_display/msm/sde/sde_kms.c
++++ b/drivers/a52_display/msm/sde/sde_kms.c
+@@ -2792,7 +2792,9 @@
+ 	struct sde_connector *sde_conn = NULL;
+ 	struct sde_splash_display *splash_display;
+ 
++	a52_ackfr_record("SPLCFG209 enter kms=%d", !!kms);
+ 	if (!kms) {
++		a52_ackfr_record("SPLCFG209 fail stage=kms rc=%d", -EINVAL);
+ 		SDE_ERROR("invalid kms\n");
+ 		return -EINVAL;
+ 	}
+@@ -2800,12 +2802,18 @@
+ 	sde_kms = to_sde_kms(kms);
+ 	dev = sde_kms->dev;
+ 	if (!dev) {
++		a52_ackfr_record("SPLCFG209 fail stage=dev rc=%d", -EINVAL);
+ 		SDE_ERROR("invalid device\n");
+ 		return -EINVAL;
+ 	}
+ 
++	a52_ackfr_record("SPLCFG209 counts regions=%u displays=%u dsi=%d",
++			sde_kms->splash_data.num_splash_regions,
++			sde_kms->splash_data.num_splash_displays,
++			sde_kms->dsi_display_count);
+ 	if (!sde_kms->splash_data.num_splash_regions ||
+ 			!sde_kms->splash_data.num_splash_displays) {
++		a52_ackfr_record("SPLCFG209 bypass no-splash rc=%d", rc);
+ 		DRM_INFO("cont_splash feature not enabled\n");
+ 		return rc;
+ 	}
+@@ -2819,8 +2827,12 @@
+ 		display = sde_kms->dsi_displays[i];
+ 		dsi_display = (struct dsi_display *)display;
+ 		splash_display = &sde_kms->splash_data.splash_display[i];
++		a52_ackfr_record("SPLCFG209 display i=%d enabled=%d bridge=%d",
++			i, splash_display->cont_splash_enabled,
++			!!dsi_display->bridge);
+ 
+ 		if (!splash_display->cont_splash_enabled) {
++			a52_ackfr_record("SPLCFG209 skip i=%d", i);
+ 			SDE_DEBUG("display->name = %s splash not enabled\n",
+ 					dsi_display->name);
+ 			continue;
+@@ -2833,7 +2845,10 @@
+ 			SDE_DEBUG("encoder name = %s\n", encoder->name);
+ 		}
+ 		memset(&info, 0x0, sizeof(info));
++		a52_ackfr_record("SPLCFG209 info enter i=%d enc=%d", i, !!encoder);
+ 		rc = dsi_display_get_info(NULL, &info, display);
++		a52_ackfr_record("SPLCFG209 info exit i=%d rc=%d conn=%d type=%d",
++			i, rc, info.is_connected, info.display_type);
+ 		if (rc) {
+ 			SDE_ERROR("dsi get_info %d failed\n", i);
+ 			encoder = NULL;
+@@ -2844,6 +2859,8 @@
+ 			info.display_type);
+ 
+ 		if (!encoder) {
++			a52_ackfr_record("SPLCFG209 fail stage=encoder i=%d rc=%d",
++				i, -EINVAL);
+ 			SDE_ERROR("encoder not initialized\n");
+ 			return -EINVAL;
+ 		}
+@@ -2852,10 +2869,14 @@
+ 		encoder->crtc = priv->crtcs[i];
+ 		crtc = encoder->crtc;
+ 		splash_display->encoder =  encoder;
++		a52_ackfr_record("SPLCFG209 objects i=%d crtc=%u enc=%u",
++			i, crtc->base.id, encoder->base.id);
+ 
+ 		SDE_DEBUG("for dsi-display:%d crtc id = %d enc id =%d\n",
+ 				i, crtc->base.id, encoder->base.id);
+ 
++		a52_ackfr_record("SPLCFG209 conn-find enter i=%d enc=%u",
++			i, encoder->base.id);
+ 		mutex_lock(&dev->mode_config.mutex);
+ 		drm_connector_list_iter_begin(dev, &conn_iter);
+ 		drm_for_each_connector_iter(connector, &conn_iter) {
+@@ -2870,18 +2891,28 @@
+ 				break;
+ 		}
+ 		drm_connector_list_iter_end(&conn_iter);
++		a52_ackfr_record("SPLCFG209 conn-find exit i=%d found=%d id=%u",
++			i, !!connector, connector ? connector->base.id : 0);
+ 
+ 		if (!connector) {
++			a52_ackfr_record("SPLCFG209 fail stage=connector i=%d rc=%d",
++				i, -EINVAL);
+ 			SDE_ERROR("connector not initialized\n");
+ 			mutex_unlock(&dev->mode_config.mutex);
+ 			return -EINVAL;
+ 		}
+ 
+ 		if (connector->funcs->fill_modes) {
++			a52_ackfr_record("SPLCFG209 fill enter i=%d conn=%u",
++				i, connector->base.id);
+ 			connector->funcs->fill_modes(connector,
+ 					dev->mode_config.max_width,
+ 					dev->mode_config.max_height);
++			a52_ackfr_record("SPLCFG209 fill exit i=%d empty=%d",
++				i, list_empty(&connector->modes));
+ 		} else {
++			a52_ackfr_record("SPLCFG209 fail stage=fill-api i=%d rc=%d",
++				i, -EINVAL);
+ 			SDE_ERROR("fill_modes api not defined\n");
+ 			mutex_unlock(&dev->mode_config.mutex);
+ 			return -EINVAL;
+@@ -2891,15 +2922,21 @@
+ 		crtc->state->encoder_mask = (1 << drm_encoder_index(encoder));
+ 
+ 		/* currently consider modes[0] as the preferred mode */
++		a52_ackfr_record("SPLCFG209 mode-pick enter i=%d", i);
+ 		drm_mode = list_first_entry(&connector->modes,
+ 				struct drm_display_mode, head);
++		a52_ackfr_record("SPLCFG209 mode i=%d id=%u type=0x%x flags=0x%x",
++			i, drm_mode->base.id, drm_mode->type, drm_mode->flags);
+ 		SDE_DEBUG("drm_mode->name = %s, id=%d, type=0x%x, flags=0x%x\n",
+ 				drm_mode->name, drm_mode->base.id,
+ 				drm_mode->type, drm_mode->flags);
+ 
+ 		/* Update CRTC drm structure */
+ 		crtc->state->active = true;
++		a52_ackfr_record("SPLCFG209 set-mode enter i=%d crtc=%u",
++			i, crtc->base.id);
+ 		rc = drm_atomic_set_mode_for_crtc(crtc->state, drm_mode);
++		a52_ackfr_record("SPLCFG209 set-mode exit i=%d rc=%d", i, rc);
+ 		if (rc) {
+ 			SDE_ERROR("Failed: set mode for crtc. rc = %d\n", rc);
+ 			return rc;
+@@ -2908,23 +2945,34 @@
+ 		drm_mode_copy(&crtc->mode, drm_mode);
+ 
+ 		/* Update encoder structure */
++		a52_ackfr_record("SPLCFG209 enc-caps enter i=%d", i);
+ 		sde_encoder_update_caps_for_cont_splash(encoder,
+ 				splash_display, true);
++		a52_ackfr_record("SPLCFG209 enc-caps exit i=%d", i);
+ 
++		a52_ackfr_record("SPLCFG209 crtc-set enter i=%d", i);
+ 		sde_crtc_update_cont_splash_settings(crtc);
++		a52_ackfr_record("SPLCFG209 crtc-set exit i=%d", i);
+ 
+ 		sde_conn = to_sde_connector(connector);
++		a52_ackfr_record("SPLCFG209 conn-cb enter i=%d has=%d", i,
++				sde_conn && sde_conn->ops.cont_splash_config);
+ 		if (sde_conn && sde_conn->ops.cont_splash_config)
+ 			sde_conn->ops.cont_splash_config(sde_conn->display);
++		a52_ackfr_record("SPLCFG209 conn-cb exit i=%d", i);
+ 
++		a52_ackfr_record("SPLCFG209 planes enter i=%d", i);
+ 		rc = _sde_kms_update_planes_for_cont_splash(sde_kms,
+ 				splash_display, crtc);
++		a52_ackfr_record("SPLCFG209 planes exit i=%d rc=%d", i, rc);
+ 		if (rc) {
+ 			SDE_ERROR("Failed: updating plane status rc=%d\n", rc);
+ 			return rc;
+ 		}
++		a52_ackfr_record("SPLCFG209 display exit i=%d rc=%d", i, rc);
+ 	}
+ 
++	a52_ackfr_record("SPLCFG209 exit rc=%d", rc);
+ 	return rc;
+ }
+ 

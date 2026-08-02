@@ -57,15 +57,11 @@ def patch_smmu_c(text: str) -> str:
     text = replace_one(text, old, new, 'ARM SMMU early-map SCTLR gate')
 
     old = '''static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)\n{\n'''
-    helper = '''static void a52_arm_smmu_apply_dt_domain_attrs(\n\t\tstruct arm_smmu_domain *smmu_domain, struct device *dev)\n{\n\tstruct device_node *np;\n\n\tif (!dev->of_node)\n\t\treturn;\n\n\tnp = of_parse_phandle(dev->of_node, "qcom,iommu-group", 0);\n\tif (!np)\n\t\tnp = of_node_get(dev->of_node);\n\n\tif (of_property_read_bool(np, "qcom,iommu-earlymap"))\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_EARLY_MAP);\n\n\t/* Upstream faults are already non-fatal. Keep the downstream DT/API\n\t * contract explicit so clients can query it without changing policy.\n\t */\n\tif (of_property_match_string(np, "qcom,iommu-faults",\n\t\t\t\t     "non-fatal") >= 0)\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\n\tof_node_put(np);\n}\n\nstatic int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)\n{\n'''
+    helper = '''static void a52_arm_smmu_apply_dt_domain_attrs(\n\t\tstruct arm_smmu_domain *smmu_domain, struct device *dev)\n{\n\tstruct device_node *np;\n\n\tif (!dev->of_node)\n\t\treturn;\n\n\tnp = of_parse_phandle(dev->of_node, "qcom,iommu-group", 0);\n\tif (!np)\n\t\tnp = of_node_get(dev->of_node);\n\n\tif (of_property_read_bool(np, "qcom,iommu-earlymap"))\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_EARLY_MAP);\n\n\t/* Upstream faults are already non-fatal. Keep the downstream DT/API\n\t * contract explicit so clients can query it without changing policy.\n\t */\n\tif (of_property_match_string(np, "qcom,iommu-faults",\n\t\t\t\t     "non-fatal") >= 0)\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\n\tof_node_put(np);\n}\n\nstatic int a52_arm_smmu_attach_fault(struct device *dev,\n\t\tstruct arm_smmu_master_cfg *cfg, struct iommu_fwspec *fwspec)\n{\n\tstruct arm_smmu_device *smmu = cfg->smmu;\n\tint i, idx, ret;\n\n\tret = arm_smmu_rpm_get(smmu);\n\tif (ret < 0)\n\t\treturn ret;\n\n\tmutex_lock(&smmu->stream_map_mutex);\n\tfor_each_cfg_sme(cfg, fwspec, i, idx) {\n\t\tsmmu->s2crs[idx].type = S2CR_TYPE_FAULT;\n\t\tsmmu->s2crs[idx].privcfg = S2CR_PRIVCFG_DEFAULT;\n\t\tsmmu->s2crs[idx].cbndx = 0;\n\t\tarm_smmu_write_s2cr(smmu, idx);\n\t}\n\tmutex_unlock(&smmu->stream_map_mutex);\n\tarm_smmu_rpm_put(smmu);\n\n\ta52_ackfr_record("SMMU secure-streams faulted dev=%s",\n\t\t\tdev_name(dev));\n\treturn 0;\n}\n\nstatic int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)\n{\n'''
     text = replace_one(text, old, helper, 'ARM SMMU DT domain attribute parser')
 
-    old = '''\tif (!fwspec || fwspec->ops != &arm_smmu_ops) {\n\t\tdev_err(dev, "cannot attach to SMMU, is it on the same bus?\\n");\n\t\treturn -ENXIO;\n\t}\n\n\t/*\n'''
-    new = '''\tif (!fwspec || fwspec->ops != &arm_smmu_ops) {\n\t\tdev_err(dev, "cannot attach to SMMU, is it on the same bus?\\n");\n\t\treturn -ENXIO;\n\t}\n\n\t/* Do not let the IOMMU core attach a secure display context as an\n\t * ordinary HLOS-owned DMA domain before the full VMID/page-table\n\t * ownership backend is available. Normal display contexts are unaffected.\n\t */\n\tif (a52_unported_secure_display(dev)) {\n\t\ta52_ackfr_record("SMMU secure-attach blocked dev=%s",\n\t\t\tdev_name(dev));\n\t\treturn -EOPNOTSUPP;\n\t}\n\n\t/*\n'''
-    text = replace_one(text, old, new, 'Secure display default-domain gate')
-
     old = '''\tcfg = dev_iommu_priv_get(dev);\n\tif (!cfg)\n\t\treturn -ENODEV;\n\n\tsmmu = cfg->smmu;\n\n\tret = arm_smmu_rpm_get(smmu);\n'''
-    new = '''\tcfg = dev_iommu_priv_get(dev);\n\tif (!cfg)\n\t\treturn -ENODEV;\n\n\tsmmu = cfg->smmu;\n\ta52_arm_smmu_apply_dt_domain_attrs(smmu_domain, dev);\n\n\tret = arm_smmu_rpm_get(smmu);\n'''
+    new = '''\tcfg = dev_iommu_priv_get(dev);\n\tif (!cfg)\n\t\treturn -ENODEV;\n\n\tsmmu = cfg->smmu;\n\tif (a52_unported_secure_display(dev))\n\t\treturn a52_arm_smmu_attach_fault(dev, cfg, fwspec);\n\n\ta52_arm_smmu_apply_dt_domain_attrs(smmu_domain, dev);\n\n\tret = arm_smmu_rpm_get(smmu);\n'''
     text = replace_one(text, old, new, 'ARM SMMU DT attributes before attach')
 
     old = '''static int arm_smmu_domain_get_attr(struct iommu_domain *domain,\n\t\t\t\t    enum iommu_attr attr, void *data)\n{\n'''
@@ -174,7 +170,9 @@ def self_test(root: Path) -> None:
             'unsigned long\t\t\tattributes;',
             'cfg_to_smmu_domain',
             'a52_unported_secure_display',
-            'SMMU secure-attach blocked dev=%s',
+            'a52_arm_smmu_attach_fault',
+            'S2CR_TYPE_FAULT',
+            'SMMU secure-streams faulted dev=%s',
             'a52_apps_smmu_has_unmanaged_tbus',
             'system suspend blocked until qsmmuv500 TBU support is ported',
             'a52_arm_smmu_apply_dt_domain_attrs',

@@ -9,6 +9,7 @@ on:
       - agent/a52-splash-takeover-trace-v1
     paths:
       - patches/209-splash-takeover-trace.patch
+      - scripts/209_prepare_phase206.sh
       - scripts/209_ci.sh
       - .github/workflows/209-a52-splash-takeover-trace.yml
   pull_request:
@@ -16,6 +17,7 @@ on:
       - agent/a52-splash-takeover-trace-ci-base-v1
     paths:
       - patches/209-splash-takeover-trace.patch
+      - scripts/209_prepare_phase206.sh
       - scripts/209_ci.sh
       - .github/workflows/209-a52-splash-takeover-trace.yml
 
@@ -62,6 +64,7 @@ jobs:
             scripts/208_apply_secure_vmid.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
+          bash -n scripts/209_prepare_phase206.sh
           bash -n scripts/209_ci.sh
 
       - name: Restore pinned GKI source
@@ -77,6 +80,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          bash scripts/209_prepare_phase206.sh
           bash scripts/209_ci.sh
 
       - name: Upload failed diagnostics

@@ -1,0 +1,6 @@
+Phase 205 is a comparison-only post-SMMU audit.
+
+It creates no boot image and changes no kernel behavior.
+The audit must compare the current Phase 204 GKI source and preserved DTB with
+TouchGrass commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7 before another recorder
+or functional display candidate is created.

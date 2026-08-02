@@ -95,6 +95,8 @@ jobs:
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
       - name: Rebuild Phase 204 and run post-SMMU audit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           test '${{ steps.gki-cache.outputs.cache-hit }}' = true

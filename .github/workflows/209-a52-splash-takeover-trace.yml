@@ -4,6 +4,13 @@ run-name: Build Phase 209 splash takeover recorder
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-splash-takeover-trace-v1
+    paths:
+      - patches/209-splash-takeover-trace.patch
+      - scripts/209_ci.sh
+      - .github/workflows/209-a52-splash-takeover-trace.yml
   pull_request:
     branches:
       - agent/a52-splash-takeover-trace-ci-base-v1

@@ -4,12 +4,11 @@ run-name: Build Phase 213 bounded ION transaction trace
 
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches:
-      - agent/a52-ion-transaction-trace-v1
+      - agent/a52-ion-transaction-trace-ci-base-v1
     paths:
-      - scripts/213_payload.py
-      - .github/workflows/213-a52-ion-transaction-trace.yml
+      - scripts/213_trigger.txt
 
 permissions:
   contents: read
@@ -133,5 +132,3 @@ jobs:
           path: artifacts/a52xq-ion-transaction-trace
           if-no-files-found: error
           retention-days: 30
-
-# Dedicated branch trigger; no pull-request fan-out.

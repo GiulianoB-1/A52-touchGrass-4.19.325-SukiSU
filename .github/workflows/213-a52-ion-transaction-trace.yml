@@ -133,3 +133,5 @@ jobs:
           path: artifacts/a52xq-ion-transaction-trace
           if-no-files-found: error
           retention-days: 30
+
+# Dedicated branch trigger; no pull-request fan-out.

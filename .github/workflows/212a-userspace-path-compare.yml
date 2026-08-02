@@ -1,0 +1,97 @@
+name: 212a - Userspace path comparison
+
+run-name: Compare graphics startup paths with TouchGrass
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-drm-core-trace-ci-base-v1
+    paths:
+      - .github/workflows/212a-userspace-path-compare.yml
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Compare process and device-open paths
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          GKI=gki/common
+          TG=workspace/touchgrass-a52xq
+          OUT=artifacts/userspace-path-comparison
+          mkdir -p "$OUT/gki" "$OUT/touchgrass" "$OUT/diffs"
+          test "$(git -C "$GKI" rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          test "$(git -C "$TG" rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+
+          files=(fs/open.c fs/namei.c fs/exec.c kernel/exit.c)
+          for file in "${files[@]}"; do
+            mkdir -p "$OUT/gki/$(dirname "$file")" "$OUT/touchgrass/$(dirname "$file")" "$OUT/diffs/$(dirname "$file")"
+            cp "$GKI/$file" "$OUT/gki/$file"
+            cp "$TG/$file" "$OUT/touchgrass/$file"
+            diff -u "$OUT/touchgrass/$file" "$OUT/gki/$file" > "$OUT/diffs/$file.diff" || true
+          done
+
+          {
+            echo "gki_commit=$GKI_COMMON_SHA"
+            echo "touchgrass_commit=$TOUCHGRASS_COMMIT"
+            echo
+            for file in "${files[@]}"; do
+              echo "== $file =="
+              sha256sum "$OUT/touchgrass/$file" "$OUT/gki/$file"
+              echo "hunks=$(grep -c '^@@' "$OUT/diffs/$file.diff" || true)"
+              echo "changed_lines=$(grep -Ec '^[+-][^+-]' "$OUT/diffs/$file.diff" || true)"
+              echo
+            done
+            echo "== GKI candidate anchors =="
+            grep -nE 'do_sys_openat2|do_filp_open|path_openat|do_execveat_common|begin_new_exec|do_exit' \
+              "$OUT/gki/fs/open.c" "$OUT/gki/fs/namei.c" "$OUT/gki/fs/exec.c" "$OUT/gki/kernel/exit.c" || true
+            echo
+            echo "== TouchGrass candidate anchors =="
+            grep -nE 'do_sys_open|do_filp_open|path_openat|do_execveat_common|begin_new_exec|do_exit' \
+              "$OUT/touchgrass/fs/open.c" "$OUT/touchgrass/fs/namei.c" "$OUT/touchgrass/fs/exec.c" "$OUT/touchgrass/kernel/exit.c" || true
+          } | tee "$OUT/report.txt"
+          test -s "$OUT/report.txt"
+
+      - name: Upload comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: userspace-path-comparison
+          path: artifacts/userspace-path-comparison
+          retention-days: 7

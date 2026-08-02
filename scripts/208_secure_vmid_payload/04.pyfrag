@@ -1,0 +1,72 @@
+\t\tlist_del(&chunk->list);
+\t\tkfree(chunk);
+\t}
+}
+
+'''
+
+
+def patch_smmu_c(text: str) -> str:
+    if 'arm_smmu_secure_pool_chunk' in text:
+        return text
+
+    old = '#include <linux/slab.h>\n#include <linux/a52_ack_secure_flight_recorder.h>\n'
+    new = '#include <linux/slab.h>\n#include <linux/a52_ack_secure_flight_recorder.h>\n#include <soc/qcom/secure_buffer.h>\n'
+    text = replace_one(text, old, new, 'ARM SMMU secure buffer include')
+
+    old = '''static bool a52_unported_secure_display(const struct device *dev)\n{\n\treturn dev && dev->of_node &&\n\t\t(of_device_is_compatible(dev->of_node, "qcom,smmu_sde_sec") ||\n\t\t of_device_is_compatible(dev->of_node, "qcom,smmu_sde_nrt_sec"));\n}\n\n'''
+    text = replace_one(text, old, '', 'remove Phase206 secure display fault predicate')
+
+    old = '''static struct arm_smmu_domain *cfg_to_smmu_domain(struct arm_smmu_cfg *cfg)\n{\n\treturn container_of(cfg, struct arm_smmu_domain, cfg);\n}\n\n'''
+    text = replace_one(text, old, old + SECURE_HELPERS,
+                       'ARM SMMU secure VMID helper implementation')
+
+    old = '''\tpgtbl_cfg = (struct io_pgtable_cfg) {\n\t\t.pgsize_bitmap\t= smmu->pgsize_bitmap,\n\t\t.ias\t\t= ias,\n\t\t.oas\t\t= oas,\n\t\t.coherent_walk\t= smmu->features & ARM_SMMU_FEAT_COHERENT_WALK,\n\t\t.tlb\t\t= smmu_domain->flush_ops,\n\t\t.iommu_dev\t= smmu->dev,\n\t};\n'''
+    new = '''\tpgtbl_cfg = (struct io_pgtable_cfg) {\n\t\t.pgsize_bitmap\t= smmu->pgsize_bitmap,\n\t\t.ias\t\t= ias,\n\t\t.oas\t\t= oas,\n\t\t.coherent_walk\t= smmu->features & ARM_SMMU_FEAT_COHERENT_WALK,\n\t\t.tlb\t\t= smmu_domain->flush_ops,\n\t\t.iommu_dev\t= smmu->dev,\n\t};\n\tif (arm_smmu_has_secure_vmid(smmu_domain)) {\n\t\tpgtbl_cfg.alloc_pages_exact = arm_smmu_alloc_pages_exact;\n\t\tpgtbl_cfg.free_pages_exact = arm_smmu_free_pages_exact;\n\t}\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure allocator selection')
+
+    old = '''\tpgtbl_ops = alloc_io_pgtable_ops(fmt, &pgtbl_cfg, smmu_domain);\n\tif (!pgtbl_ops) {\n\t\tret = -ENOMEM;\n\t\tgoto out_clear_smmu;\n\t}\n\n\t/* Update the domain's page sizes to reflect the page table format */\n'''
+    new = '''\tpgtbl_ops = alloc_io_pgtable_ops(fmt, &pgtbl_cfg, smmu_domain);\n\tif (!pgtbl_ops) {\n\t\tret = -ENOMEM;\n\t\tarm_smmu_secure_domain_lock(smmu_domain);\n\t\tarm_smmu_secure_pool_destroy(smmu_domain);\n\t\tarm_smmu_unassign_table(smmu_domain);\n\t\tarm_smmu_secure_domain_unlock(smmu_domain);\n\t\tgoto out_clear_smmu;\n\t}\n\n\tarm_smmu_secure_domain_lock(smmu_domain);\n\tret = arm_smmu_assign_table(smmu_domain);\n\tif (ret) {\n\t\tfree_io_pgtable_ops(pgtbl_ops);\n\t\tarm_smmu_secure_pool_destroy(smmu_domain);\n\t\tarm_smmu_unassign_table(smmu_domain);\n\t}\n\tarm_smmu_secure_domain_unlock(smmu_domain);\n\tif (ret)\n\t\tgoto out_clear_smmu;\n\n\t/* Update the domain's page sizes to reflect the page table format */\n'''
+    text = replace_one(text, old, new, 'ARM SMMU initial secure table assignment')
+
+    old = '''\tfree_io_pgtable_ops(smmu_domain->pgtbl_ops);\n\t__arm_smmu_free_bitmap(smmu->context_map, cfg->cbndx);\n'''
+    new = '''\tarm_smmu_secure_domain_lock(smmu_domain);\n\tfree_io_pgtable_ops(smmu_domain->pgtbl_ops);\n\tarm_smmu_secure_pool_destroy(smmu_domain);\n\tarm_smmu_unassign_table(smmu_domain);\n\tarm_smmu_secure_domain_unlock(smmu_domain);\n\t__arm_smmu_free_bitmap(smmu->context_map, cfg->cbndx);\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure domain destruction')
+
+    old = '''\tmutex_init(&smmu_domain->init_mutex);\n\tspin_lock_init(&smmu_domain->cb_lock);\n\n\treturn &smmu_domain->domain;\n'''
+    new = '''\tsmmu_domain->secure_vmid = VMID_INVAL;\n\tINIT_LIST_HEAD(&smmu_domain->pte_info_list);\n\tINIT_LIST_HEAD(&smmu_domain->unassign_list);\n\tINIT_LIST_HEAD(&smmu_domain->secure_pool_list);\n\tmutex_init(&smmu_domain->assign_lock);\n\tmutex_init(&smmu_domain->init_mutex);\n\tspin_lock_init(&smmu_domain->cb_lock);\n\n\treturn &smmu_domain->domain;\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure domain initialization')
+
+    old = '''\tif (of_property_match_string(np, "qcom,iommu-faults",\n\t\t\t\t     "non-fatal") >= 0)\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\n\tof_node_put(np);\n}\n\nstatic int a52_arm_smmu_attach_fault(struct device *dev,\n\t\tstruct arm_smmu_master_cfg *cfg, struct iommu_fwspec *fwspec)\n{\n\tstruct arm_smmu_device *smmu = cfg->smmu;\n\tint i, idx;\n\n\t/* The caller has already powered the SMMU and initialized the domain.\n\t * Keep valid DMA/IOMMU metadata, but route every secure display stream\n\t * to the hardware fault type until VMID ownership is implemented.\n\t */\n\tmutex_lock(&smmu->stream_map_mutex);\n\tfor_each_cfg_sme(cfg, fwspec, i, idx) {\n\t\tsmmu->s2crs[idx].type = S2CR_TYPE_FAULT;\n\t\tsmmu->s2crs[idx].privcfg = S2CR_PRIVCFG_DEFAULT;\n\t\tsmmu->s2crs[idx].cbndx = 0;\n\t\tarm_smmu_write_s2cr(smmu, idx);\n\t}\n\tmutex_unlock(&smmu->stream_map_mutex);\n\n\ta52_ackfr_record("SMMU secure-streams faulted dev=%s",\n\t\t\tdev_name(dev));\n\treturn 0;\n}\n\n'''
+    new = '''\tif (of_property_match_string(np, "qcom,iommu-faults",\n\t\t\t\t     "non-fatal") >= 0)\n\t\tsmmu_domain->attributes |= BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\n\tif (of_property_read_u32(np, "qcom,iommu-vmid",\n\t\t\t\t &smmu_domain->secure_vmid))\n\t\tsmmu_domain->secure_vmid = VMID_INVAL;\n\n\tof_node_put(np);\n}\n\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure DT VMID and fault removal')
+
+    old = '''\t/* Looks ok, so add the device to the domain */\n\tif (a52_unported_secure_display(dev))\n\t\tret = a52_arm_smmu_attach_fault(dev, cfg, fwspec);\n\telse\n\t\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n'''
+    new = '''\t/* Looks ok, so add the device to the domain. Secure display uses the\n\t * same translating stream path after its page tables are assigned to\n\t * HLOS and the DT-provided secure VMID.\n\t */\n\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure translating stream attach')
+
+    old = '''\tarm_smmu_rpm_get(smmu);\n\tret = ops->map_pages(ops, iova, paddr, pgsize, pgcount, prot, gfp, mapped);\n\tarm_smmu_rpm_put(smmu);\n\n\treturn ret;\n}\n'''
+    new = '''\tarm_smmu_rpm_get(smmu);\n\tarm_smmu_secure_domain_lock(to_smmu_domain(domain));\n\tret = ops->map_pages(ops, iova, paddr, pgsize, pgcount, prot, gfp, mapped);\n\t{\n\t\tint assign_ret = arm_smmu_assign_table(to_smmu_domain(domain));\n\n\t\t/* A failed map may still allocate intermediate tables. Always\n\t\t * transfer those pages, but preserve the original map failure.\n\t\t */\n\t\tif (!ret)\n\t\t\tret = assign_ret;\n\t}\n\tarm_smmu_secure_domain_unlock(to_smmu_domain(domain));\n\tarm_smmu_rpm_put(smmu);\n\n\treturn ret;\n}\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure map assignment')
+
+    old = '''\tarm_smmu_rpm_get(smmu);\n\tret = ops->unmap_pages(ops, iova, pgsize, pgcount, iotlb_gather);\n\tarm_smmu_rpm_put(smmu);\n\n\treturn ret;\n}\n'''
+    new = '''\tarm_smmu_rpm_get(smmu);\n\tarm_smmu_secure_domain_lock(to_smmu_domain(domain));\n\tret = ops->unmap_pages(ops, iova, pgsize, pgcount, iotlb_gather);\n\tarm_smmu_assign_table(to_smmu_domain(domain));\n\tarm_smmu_unassign_table(to_smmu_domain(domain));\n\tarm_smmu_secure_domain_unlock(to_smmu_domain(domain));\n\tarm_smmu_rpm_put(smmu);\n\n\treturn ret;\n}\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure unmap lifecycle')
+
+    old = '''\tswitch (attr) {\n\tcase DOMAIN_ATTR_EARLY_MAP:\n\tcase DOMAIN_ATTR_NON_FATAL_FAULTS:\n\t\t*(int *)data = !!(smmu_domain->attributes & BIT(attr));\n\t\treturn 0;\n\tdefault:\n'''
+    new = '''\tswitch (attr) {\n\tcase DOMAIN_ATTR_EARLY_MAP:\n\tcase DOMAIN_ATTR_NON_FATAL_FAULTS:\n\t\t*(int *)data = !!(smmu_domain->attributes & BIT(attr));\n\t\treturn 0;\n\tcase DOMAIN_ATTR_SECURE_VMID:\n\t\t*(int *)data = smmu_domain->secure_vmid;\n\t\treturn 0;\n\tdefault:\n'''
+    text = replace_one(text, old, new, 'ARM SMMU secure VMID get attr')
+
+    old = '''\tcase DOMAIN_ATTR_NON_FATAL_FAULTS:\n\t\tif (*(int *)data)\n\t\t\tsmmu_domain->attributes |=\n\t\t\t\tBIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\t\telse\n\t\t\tsmmu_domain->attributes &=\n\t\t\t\t~BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\t\tgoto out_unlock;\n\tdefault:\n'''
+    new = '''\tcase DOMAIN_ATTR_NON_FATAL_FAULTS:\n\t\tif (*(int *)data)\n\t\t\tsmmu_domain->attributes |=\n\t\t\t\tBIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\t\telse\n\t\t\tsmmu_domain->attributes &=\n\t\t\t\t~BIT(DOMAIN_ATTR_NON_FATAL_FAULTS);\n\t\tgoto out_unlock;\n\tcase DOMAIN_ATTR_SECURE_VMID:\n\t\tif (smmu_domain->smmu) {\n\t\t\tret = -EBUSY;\n\t\t} else if (smmu_domain->secure_vmid != VMID_INVAL) {\n\t\t\tret = -EEXIST;\n\t\t} else {\n\t\t\tsmmu_domain->secure_vmid = *(int *)data;\n\t\t}\n\t\tgoto out_unlock;\n\tdefault:\n'''
+    return replace_one(text, old, new, 'ARM SMMU secure VMID set attr')
+
+
+def patch_msm_smmu(text: str) -> str:
+    if 'secure-domain unavailable' not in text:
+        return text
+    start = text.index('\t/*\n\t * TouchGrass secure domains require VMID ownership transfer')
+    end_marker = '\n\tsmmu = kzalloc(sizeof(*smmu), GFP_KERNEL);'
+    end = text.index(end_marker, start)
+    return text[:start] + '\t/* Secure and non-secure display domains now share the validated\n\t * ARM SMMU path. Secure page tables are assigned using qcom,iommu-vmid.\n\t */\n' + text[end:]
+

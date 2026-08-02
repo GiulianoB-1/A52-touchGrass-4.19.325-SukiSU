@@ -1,0 +1,70 @@
+
+def apply(root: Path) -> None:
+    funcs = {
+        IO_PGTABLE_H: patch_io_pgtable_h,
+        IO_PGTABLE_ARM: patch_io_pgtable_arm,
+        SMMU_H: patch_smmu_h,
+        SMMU_C: patch_smmu_c,
+        MSM_SMMU_C: patch_msm_smmu,
+    }
+    for rel, func in funcs.items():
+        path = root / rel
+        text = path.read_text()
+        path.write_text(func(text))
+
+
+def self_test(root: Path) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        dst = Path(td)
+        for rel in FILES:
+            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / rel, dst / rel)
+        apply(dst)
+        once = {rel: (dst / rel).read_bytes() for rel in FILES}
+        apply(dst)
+        twice = {rel: (dst / rel).read_bytes() for rel in FILES}
+        if once != twice:
+            raise SystemExit('Phase208 patcher is not idempotent')
+        combined = '\n'.join((dst / rel).read_text() for rel in FILES)
+        required = (
+            'alloc_pages_exact)(void *cookie',
+            'cfg->alloc_pages_exact',
+            'arm_smmu_secure_pool_chunk',
+            'arm_smmu_secure_domain_lock',
+            'arm_smmu_unassign_pages',
+            'A failed map may still allocate intermediate tables',
+            'hyp_assign_phys',
+            'qcom,iommu-vmid',
+            'DOMAIN_ATTR_SECURE_VMID',
+            'ret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);',
+        )
+        for marker in required:
+            if marker not in combined:
+                raise SystemExit(f'missing Phase208 marker: {marker}')
+        forbidden = (
+            'SMMU secure-domain unavailable',
+            'SMMU secure-streams faulted',
+            'a52_unported_secure_display',
+            'a52_arm_smmu_attach_fault',
+            'mutex_lock(&to_smmu_domain(domain)->assign_lock)',
+        )
+        for marker in forbidden:
+            if marker in combined:
+                raise SystemExit(f'forbidden Phase206 containment remains: {marker}')
+    print('Phase208 secure VMID patcher self-test: PASS')
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument('--root', type=Path, required=True)
+    p.add_argument('--self-test', action='store_true')
+    args = p.parse_args()
+    if args.self_test:
+        self_test(args.root)
+    else:
+        apply(args.root)
+        print('Phase208 secure VMID lifecycle applied')
+
+
+if __name__ == '__main__':
+    main()

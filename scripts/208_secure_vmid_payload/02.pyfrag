@@ -1,0 +1,72 @@
+\tlist_add_tail(&info->entry, &smmu_domain->pte_info_list);
+\treturn 0;
+}
+
+static void arm_smmu_unprepare_pgtable(struct arm_smmu_domain *smmu_domain,
+\t\t\t\t       void *addr, size_t size)
+{
+\tstruct arm_smmu_pte_info *info;
+
+\tinfo = kzalloc(sizeof(*info), GFP_ATOMIC);
+\tif (!info)
+\t\treturn;
+\tinfo->virt_addr = addr;
+\tinfo->size = size;
+\tlist_add_tail(&info->entry, &smmu_domain->unassign_list);
+}
+
+static void *arm_smmu_alloc_pages_exact(void *cookie, size_t size, gfp_t gfp)
+{
+\tstruct arm_smmu_domain *smmu_domain = cookie;
+\tvoid *pages;
+
+\tif (!arm_smmu_has_secure_vmid(smmu_domain))
+\t\treturn alloc_pages_exact(size, gfp);
+
+\tpages = arm_smmu_secure_pool_remove(smmu_domain, size);
+\tif (pages)
+\t\treturn pages;
+
+\tpages = alloc_pages_exact(size, gfp);
+\tif (pages && arm_smmu_prepare_pgtable(smmu_domain, pages, size)) {
+\t\tfree_pages_exact(pages, size);
+\t\treturn NULL;
+\t}
+\treturn pages;
+}
+
+static bool arm_smmu_forget_unassigned_pgtable(
+\t\tstruct arm_smmu_domain *smmu_domain, void *addr);
+
+static void arm_smmu_free_pages_exact(void *cookie, void *virt, size_t size)
+{
+\tstruct arm_smmu_domain *smmu_domain = cookie;
+
+\tif (!arm_smmu_has_secure_vmid(smmu_domain)) {
+\t\tfree_pages_exact(virt, size);
+\t\treturn;
+\t}
+\tif (arm_smmu_secure_pool_add(smmu_domain, virt, size)) {
+\t\t/* A page still on pte_info_list never left HLOS. Free it
+\t\t * directly rather than issuing an invalid two-owner unassign.
+\t\t */
+\t\tif (arm_smmu_forget_unassigned_pgtable(smmu_domain, virt))
+\t\t\tfree_pages_exact(virt, size);
+\t\telse
+\t\t\tarm_smmu_unprepare_pgtable(smmu_domain, virt, size);
+\t}
+}
+
+static int arm_smmu_assign_table(struct arm_smmu_domain *smmu_domain)
+{
+\tu32 source_vmid = VMID_HLOS;
+\tint dest_vmids[2] = { VMID_HLOS, smmu_domain->secure_vmid };
+\tint dest_perms[2] = { PERM_READ | PERM_WRITE, PERM_READ };
+\tstruct arm_smmu_pte_info *info, *tmp;
+\tint ret = 0;
+
+\tif (!arm_smmu_has_secure_vmid(smmu_domain))
+\t\treturn 0;
+
+\tlist_for_each_entry_safe(info, tmp, &smmu_domain->pte_info_list, entry) {
+\t\tret = hyp_assign_phys(virt_to_phys(info->virt_addr), info->size,

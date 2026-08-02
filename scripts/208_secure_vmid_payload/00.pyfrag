@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import argparse
+import shutil
+import tempfile
+
+IO_PGTABLE_H = Path('include/linux/io-pgtable.h')
+IO_PGTABLE_ARM = Path('drivers/iommu/io-pgtable-arm.c')
+SMMU_H = Path('drivers/iommu/arm/arm-smmu/arm-smmu.h')
+SMMU_C = Path('drivers/iommu/arm/arm-smmu/arm-smmu.c')
+MSM_SMMU_C = Path('drivers/a52_display/msm/msm_smmu.c')
+FILES = (IO_PGTABLE_H, IO_PGTABLE_ARM, SMMU_H, SMMU_C, MSM_SMMU_C)
+
+
+def replace_one(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected exactly one match, found {count}')
+    return text.replace(old, new, 1)
+
+
+def patch_io_pgtable_h(text: str) -> str:
+    if 'alloc_pages_exact)(void *cookie' in text:
+        return text
+    old = '''\tconst struct iommu_flush_ops\t*tlb;\n\tstruct device\t\t\t*iommu_dev;\n\n\t/* Low-level data specific to the table format */\n'''
+    new = '''\tconst struct iommu_flush_ops\t*tlb;\n\tstruct device\t\t\t*iommu_dev;\n\n\t/* Optional allocator hooks used by secure IOMMU domains. */\n\tvoid *(*alloc_pages_exact)(void *cookie, size_t size, gfp_t gfp);\n\tvoid (*free_pages_exact)(void *cookie, void *virt, size_t size);\n\n\t/* Low-level data specific to the table format */\n'''
+    return replace_one(text, old, new, 'io-pgtable secure allocator hooks')
+
+
+def patch_io_pgtable_arm(text: str) -> str:
+    if 'cfg->alloc_pages_exact' in text:
+        return text
+
+    old = '''static void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp,\n\t\t\t\t    struct io_pgtable_cfg *cfg)\n{\n\tstruct device *dev = cfg->iommu_dev;\n\tint order = get_order(size);\n\tstruct page *p;\n\tdma_addr_t dma;\n\tvoid *pages;\n\n\tVM_BUG_ON((gfp & __GFP_HIGHMEM));\n\tp = alloc_pages_node(dev ? dev_to_node(dev) : NUMA_NO_NODE,\n\t\t\t     gfp | __GFP_ZERO, order);\n\tif (!p)\n\t\treturn NULL;\n\n\tpages = page_address(p);\n\tif (!cfg->coherent_walk) {\n\t\tdma = dma_map_single(dev, pages, size, DMA_TO_DEVICE);\n\t\tif (dma_mapping_error(dev, dma))\n\t\t\tgoto out_free;\n\t\t/*\n\t\t * We depend on the IOMMU being able to work with any physical\n\t\t * address directly, so if the DMA layer suggests otherwise by\n\t\t * translating or truncating them, that bodes very badly...\n\t\t */\n\t\tif (dma != virt_to_phys(pages))\n\t\t\tgoto out_unmap;\n\t}\n\n\treturn pages;\n\n out_unmap:\n\tdev_err(dev, "Cannot accommodate DMA translation for IOMMU page tables\\n");\n\tdma_unmap_single(dev, dma, size, DMA_TO_DEVICE);\n out_free:\n\t__free_pages(p, order);\n\treturn NULL;\n}\n\nstatic void __arm_lpae_free_pages(void *pages, size_t size,\n\t\t\t\t  struct io_pgtable_cfg *cfg)\n{\n\tif (!cfg->coherent_walk)\n\t\tdma_unmap_single(cfg->iommu_dev, __arm_lpae_dma_addr(pages),\n\t\t\t\t size, DMA_TO_DEVICE);\n\tfree_pages((unsigned long)pages, get_order(size));\n}\n'''.replace('\n out_', '\nout_')
+    new = '''static void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp,\n\t\t\t\t    struct io_pgtable_cfg *cfg, void *cookie)\n{\n\tstruct device *dev = cfg->iommu_dev;\n\tint order = get_order(size);\n\tdma_addr_t dma;\n\tvoid *pages;\n\n\tVM_BUG_ON((gfp & __GFP_HIGHMEM));\n\tif (cfg->alloc_pages_exact) {\n\t\tpages = cfg->alloc_pages_exact(cookie, size, gfp | __GFP_ZERO);\n\t} else {\n\t\tstruct page *p;\n\n\t\tp = alloc_pages_node(dev ? dev_to_node(dev) : NUMA_NO_NODE,\n\t\t\t\t     gfp | __GFP_ZERO, order);\n\t\tpages = p ? page_address(p) : NULL;\n\t}\n\tif (!pages)\n\t\treturn NULL;\n\n\tif (!cfg->coherent_walk) {\n\t\tdma = dma_map_single(dev, pages, size, DMA_TO_DEVICE);\n\t\tif (dma_mapping_error(dev, dma))\n\t\t\tgoto out_free;\n\t\t/*\n\t\t * We depend on the IOMMU being able to work with any physical\n\t\t * address directly, so if the DMA layer suggests otherwise by\n\t\t * translating or truncating them, that bodes very badly...\n\t\t */\n\t\tif (dma != virt_to_phys(pages))\n\t\t\tgoto out_unmap;\n\t}\n\n\treturn pages;\n\n out_unmap:\n\tdev_err(dev, "Cannot accommodate DMA translation for IOMMU page tables\\n");\n\tdma_unmap_single(dev, dma, size, DMA_TO_DEVICE);\n out_free:\n\tif (cfg->free_pages_exact)\n\t\tcfg->free_pages_exact(cookie, pages, size);\n\telse\n\t\tfree_pages((unsigned long)pages, order);\n\treturn NULL;\n}\n\nstatic void __arm_lpae_free_pages(void *pages, size_t size,\n\t\t\t\t  struct io_pgtable_cfg *cfg, void *cookie)\n{\n\tif (!cfg->coherent_walk)\n\t\tdma_unmap_single(cfg->iommu_dev, __arm_lpae_dma_addr(pages),\n\t\t\t\t size, DMA_TO_DEVICE);\n\tif (cfg->free_pages_exact)\n\t\tcfg->free_pages_exact(cookie, pages, size);\n\telse\n\t\tfree_pages((unsigned long)pages, get_order(size));\n}\n'''.replace('\n out_', '\nout_')
+    text = replace_one(text, old, new, 'io-pgtable ARM allocator implementation')
+
+    replacements = [
+        ('__arm_lpae_alloc_pages(tblsz, gfp, cfg)',
+         '__arm_lpae_alloc_pages(tblsz, gfp, cfg, data->iop.cookie)'),
+        ('__arm_lpae_free_pages(cptep, tblsz, cfg)',
+         '__arm_lpae_free_pages(cptep, tblsz, cfg, data->iop.cookie)'),
+        ('__arm_lpae_free_pages(start, table_size, &data->iop.cfg)',
+         '__arm_lpae_free_pages(start, table_size, &data->iop.cfg,\n\t\t\t      data->iop.cookie)'),
+        ('__arm_lpae_alloc_pages(tablesz, GFP_ATOMIC, cfg)',
+         '__arm_lpae_alloc_pages(tablesz, GFP_ATOMIC, cfg,\n\t\t\t\t      data->iop.cookie)'),
+        ('__arm_lpae_free_pages(tablep, tablesz, cfg)',
+         '__arm_lpae_free_pages(tablep, tablesz, cfg, data->iop.cookie)'),
+        ('__arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data),\n\t\t\t\t\t   GFP_KERNEL, cfg)',
+         '__arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data),\n\t\t\t\t\t   GFP_KERNEL, cfg, cookie)'),
+        ('__arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data), GFP_KERNEL,\n\t\t\t\t\t   cfg)',
+         '__arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data), GFP_KERNEL,\n\t\t\t\t\t   cfg, cookie)'),
+    ]
+    for old_call, new_call in replacements:
+        if old_call in text:
+            text = text.replace(old_call, new_call)
+    if text.count('__arm_lpae_alloc_pages(') != 6:
+        raise SystemExit('io-pgtable ARM: unexpected allocator call count')
+    if text.count('__arm_lpae_free_pages(') != 4:
+        raise SystemExit('io-pgtable ARM: unexpected free call count')
+    return text
+
+
+def patch_smmu_h(text: str) -> str:
+    if 'secure_pool_list' in text:
+        return text
+    old = '''#include <linux/irqreturn.h>\n#include <linux/mutex.h>\n'''
+    new = '''#include <linux/irqreturn.h>\n#include <linux/list.h>\n#include <linux/mutex.h>\n'''
+    text = replace_one(text, old, new, 'ARM SMMU list include')
+    old = '''struct arm_smmu_domain {\n\tstruct arm_smmu_device\t\t*smmu;\n'''
+    new = '''struct arm_smmu_pte_info {\n\tvoid\t\t\t\t*virt_addr;\n\tsize_t\t\t\t\tsize;\n\tstruct list_head\t\tentry;\n};\n\nstruct arm_smmu_domain {\n\tstruct arm_smmu_device\t\t*smmu;\n'''
+    text = replace_one(text, old, new, 'ARM SMMU PTE tracking type')

@@ -1,0 +1,167 @@
+name: 178 - A52 protected display initialization recorder
+
+run-name: Build triple-copy Reed-Solomon display initialization recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-display-init-recorder-fec-v1
+    paths:
+      - .github/workflows/178-a52-display-init-recorder-fec.yml
+      - scripts/178_ci_display_init_fec.sh
+      - scripts/178_apply_a52_display_init_recorder_fec.py
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/38_repack_a52_p1_boot.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/178-a52-display-init-recorder-fec.yml
+      - scripts/178_ci_display_init_fec.sh
+      - scripts/178_apply_a52_display_init_recorder_fec.py
+      - patches/177-a52-display-init-recorder-plain.patch
+      - scripts/38_repack_a52_p1_boot.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-display-init-recorder-fec-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Compile and package protected display recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out protected recorder branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Enable recorder compile preflight
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/178_ci_display_init_fec.sh')
+          text = path.read_text()
+          text = text.replace(
+              'make -k -C gki/common O="$BUILD"',
+              'make -C gki/common O="$BUILD"',
+              1,
+          )
+          marker = "grep -Fxq 'CONFIG_REED_SOLOMON_DEC8=y' \"$BUILD/.config\"\n\nset +e\n"
+          preflight = """grep -Fxq 'CONFIG_REED_SOLOMON_DEC8=y' "$BUILD/.config"
+
+          make -C gki/common O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \\
+            KCFLAGS=-Wno-error=frame-larger-than \\
+            fs/pstore/ram.o \\
+            drivers/a52_secure/a52_ack_secure_flight_recorder.o \\
+            > "$OUT/logs/recorder-object-preflight.log" 2>&1
+          grep -Fq 'CC      fs/pstore/ram.o' \\
+            "$OUT/logs/recorder-object-preflight.log"
+          grep -Fq 'CC      drivers/a52_secure/a52_ack_secure_flight_recorder.o' \\
+            "$OUT/logs/recorder-object-preflight.log"
+
+          set +e
+          """
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one preflight insertion marker, found {text.count(marker)}')
+          text = text.replace(marker, preflight, 1)
+
+          audit_old = '  grep -Fq "$object" "$OUT/logs/compile.log"\ndone\n'
+          audit_new = '''  if ! grep -Fq "$object" "$OUT/logs/compile.log"; then
+            grep -Fq "$object" "$OUT/logs/recorder-object-preflight.log"
+          fi
+          done
+          '''
+          if text.count(audit_old) != 1:
+              raise SystemExit(f'expected one object audit block, found {text.count(audit_old)}')
+          text = text.replace(audit_old, audit_new, 1)
+
+          if 'make -k -C gki/common' in text:
+              raise SystemExit('make -k remains after fail-fast rewrite')
+          path.write_text(text)
+
+          patcher_path = Path('scripts/178_apply_a52_display_init_recorder_fec.py')
+          patcher = patcher_path.read_text()
+          start_marker = (
+              '    declaration = """extern unsigned int '
+              'a52_ackfr_ramoops_write_record(const void *data,'
+          )
+          start = patcher.find(start_marker)
+          end = patcher.find('    core = r"""', start)
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit('fragile deferred RS declaration block not found')
+          robust = (
+              '    declaration_start = text.find(\n'
+              '        "extern unsigned int a52_ackfr_ramoops_write_record(const void *data,"\n'
+              '    )\n'
+              '    if declaration_start < 0:\n'
+              '        raise SystemExit("deferred RS declaration start missing")\n'
+              '    declaration_end = text.find(";", declaration_start)\n'
+              '    if declaration_end < 0:\n'
+              '        raise SystemExit("deferred RS declaration terminator missing")\n'
+              '    declaration_end += 1\n'
+              '    text = (\n'
+              '        text[:declaration_end]\n'
+              '        + "\\nextern int __init a52_ackfr_ramoops_enable_rs(void);"\n'
+              '        + text[declaration_end:]\n'
+              '    )\n'
+          )
+          patcher = patcher[:start] + robust + patcher[end:]
+
+          writer_old = (
+              '        text, "unsigned int a52_ackfr_ramoops_write_record", '
+              'write_source\n'
+          )
+          writer_new = (
+              '        text, "unsigned int a52_ackfr_ramoops_write_record'
+              '(const void *data, size_t len,", write_source\n'
+          )
+          if patcher.count(writer_old) != 1:
+              raise SystemExit(
+                  f'expected one broad writer matcher, found {patcher.count(writer_old)}'
+              )
+          patcher = patcher.replace(writer_old, writer_new, 1)
+          patcher_path.write_text(patcher)
+          PY
+
+      - name: Build and audit protected display recorder candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: bash scripts/178_ci_display_init_fec.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-init-recorder-fec-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload protected display recorder candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-display-init-recorder-fec-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: error
+          retention-days: 30

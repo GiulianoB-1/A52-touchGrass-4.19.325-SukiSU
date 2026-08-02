@@ -1,0 +1,80 @@
+name: 180 - A52 record construction checkpoints
+
+run-name: Build A52 record construction checkpoint image
+
+# Hardware capture 20260801_110808 stopped after event classification.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-display-init-recorder-fec-v1
+    paths:
+      - .github/workflows/180-a52-record-construction-checkpoints.yml
+      - scripts/180_instrument_a52_record_construction.py
+      - scripts/181_fix_construction_crc_matcher.py
+  pull_request:
+    branches:
+      - agent/a52-display-init-recorder-v1
+    paths:
+      - .github/workflows/180-a52-record-construction-checkpoints.yml
+      - scripts/180_instrument_a52_record_construction.py
+      - scripts/181_fix_construction_crc_matcher.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-record-construction-checkpoints-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  SOURCE_ARTIFACT_ID: '8681171875'
+  SOURCE_ARTIFACT_SHA256: c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11
+
+jobs:
+  build-package:
+    name: Compile and package record construction checkpoints
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out checkpoint branch
+        uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Apply record construction checkpoints
+        run: |
+          python3 scripts/180_instrument_a52_record_construction.py
+          python3 scripts/181_fix_construction_crc_matcher.py
+
+      - name: Build and audit checkpoint candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GKI_CACHE_HIT: ${{ steps.gki-cache.outputs.cache-hit }}
+        run: bash scripts/178_ci_display_init_fec.sh
+
+      - name: Upload failed checkpoint diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-record-construction-checkpoints-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload checkpoint candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-record-construction-checkpoints-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-display-init-recorder-fec
+          if-no-files-found: error
+          retention-days: 30

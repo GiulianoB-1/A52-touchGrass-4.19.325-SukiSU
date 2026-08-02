@@ -1,0 +1,9 @@
+Phase 213 bounded ION transaction trace
+
+Hardware evidence basis:
+- Phase 212 published card0 and renderD128 successfully.
+- Userspace saw /sys/class/drm/card0.
+- No DRM client open or atomic commit occurred.
+- The next observed boundary was repeated successful /dev/ion opens.
+
+This file triggers only the isolated Phase 213 workflow.

@@ -12,6 +12,14 @@ on:
       - scripts/210_make_rs48_decoders.py
       - scripts/210_ci.sh
       - .github/workflows/210-a52-first-atomic-rs48.yml
+  pull_request:
+    branches:
+      - agent/a52-first-atomic-rs48-ci-base-v1
+    paths:
+      - scripts/210_apply_first_atomic_rs48.py
+      - scripts/210_make_rs48_decoders.py
+      - scripts/210_ci.sh
+      - .github/workflows/210-a52-first-atomic-rs48.yml
 
 permissions:
   contents: read
@@ -123,4 +131,4 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-# Push-trigger synchronization commit.
+# Trusted Phase 210 workflow shared by the CI base and feature branches.

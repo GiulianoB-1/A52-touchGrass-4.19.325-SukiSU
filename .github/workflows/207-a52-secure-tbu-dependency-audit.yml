@@ -1,3 +1,4 @@
+# Non-flashable exact-source dependency audit.
 name: 207 - A52 secure VMID and TBU dependency audit
 
 run-name: Audit Phase 207 secure VMID and TBU dependencies

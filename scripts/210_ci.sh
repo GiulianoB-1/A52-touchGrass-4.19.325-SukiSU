@@ -143,12 +143,13 @@ cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
 nm "$BUILD/vmlinux" | grep -Eq ' [tT] msm_atomic_commit$'
 nm "$BUILD/vmlinux" | grep -Eq ' [tT] a52_ackfr_record$'
 
+# The recorder magic is source-audited above. Clang may lower its memcpy into
+# immediate stores, so only runtime-visible strings are required in the Image.
 missing=0
 : > "$OUT/logs/phase210-binary-marker-audit.log"
 for marker in \
   'BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c' \
   'R48' \
-  'A52R0210' \
   'DRMPOST 210 c=%u commit enter nb=%d' \
   'DRMPOST 210 c=%u fences wait enter' \
   'DRMPOST 210 c=%u dispatch queued crtc=%u'; do

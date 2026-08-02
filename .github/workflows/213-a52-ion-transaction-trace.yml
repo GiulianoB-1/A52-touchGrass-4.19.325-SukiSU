@@ -43,6 +43,20 @@ jobs:
           python3 scripts/213_payload.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
           grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/213_apply_ion_transaction_trace.py')
+          text = path.read_text(encoding='utf-8')
+          old = r'pr_warn_once("%s: ioctl validate failed\n", __func__);'
+          new = r'pr_warn_once("%s: ioctl validate failed\\n", __func__);'
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one Phase 213 C-string escape target')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          repaired = path.read_text(encoding='utf-8')
+          if repaired.count(new) != 1 or old in repaired:
+              raise SystemExit('Phase 213 C-string escape repair failed')
+          print('Phase 213 C-string newline escape repaired')
+          PY
           python3 -m py_compile \
             scripts/213_payload.py \
             scripts/213_apply_ion_transaction_trace.py

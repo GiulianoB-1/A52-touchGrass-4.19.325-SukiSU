@@ -69,8 +69,6 @@ tg_smmu = (tg / 'drivers/iommu/arm-smmu.c').read_text()
 tg_dma = (tg / 'arch/arm64/mm/dma-mapping.c').read_text()
 lagoon = (tg / 'arch/arm64/boot/dts/vendor/qcom/lagoon.dtsi').read_text()
 
-# The display context-bank properties are supplied by Samsung's preserved
-# board DTB/overlays, not necessarily by the base TouchGrass lagoon.dtsi.
 spec = importlib.util.spec_from_file_location(
     'phase205_dt', 'scripts/205_compare_post_smmu_touchgrass.py')
 phase205_dt = importlib.util.module_from_spec(spec)
@@ -89,7 +87,6 @@ unsecure_pool = phase205_dt.u32s(
 secure_pool = phase205_dt.u32s(
     secure_props.get('qcom,iommu-dma-addr-pool'))
 
-# EARLY_MAP is stateful and clears by enabling SCTLR.M, matching TouchGrass.
 for marker in ('DOMAIN_ATTR_EARLY_MAP', 'arm_smmu_enable_s1_translations',
                'qcom,iommu-earlymap', '~BIT(DOMAIN_ATTR_EARLY_MAP)',
                'cfg_to_smmu_domain(cfg)->attributes'):
@@ -98,7 +95,6 @@ assert 'ARM_SMMU_SCTLR_TRE | ARM_SMMU_SCTLR_M' not in core
 assert 'arm_smmu_enable_s1_translations' in tg_smmu
 assert 'qcom,iommu-earlymap' in tg_smmu
 
-# The downstream aperture is applied at the 5.10 dma-iommu setup boundary.
 for marker in ('a52_iommu_get_dma_window', 'qcom,iommu-dma-addr-pool',
                'of_read_number(ranges, naddr)',
                'iommu_dma_init_domain(domain, dma_base, size, dev)'):
@@ -125,26 +121,22 @@ active_dt = {
 (out / 'phase206-active-display-dt.json').write_text(
     json.dumps(active_dt, indent=2, sort_keys=True) + '\n')
 
-# Non-fatal is an explicit API/DT contract. Upstream 5.10 already logs and
-# clears context faults rather than panicking, so no fault-handler weakening is needed.
 assert 'DOMAIN_ATTR_NON_FATAL_FAULTS' in iommu_h
 assert 'BIT(DOMAIN_ATTR_NON_FATAL_FAULTS)' in core
 assert 'qcom,iommu-faults' in core
 assert 'panic(' not in core[core.find('static irqreturn_t arm_smmu_context_fault'):core.find('static irqreturn_t arm_smmu_global_fault')]
 
-# Secure VMID cannot be emulated safely without secure page-table assignment.
 assert 'secure display SMMU is fail-closed' in msm
 assert 'return ERR_PTR(-EOPNOTSUPP);' in msm
 assert 'a52_unported_secure_display' in core
 assert 'a52_arm_smmu_attach_fault' in core
 assert 'S2CR_TYPE_FAULT' in core
 assert 'SMMU secure-streams faulted dev=%s' in core
-assert 'return a52_arm_smmu_attach_fault(dev, cfg, fwspec);' in core
+assert 'ret = a52_arm_smmu_attach_fault(dev, cfg, fwspec);' in core
+assert core.find('ret = arm_smmu_init_domain_context(domain, smmu, dev);') < core.find('ret = a52_arm_smmu_attach_fault(dev, cfg, fwspec);')
 assert 'DOMAIN_ATTR_SECURE_VMID' in tg_smmu
 assert 'arm_smmu_assign_table' in tg_smmu
 
-# Until the downstream TBU backend is ported, prevent power collapse rather
-# than silently losing the bootloader-owned distributed translation state.
 for marker in ('a52_apps_smmu_has_unmanaged_tbus', 'qcom,qsmmuv500-tbu',
                'runtime PM disabled until qsmmuv500 TBU support is ported',
                'system suspend blocked until qsmmuv500 TBU support is ported',
@@ -178,8 +170,6 @@ report = {
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
 
-# Save a focused patch and verify only the intended source files changed from
-# the reconstructed Phase 204 tree.
 git -C "$ROOT" diff --binary --no-ext-diff -- \
   include/linux/iommu.h \
   drivers/iommu/arm/arm-smmu/arm-smmu.h \

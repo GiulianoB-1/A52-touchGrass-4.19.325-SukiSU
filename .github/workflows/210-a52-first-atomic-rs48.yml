@@ -122,3 +122,5 @@ jobs:
           path: artifacts/a52xq-first-atomic-rs48
           if-no-files-found: error
           retention-days: 30
+
+# Push-trigger synchronization commit.

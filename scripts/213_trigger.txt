@@ -7,3 +7,4 @@ Hardware evidence basis:
 - The next observed boundary was repeated successful /dev/ion opens.
 
 This file triggers only the isolated Phase 213 workflow.
+Rerun 2: corrected the artifact copy destination; no kernel source change.

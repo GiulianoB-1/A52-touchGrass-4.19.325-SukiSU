@@ -1,13 +1,253 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-# Self-contained launcher for the audited Phase 208 CI script.
-expected=0de0208798ac98bb6b77655e5981f76035666bf4d102473f66189d01ddb9056b
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
-base64 --decode > "$tmp.gz" <<'PAYLOAD'
-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
-PAYLOAD
-gzip -dc "$tmp.gz" > "$tmp"
-rm -f "$tmp.gz"
-printf '%s  %s\n' "$expected" "$tmp" | sha256sum -c -
-exec bash "$tmp" "$@"
+
+BASE_OUT="$PWD/artifacts/a52xq-smmu-display-contracts"
+OUT="$PWD/artifacts/a52xq-secure-vmid"
+BUILD="$PWD/workspace/gki-phase199-out"
+ROOT="$PWD/gki/common"
+TG="$PWD/workspace/touchgrass-a52xq"
+mkdir -p "$OUT/logs"
+trap 'rc=$?; mkdir -p "$OUT/logs"; printf "line=%s\ncommand=%s\nreturn_code=%s\n" "$LINENO" "$BASH_COMMAND" "$rc" > "$OUT/logs/ci-failure.txt"; exit "$rc"' ERR
+
+bash scripts/206_ci.sh
+rm -rf "$OUT"
+cp -a "$BASE_OUT" "$OUT"
+rm -f "$OUT/SHA256SUMS"
+mkdir -p "$OUT"/{config,logs,stage,compile,package,tools,comparison}
+
+cp "$BUILD/.config" "$OUT/config/before-phase208.config"
+for rel in \
+  include/linux/io-pgtable.h \
+  drivers/iommu/io-pgtable-arm.c \
+  drivers/iommu/arm/arm-smmu/arm-smmu.h \
+  drivers/iommu/arm/arm-smmu/arm-smmu.c \
+  drivers/a52_display/msm/msm_smmu.c; do
+  safe="${rel//\//-}"
+  cp "$ROOT/$rel" "$OUT/stage/${safe}-before-phase208"
+done
+cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
+  "$OUT/stage/recorder-before-phase208.c"
+
+python3 scripts/208_apply_secure_vmid.py --root "$ROOT" --self-test \
+  | tee "$OUT/logs/phase208-patcher-self-test.log"
+python3 scripts/208_apply_secure_vmid.py --root "$ROOT" \
+  | tee "$OUT/logs/phase208-apply.log"
+cp scripts/208_apply_secure_vmid.py "$OUT/stage/"
+
+for rel in \
+  include/linux/io-pgtable.h \
+  drivers/iommu/io-pgtable-arm.c \
+  drivers/iommu/arm/arm-smmu/arm-smmu.h \
+  drivers/iommu/arm/arm-smmu/arm-smmu.c \
+  drivers/a52_display/msm/msm_smmu.c; do
+  safe="${rel//\//-}"
+  cp "$ROOT/$rel" "$OUT/stage/${safe}-after-phase208"
+done
+cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
+  "$OUT/stage/recorder-after-phase208.c"
+
+git -C "$ROOT" diff --check
+cmp "$OUT/config/before-phase208.config" "$BUILD/.config"
+cmp "$OUT/stage/recorder-before-phase208.c" \
+    "$OUT/stage/recorder-after-phase208.c"
+
+python3 - <<'PY' | tee "$OUT/logs/phase208-touchgrass-comparison.log"
+import json
+from pathlib import Path
+root = Path('gki/common')
+tg = Path('workspace/touchgrass-a52xq')
+out = Path('artifacts/a52xq-secure-vmid/comparison')
+
+hdr = (root / 'include/linux/io-pgtable.h').read_text()
+pg = (root / 'drivers/iommu/io-pgtable-arm.c').read_text()
+smmu_h = (root / 'drivers/iommu/arm/arm-smmu/arm-smmu.h').read_text()
+smmu = (root / 'drivers/iommu/arm/arm-smmu/arm-smmu.c').read_text()
+msm = (root / 'drivers/a52_display/msm/msm_smmu.c').read_text()
+secure = (root / 'drivers/a52_secure/secure_buffer.c').read_text()
+tg_hdr = (tg / 'include/linux/io-pgtable.h').read_text()
+tg_pg = (tg / 'drivers/iommu/io-pgtable-arm.c').read_text()
+tg_smmu = (tg / 'drivers/iommu/arm-smmu.c').read_text()
+phase206 = json.loads((out.parent.parent / 'a52xq-smmu-display-contracts' /
+                       'comparison/phase206-active-display-dt.json').read_text())
+
+assert phase206['secure']['properties']['qcom,iommu-vmid'] == [10]
+assert 'hyp_assign_phys' in secure
+assert 'EXPORT_SYMBOL(hyp_assign_phys)' in secure
+for marker in ('alloc_pages_exact)(void *cookie', 'free_pages_exact',
+               'cfg->alloc_pages_exact', 'cfg->free_pages_exact'):
+    assert marker in hdr + pg, marker
+for marker in ('secure_vmid', 'pte_info_list', 'unassign_list',
+               'secure_pool_list', 'assign_lock'):
+    assert marker in smmu_h, marker
+for marker in ('arm_smmu_assign_table', 'arm_smmu_unassign_table',
+               'arm_smmu_secure_pool_destroy', 'arm_smmu_secure_domain_lock',
+               'hyp_assign_phys',
+               'qcom,iommu-vmid', 'DOMAIN_ATTR_SECURE_VMID'):
+    assert marker in smmu, marker
+assert 'SMMU secure-domain unavailable' not in msm
+assert 'SMMU secure-streams faulted' not in smmu
+assert 'a52_arm_smmu_attach_fault' not in smmu
+assert 'a52_unported_secure_display' not in smmu
+assert 'mutex_lock(&to_smmu_domain(domain)->assign_lock)' not in smmu
+assert 'alloc_pages_exact' in tg_hdr and 'free_pages_exact' in tg_hdr
+assert 'io_pgtable_alloc_pages_exact' in tg_pg
+assert 'arm_smmu_assign_table' in tg_smmu
+assert 'arm_smmu_unassign_table' in tg_smmu
+assert 'hyp_assign_phys' in tg_smmu
+
+report = {
+    'status': 'phase208-secure-vmid-source-pass',
+    'touchgrass_commit': '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
+    'active_secure_vmid': 10,
+    'secure_buffer_backend_reused': True,
+    'io_pgtable_allocator_hooks_ported': True,
+    'secure_domain_state_ported': True,
+    'initial_page_tables_assigned': True,
+    'runtime_new_page_tables_assigned': True,
+    'freed_page_tables_unassigned': True,
+    'secure_streams_translating': True,
+    'phase206_fault_containment_removed': True,
+    'tbu_backend_ported': False,
+    'runtime_pm_blocked_for_unmanaged_tbus': True,
+    'system_suspend_blocked_for_unmanaged_tbus': True,
+    'new_recorder_added': False,
+}
+(out / 'phase208-touchgrass-comparison.json').write_text(
+    json.dumps(report, indent=2, sort_keys=True) + '\n')
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
+
+git -C "$ROOT" diff --binary --no-ext-diff -- \
+  include/linux/io-pgtable.h \
+  drivers/iommu/io-pgtable-arm.c \
+  drivers/iommu/arm/arm-smmu/arm-smmu.h \
+  drivers/iommu/arm/arm-smmu/arm-smmu.c \
+  drivers/a52_display/msm/msm_smmu.c \
+  > "$OUT/stage/phase208-secure-vmid.patch"
+test -s "$OUT/stage/phase208-secure-vmid.patch"
+
+CLANG="$(readlink -f "$(command -v clang)")"
+export PATH="$(dirname "$CLANG"):$PATH"
+export CROSS_COMPILE=aarch64-linux-gnu-
+export CLANG_TRIPLE=aarch64-linux-gnu-
+make -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig \
+  > "$OUT/logs/phase208-olddefconfig.log" 2>&1
+cp "$BUILD/.config" "$OUT/config/final.config"
+cmp "$OUT/config/before-phase208.config" "$OUT/config/final.config"
+
+set +e
+make -k -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 -j4 \
+  KCFLAGS=-Wno-error=frame-larger-than Image \
+  > "$OUT/logs/phase208-compile.log" 2>&1
+rc=$?
+set -e
+printf '%s\n' "$rc" > "$OUT/compile/make-return-code.txt"
+if [ "$rc" -ne 0 ]; then
+  grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+    "$OUT/logs/phase208-compile.log" | tail -n 300 || true
+  tail -n 500 "$OUT/logs/phase208-compile.log" || true
+  exit "$rc"
+fi
+if grep -nE '(^|: )(fatal error|error): |undefined reference to' \
+  "$OUT/logs/phase208-compile.log" > "$OUT/logs/compiler-errors.txt"; then
+  cat "$OUT/logs/compiler-errors.txt"
+  exit 1
+fi
+
+test -s "$BUILD/arch/arm64/boot/Image"
+test -s "$BUILD/vmlinux"
+for symbol in \
+  arm_smmu_assign_table \
+  arm_smmu_unassign_table \
+  arm_smmu_alloc_pages_exact \
+  arm_smmu_free_pages_exact \
+  hyp_assign_phys; do
+  nm "$BUILD/vmlinux" | grep -Eq " [tT] ${symbol}$"
+done
+for marker in \
+  'qcom,iommu-vmid' \
+  'SMMU parent-qcom scm=%d handoff=%d' \
+  'BOOT rs=ready phase=199 roots=%u copies=3 crc=crc32c'; do
+  grep -aFq "$marker" "$BUILD/arch/arm64/boot/Image"
+done
+
+cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
+gzip -t "$OUT/package/Image.gz"
+python3 scripts/38_repack_a52_p1_boot.py \
+  --source "$BASE_OUT/package/boot.img" \
+  --kernel "$OUT/package/Image.gz" \
+  --output "$OUT/package/boot.img" \
+  --report "$OUT/package/repack-report.json"
+python3 "$OUT/tools/decode-a52-r199-crc32c-base.py" --self-test \
+  | tee "$OUT/logs/phase208-base-decoder-self-test.log"
+python3 "$OUT/tools/decode-a52-r199-crc32c-triple.py" --self-test \
+  | tee "$OUT/logs/phase208-triple-decoder-self-test.log"
+
+cat > "$OUT/README-FIRST.txt" <<'EOF'
+A52 GKI 5.10 Phase 208 secure display VMID page-table ownership
+
+FLASH ONLY:
+  package/boot.img -> BOOT partition
+
+Phase 208 ports the exact secure page-table ownership contract identified by
+the Phase 207 TouchGrass comparison:
+  - reads qcom,iommu-vmid=10 before secure context creation
+  - tracks every secure io-pgtable allocation
+  - assigns page-table memory to HLOS RW and VMID 10 read-only
+  - assigns new lower-level tables created during map/unmap
+  - retains freed secure tables in an assigned reuse pool
+  - returns all table memory to HLOS before final free
+  - attaches secure display streams to their translating context bank
+
+The existing secure_buffer/hyp_assign_phys backend is reused. No new recorder,
+DTB change, DTBO change, ramdisk change, forced bind, IOMMU bypass, supplier
+relaxation, panel command, display timing, clock-rate, or regulator-policy
+change is included.
+
+The QSMMUv500 TBU backend remains unported. Apps SMMU runtime PM and system
+suspend remain blocked. Compile-audited, not hardware validated.
+EOF
+
+python3 - <<'PY'
+import hashlib, json
+from pathlib import Path
+root = Path('artifacts/a52xq-secure-vmid')
+base = json.loads(Path('artifacts/a52xq-smmu-display-contracts/final-audit.json').read_text())
+comparison = json.loads((root / 'comparison/phase208-touchgrass-comparison.json').read_text())
+repack = json.loads((root / 'package/repack-report.json').read_text())
+image = root / 'compile/Image'
+boot = root / 'package/boot.img'
+base.update({
+    'status': 'a52-secure-vmid-audited',
+    'phase': 208,
+    'base_phase': 206,
+    'hardware_validated': False,
+    'flashable_candidate': True,
+    'secure_vmid_backend_ported': True,
+    'secure_display_fail_closed': False,
+    'secure_display_default_domain_faulted': False,
+    'secure_display_streams_translating': True,
+    'secure_page_table_assignment_ported': True,
+    'secure_page_table_unassignment_ported': True,
+    'secure_page_table_reuse_pool_ported': True,
+    'tbu_backend_ported': False,
+    'runtime_pm_blocked_for_unmanaged_tbus': True,
+    'system_suspend_blocked_for_unmanaged_tbus': True,
+    'new_recorder_added': False,
+    'touchgrass_commit': comparison['touchgrass_commit'],
+    'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+    'boot_sha256': hashlib.sha256(boot.read_bytes()).hexdigest(),
+    'boot_bytes': boot.stat().st_size,
+    'dtb_preserved': repack['invariants']['dtb_preserved'],
+    'ramdisk_preserved': repack['invariants']['ramdisk_preserved'],
+})
+(root / 'final-audit.json').write_text(json.dumps(base, indent=2, sort_keys=True) + '\n')
+PY
+
+(
+  cd "$OUT"
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+    xargs -0 sha256sum > SHA256SUMS
+  sha256sum -c SHA256SUMS
+)

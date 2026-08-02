@@ -139,8 +139,12 @@ fi
 
 test -s "$BUILD/arch/arm64/boot/Image"
 test -s "$BUILD/vmlinux"
+cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
 nm "$BUILD/vmlinux" | grep -Eq ' [tT] msm_atomic_commit$'
 nm "$BUILD/vmlinux" | grep -Eq ' [tT] a52_ackfr_record$'
+
+missing=0
+: > "$OUT/logs/phase210-binary-marker-audit.log"
 for marker in \
   'BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c' \
   'R48' \
@@ -148,10 +152,20 @@ for marker in \
   'DRMPOST 210 c=%u commit enter nb=%d' \
   'DRMPOST 210 c=%u fences wait enter' \
   'DRMPOST 210 c=%u dispatch queued crtc=%u'; do
-  grep -aFq "$marker" "$BUILD/arch/arm64/boot/Image"
+  if grep -aFq "$marker" "$OUT/compile/Image"; then
+    printf 'PASS %s\n' "$marker" | tee -a "$OUT/logs/phase210-binary-marker-audit.log"
+  else
+    printf 'FAIL %s\n' "$marker" | tee -a "$OUT/logs/phase210-binary-marker-audit.log"
+    missing=1
+  fi
 done
+if [ "$missing" -ne 0 ]; then
+  strings -a "$OUT/compile/Image" | \
+    grep -E 'A52R|BOOT rs=ready|DRMPOST 210|R48' \
+    > "$OUT/logs/phase210-related-image-strings.txt" || true
+  exit 1
+fi
 
-cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
 gzip -n -9 -c "$OUT/compile/Image" > "$OUT/package/Image.gz"
 gzip -t "$OUT/package/Image.gz"
 python3 scripts/38_repack_a52_p1_boot.py \

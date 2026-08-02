@@ -41,6 +41,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
+          sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
+          grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
           python3 -m py_compile \
             scripts/213_payload.py \
             scripts/213_apply_ion_transaction_trace.py

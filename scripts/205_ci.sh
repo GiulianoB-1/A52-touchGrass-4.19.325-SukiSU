@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Comparison-only PR gate. No kernel behavior or boot artifact is modified.
 
 BASE="$PWD/artifacts/a52xq-apps-smmu-scm-handoff"
 OUT="$PWD/artifacts/a52xq-post-smmu-touchgrass-audit"

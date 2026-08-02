@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches:
-      - agent/a52-secure-vmid-v1
+      - agent/a52-splash-takeover-trace-ci-base-v1
     paths:
       - patches/209-splash-takeover-trace.patch
       - scripts/209_ci.sh

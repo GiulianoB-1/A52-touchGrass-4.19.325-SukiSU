@@ -1,0 +1,72 @@
+    old = '''\tunsigned long\t\t\tattributes;\n\tbool\t\t\t\tnon_strict;\n\tstruct mutex\t\t\tinit_mutex; /* Protects smmu pointer */\n'''
+    new = '''\tunsigned long\t\t\tattributes;\n\tu32\t\t\t\tsecure_vmid;\n\tbool\t\t\t\tnon_strict;\n\tstruct list_head\t\tpte_info_list;\n\tstruct list_head\t\tunassign_list;\n\tstruct list_head\t\tsecure_pool_list;\n\tstruct mutex\t\t\tassign_lock;\n\tstruct mutex\t\t\tinit_mutex; /* Protects smmu pointer */\n'''
+    return replace_one(text, old, new, 'ARM SMMU secure domain state')
+
+
+SECURE_HELPERS = r'''struct arm_smmu_secure_pool_chunk {
+\tvoid *addr;
+\tsize_t size;
+\tstruct list_head list;
+};
+
+static bool arm_smmu_has_secure_vmid(struct arm_smmu_domain *smmu_domain)
+{
+\treturn smmu_domain->secure_vmid != VMID_INVAL;
+}
+
+static void arm_smmu_secure_domain_lock(
+\t\tstruct arm_smmu_domain *smmu_domain)
+{
+\tif (arm_smmu_has_secure_vmid(smmu_domain))
+\t\tmutex_lock(&smmu_domain->assign_lock);
+}
+
+static void arm_smmu_secure_domain_unlock(
+\t\tstruct arm_smmu_domain *smmu_domain)
+{
+\tif (arm_smmu_has_secure_vmid(smmu_domain))
+\t\tmutex_unlock(&smmu_domain->assign_lock);
+}
+
+static void *arm_smmu_secure_pool_remove(struct arm_smmu_domain *smmu_domain,
+\t\t\t\t\t size_t size)
+{
+\tstruct arm_smmu_secure_pool_chunk *chunk;
+
+\tlist_for_each_entry(chunk, &smmu_domain->secure_pool_list, list) {
+\t\tif (chunk->size == size) {
+\t\t\tvoid *addr = chunk->addr;
+
+\t\t\tlist_del(&chunk->list);
+\t\t\tkfree(chunk);
+\t\t\treturn addr;
+\t\t}
+\t}
+\treturn NULL;
+}
+
+static int arm_smmu_secure_pool_add(struct arm_smmu_domain *smmu_domain,
+\t\t\t\t    void *addr, size_t size)
+{
+\tstruct arm_smmu_secure_pool_chunk *chunk;
+
+\tchunk = kmalloc(sizeof(*chunk), GFP_ATOMIC);
+\tif (!chunk)
+\t\treturn -ENOMEM;
+\tchunk->addr = addr;
+\tchunk->size = size;
+\tmemset(addr, 0, size);
+\tlist_add(&chunk->list, &smmu_domain->secure_pool_list);
+\treturn 0;
+}
+
+static int arm_smmu_prepare_pgtable(struct arm_smmu_domain *smmu_domain,
+\t\t\t\t    void *addr, size_t size)
+{
+\tstruct arm_smmu_pte_info *info;
+
+\tinfo = kzalloc(sizeof(*info), GFP_ATOMIC);
+\tif (!info)
+\t\treturn -ENOMEM;
+\tinfo->virt_addr = addr;
+\tinfo->size = size;

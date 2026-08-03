@@ -3,7 +3,7 @@ import base64, hashlib, zlib
 from pathlib import Path
 S=Path('scripts')
 PAYLOADS={
- '218_apply_keymint_qsee_trace.py':('218_apply_keymint_qsee_trace.py.z64','5c27e0ff5460cc740cd6025500e0aaefe75c7fe40c828337322276c43357a336','b5fd79d03ef6593082451df49f4f7a7c6e08bc61ca751b987f8581d2b791d2de'),
+ '218_apply_keymint_qsee_trace.py':('218_apply_keymint_qsee_trace.py.z64','461db4b8df0aedc7effc3b21cb0af3089f6eb58d6931035a5cb8c8cf2f820242','979c82118c017343533903aed7fa6373aa336c78718e8093e4430b8679fd0f1d'),
  '218_phase217_wrapper.py':('218_phase217_wrapper.py.z64','9ad51c8526112ed7742a6f5051536de7738aad1391302901a276b827a84f0517','a3df6626fa9aa9c0a541808985b4b660951a5159d3bbe1391bd69696a0aef3e3'),
 }
 for out,(src,esha,rsha) in PAYLOADS.items():

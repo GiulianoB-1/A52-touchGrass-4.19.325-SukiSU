@@ -1,0 +1,9 @@
+Phase 221 pre-change probe
+
+Hardware evidence from A52_RAW_RAMOOPS_20260803_235659.zip:
+- Phase 220 all-open recorder reproduced two qseecomd exits with status 255
+- each launch successfully loads /vendor/lib64/librpmb.so
+- each launch then opens /dev as a directory and exits before opening /dev/qseecom or /dev/ion
+- current GKI final.config enables UFS BSG but disables CONFIG_CHR_DEV_SG
+
+This trigger requests a read-only comparison against exact TouchGrass commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7 before any kernel behavior change.

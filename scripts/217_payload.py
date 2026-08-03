@@ -5,13 +5,20 @@ import zlib
 from pathlib import Path
 
 SCRIPTS = Path('scripts')
+PAYLOADS = {
+    '217_apply_graphics_service_trace.py': (
+        '217_apply_graphics_service_trace.py.z64',
+        '2d107af779023f39fde27c0ca31f16ae85ae99c090512da6593d2a898a542247',
+        '9ce32caab14993f2513d0788e4fd9513157a76e4f7c3edb909cde9c504db0377',
+    ),
+    '217_ci.sh': (
+        '217_ci.sh.z64',
+        '9bdca782316bdd2a5244da26209ec3836754709ba1fb394c5dc83c711704cdc6',
+        'c20ba2ab8642d576e437ef1128ad030614b8332bd461cdfe1e7f3edede32cfb9',
+    ),
+}
 
-PAYLOADS = [
-    ('217_apply_graphics_service_trace.py.z64', '217_apply_graphics_service_trace.py', 'ff3a4623af127414fe5211a2405537282065faa87392562990806c7d103a4c3b', '2816a4a34369be2c9be59fd1161882cd7f53ef79db15f8428d012801a80dec4f'),
-    ('217_ci.sh.z64', '217_ci.sh', '4de7e2e77d478a218d3b4dc46dd722b987a4acad53e3c06a4f4c84dc65fa7c55', '77995f6864e56b06f1969f6c3c4adec14e4827e70a479a3337aa91e7c3a79769'),
-]
-
-for source, output, expected_encoded_sha, expected_raw_sha in PAYLOADS:
+for output, (source, expected_encoded_sha, expected_raw_sha) in PAYLOADS.items():
     encoded = (SCRIPTS / source).read_text(encoding='ascii').strip()
     encoded_sha = hashlib.sha256(encoded.encode('ascii')).hexdigest()
     if encoded_sha != expected_encoded_sha:
@@ -20,7 +27,7 @@ for source, output, expected_encoded_sha, expected_raw_sha in PAYLOADS:
     raw_sha = hashlib.sha256(raw).hexdigest()
     if raw_sha != expected_raw_sha:
         raise SystemExit(f'{output}: raw sha256 mismatch: {raw_sha}')
-    out = SCRIPTS / output
-    out.write_bytes(raw)
-    out.chmod(0o755)
-    print(f'materialized {out} sha256={raw_sha} bytes={len(raw)}')
+    target = SCRIPTS / output
+    target.write_bytes(raw)
+    target.chmod(0o755)
+    print(f'materialized {target} sha256={raw_sha} bytes={len(raw)}')

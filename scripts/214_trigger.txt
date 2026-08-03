@@ -1,0 +1,8 @@
+Phase 214 qsecom ION heap-27 compatibility
+
+Hardware evidence from A52_RAW_RAMOOPS_20260803_013705.zip:
+- BIT(19) qsecom_ta allocations succeed.
+- BIT(27) qsecom allocations fail with -ENODEV.
+- The preserved DTB defines heap ID 27 and its reusable 20 MiB qseecom_region.
+
+This file triggers only the isolated Phase 214 workflow.

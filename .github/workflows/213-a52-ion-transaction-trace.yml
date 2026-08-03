@@ -1,21 +1,21 @@
-name: 215 - A52 bounded QSEECOM transaction trace
+name: 216 - A52 deep QSEECOM RS48 recorder
 
-run-name: Build Phase 215 bounded QSEECOM transaction trace
+run-name: Build Phase 216 deep QSEECOM RS48/CRC32C three-copy recorder
 
 on:
   workflow_dispatch:
   pull_request:
     branches:
-      - agent/a52-ion-transaction-trace-ci-base-v1
+      - agent/a52-qsee-deep-trace-ci-base-v1
     paths:
-      - scripts/215_trigger.txt
+      - scripts/216_trigger.txt
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-qsee-transaction-trace-${{ github.ref }}
+  group: a52-qsee-deep-trace-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -29,18 +29,19 @@ env:
 
 jobs:
   build-package:
-    name: Build and audit Phase 215 QSEECOM trace
+    name: Build and audit Phase 216 deep QSEECOM recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out dedicated Phase 215 branch
+      - name: Check out dedicated Phase 216 branch
         uses: actions/checkout@v4
 
-      - name: Materialize and verify Phase 213-215 scripts
+      - name: Materialize and verify Phase 213-216 scripts
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
           grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
           python3 - <<'PY'
@@ -59,12 +60,16 @@ jobs:
           PY
           python3 -m py_compile \
             scripts/213_payload.py \
+            scripts/216_payload.py \
             scripts/213_apply_ion_transaction_trace.py \
             scripts/214_apply_qsecom_heap27.py \
-            scripts/215_apply_qsee_transaction_trace.py
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py
           bash -n scripts/213_ci.sh
           bash -n scripts/214_ci.sh
           bash -n scripts/215_ci.sh
+          bash -n scripts/216_ci.sh
+          python3 scripts/216_apply_qsee_deep_trace.py --self-test
 
       - name: Prepare runner
         run: |
@@ -93,6 +98,7 @@ jobs:
             scripts/213_apply_ion_transaction_trace.py \
             scripts/214_apply_qsecom_heap27.py \
             scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
           bash -n scripts/209_prepare_phase206.sh
@@ -100,6 +106,7 @@ jobs:
           bash -n scripts/213_ci.sh
           bash -n scripts/214_ci.sh
           bash -n scripts/215_ci.sh
+          bash -n scripts/216_ci.sh
 
       - name: Restore pinned GKI source
         id: gki-cache
@@ -126,7 +133,7 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build, package and audit Phase 215
+      - name: Build, package and audit Phase 216
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -140,21 +147,22 @@ jobs:
           bash scripts/213_ci.sh
           bash scripts/214_ci.sh
           bash scripts/215_ci.sh
+          bash scripts/216_ci.sh
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-qsee-transaction-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
-          path: artifacts/a52xq-qsee-transaction-trace
+          name: a52xq-qsee-deep-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          path: artifacts/a52xq-qsee-deep-trace
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload Phase 215 candidate
+      - name: Upload Phase 216 candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-qsee-transaction-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: artifacts/a52xq-qsee-transaction-trace
+          name: a52xq-qsee-deep-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/a52xq-qsee-deep-trace
           if-no-files-found: error
           retention-days: 30

@@ -1,24 +1,32 @@
-Phase 220 qseecomd all-open failure-boundary RS48 recorder
+Phase 221 TouchGrass-matched SCSI generic RPMB interface fix with Phase 220 proof recorder
 
-Hardware evidence from A52_RAW_RAMOOPS_20260803_225355.zip:
-- 1,028 valid R48/CRC32C records were recovered, sequences 722 through 1865, with 116 missing sequences
-- Phase 219 is present and the previous sscrpcd /dev/ion flood is gone
-- 15 /vendor/bin/qseecomd executions all exit with status 255
-- the first process exits 38.395 ms after exec and 32.926 ms after successful exec-ret
-- later restarts occur about every five seconds and normally exit 22-30 ms after exec-ret
-- no qseecomd KEYPOST 218 or KEYPOST 219 event exists anywhere in the capture
-- the first qseecomd interval is sequence-contiguous: exec, exec-ret, exit, with no secure open or ioctl between them
-- a later Keymaster process successfully opens /dev/qseecom and /dev/ion and completes multiple QSEE ioctls with return 0
-- therefore qseecomd fails before reaching the currently traced QSEE, ION, firmware-fragment or secure-library paths
-- the kernel heartbeat reaches tick 60 and events continue through 79.571 seconds
+Hardware evidence from A52_RAW_RAMOOPS_20260803_235659.zip:
+- the frozen and exported 1 MiB recorder snapshots are byte-identical
+- 1,028 valid R48/CRC32C records were recovered, sequences 1222 through 2305
+- Phase 220 is active and records the first two qseecomd startup attempts in detail
+- both qseecomd processes successfully load /vendor/lib64/librpmb.so
+- both then open /dev as a directory and exit with status 255 before opening /dev/qseecom or /dev/ion
+- later qseecomd restarts continue roughly every five seconds and exit with status 255
+- therefore the repeatable failure boundary is librpmb device discovery, before QSEE listener setup
 
-Phase 220 is observation-only:
-- disables the Phase 219 secure-path open and task-filtered ION recorders
-- records every do_sys_openat2 file-open attempt from tasks whose comm is exactly qseecomd
-- records only sequence, pid, dirfd, open flags, truncated path and returned fd/error
-- caps the recorder at 256 Phase 220 events so the earliest startup attempts survive
-- retains the existing Phase 218 QSEE app, listener, firmware-fragment and ioctl metadata
+Exact known-good TouchGrass comparison at commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7:
+- build.sh selects a52xq_defconfig
+- arch/arm64/configs/a52xq_defconfig contains CONFIG_CHR_DEV_SG=y
+- TouchGrass contains drivers/scsi/sg.c
 
-The payload is generated against the exact post-Phase-217 source hashes used by the combined wrapper. The nested Phase-217-plus-Phase-220 self-test, patcher idempotence test and exact output comparison pass locally.
+Current Phase 220 GKI output:
+- CONFIG_SCSI_UFSHCD=y
+- CONFIG_SCSI_UFS_QCOM=y
+- CONFIG_SCSI_UFS_BSG=y
+- CONFIG_BLK_DEV_BSG=y
+- CONFIG_BLK_DEV_BSGLIB=y
+- CONFIG_CHR_DEV_SG is disabled
 
-No file contents, command buffers, response buffers, key material, authentication tokens, Binder payloads or process memory are recorded. No ION, QSEECom, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power or userspace behavior is changed. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests and boot-image invariant audits remain mandatory.
+Phase 221 is the smallest comparison-supported behavior change:
+- enable only CONFIG_CHR_DEV_SG=y before the final olddefconfig and compile
+- retain the existing UFS BSG settings
+- retain the Phase 220 all-open qseecomd recorder for hardware proof
+- require final.config to contain CONFIG_CHR_DEV_SG=y
+- require drivers/scsi/sg.o to be compiled before accepting the candidate
+
+No QSEECom, ION, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power, or userspace binary is modified. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests, source reconstruction, compiler checks, boot-image repack invariants, and candidate audits remain mandatory.

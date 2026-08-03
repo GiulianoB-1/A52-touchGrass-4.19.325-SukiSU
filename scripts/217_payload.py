@@ -31,3 +31,28 @@ for output, (source, expected_encoded_sha, expected_raw_sha) in PAYLOADS.items()
     target.write_bytes(raw)
     target.chmod(0o755)
     print(f'materialized {target} sha256={raw_sha} bytes={len(raw)}')
+
+patcher = SCRIPTS / '217_apply_graphics_service_trace.py'
+text = patcher.read_text(encoding='utf-8')
+old_budget = '''    elif path == RECORDER:
+        replacements = [
+            ('#define A52_R179_HEARTBEAT_LIMIT 120U', '#define A52_R179_HEARTBEAT_LIMIT 60U', 'heartbeat budget'),
+        ]'''
+new_budget = '''    elif path == RECORDER:
+        replacements = [
+            ('\\t       !strncmp(message, "DRMPOST ", 8) ||\\n\\t       !strncmp(message, "IONPOST ", 8) ||',
+             '\\t       !strncmp(message, "DRMPOST ", 8) ||\\n\\t       !strncmp(message, "GFXPOST ", 8) ||\\n\\t       !strncmp(message, "IONPOST ", 8) ||',
+             'graphics critical retention'),
+            ('#define A52_R179_HEARTBEAT_LIMIT 120U', '#define A52_R179_HEARTBEAT_LIMIT 60U', 'heartbeat budget'),
+        ]'''
+old_check = "            RECORDER: ('A52_R179_HEARTBEAT_LIMIT 60U',),"
+new_check = "            RECORDER: ('!strncmp(message, \"GFXPOST \", 8)', 'A52_R179_HEARTBEAT_LIMIT 60U'),"
+if text.count(old_budget) != 1 or text.count(old_check) != 1:
+    raise SystemExit('Phase 217 retention transform anchor mismatch')
+text = text.replace(old_budget, new_budget).replace(old_check, new_check)
+patcher.write_text(text, encoding='utf-8')
+patched_sha = hashlib.sha256(patcher.read_bytes()).hexdigest()
+expected_patched_sha = '0c77f60d4a8a00f3c4698d3e1b63377ab9254c567e9a8cbda82b6450ae870827'
+if patched_sha != expected_patched_sha:
+    raise SystemExit(f'Phase 217 retention transform sha256 mismatch: {patched_sha}')
+print(f'patched {patcher} sha256={patched_sha} with critical GFXPOST retention')

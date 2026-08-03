@@ -1,0 +1,17 @@
+Phase 216 deep QSEECOM RS48 recorder
+
+Hardware and comparison basis:
+- Phase 214 hardware confirms ION heap IDs 19 and 27 both allocate successfully.
+- No DRM client open or atomic commit follows Keymaster secure-buffer activity.
+- TouchGrass comparison rules out ION_IOC_FREE -ENOTTY as the blocker.
+- Phase 215 omitted secure-world desc.ret[0..2] and used one shared event cap.
+
+Phase 216 remains observation-only and adds category-bounded SCM/QSEOS,
+DMA-BUF, listener, native ioctl and compat-ioctl evidence. Abnormal results are
+retained beyond normal category limits.
+
+Protected transport is unchanged and mandatory:
+- record, console and ftrace copies
+- 48 Reed-Solomon parity symbols per copy
+- CRC32C
+- up to 24 unknown-symbol corrections per copy

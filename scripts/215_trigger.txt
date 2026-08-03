@@ -1,0 +1,13 @@
+Phase 215 bounded QSEECOM transaction trace
+
+Hardware evidence from A52_RAW_RAMOOPS_20260803_091145.zip:
+- Phase 214 fixes heap 27: BIT(19) and BIT(27) allocations both succeed.
+- The previous BIT(27) -ENODEV retry storm is gone.
+- Startup advances into keymaster@4.0-service secure-buffer activity.
+- No DRM client open, DRM ioctl, atomic check or atomic commit follows.
+- Corrupted pmsg repeatedly suggests keystore2 sees DEAD_OBJECT / KM(-1000).
+
+Phase 215 is observation-only and traces the bounded QSEECOM open, ioctl,
+trusted-app, dma-buf and low-level SCM transaction path.
+
+This file triggers only the isolated Phase 215 workflow.

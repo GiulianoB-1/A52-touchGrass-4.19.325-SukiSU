@@ -42,11 +42,17 @@ if ci_raw_sha != 'a9b10bb1c6903f4fddcc13074c8fd7c3e44387d18709bc5135c036c8fc062e
     raise SystemExit(f'216_ci.sh: raw sha256 mismatch: {ci_raw_sha}')
 
 ci_text = ci_raw.decode('utf-8')
-old_gate = "grep -Fq 'A52_R210_RS_PARITY 48U' \"$REC\""
-new_gate = "grep -Fq 'A52_R179_RS_ROOTS 48U' \"$REC\""
-if ci_text.count(old_gate) != 1:
-    raise SystemExit('expected exactly one stale Phase 216 RS48 source gate')
-ci_text = ci_text.replace(old_gate, new_gate)
+source_gate_replacements = {
+    "grep -Fq 'A52_R210_RS_PARITY 48U' \"$REC\"":
+        "grep -Fq 'A52_R179_RS_ROOTS 48U' \"$REC\"",
+    "grep -Fq 'A52_R199_CRC32C_POLY 0x82f63b78U' \"$REC\"":
+        "grep -Fq '0x82f63b78U' \"$REC\"",
+}
+for old_gate, new_gate in source_gate_replacements.items():
+    if ci_text.count(old_gate) != 1:
+        raise SystemExit(f'expected exactly one stale Phase 216 source gate: {old_gate}')
+    ci_text = ci_text.replace(old_gate, new_gate)
+
 ci_raw = ci_text.encode('utf-8')
 patched_ci_sha = hashlib.sha256(ci_raw).hexdigest()
 

@@ -1,0 +1,64 @@
+name: Probe exact TouchGrass RPMB and SCSI-generic configuration
+
+on:
+  pull_request:
+    branches:
+      - agent/a52-keymint-qsee-recorder-ci-base-v1
+    paths:
+      - scripts/221_probe_trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out probe trigger
+        uses: actions/checkout@v4
+
+      - name: Fetch exact TouchGrass source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+      - name: Inspect exact configuration and build entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd touchgrass
+          REPORT="$GITHUB_WORKSPACE/touchgrass-rpmb-config-report.txt"
+          {
+            echo '=== exact commit ==='
+            git rev-parse HEAD
+            echo
+            echo '=== A52/defconfig candidates ==='
+            find arch/arm64/configs -type f \( -iname '*a52*' -o -iname '*qcom*defconfig' -o -iname '*gki*defconfig' -o -iname '*vendor*defconfig' \) -print 2>/dev/null | sort || true
+            echo
+            echo '=== relevant config assignments in all arm64 config files ==='
+            grep -RnsE '^(CONFIG_CHR_DEV_SG=|# CONFIG_CHR_DEV_SG is not set|CONFIG_SCSI_UFS_BSG=|# CONFIG_SCSI_UFS_BSG is not set|CONFIG_BLK_DEV_BSG=|# CONFIG_BLK_DEV_BSG is not set|CONFIG_BLK_DEV_BSGLIB=|# CONFIG_BLK_DEV_BSGLIB is not set|CONFIG_SCSI_UFSHCD=|CONFIG_SCSI_UFS_QCOM=)' arch/arm64/configs 2>/dev/null || true
+            echo
+            echo '=== build commands selecting a defconfig ==='
+            grep -RnsE 'DEFCONFIG|defconfig|a52q|a52xq|ARCH=arm64' --include='*.sh' --include='Makefile' --include='*.yml' --include='*.yaml' . 2>/dev/null | head -n 1200 || true
+            echo
+            echo '=== SCSI generic and UFS Kconfig definitions ==='
+            grep -RnsE 'config CHR_DEV_SG|config SCSI_UFS_BSG|config BLK_DEV_BSG|config BLK_DEV_BSGLIB' drivers block 2>/dev/null || true
+            echo
+            echo '=== SG/UFS source presence ==='
+            find drivers/scsi block -maxdepth 4 -type f \( -name 'sg.c' -o -name '*bsg*' -o -name '*ufs*' \) -print 2>/dev/null | sort || true
+          } | tee "$REPORT"
+
+      - name: Upload probe report
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchgrass-rpmb-config-probe
+          path: touchgrass-rpmb-config-report.txt
+          if-no-files-found: error
+          retention-days: 7

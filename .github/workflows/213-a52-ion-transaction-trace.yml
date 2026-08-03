@@ -1,21 +1,21 @@
-name: 217 - A52 graphics service-startup RS48 recorder
+name: 218 - A52 KeyMint QSEE failure-boundary RS48 recorder
 
-run-name: Build Phase 217 graphics service-startup RS48/CRC32C recorder
+run-name: Build Phase 218 KeyMint QSEE failure-boundary RS48/CRC32C recorder
 
 on:
   workflow_dispatch:
   pull_request:
     branches:
-      - agent/a52-graphics-startup-recorder-ci-base-v1
+      - agent/a52-keymint-qsee-recorder-ci-base-v1
     paths:
-      - scripts/217_trigger.txt
+      - scripts/218_trigger.txt
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-graphics-startup-recorder-${{ github.ref }}
+  group: a52-keymint-qsee-recorder-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -29,20 +29,25 @@ env:
 
 jobs:
   build-package:
-    name: Build and audit Phase 217 graphics startup recorder
+    name: Build and audit Phase 218 KeyMint QSEE recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out dedicated Phase 217 branch
+      - name: Check out dedicated Phase 218 branch
         uses: actions/checkout@v4
 
-      - name: Materialize and verify Phase 213-217 scripts
+      - name: Materialize and verify Phase 213-218 scripts
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
           python3 scripts/216_payload.py
           python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py \
+             scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          cp scripts/218_phase217_wrapper.py \
+             scripts/217_apply_graphics_service_trace.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
           grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
           python3 - <<'PY'
@@ -63,10 +68,14 @@ jobs:
             scripts/213_payload.py \
             scripts/216_payload.py \
             scripts/217_payload.py \
+            scripts/218_payload.py \
             scripts/213_apply_ion_transaction_trace.py \
             scripts/214_apply_qsecom_heap27.py \
             scripts/215_apply_qsee_transaction_trace.py \
             scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/218_apply_keymint_qsee_trace.py \
+            scripts/218_phase217_wrapper.py \
             scripts/217_apply_graphics_service_trace.py
           bash -n scripts/213_ci.sh
           bash -n scripts/214_ci.sh
@@ -102,6 +111,9 @@ jobs:
             scripts/214_apply_qsecom_heap27.py \
             scripts/215_apply_qsee_transaction_trace.py \
             scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/218_apply_keymint_qsee_trace.py \
+            scripts/218_phase217_wrapper.py \
             scripts/217_apply_graphics_service_trace.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
@@ -138,7 +150,7 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build, package and audit Phase 217
+      - name: Build, package and audit Phase 218
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -154,21 +166,31 @@ jobs:
           bash scripts/215_ci.sh
           bash scripts/216_ci.sh
           bash scripts/217_ci.sh
+          OUT=artifacts/a52xq-graphics-startup-trace
+          grep -Fq 'KEYPOST 218 open n=%u' "$OUT/stage/after/open.c"
+          grep -Fq 'A52_R218_KEY_LIMIT 1024U' "$OUT/stage/after/qseecom.c"
+          grep -Fq '!strncmp(message, "KEYPOST ", 8)' \
+            "$OUT/stage/after/a52_ack_secure_flight_recorder.c"
+          grep -aFq 'KEYPOST 218' "$OUT/compile/Image"
+          printf '%s\n' \
+            'Phase 218 adds metadata-only KeyMint/QSEE failure-boundary tracing.' \
+            'No command buffers, response buffers, key blobs, tokens, or process memory are recorded.' \
+            >> "$OUT/README-FIRST.txt"
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-graphics-startup-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          name: a52xq-keymint-qsee-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload Phase 217 candidate
+      - name: Upload Phase 218 candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-graphics-startup-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: a52xq-keymint-qsee-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: error
           retention-days: 30

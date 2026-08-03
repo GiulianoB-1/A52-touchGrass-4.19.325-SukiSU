@@ -25,3 +25,12 @@ Run 15 source compatibility corrections:
 - match the reconstructed 5.10 KGSL platform-probe body without the removed cpu local
 - use the actual shared heap macro A52_R213_HEAP_FLAGS_LIMIT in patch and audit gates
 - verify the corrected materialized patcher and CI script by pinned SHA-256
+
+Hardware retention correction from A52_RAW_RAMOOPS_20260803_164754.zip:
+- early frozen and later raw images are byte-identical, confirming recovery preservation
+- 1,028 CRC32C-valid records were recovered
+- normal recorder capacity reached sequence 896 at 1.202 seconds
+- BOOT_READY followed at sequence 1125 and 1.264 seconds
+- zero GFXPOST records survived because GFXPOST was not a critical message class
+- transform the original proven payload to retain metadata-only GFXPOST records after normal capacity
+- no graphics, DRM, KGSL, init, Binder or boot behavior is changed

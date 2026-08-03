@@ -1,0 +1,25 @@
+Phase 218 KeyMint/QSEE failure-boundary RS48 recorder
+
+Hardware evidence from A52_RAW_RAMOOPS_20260803_190851.zip:
+- 1,028 valid R48/CRC32C records were recovered
+- Android starts servicemanager, hwservicemanager and vndservicemanager
+- /vendor/bin/qseecomd repeatedly exits with status 255 about every five seconds
+- keystore2 reports DEAD_OBJECT, KeyMint ErrorCode(-1000) and failed addRngEntropy transactions
+- the kernel remains alive beyond 104 seconds
+- ION heap 19 and heap 27 allocations, maps and cache operations succeed
+
+TouchGrass commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7 was compared before creating this recorder:
+- qseecom userspace UAPI and qseecom internal command definitions are byte-identical
+- SCM and QTEE shared-memory bridge headers are byte-identical
+- TouchGrass also rejects the legacy ION_IOC_FREE compatibility probe with ENOTTY
+- its QTEE shared-memory bridge follows the same disabled-by-default path
+- no concrete behavior mismatch justified a blind security-driver change
+
+Phase 218 is observation-only and records metadata around the first failing KeyMint/QSEE boundary:
+- opens and returns for qseecom, ion, storage and secure-app firmware paths
+- QSEECom ioctl numbers, exact returns, handle type, app id and listener id
+- listener registration metadata: listener id, file descriptor and size
+- secure-app firmware fragment names, sizes, architecture and exact load failures
+- process identity for qseecomd, keymaster, gatekeeper and keystore-related tasks
+
+No command buffers, response buffers, key material, authentication tokens, Binder payloads or process memory are recorded. Existing R48 three-copy transport, Reed-Solomon parity, CRC32C, boot-image invariants and decoder checks remain mandatory.

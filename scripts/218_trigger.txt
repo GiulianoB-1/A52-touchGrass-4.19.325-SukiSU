@@ -15,6 +15,8 @@ Phase 219 is observation-only:
 - records task-filtered ION ioctl metadata and exact return values for those tasks
 - retains QSEECom app, listener, firmware-fragment and ioctl metadata from Phase 218
 
+The corrected payload is generated against the exact post-Phase-217 source hashes used by the combined wrapper. Its nested Phase-217-plus-Phase-219 self-test and exact output comparison pass locally.
+
 It records only paths, ioctl numbers, return values, sizes, directions and allocation metadata. No command buffers, response buffers, key material, authentication tokens, Binder payloads or process memory are recorded.
 
 No ION, QSEECom, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator or power behavior is changed. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests and boot-image invariant audits remain mandatory.

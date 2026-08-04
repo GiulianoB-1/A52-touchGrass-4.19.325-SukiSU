@@ -1,0 +1,146 @@
+name: 226 - Dispatch proven KeyMint builder
+
+run-name: Dispatch Phase 226 through workflow 325785868
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase226-odsign-gate-v1
+    paths:
+      - .github/workflows/226-dispatch-phase218.yml
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: a52-phase226-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch-monitor:
+    name: Dispatch and monitor Phase 226 build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    env:
+      TARGET_WORKFLOW_ID: '325785868'
+      TARGET_REF: agent/a52-phase226-odsign-gate-v1
+      TARGET_PR: '127'
+
+    steps:
+      - name: Dispatch Phase 218 builder on Phase 226 ref
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf 'started_at=%s\n' "$started_at" >> "$GITHUB_OUTPUT"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW_ID}/dispatches" \
+            -d "{\"ref\":\"${TARGET_REF}\"}"
+          printf 'Phase 226 builder dispatched at %s\n' "$started_at"
+
+      - name: Locate and monitor dispatched build
+        id: monitor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW_ID}/runs?branch=${TARGET_REF}&event=workflow_dispatch&per_page=20"
+          run_id=''
+          run_url=''
+
+          for attempt in $(seq 1 40); do
+            response="$(curl --fail --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$api")"
+            run_id="$(jq -r --arg started "$STARTED_AT" \
+              '.workflow_runs | map(select(.created_at >= $started)) | sort_by(.created_at) | last | .id // empty' \
+              <<<"$response")"
+            run_url="$(jq -r --arg started "$STARTED_AT" \
+              '.workflow_runs | map(select(.created_at >= $started)) | sort_by(.created_at) | last | .html_url // empty' \
+              <<<"$response")"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            sleep 15
+          done
+
+          if [[ -z "$run_id" ]]; then
+            echo 'Dispatched build run was not found.' >&2
+            exit 1
+          fi
+
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'run_url=%s\n' "$run_url" >> "$GITHUB_OUTPUT"
+          echo "Monitoring run ${run_id}: ${run_url}"
+
+          run_api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+          conclusion=''
+          for attempt in $(seq 1 720); do
+            response="$(curl --fail --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$run_api")"
+            status="$(jq -r '.status' <<<"$response")"
+            conclusion="$(jq -r '.conclusion // empty' <<<"$response")"
+            echo "run=${run_id} status=${status} conclusion=${conclusion:-pending}"
+            if [[ "$status" == completed ]]; then
+              break
+            fi
+            sleep 30
+          done
+
+          if [[ -z "$conclusion" ]]; then
+            echo 'Build did not complete within the monitoring window.' >&2
+            exit 1
+          fi
+          printf 'conclusion=%s\n' "$conclusion" >> "$GITHUB_OUTPUT"
+
+          artifacts="$(curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100")"
+          artifact_id="$(jq -r '.artifacts | map(select(.expired == false)) | last | .id // empty' <<<"$artifacts")"
+          artifact_name="$(jq -r '.artifacts | map(select(.expired == false)) | last | .name // empty' <<<"$artifacts")"
+          printf 'artifact_id=%s\n' "$artifact_id" >> "$GITHUB_OUTPUT"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+
+          if [[ "$conclusion" != success ]]; then
+            exit 1
+          fi
+
+      - name: Report result to PR 127
+        if: ${{ always() && steps.monitor.outputs.run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.monitor.outputs.run_id }}
+          RUN_URL: ${{ steps.monitor.outputs.run_url }}
+          CONCLUSION: ${{ steps.monitor.outputs.conclusion }}
+          ARTIFACT_ID: ${{ steps.monitor.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.monitor.outputs.artifact_name }}
+        run: |
+          set -Eeuo pipefail
+          body="Phase 226 builder finished.\n\n- Run: [${RUN_ID}](${RUN_URL})\n- Conclusion: \`${CONCLUSION:-unknown}\`\n- Artifact: \`${ARTIFACT_NAME:-none}\`\n- Artifact ID: \`${ARTIFACT_ID:-none}\`"
+          jq -n --arg body "$body" '{body:$body}' > comment.json
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${TARGET_PR}/comments" \
+            --data-binary @comment.json

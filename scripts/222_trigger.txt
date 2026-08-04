@@ -1,0 +1,42 @@
+A52 Phase 222 paired librpmb.so SG/RPMB comparison
+
+Purpose
+- Establish a working TouchGrass reference trace and compare it with the GKI Phase 221 behavior.
+- Preserve enough sparse later-boot evidence to expose the next blocker without rebuilding immediately.
+
+GKI recorder additions
+- SGPOST 222 ioctl: qseecomd SG ioctl entry and SCSI identity metadata.
+- SGPOST 222 ioctl-ret: final ioctl return after sg or generic SCSI handling.
+- SGPOST 222 submit: opcode, CDB length, direction, transfer length, timeout and LUN.
+- SGPOST 222 done: SCSI, host and driver status, residual bytes, sense length, sense key, ASC and ASCQ.
+- BOOTPOST 222 exec, exec-ret and exit: bounded milestones for core Android and security services.
+- Existing 60-second heartbeat and Phase 218 QSEECom, ION, exec, exit and all-open tracing remain enabled.
+
+TouchGrass reference additions
+- TGSG 222 records the same SG metadata through the kernel log.
+- TGBOOT 222 records the same sparse service milestones.
+- Normal TouchGrass dmesg remains available for later kernel progress.
+
+Privacy and stability
+- Exact qseecomd task filter for SG tracing.
+- No transfer buffers, RPMB frames, keys, command payloads, userspace memory or CDB bytes beyond the opcode.
+- Bounded to 512 SG metadata records and 256 exec/exit milestones.
+- No SG, UFS, QSEECom, ION, SCM, DT, DTBO, ramdisk, clock, regulator or power behavior is changed.
+
+Collection order
+1. Flash and boot the TouchGrass reference candidate once.
+2. Collect full dmesg or pstore immediately and restore the normal boot image.
+3. Flash and boot the GKI Phase 222 candidate once.
+4. Collect the raw 1 MiB ramoops image immediately.
+5. Decode GKI with the supplied R48 transport-fusion decoder.
+6. Run:
+   python3 scripts/222_compare_runtime_traces.py \
+     --touchgrass touchgrass-dmesg.txt \
+     --gki decoded-gki/events.csv \
+     --output phase222-runtime-comparison
+
+Success criteria
+- TouchGrass reaches a successful SG/RPMB selection and continues to ION/QSEECom or later service milestones.
+- GKI identifies the first differing ioctl, CDB opcode, LUN, SCSI result, sense status, or missing follow-on event.
+
+CI dispatch revision: phase222-reference-v2

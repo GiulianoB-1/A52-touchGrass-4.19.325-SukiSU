@@ -1,4 +1,4 @@
-# Status probe generation 3: direct marker-audited Phase 226 workflow
+# Status probe generation 4: valid wrapper and marker-audited Phase 226 workflow
 name: 226 - Report builder status
 
 run-name: Report Phase 226 builder status

@@ -46,8 +46,8 @@ git -C touchgrass diff --binary --no-ext-diff \
 test -s "$OUT/stage/phase222-touchgrass-sg-reference.patch"
 for marker in \
   A52_PHASE222_SG_BOOT_PROGRESS_TRACE \
-  'TGSG 222 ioctl' \
-  'TGSG 222 done'; do
+  'A52_R222_SG_RECORD("ioctl ' \
+  'A52_R222_SG_RECORD("done '; do
   grep -Fq "$marker" touchgrass/drivers/scsi/sg.c
 done
 grep -Fq 'TGBOOT 222 exec' touchgrass/fs/exec.c

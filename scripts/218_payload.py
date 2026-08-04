@@ -16,8 +16,8 @@ PAYLOADS = {
     ),
     '222_apply_sg_boot_progress_trace.py': (
         '222_apply_sg_boot_progress_trace.py.z64',
-        '288e28c4f3363c4efec8e029756d933d37bd4370f0491d2dd8b4b7081a7014a2',
-        'ce372f94c7a94b66fc78a09b94d10907ef9136b0126588b9177640e87035de24',
+        'c1e40f30e91cc8779b4addeb1832ca64efcb1a7b2cbe47f6fe88f2ed00a1a933',
+        '5a9839f7fd3602855bfeb6ba6e658435f6822fdc29e70a0aa8230b2e4777d9ab',
     ),
     '222_compare_runtime_traces.py': (
         '222_compare_runtime_traces.py.z64',

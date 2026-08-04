@@ -1,0 +1,16 @@
+Phase 223 hardware test
+
+1. Flash only the supplied boot.img to BOOT.
+2. Perform one normal boot attempt.
+3. After a restart, freeze, or clear stop in progress, enter recovery.
+4. Collect the raw 1 MiB RAMOOPS image with the existing collector.
+5. Upload A52_RAW_RAMOOPS_*.zip.
+
+Success boundary:
+- sg1 0x5388 returns 0
+- SG_IO 0x2285 appears
+- REQUEST SENSE 0x03 is submitted
+
+Next boundaries:
+- 0xB5 SECURITY PROTOCOL OUT, 512 bytes
+- 0xA2 SECURITY PROTOCOL IN, 1024 bytes

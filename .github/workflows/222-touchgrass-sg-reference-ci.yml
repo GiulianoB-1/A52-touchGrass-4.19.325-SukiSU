@@ -1,0 +1,68 @@
+name: 222 - TouchGrass SG RPMB reference CI
+
+run-name: Build Phase 222 TouchGrass librpmb SG reference candidate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-keymint-qsee-recorder-ci-base-v1
+    paths:
+      - scripts/222_trigger.txt
+      - scripts/222_touchgrass_ci.sh
+      - scripts/222_apply_sg_boot_progress_trace.py.z64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-phase222-touchgrass-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  ANYKERNEL_SHA: 1c9a500dd4aa8081952523126e97eb155aed941b
+  DEFCONFIG: a52xq_defconfig
+
+jobs:
+  build:
+    name: Build and audit TouchGrass SG reference
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out Phase 222 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ca-certificates make gcc g++ python3 bc bison flex \
+            clang-14 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip zip unzip file \
+            dwarves device-tree-compiler
+          bash -n scripts/222_touchgrass_ci.sh
+
+      - name: Build, package and audit TouchGrass reference
+        run: bash scripts/222_touchgrass_ci.sh
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-phase222-sg-reference-${{ github.run_number }}-FAILED
+          path: artifacts/touchgrass-phase222-reference
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload TouchGrass reference candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-phase222-sg-reference-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/touchgrass-phase222-reference
+          if-no-files-found: error
+          retention-days: 30

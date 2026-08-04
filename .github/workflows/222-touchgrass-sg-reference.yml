@@ -1,0 +1,247 @@
+name: 222 - TouchGrass SG RPMB reference trace
+
+run-name: Build Phase 222 TouchGrass librpmb SG reference candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase222-sg-reference-v1
+    paths:
+      - .github/workflows/222-touchgrass-sg-reference.yml
+      - scripts/222_apply_sg_boot_progress_trace.py.z64
+      - scripts/222_trigger.txt
+
+permissions:
+  contents: read
+
+env:
+  TOUCHGRASS_SHA: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  ANYKERNEL_SHA: 1c9a500dd4aa8081952523126e97eb155aed941b
+  DEFCONFIG: a52xq_defconfig
+
+jobs:
+  build:
+    name: Build and audit TouchGrass SG reference
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out Phase 222 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner and materialize patcher
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ca-certificates make gcc g++ python3 bc bison flex \
+            clang-14 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip zip unzip file \
+            dwarves device-tree-compiler
+          python3 - <<'PY'
+          import base64, hashlib, zlib
+          from pathlib import Path
+          source = Path('scripts/222_apply_sg_boot_progress_trace.py.z64')
+          encoded = source.read_text(encoding='ascii').strip()
+          assert hashlib.sha256(encoded.encode('ascii')).hexdigest() == \
+              '288e28c4f3363c4efec8e029756d933d37bd4370f0491d2dd8b4b7081a7014a2'
+          raw = zlib.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == \
+              'ce372f94c7a94b66fc78a09b94d10907ef9136b0126588b9177640e87035de24'
+          target = Path('scripts/222_apply_sg_boot_progress_trace.py')
+          target.write_bytes(raw)
+          target.chmod(0o755)
+          PY
+          python3 -m py_compile scripts/222_apply_sg_boot_progress_trace.py
+          python3 scripts/222_apply_sg_boot_progress_trace.py --self-test
+
+      - name: Fetch exact TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf touchgrass
+          git init touchgrass
+          git -C touchgrass remote add origin \
+            https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+          git -C touchgrass fetch --depth=1 origin "${TOUCHGRASS_SHA}"
+          git -C touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C touchgrass rev-parse HEAD)" = "${TOUCHGRASS_SHA}"
+          test -f "touchgrass/arch/arm64/configs/${DEFCONFIG}"
+          chmod 755 touchgrass/tools/dtc
+
+      - name: Apply metadata-only SG and later-boot trace
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-phase222-reference"
+          mkdir -p "$OUT/logs" "$OUT/stage" "$OUT/config" "$OUT/package"
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 200/' touchgrass/Makefile
+          python3 scripts/222_apply_sg_boot_progress_trace.py \
+            --root touchgrass --backend printk \
+            2>&1 | tee "$OUT/logs/stage.log"
+          git -C touchgrass diff --check
+          git -C touchgrass diff --binary --no-ext-diff \
+            > "$OUT/stage/phase222-touchgrass-sg-reference.patch"
+          test -s "$OUT/stage/phase222-touchgrass-sg-reference.patch"
+          grep -Fq 'A52_PHASE222_SG_BOOT_PROGRESS_TRACE' touchgrass/drivers/scsi/sg.c
+          grep -Fq 'TGSG 222 ioctl' touchgrass/drivers/scsi/sg.c
+          grep -Fq 'TGSG 222 done' touchgrass/drivers/scsi/sg.c
+          grep -Fq 'TGBOOT 222 exec' touchgrass/fs/exec.c
+          grep -Fq 'TGBOOT 222 exit' touchgrass/kernel/exit.c
+
+      - name: Configure TouchGrass reference
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-phase222-reference"
+          BUILD="$PWD/workspace/touchgrass-phase222-out"
+          mkdir -p "$BUILD"
+          common_make=(
+            -C touchgrass O="$BUILD" ARCH=arm64
+            CC=clang-14
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            DTC_EXT="$PWD/touchgrass/tools/dtc"
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+            CONFIG_DRV_BUILD_IN=Y
+          )
+          make "${common_make[@]}" "${DEFCONFIG}" \
+            2>&1 | tee "$OUT/logs/defconfig.log"
+          touchgrass/scripts/config --file "$BUILD/.config" \
+            --set-str LOCALVERSION '-touchGrassKernel+' \
+            --disable LOCALVERSION_AUTO \
+            --enable PRINTK_TIME \
+            --enable PROC_FS \
+            --enable CHR_DEV_SG \
+            --set-val LOG_BUF_SHIFT 22 \
+            --set-val LOG_CPU_MAX_BUF_SHIFT 16
+          make "${common_make[@]}" olddefconfig \
+            2>&1 | tee "$OUT/logs/olddefconfig.log"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          make -s "${common_make[@]}" kernelrelease | tee "$OUT/config/kernelrelease.txt"
+          grep -Fxq 'CONFIG_CHR_DEV_SG=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PRINTK_TIME=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+
+      - name: Compile TouchGrass reference Image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-phase222-reference"
+          BUILD="$PWD/workspace/touchgrass-phase222-out"
+          common_make=(
+            -C touchgrass O="$BUILD" ARCH=arm64
+            CC=clang-14
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            DTC_EXT="$PWD/touchgrass/tools/dtc"
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+            CONFIG_DRV_BUILD_IN=Y
+          )
+          make "${common_make[@]}" -j4 KCFLAGS=-w Image \
+            2>&1 | tee "$OUT/logs/build.log"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          cp "$IMAGE" "$OUT/package/Image"
+          grep -aFq 'TGSG 222 ioctl' "$IMAGE"
+          grep -aFq 'TGSG 222 done' "$IMAGE"
+          grep -aFq 'TGBOOT 222 exec' "$IMAGE"
+          grep -aFq 'TGBOOT 222 exit' "$IMAGE"
+          sha256sum "$IMAGE" | tee "$OUT/package/Image.sha256"
+
+      - name: Package pinned AnyKernel flashable
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-phase222-reference"
+          rm -rf anykernel
+          git init anykernel
+          git -C anykernel remote add origin https://github.com/osm0sis/AnyKernel3.git
+          git -C anykernel fetch --depth=1 origin "${ANYKERNEL_SHA}"
+          git -C anykernel checkout --detach FETCH_HEAD
+          test "$(git -C anykernel rev-parse HEAD)" = "${ANYKERNEL_SHA}"
+          rm -rf anykernel/.git anykernel/.github
+          rm -f anykernel/README.md anykernel/Image anykernel/Image.gz \
+            anykernel/Image.gz-dtb anykernel/dtb anykernel/dtbo.img
+          cp "$OUT/package/Image" anykernel/Image
+          cat > anykernel/anykernel.sh <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          properties() { '
+          kernel.string=TouchGrass Phase 222 SG RPMB Reference
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          ui_print "  TouchGrass Phase 222 SG/RPMB reference trace";
+          dump_boot;
+          write_boot;
+          EOF
+          chmod 755 anykernel/anykernel.sh
+          bash -n anykernel/anykernel.sh
+          cat > anykernel/README-FIRST.txt <<'EOF'
+          A52 TOUCHGRASS PHASE 222 SG/RPMB REFERENCE TRACE
+
+          Metadata-only reference build. It records TGSG 222 and TGBOOT 222
+          messages in dmesg/pstore. It does not record RPMB frames, transfer
+          buffers, keys, userspace memory or CDB bytes beyond the opcode.
+
+          This candidate is not hardware validated. Keep a known-good boot image
+          and recovery/download-mode path available.
+          EOF
+          (
+            cd anykernel
+            zip -qr9 "$OUT/package/A52XQ-TouchGrass-Phase222-SG-Reference.zip" .
+          )
+          unzip -t "$OUT/package/A52XQ-TouchGrass-Phase222-SG-Reference.zip"
+          sha256sum "$OUT/package/A52XQ-TouchGrass-Phase222-SG-Reference.zip" \
+            | tee "$OUT/package/flashable.sha256"
+
+      - name: Add collector and manifest
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/artifacts/touchgrass-phase222-reference"
+          cat > "$OUT/package/COLLECT-PHASE222-TOUCHGRASS.ps1" <<'EOF'
+          $ErrorActionPreference = 'Stop'
+          adb wait-for-device
+          adb shell su 0 dmesg | Out-File -Encoding utf8 phase222-touchgrass-dmesg.txt
+          adb shell su 0 sh -c 'for f in /sys/fs/pstore/*; do echo ===$f===; cat $f; done' |
+            Out-File -Encoding utf8 phase222-touchgrass-pstore.txt
+          adb shell getprop | Out-File -Encoding utf8 phase222-touchgrass-getprop.txt
+          adb shell cat /proc/version | Out-File -Encoding utf8 phase222-touchgrass-version.txt
+          Compress-Archive -Force -Path phase222-touchgrass-*.txt \
+            -DestinationPath Phase222-TouchGrass-Capture.zip
+          EOF
+          find "$OUT" -type f -print0 | sort -z | xargs -0 sha256sum > "$OUT/SHA256SUMS"
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          Phase 222 TouchGrass SG/RPMB reference candidate.
+          Build-audited only. Not hardware validated.
+          Flash once, collect dmesg and pstore, then restore the known-good image.
+          EOF
+
+      - name: Upload failed diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-phase222-sg-reference-${{ github.run_number }}-FAILED
+          path: artifacts/touchgrass-phase222-reference
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload TouchGrass reference candidate
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-phase222-sg-reference-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/touchgrass-phase222-reference
+          if-no-files-found: error
+          retention-days: 30

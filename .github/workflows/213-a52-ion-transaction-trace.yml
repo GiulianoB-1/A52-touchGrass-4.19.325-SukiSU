@@ -52,6 +52,22 @@ jobs:
           mv scripts/217_apply_graphics_service_trace.py \
              scripts/217_apply_graphics_service_trace_base.py
           python3 scripts/218_payload.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/217_ci.sh')
+          text = path.read_text(encoding='utf-8')
+          old = '#define A52_R179_HEARTBEAT_LIMIT 60U'
+          new = '#define A52_R179_HEARTBEAT_LIMIT 180U'
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f'expected exactly one stale Phase 217 heartbeat audit, found {text.count(old)}'
+              )
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          repaired = path.read_text(encoding='utf-8')
+          if old in repaired or repaired.count(new) != 1:
+              raise SystemExit('Phase 226 heartbeat audit repair failed')
+          print('Phase 217 heartbeat audit updated for Phase 226 limit 180U')
+          PY
           cp scripts/218_phase217_wrapper.py \
              scripts/217_apply_graphics_service_trace.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
@@ -207,7 +223,7 @@ jobs:
           cp scripts/226_trigger.txt "$OUT/PHASE226-HARDWARE-TEST.txt"
           printf '%s\n' \
             'Phase 226 adds metadata-only odsign/odrefresh gate tracing.' \
-            'It does not bypass signing, publish properties, weaken fs-verity, or record payload buffers or key material.' \
+            'It does not bypass signing, publish completion properties, weaken fs-verity, or record payload buffers or key material.' \
             >> "$OUT/README-FIRST.txt"
 
       - name: Upload failed diagnostics

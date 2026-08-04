@@ -14,3 +14,5 @@ Success boundary:
 Next boundaries:
 - 0xB5 SECURITY PROTOCOL OUT, 512 bytes
 - 0xA2 SECURITY PROTOCOL IN, 1024 bytes
+
+Phase 224 CI trigger: validate bounded USRPOST exec/connect/ioctl tracing while retaining the hardware-validated Phase 223 UFS/RPMB path.

@@ -1,0 +1,3 @@
+kernel,sg_prefix,boot_prefix,primary_capture
+TouchGrass,TGSG 222,TGBOOT 222,dmesg or pstore
+GKI,SGPOST 222,BOOTPOST 222,raw 1 MiB ramoops

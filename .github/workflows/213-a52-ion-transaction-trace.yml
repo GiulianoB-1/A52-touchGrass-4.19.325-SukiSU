@@ -1,21 +1,27 @@
-name: 217 - A52 graphics service-startup RS48 recorder
+name: 226 - A52 odsign gate RS48 recorder
 
-run-name: Build Phase 217 graphics service-startup RS48/CRC32C recorder
+run-name: Build Phase 226 odsign post-fs-data gate recorder
 
 on:
   workflow_dispatch:
-  pull_request:
+  push:
     branches:
-      - agent/a52-graphics-startup-recorder-ci-base-v1
+      - agent/a52-phase226-odsign-gate-v1
     paths:
-      - scripts/217_trigger.txt
+      - .github/workflows/213-a52-ion-transaction-trace.yml
+      - scripts/218_payload.py
+      - scripts/218_phase217_wrapper.py.z64
+      - scripts/226_driver_chunks/**
+      - scripts/226_payload_chunks/**
+      - scripts/226_design.md
+      - scripts/226_trigger.txt
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-graphics-startup-recorder-${{ github.ref }}
+  group: a52-phase226-odsign-gate-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -29,20 +35,41 @@ env:
 
 jobs:
   build-package:
-    name: Build and audit Phase 217 graphics startup recorder
+    name: Build and audit Phase 226 odsign recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out dedicated Phase 217 branch
+      - name: Check out Phase 226 branch
         uses: actions/checkout@v4
 
-      - name: Materialize and verify Phase 213-217 scripts
+      - name: Materialize and verify Phase 213-226 scripts
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
           python3 scripts/216_payload.py
           python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py \
+             scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/217_ci.sh')
+          text = path.read_text(encoding='utf-8')
+          old = '#define A52_R179_HEARTBEAT_LIMIT 60U'
+          new = '#define A52_R179_HEARTBEAT_LIMIT 180U'
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f'expected exactly one stale Phase 217 heartbeat audit, found {text.count(old)}'
+              )
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          repaired = path.read_text(encoding='utf-8')
+          if old in repaired or repaired.count(new) != 1:
+              raise SystemExit('Phase 226 heartbeat audit repair failed')
+          print('Phase 217 heartbeat audit updated for Phase 226 limit 180U')
+          PY
+          cp scripts/218_phase217_wrapper.py \
+             scripts/217_apply_graphics_service_trace.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
           grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
           python3 - <<'PY'
@@ -63,10 +90,20 @@ jobs:
             scripts/213_payload.py \
             scripts/216_payload.py \
             scripts/217_payload.py \
+            scripts/218_payload.py \
             scripts/213_apply_ion_transaction_trace.py \
             scripts/214_apply_qsecom_heap27.py \
             scripts/215_apply_qsee_transaction_trace.py \
             scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/218_apply_keymint_qsee_trace.py \
+            scripts/222_apply_sg_boot_progress_trace.py \
+            scripts/222_compare_runtime_traces.py \
+            scripts/223_apply_ufs_query_ioctl.py \
+            scripts/224_apply_early_userspace_trace.py \
+            scripts/225_apply_kgsl_late_state.py \
+            scripts/226_apply_odsign_gate_trace.py \
+            scripts/218_phase217_wrapper.py \
             scripts/217_apply_graphics_service_trace.py
           bash -n scripts/213_ci.sh
           bash -n scripts/214_ci.sh
@@ -102,6 +139,14 @@ jobs:
             scripts/214_apply_qsecom_heap27.py \
             scripts/215_apply_qsee_transaction_trace.py \
             scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/218_apply_keymint_qsee_trace.py \
+            scripts/222_apply_sg_boot_progress_trace.py \
+            scripts/223_apply_ufs_query_ioctl.py \
+            scripts/224_apply_early_userspace_trace.py \
+            scripts/225_apply_kgsl_late_state.py \
+            scripts/226_apply_odsign_gate_trace.py \
+            scripts/218_phase217_wrapper.py \
             scripts/217_apply_graphics_service_trace.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
@@ -138,7 +183,7 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build, package and audit Phase 217
+      - name: Build, package and audit Phase 226
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -154,21 +199,57 @@ jobs:
           bash scripts/215_ci.sh
           bash scripts/216_ci.sh
           bash scripts/217_ci.sh
+          OUT=artifacts/a52xq-graphics-startup-trace
+          TRACE_ROOT=workspace/gki-phase199-src
+          if test ! -f "$TRACE_ROOT/fs/exec.c"; then TRACE_ROOT=gki/common; fi
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/exec.c"
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/kernel/exit.c"
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/open.c"
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/ioctl.c"
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/net/socket.c"
+          for marker in \
+            'ODSPOST 226 ts' \
+            'ODSPOST 226 exec' \
+            'ODSPOST 226 exit' \
+            'ODSPOST 226 open' \
+            'ODSPOST 226 io-' \
+            'ODSPOST 226 con-' \
+            'GFXPOST 225 ks1' \
+            'GFXPOST 225 ks2'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          cp scripts/226_design.md "$OUT/PHASE226-DESIGN.md"
+          cp scripts/226_trigger.txt "$OUT/PHASE226-HARDWARE-TEST.txt"
+          printf '%s\n' \
+            'Phase 226 adds metadata-only odsign/odrefresh gate tracing.' \
+            'It does not bypass signing, publish completion properties, weaken fs-verity, or record payload buffers or key material.' \
+            >> "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+            grep -Fq './README-FIRST.txt' SHA256SUMS
+            grep -Fq './PHASE226-DESIGN.md' SHA256SUMS
+            grep -Fq './PHASE226-HARDWARE-TEST.txt' SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-graphics-startup-trace-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          name: a52xq-odsign-gate-${{ github.run_number }}-FAILED-DIAGNOSTICS
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload Phase 217 candidate
+      - name: Upload Phase 226 candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-graphics-startup-trace-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: a52xq-odsign-gate-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: error
           retention-days: 30

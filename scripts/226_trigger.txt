@@ -1,0 +1,43 @@
+Phase 226 hardware test
+
+1. Flash only the supplied boot.img to BOOT.
+2. Perform one normal boot attempt.
+3. Leave the phone untouched for at least 210 seconds.
+4. Enter recovery without flashing another kernel first.
+5. Collect the untouched raw 1 MiB RAMOOPS image.
+6. Upload A52_RAW_RAMOOPS_*.zip.
+
+Primary records:
+- ODSPOST 226 exec
+- ODSPOST 226 exit
+- ODSPOST 226 open
+- ODSPOST 226 io-in / io-out
+- ODSPOST 226 con-in / con-out
+- ODSPOST 226 ts
+
+Later successful-path records:
+- second BOOTPOST 222 exec for /system/bin/apexd
+- app_process64 / app_process32
+- SurfaceFlinger
+- GFXPOST 225 ks1 / ks2 if /dev/kgsl-3d0 is opened
+
+Task snapshot fields:
+- t: heartbeat second
+- p: PID
+- c: task name
+- s: scheduler state bitmask
+- x: exit state
+- r: on run queue
+- o: currently on CPU
+- i: in I/O wait
+
+Open path classes:
+- 1: /data/misc/odsign
+- 2: /data/dalvik-cache
+- 3: /data/misc/apexdata/com.android.art
+- 4: /apex/com.android.art
+- 5: /system/bin/odrefresh
+- 6: /dev/binder
+- 7: /dev/hwbinder
+- 8: /dev/vndbinder
+- 9: /data/misc/keystore

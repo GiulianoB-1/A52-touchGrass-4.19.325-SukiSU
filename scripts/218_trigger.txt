@@ -1,32 +1,22 @@
-Phase 221 TouchGrass-matched SCSI generic RPMB interface fix with Phase 220 proof recorder
+Phase 222 paired TouchGrass and GKI librpmb SG/RPMB runtime comparison
 
-Hardware evidence from A52_RAW_RAMOOPS_20260803_235659.zip:
-- the frozen and exported 1 MiB recorder snapshots are byte-identical
-- 1,028 valid R48/CRC32C records were recovered, sequences 1222 through 2305
-- Phase 220 is active and records the first two qseecomd startup attempts in detail
-- both qseecomd processes successfully load /vendor/lib64/librpmb.so
-- both then open /dev as a directory and exit with status 255 before opening /dev/qseecom or /dev/ion
-- later qseecomd restarts continue roughly every five seconds and exit with status 255
-- therefore the repeatable failure boundary is librpmb device discovery, before QSEE listener setup
+Hardware evidence from A52_RAW_RAMOOPS_20260803_235659.zip and Phase 221:
+- Phase 220 stopped after librpmb.so opened /dev because CONFIG_CHR_DEV_SG was disabled
+- Phase 221 enables CONFIG_CHR_DEV_SG=y and qseecomd now opens /dev/sg0 through /dev/sg8
+- qseecomd still exits with status 255 before opening /dev/ion or /dev/qseecom
+- therefore the new boundary is SG device inspection or SG_IO communication, not device-node creation
 
-Exact known-good TouchGrass comparison at commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7:
-- build.sh selects a52xq_defconfig
-- arch/arm64/configs/a52xq_defconfig contains CONFIG_CHR_DEV_SG=y
-- TouchGrass contains drivers/scsi/sg.c
+Phase 222 keeps the Phase 221 configuration and adds metadata-only comparison tracing:
+- SG ioctl entry and final return code
+- SG_IO opcode, command length, direction, transfer length, timeout and UFS LUN
+- SCSI, host and driver status, residual bytes, sense length, sense key, ASC and ASCQ
+- exact qseecomd task filter
+- no CDB payload bytes beyond opcode, no transfer buffers, no RPMB frames, no keys and no userspace memory
 
-Current Phase 220 GKI output:
-- CONFIG_SCSI_UFSHCD=y
-- CONFIG_SCSI_UFS_QCOM=y
-- CONFIG_SCSI_UFS_BSG=y
-- CONFIG_BLK_DEV_BSG=y
-- CONFIG_BLK_DEV_BSGLIB=y
-- CONFIG_CHR_DEV_SG is disabled
+Later progress coverage is also retained:
+- bounded exec, exec-return and exit milestones for init, service managers, storage, graphics and security services
+- existing QSEECom, ION, all-open, exit and 60-second heartbeat tracing remains enabled
+- the same patcher supports a TouchGrass printk reference backend using TGSG 222 and TGBOOT 222
+- the comparison tool reports the first differing ioctl, opcode, LUN, result or sense status
 
-Phase 221 is the smallest comparison-supported behavior change:
-- enable only CONFIG_CHR_DEV_SG=y before the final olddefconfig and compile
-- retain the existing UFS BSG settings
-- retain the Phase 220 all-open qseecomd recorder for hardware proof
-- require final.config to contain CONFIG_CHR_DEV_SG=y
-- require drivers/scsi/sg.o to be compiled before accepting the candidate
-
-No QSEECom, ION, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power, or userspace binary is modified. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests, source reconstruction, compiler checks, boot-image repack invariants, and candidate audits remain mandatory.
+No SG, UFS, QSEECom, ION, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power or userspace behavior is modified. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests, source reconstruction, compiler checks, boot-image repack invariants and candidate audits remain mandatory.

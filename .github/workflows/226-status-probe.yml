@@ -1,4 +1,4 @@
-# Status probe generation 5: retained heartbeat layout and marker-audited Phase 226 workflow
+# Status probe generation 6: Phase 226 heartbeat-audit correction
 name: 226 - Report builder status
 
 run-name: Report Phase 226 builder status

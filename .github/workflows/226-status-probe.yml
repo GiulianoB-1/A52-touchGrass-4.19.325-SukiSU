@@ -1,4 +1,4 @@
-# Status probe generation 2
+# Status probe generation 3: direct marker-audited Phase 226 workflow
 name: 226 - Report builder status
 
 run-name: Report Phase 226 builder status
@@ -45,7 +45,8 @@ jobs:
             status="$(jq -r '.workflow_runs[0].status' <<<"$response")"
             conclusion="$(jq -r '.workflow_runs[0].conclusion // "pending"' <<<"$response")"
             head_sha="$(jq -r '.workflow_runs[0].head_sha' <<<"$response")"
-            body="Phase 226 status probe:\n\n- Run: [${run_id}](${run_url})\n- Event: \`${event}\`\n- Status: \`${status}\`\n- Conclusion: \`${conclusion}\`\n- Head: \`${head_sha}\`"
+            name="$(jq -r '.workflow_runs[0].name' <<<"$response")"
+            body="Direct Phase 226 status probe:\n\n- Workflow: \`${name}\`\n- Run: [${run_id}](${run_url})\n- Event: \`${event}\`\n- Status: \`${status}\`\n- Conclusion: \`${conclusion}\`\n- Head: \`${head_sha}\`"
           fi
           jq -n --arg body "$body" '{body:$body}' > comment.json
           curl --fail-with-body --silent --show-error \

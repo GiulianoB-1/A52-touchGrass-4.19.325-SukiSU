@@ -1,0 +1,32 @@
+Phase 221 TouchGrass-matched SCSI generic RPMB interface fix with Phase 220 proof recorder
+
+Hardware evidence from A52_RAW_RAMOOPS_20260803_235659.zip:
+- the frozen and exported 1 MiB recorder snapshots are byte-identical
+- 1,028 valid R48/CRC32C records were recovered, sequences 1222 through 2305
+- Phase 220 is active and records the first two qseecomd startup attempts in detail
+- both qseecomd processes successfully load /vendor/lib64/librpmb.so
+- both then open /dev as a directory and exit with status 255 before opening /dev/qseecom or /dev/ion
+- later qseecomd restarts continue roughly every five seconds and exit with status 255
+- therefore the repeatable failure boundary is librpmb device discovery, before QSEE listener setup
+
+Exact known-good TouchGrass comparison at commit 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7:
+- build.sh selects a52xq_defconfig
+- arch/arm64/configs/a52xq_defconfig contains CONFIG_CHR_DEV_SG=y
+- TouchGrass contains drivers/scsi/sg.c
+
+Current Phase 220 GKI output:
+- CONFIG_SCSI_UFSHCD=y
+- CONFIG_SCSI_UFS_QCOM=y
+- CONFIG_SCSI_UFS_BSG=y
+- CONFIG_BLK_DEV_BSG=y
+- CONFIG_BLK_DEV_BSGLIB=y
+- CONFIG_CHR_DEV_SG is disabled
+
+Phase 221 is the smallest comparison-supported behavior change:
+- enable only CONFIG_CHR_DEV_SG=y before the final olddefconfig and compile
+- retain the existing UFS BSG settings
+- retain the Phase 220 all-open qseecomd recorder for hardware proof
+- require final.config to contain CONFIG_CHR_DEV_SG=y
+- require drivers/scsi/sg.o to be compiled before accepting the candidate
+
+No QSEECom, ION, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power, or userspace binary is modified. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests, source reconstruction, compiler checks, boot-image repack invariants, and candidate audits remain mandatory.

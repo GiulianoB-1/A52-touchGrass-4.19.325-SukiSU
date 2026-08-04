@@ -26,8 +26,8 @@ PAYLOADS = {
     ),
     '223_apply_ufs_query_ioctl.py': (
         '223_apply_ufs_query_ioctl.py.z64',
-        '49b6e2f56578d2ba60af5cdb6ba6e956d8f407cb72c1a7c2b05dca22e42e9c6a',
-        '0cb5c9b5aacd2f241a910d5d4df28d1cfaa6461076381e2b530e8136cf6332ff',
+        '0292f59e130628f3a1b38700be38f688e0534450589e1c2b33b3d9c4f7de4e6b',
+        '3b0e868707f75e4861e5e7bd4004794730e42a6e17eeaed7381959075123e6e3',
     ),
 }
 

@@ -25,17 +25,20 @@ PAYLOADS = {
         'f8eeb8dbfcf22e005428558cf5aeaca71ece7b50b4fa0d4a28e80342fb6f5073',
     ),
     '223_apply_ufs_query_ioctl.py': (
-        '223_apply_ufs_query_ioctl.py.z64',
+        tuple(f'223_payload_chunks/{i:02d}.txt' for i in range(8)),
         '0292f59e130628f3a1b38700be38f688e0534450589e1c2b33b3d9c4f7de4e6b',
         '3b0e868707f75e4861e5e7bd4004794730e42a6e17eeaed7381959075123e6e3',
     ),
 }
 
 for out, (src, expected_encoded_sha, expected_raw_sha) in PAYLOADS.items():
-    encoded = (S / src).read_text(encoding='ascii').strip()
+    sources = (src,) if isinstance(src, str) else src
+    encoded = ''.join((S / item).read_text(encoding='ascii').strip()
+                      for item in sources)
+    source_label = '+'.join(sources)
     encoded_sha = hashlib.sha256(encoded.encode('ascii')).hexdigest()
     if encoded_sha != expected_encoded_sha:
-        raise SystemExit(f'{src}: encoded sha256 mismatch: {encoded_sha}')
+        raise SystemExit(f'{source_label}: encoded sha256 mismatch: {encoded_sha}')
     raw = zlib.decompress(base64.b64decode(encoded, validate=True))
     raw_sha = hashlib.sha256(raw).hexdigest()
     if raw_sha != expected_raw_sha:

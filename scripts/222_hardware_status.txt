@@ -1,0 +1,1 @@
+Not hardware validated. Flash only after CI produces audited candidates and keep a known-good boot image and recovery path available.

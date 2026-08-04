@@ -1,0 +1,15 @@
+Phase 224 hardware procedure
+
+1. Flash only package/boot.img to BOOT.
+2. Attempt one normal boot.
+3. After the device stops progressing, restarts, or remains stuck for about
+   90 seconds, enter recovery.
+4. Collect the same raw 1 MiB RAMOOPS snapshot.
+5. Upload A52_RAW_RAMOOPS_*.zip.
+
+Expected markers:
+  USRPOST 224 exec
+  USRPOST 224 connect-enter / connect-return
+  USRPOST 224 ioctl-enter / ioctl-return
+
+Do not wipe data and do not flash any partition other than BOOT.

@@ -1,0 +1,19 @@
+Phase 225 hardware test
+
+1. Flash only the supplied boot.img to BOOT.
+2. Perform one normal boot attempt.
+3. Leave the stopped boot for about 180 seconds so SurfaceFlinger retries.
+4. Enter recovery and collect the raw 1 MiB RAMOOPS image.
+5. Upload A52_RAW_RAMOOPS_*.zip.
+
+Required records:
+- GFXPOST 225 ks1
+- GFXPOST 225 ks2
+
+Interpretation:
+- cs/cr: KGSL core seen/result
+- ps/pr: platform probe seen/result
+- rs/rr: device registration seen/result
+- ns/nr: device_create seen/result
+- u: unregister count
+- d0: kgsl_driver.devp[0] still present

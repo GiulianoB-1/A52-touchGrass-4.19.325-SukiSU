@@ -1,0 +1,1 @@
+See scripts/222_design.md for the trace contract and scripts/222_trigger.txt for the paired hardware collection procedure.

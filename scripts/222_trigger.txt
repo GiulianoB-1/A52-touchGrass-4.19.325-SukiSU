@@ -38,3 +38,5 @@ Collection order
 Success criteria
 - TouchGrass reaches a successful SG/RPMB selection and continues to ION/QSEECom or later service milestones.
 - GKI identifies the first differing ioctl, CDB opcode, LUN, SCSI result, sense status, or missing follow-on event.
+
+CI dispatch revision: phase222-reference-v2

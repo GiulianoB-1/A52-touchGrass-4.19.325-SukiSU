@@ -1,0 +1,6 @@
+Phase 222 scope
+- Preserve Phase 221 CONFIG_CHR_DEV_SG=y.
+- Add metadata-only qseecomd SG ioctl and SG_IO result tracing.
+- Add bounded later Android service exec and exit milestones.
+- Add a TouchGrass printk backend and paired runtime comparison tool.
+- Make no storage, UFS, QSEECom, ION, SCM, DT, DTBO, ramdisk, clock, regulator or power behavior change.

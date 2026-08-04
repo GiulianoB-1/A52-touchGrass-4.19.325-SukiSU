@@ -1,0 +1,1 @@
+Next step after CI: perform one TouchGrass reference boot and one GKI Phase 222 boot, then compare the captures.

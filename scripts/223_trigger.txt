@@ -17,3 +17,4 @@ Next boundaries:
 
 Phase 224 CI trigger: validate bounded USRPOST exec/connect/ioctl tracing while retaining the hardware-validated Phase 223 UFS/RPMB path.
 Phase 224 CI base trigger after retarget.
+Phase 224 dedicated CI-base synchronization.

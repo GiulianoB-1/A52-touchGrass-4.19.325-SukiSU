@@ -225,6 +225,16 @@ jobs:
             'Phase 226 adds metadata-only odsign/odrefresh gate tracing.' \
             'It does not bypass signing, publish completion properties, weaken fs-verity, or record payload buffers or key material.' \
             >> "$OUT/README-FIRST.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+            grep -Fq './README-FIRST.txt' SHA256SUMS
+            grep -Fq './PHASE226-DESIGN.md' SHA256SUMS
+            grep -Fq './PHASE226-HARDWARE-TEST.txt' SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Upload failed diagnostics
         if: ${{ failure() }}

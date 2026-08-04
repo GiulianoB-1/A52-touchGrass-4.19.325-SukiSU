@@ -1,1 +1,0 @@
-Metadata only. No CDB payload bytes beyond opcode, no transfer buffers, no RPMB frames, no keys, and no userspace memory are recorded.

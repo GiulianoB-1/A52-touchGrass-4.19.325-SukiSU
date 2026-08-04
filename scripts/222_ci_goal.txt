@@ -1,1 +1,0 @@
-CI goal: compile-audited GKI candidate with SGPOST and BOOTPOST markers, then a separately audited TouchGrass reference candidate with TGSG and TGBOOT markers.

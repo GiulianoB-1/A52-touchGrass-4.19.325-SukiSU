@@ -1,1 +1,0 @@
-python3 scripts/222_compare_runtime_traces.py --touchgrass touchgrass-dmesg.txt --gki decoded-gki/events.csv --output phase222-runtime-comparison

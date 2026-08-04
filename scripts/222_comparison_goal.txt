@@ -1,1 +1,0 @@
-Comparison goal: stop at the first differing SG ioctl, opcode, UFS LUN, return code, SCSI status, host status, driver status or sense result.

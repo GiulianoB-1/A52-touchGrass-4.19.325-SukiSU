@@ -1,2 +1,0 @@
-Branch: agent/a52-phase222-sg-reference-v1
-Base: agent/a52-keymint-qsee-recorder-pr-v1

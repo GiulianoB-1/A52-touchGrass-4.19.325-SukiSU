@@ -1,1 +1,0 @@
-SG metadata events: 512 maximum. Later boot exec and exit events: 256 maximum per translation unit. Existing recorder heartbeat remains unchanged.

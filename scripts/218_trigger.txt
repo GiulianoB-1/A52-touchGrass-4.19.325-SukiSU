@@ -20,3 +20,5 @@ Later progress coverage is also retained:
 - the comparison tool reports the first differing ioctl, opcode, LUN, result or sense status
 
 No SG, UFS, QSEECom, ION, SCM, KeyMint, DTB, DTBO, ramdisk, clock, regulator, power or userspace behavior is modified. Existing three-copy R48 transport, 48 Reed-Solomon parity symbols, CRC32C, decoder tests, source reconstruction, compiler checks, boot-image repack invariants and candidate audits remain mandatory.
+
+CI dispatch revision: phase222-v2

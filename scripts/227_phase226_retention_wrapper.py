@@ -103,8 +103,11 @@ def main() -> int:
 
     if "--self-test" in sys.argv[1:]:
         if base.is_file():
+            base_args = list(sys.argv[1:])
+            if "--root" not in base_args:
+                base_args[0:0] = ["--root", "."]
             completed = subprocess.run(
-                [sys.executable, str(base), *sys.argv[1:]], check=False
+                [sys.executable, str(base), *base_args], check=False
             )
             if completed.returncode:
                 return completed.returncode

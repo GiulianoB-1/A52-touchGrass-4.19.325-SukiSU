@@ -99,11 +99,18 @@ def self_test() -> None:
 
 
 def main() -> int:
+    base = Path(__file__).with_name("218_phase217_wrapper_phase226.py")
+
     if "--self-test" in sys.argv[1:]:
+        if base.is_file():
+            completed = subprocess.run(
+                [sys.executable, str(base), *sys.argv[1:]], check=False
+            )
+            if completed.returncode:
+                return completed.returncode
         self_test()
         return 0
 
-    base = Path(__file__).with_name("218_phase217_wrapper_phase226.py")
     if not base.is_file():
         raise SystemExit(f"missing Phase 226 base wrapper: {base}")
 

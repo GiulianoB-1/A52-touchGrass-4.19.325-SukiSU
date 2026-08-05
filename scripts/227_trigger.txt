@@ -1,0 +1,13 @@
+PHASE 227 HARDWARE TEST
+
+1. Flash the packaged boot.img.
+2. Boot with USB disconnected.
+3. Do not interact with the phone for at least 210 seconds.
+4. Enter recovery without allowing another normal Android boot.
+5. Collect every file under /sys/fs/pstore/ and preserve the raw 1 MiB image.
+6. Repeat at least three times because the odsign boundary is timing-sensitive.
+7. Preserve captures from boots that reach the UI as well as boots that stall.
+
+Phase 227 changes recorder retention only. It does not bypass odsign or weaken
+verification. The candidate is not hardware validated until a fresh capture
+contains retained ODSPOST 226 records after the 896-record capacity boundary.

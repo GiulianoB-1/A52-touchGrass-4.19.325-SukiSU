@@ -56,7 +56,8 @@ jobs:
             scripts/230_package.py
           python3 scripts/227_phase226_retention_wrapper.py --self-test
           grep -RFq 'A52_PHASE230_KGSL_DRIVER_CORE_PATH' scripts/230_patcher_parts
-          grep -RFq 'KGPPOST 230' scripts/230_patcher_parts
+          grep -RFq 'A52_PHASE230_KGSL_LATE_REPLAY' scripts/230_patcher_parts
+          grep -RFq 'KGPPOST 230 replay-begin' scripts/230_patcher_parts
           grep -Fq '__driver_attach()' scripts/230_design.md
           grep -Fq '__device_attach_driver()' scripts/230_design.md
           grep -Fq 'RS(255,207)' scripts/230_design.md
@@ -70,6 +71,8 @@ jobs:
           test -f phase230-out/package/boot.img
           test -f phase230-out/compile/Image
           grep -aFq 'KGPPOST 230' phase230-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' phase230-out/compile/Image
+          grep -aFq 'A52_PHASE230_KGSL_LATE_REPLAY' phase230-out/compile/Image
           grep -aFq 'KGPPOST 229' phase230-out/compile/Image
           grep -aFq 'TRIPOST 228' phase230-out/compile/Image
           grep -aFq 'ODSPOST 226' phase230-out/compile/Image

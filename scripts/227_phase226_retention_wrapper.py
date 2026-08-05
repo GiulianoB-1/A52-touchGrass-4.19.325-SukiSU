@@ -92,8 +92,6 @@ static int a52_r228_stage(const char *message)
 		return 7;
 	if (a52_r228_has(message, "con-out"))
 		return 8;
-	if (a52_r228_has(message, " ts "))
-		return 9;
 	return 0;
 }
 
@@ -143,7 +141,8 @@ static void a52_r228_track_message(const char *message)
 		atomic_inc(&a52_r228_o_count);
 	}
 
-	if (a52_r228_has(message, "surfaceflinger")) {
+	if (!strncmp(message, "BOOTPOST ", 9) &&
+	    a52_r228_has(message, "surfaceflinger")) {
 		stage = a52_r228_stage(message);
 		value = a52_r228_value(message, atomic_read(&a52_r228_f_value));
 		if (stage)

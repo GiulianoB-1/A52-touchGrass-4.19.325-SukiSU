@@ -1,0 +1,29 @@
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(root, out)
+    return out
+
+
+def main() -> int:
+    run_id, run_url, artifact_id = dispatch_and_wait()
+    work = Path("phase229-work")
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    zip_path = work / "inherited.zip"
+    download_artifact(artifact_id, zip_path)
+    extract = work / "inherited"
+    extract.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(extract)
+    root = locate_root(extract)
+    package(root, run_id, run_url)
+    print(f"Phase 229 package prepared from source run {run_id}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, urllib.error.URLError, zipfile.BadZipFile) as exc:
+        print(f"Phase 229 packaging failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)

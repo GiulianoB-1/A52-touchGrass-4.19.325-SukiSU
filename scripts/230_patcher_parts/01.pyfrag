@@ -1,0 +1,245 @@
+DD_HELPER = r'''/* A52_PHASE230_KGSL_DRIVERCORE_PATH
+ * Read-only checkpoints from match/attach through the actual probe callback.
+ */
+static atomic_t a52_r230_dd_seen = ATOMIC_INIT(0);
+
+static bool a52_r230_dd_once(unsigned int bit)
+{
+	int old, new;
+
+	do {
+		old = atomic_read(&a52_r230_dd_seen);
+		if (old & BIT(bit))
+			return false;
+		new = old | BIT(bit);
+	} while (atomic_cmpxchg(&a52_r230_dd_seen, old, new) != old);
+	return true;
+}
+
+static bool a52_r230_gpu_pair(const struct device *dev,
+			      const struct device_driver *drv)
+{
+	const struct of_device_id *id;
+
+	if (!dev || !dev->of_node ||
+	    !of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0") ||
+	    !drv || !drv->of_match_table)
+		return false;
+	for (id = drv->of_match_table;
+	     id->name[0] || id->type[0] || id->compatible[0]; id++)
+		if (!strcmp(id->compatible, "qcom,kgsl-3d0"))
+			return true;
+	return false;
+}
+
+'''
+
+
+def patch_dd(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    helper_anchor = (
+        "static bool a52_smmu_unsec_trace_dev(const struct device *dev)\n"
+        "{\n"
+        "\treturn dev && dev->of_node &&\n"
+        "\t\tof_device_is_compatible(dev->of_node, \"qcom,smmu_sde_unsec\");\n"
+        "}\n\n"
+    )
+    if text.count(helper_anchor) != 1:
+        raise RuntimeError(f"{label}: dd helper anchor mismatch")
+    text = text.replace(helper_anchor, helper_anchor + "\n" + DD_HELPER)
+
+    attach_anchor = "\tret = driver_match_device(drv, dev);\n\tif (a52_smmu_unsec_trace_dev(dev) &&\n"
+    if text.count(attach_anchor) != 1:
+        raise RuntimeError(f"{label}: device-attach match anchor mismatch")
+    text = text.replace(
+        attach_anchor,
+        "\tret = driver_match_device(drv, dev);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(0))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 UA m=%d ck=%d wa=%d\",\n"
+        "\t\t\tret, data->check_async, data->want_async);\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev) &&\n",
+    )
+
+    driver_attach_anchor = (
+        "\tret = driver_match_device(drv, dev);\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE match path=driver-attach dev=%s drv=%s rc=%d\",\n"
+    )
+    if text.count(driver_attach_anchor) != 1:
+        raise RuntimeError(f"{label}: driver-attach match anchor mismatch")
+    text = text.replace(
+        driver_attach_anchor,
+        "\tret = driver_match_device(drv, dev);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(1))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 DA m=%d dead=%d bound=%d\",\n"
+        "\t\t\tret, dev->p ? dev->p->dead : -1, dev->driver ? 1 : 0);\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE match path=driver-attach dev=%s drv=%s rc=%d\",\n",
+    )
+
+    probe_start = "int driver_probe_device(struct device_driver *drv, struct device *dev)\n{\n\tint ret = 0;\n\n"
+    if text.count(probe_start) != 1:
+        raise RuntimeError(f"{label}: driver_probe_device start mismatch")
+    text = text.replace(
+        probe_start,
+        probe_start
+        + "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(2))\n"
+        + "\t\ta52_ackfr_record(\"KGBPOST 230 DP in reg=%d par=%d\",\n"
+        + "\t\t\tdevice_is_registered(dev), dev->parent ? 1 : 0);\n\n",
+    )
+    probe_after = (
+        "\telse\n"
+        "\t\tret = really_probe(dev, drv);\n"
+        "\tpm_request_idle(dev);\n"
+    )
+    if text.count(probe_after) != 1:
+        raise RuntimeError(f"{label}: driver_probe_device return anchor mismatch")
+    text = text.replace(
+        probe_after,
+        "\telse\n"
+        "\t\tret = really_probe(dev, drv);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(3))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 DP out r=%d b=%d\",\n"
+        "\t\t\tret, dev->driver ? 1 : 0);\n"
+        "\tpm_request_idle(dev);\n",
+    )
+
+    really_decl = (
+        "\tbool test_remove = IS_ENABLED(CONFIG_DEBUG_TEST_DRIVER_REMOVE) &&\n"
+        "\t\t\t   !drv->suppress_bind_attrs;\n\n"
+    )
+    if text.count(really_decl) != 1:
+        raise RuntimeError(f"{label}: really_probe declaration anchor mismatch")
+    text = text.replace(
+        really_decl,
+        really_decl
+        + "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(4))\n"
+        + "\t\ta52_ackfr_record(\"KGBPOST 230 R in all=%d st=%d\",\n"
+        + "\t\t\tdefer_all_probes, dev->links.status);\n\n",
+    )
+
+    suppliers_anchor = "\tret = device_links_check_suppliers(dev);\n\tif (a52_smmu_unsec_trace_dev(dev))\n"
+    if text.count(suppliers_anchor) != 1:
+        raise RuntimeError(f"{label}: supplier return anchor mismatch")
+    text = text.replace(
+        suppliers_anchor,
+        "\tret = device_links_check_suppliers(dev);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(5)) {\n"
+        "\t\tconst char *reason = dev->p && dev->p->deferred_probe_reason ?\n"
+        "\t\t\tdev->p->deferred_probe_reason : \"-\";\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R sup=%d st=%d why=%.24s\",\n"
+        "\t\t\tret, dev->links.status, reason);\n"
+        "\t}\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev))\n",
+    )
+
+    pin_anchor = "\tret = pinctrl_bind_pins(dev);\n\tif (a52_rscc_probe_device(dev))\n"
+    if text.count(pin_anchor) != 1:
+        raise RuntimeError(f"{label}: pinctrl anchor mismatch")
+    text = text.replace(
+        pin_anchor,
+        "\tret = pinctrl_bind_pins(dev);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(6))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R pin=%d\", ret);\n"
+        "\tif (a52_rscc_probe_device(dev))\n",
+    )
+
+    dma_to_sysfs = (
+        "\t} else if (a52_run40_preprobe_target(dev)) {\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t}\n\n"
+        "\tret = driver_sysfs_add(dev);\n"
+    )
+    if text.count(dma_to_sysfs) != 1:
+        raise RuntimeError(f"{label}: dma/sysfs anchor mismatch")
+    text = text.replace(
+        dma_to_sysfs,
+        "\t} else if (a52_run40_preprobe_target(dev)) {\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t}\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(7))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R dma=%d rc=%d\",\n"
+        "\t\t\tdev->bus->dma_configure ? 1 : 0, ret);\n\n"
+        "\tret = driver_sysfs_add(dev);\n",
+    )
+
+    sysfs_anchor = "\tret = driver_sysfs_add(dev);\n\tif (a52_rscc_probe_device(dev))\n"
+    if text.count(sysfs_anchor) != 1:
+        raise RuntimeError(f"{label}: sysfs anchor mismatch")
+    text = text.replace(
+        sysfs_anchor,
+        "\tret = driver_sysfs_add(dev);\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(8))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R sys=%d\", ret);\n"
+        "\tif (a52_rscc_probe_device(dev))\n",
+    )
+
+    pm_to_bus = (
+        "\t} else if (a52_run40_preprobe_target(dev)) {\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t}\n\n"
+        "\tif (dev->bus->probe) {\n"
+    )
+    if text.count(pm_to_bus) != 1:
+        raise RuntimeError(f"{label}: pm/bus anchor mismatch")
+    text = text.replace(
+        pm_to_bus,
+        "\t} else if (a52_run40_preprobe_target(dev)) {\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t\tdo { } while (0);\n"
+        "\t}\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(9))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R pm=%d rc=%d\",\n"
+        "\t\t\tdev->pm_domain && dev->pm_domain->activate ? 1 : 0, ret);\n\n"
+        "\tif (dev->bus->probe) {\n",
+    )
+
+    bus_call = "\t\tret = dev->bus->probe(dev);\n\t\tif (a52_smmu_unsec_trace_dev(dev))\n"
+    if text.count(bus_call) != 1:
+        raise RuntimeError(f"{label}: bus probe call anchor mismatch")
+    text = text.replace(
+        bus_call,
+        "\t\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(10))\n"
+        "\t\t\ta52_ackfr_record(\"KGBPOST 230 R cb-in bus=1\");\n"
+        "\t\tret = dev->bus->probe(dev);\n"
+        "\t\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(11))\n"
+        "\t\t\ta52_ackfr_record(\"KGBPOST 230 R cb-out=%d\", ret);\n"
+        "\t\tif (a52_smmu_unsec_trace_dev(dev))\n",
+    )
+
+    done_anchor = "done:\n\tif (a52_smmu_unsec_trace_dev(dev))\n"
+    if text.count(done_anchor) != 1:
+        raise RuntimeError(f"{label}: really_probe done anchor mismatch")
+    text = text.replace(
+        done_anchor,
+        "done:\n"
+        "\tif (a52_r230_gpu_pair(dev, drv) && a52_r230_dd_once(12))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 R done=%d b=%d\",\n"
+        "\t\t\tret, dev->driver ? 1 : 0);\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev))\n",
+    )
+
+    expected = {
+        PHASE230_MARKER: 1,
+        "KGBPOST 230 UA": 1,
+        "KGBPOST 230 DA": 1,
+        "KGBPOST 230 DP in": 1,
+        "KGBPOST 230 DP out": 1,
+        "KGBPOST 230 R sup": 1,
+        "KGBPOST 230 R cb-in": 1,
+        "KGBPOST 230 R cb-out": 1,
+    }
+    for token, count in expected.items():
+        if text.count(token) != count:
+            raise RuntimeError(f"{label}: expected {count} {token!r}, found {text.count(token)}")
+    return text
+
+

@@ -1,0 +1,38 @@
+def select_source() -> tuple[int, str, int]:
+    artifact = os.environ.get("PHASE230_SOURCE_ARTIFACT_ID")
+    run = os.environ.get("PHASE230_SOURCE_RUN_ID")
+    if artifact and run:
+        run_id = int(run)
+        return run_id, f"https://github.com/{REPO}/actions/runs/{run_id}", int(artifact)
+    if artifact or run:
+        raise RuntimeError("both PHASE230_SOURCE_ARTIFACT_ID and PHASE230_SOURCE_RUN_ID are required")
+    return dispatch_and_wait()
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def locate_root(base: Path) -> Path:
+    matches = list(base.rglob("package/boot.img"))
+    if len(matches) != 1:
+        raise RuntimeError(f"expected one package/boot.img, found {len(matches)}")
+    return matches[0].parent.parent
+
+
+def verify_markers(image: Path) -> None:
+    data = image.read_bytes()
+    markers = (
+        b"KGBPOST 230", b"KGPPOST 229", b"TRIPOST 228", b"ODSPOST 226",
+        b"GFXPOST 225 ks1", b"GFXPOST 225 ks2",
+    )
+    for marker in markers:
+        if marker not in data:
+            raise RuntimeError(f"missing binary marker: {marker.decode()}")
+        print(f"binary marker present: {marker.decode()}")
+
+

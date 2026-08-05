@@ -1,0 +1,182 @@
+def compare_driver_core(root: Path, touchgrass: Path) -> tuple[dict[str, object], str]:
+    pairs = [
+        ("drivers/base/platform.c", ["platform_match"]),
+        ("drivers/base/dd.c", ["really_probe", "driver_probe_device", "__device_attach_driver", "__driver_attach"]),
+        ("drivers/base/core.c", ["device_links_check_suppliers"]),
+    ]
+    rows: list[dict[str, object]] = []
+    chunks: list[str] = []
+    for rel, names in pairs:
+        current_path = root / rel
+        tg_path = touchgrass / rel
+        current_text = current_path.read_text(encoding="utf-8", errors="replace") if current_path.is_file() else ""
+        tg_text = tg_path.read_text(encoding="utf-8", errors="replace") if tg_path.is_file() else ""
+        for name in names:
+            current_fn = extract_function(current_text, name)
+            tg_fn = extract_function(tg_text, name)
+            same = current_fn is not None and tg_fn is not None and current_fn == tg_fn
+            rows.append({
+                "path": rel,
+                "function": name,
+                "current_present": current_fn is not None,
+                "touchgrass_present": tg_fn is not None,
+                "identical": same,
+                "current_sha256": hashlib.sha256((current_fn or "").encode()).hexdigest() if current_fn is not None else None,
+                "touchgrass_sha256": hashlib.sha256((tg_fn or "").encode()).hexdigest() if tg_fn is not None else None,
+            })
+            chunks.append(f"### {rel}: {name}\n")
+            if current_fn is None or tg_fn is None:
+                chunks.append(f"missing current={current_fn is None} touchgrass={tg_fn is None}\n\n")
+            else:
+                diff = difflib.unified_diff(
+                    tg_fn.splitlines(keepends=True), current_fn.splitlines(keepends=True),
+                    fromfile=f"touchgrass/{rel}:{name}", tofile=f"current-pre-phase230/{rel}:{name}", n=3,
+                )
+                rendered = "".join(diff)
+                chunks.append(rendered if rendered else "IDENTICAL\n")
+                chunks.append("\n")
+    return {
+        "phase": 230,
+        "comparison_point": "generated Phase 229 source immediately before Phase 230 instrumentation",
+        "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
+        "functions": rows,
+    }, "".join(chunks)
+
+
+def write_comparisons(root: Path) -> None:
+    touchgrass = Path("workspace/touchgrass-a52xq")
+    destinations = [Path("workspace/phase230-comparison"), Path("artifacts/a52xq-graphics-startup-trace/comparison")]
+    current_nodes = find_gpu_nodes(root)
+    tg_nodes = find_gpu_nodes(touchgrass) if touchgrass.is_dir() else []
+    dt_report = {
+        "phase": 230,
+        "compatible": GPU_COMPAT,
+        "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
+        "current_nodes": current_nodes,
+        "touchgrass_nodes": tg_nodes,
+        "current_reference_union": sorted({ref for row in current_nodes for ref in row["references"]}),
+        "touchgrass_reference_union": sorted({ref for row in tg_nodes for ref in row["references"]}),
+    }
+    dt_chunks = ["# qcom,kgsl-3d0 device-tree comparison\n\n"]
+    max_rows = max(len(current_nodes), len(tg_nodes))
+    for idx in range(max_rows):
+        current = current_nodes[idx] if idx < len(current_nodes) else None
+        tg = tg_nodes[idx] if idx < len(tg_nodes) else None
+        dt_chunks.append(f"## node {idx}\n")
+        if tg:
+            dt_chunks.append(f"TouchGrass: {tg['path']}:{tg['start_line']}-{tg['end_line']}\n")
+        if current:
+            dt_chunks.append(f"Current: {current['path']}:{current['start_line']}-{current['end_line']}\n")
+        if current and tg:
+            diff = difflib.unified_diff(
+                str(tg["block"]).splitlines(keepends=True), str(current["block"]).splitlines(keepends=True),
+                fromfile=f"touchgrass/{tg['path']}", tofile=f"current/{current['path']}", n=3,
+            )
+            rendered = "".join(diff)
+            dt_chunks.append(rendered if rendered else "IDENTICAL\n")
+        elif current:
+            dt_chunks.append(str(current["block"]))
+        elif tg:
+            dt_chunks.append(str(tg["block"]))
+        dt_chunks.append("\n")
+    core_report, core_text = compare_driver_core(root, touchgrass) if touchgrass.is_dir() else ({"phase": 230, "error": "TouchGrass source unavailable"}, "TouchGrass source unavailable\n")
+    for dest in destinations:
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "phase230-gpu-dt-touchgrass.json").write_text(json.dumps(dt_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (dest / "phase230-gpu-dt-touchgrass.txt").write_text("".join(dt_chunks), encoding="utf-8")
+        (dest / "phase230-drivercore-touchgrass.json").write_text(json.dumps(core_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (dest / "phase230-drivercore-touchgrass.txt").write_text(core_text, encoding="utf-8")
+    print(f"Phase 230 DT comparison: current_nodes={len(current_nodes)} touchgrass_nodes={len(tg_nodes)}")
+
+
+def patch_generated(arguments: list[str]) -> Path:
+    root = locate_root(arguments)
+    write_comparisons(root)
+    targets = {
+        PLATFORM_REL: patch_platform,
+        DD_REL: patch_dd,
+        CORE_REL: patch_core,
+        RECORDER_REL: patch_recorder,
+    }
+    for rel, patcher in targets.items():
+        path = root / rel
+        path.write_text(patcher(path.read_text(encoding="utf-8"), str(path)), encoding="utf-8")
+    stage_destinations = [Path("workspace/phase230-stage"), Path("artifacts/a52xq-graphics-startup-trace/stage")]
+    for dest in stage_destinations:
+        dest.mkdir(parents=True, exist_ok=True)
+        for rel in (PLATFORM_REL, DD_REL, CORE_REL, RECORDER_REL):
+            shutil.copy2(root / rel, dest / (str(rel).replace("/", "-") + "-after-phase230.c"))
+    return root
+
+
+def synthetic_platform() -> str:
+    return '''#include <linux/of_device.h>
+#include <linux/a52_ack_secure_flight_recorder.h>
+static int platform_match_id(void *a, void *b);
+static int platform_match(struct device *dev, struct device_driver *drv)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_driver *pdrv = to_platform_driver(drv);
+	int ret;
+
+	if (pdev->driver_override)
+		ret = !strcmp(pdev->driver_override, drv->name);
+	else if (of_driver_match_device(dev, drv))
+		ret = 1;
+	else if (acpi_driver_match_device(dev, drv))
+		ret = 1;
+	else if (pdrv->id_table)
+		ret = platform_match_id(pdrv->id_table, pdev) != NULL;
+	else
+		ret = strcmp(pdev->name, drv->name) == 0;
+
+	if (dev->of_node &&
+	    of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec") &&
+	    !strcmp(drv->name, "msmdrm_smmu"))
+		a52_ackfr_record("DCORE platform-match drv=%s rc=%d", drv->name, ret);
+	return ret;
+}
+'''
+
+
+def self_test() -> None:
+    recorder = '/* KGPPOST 229 */\n\treturn !strncmp(message, "BOOT ", 5) ||\n\t       !strncmp(message, "KGPPOST ", 8) ||\n\t       !strncmp(message, "ODSPOST ", 8);\n'
+    patched_recorder = patch_recorder(recorder, "recorder-fixture")
+    if patch_recorder(patched_recorder, "recorder-idempotent") != patched_recorder:
+        raise AssertionError("recorder patch is not idempotent")
+    platform = synthetic_platform()
+    patched_platform = patch_platform(platform, "platform-fixture")
+    if patch_platform(patched_platform, "platform-idempotent") != patched_platform:
+        raise AssertionError("platform patch is not idempotent")
+    # The exact generated 5.10 files are validated by strict anchors during the inherited build.
+    for name, fn in (("dd", patch_dd), ("core", patch_core)):
+        source = Path(__file__).resolve().parent / f"phase230-selftest-{name}.c"
+        if source.is_file():
+            patched = fn(source.read_text(encoding="utf-8"), f"{name}-fixture")
+            if fn(patched, f"{name}-idempotent") != patched:
+                raise AssertionError(f"{name} patch is not idempotent")
+    print("Phase 230 KGSL driver-core pre-probe self-test: PASS")
+
+
+def main() -> int:
+    base = Path(__file__).with_name("229_phase228_kgsl_wrapper.py")
+    if "--self-test" in sys.argv[1:]:
+        if not base.is_file():
+            raise SystemExit(f"missing Phase 229 base wrapper: {base}")
+        completed = subprocess.run([sys.executable, str(base), "--self-test"], check=False)
+        if completed.returncode:
+            return completed.returncode
+        self_test()
+        return 0
+    if not base.is_file():
+        raise SystemExit(f"missing Phase 229 base wrapper: {base}")
+    completed = subprocess.run([sys.executable, str(base), *sys.argv[1:]], check=False)
+    if completed.returncode:
+        return completed.returncode
+    root = patch_generated(sys.argv[1:])
+    print(f"Phase 230 KGSL driver-core trace applied to {root}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

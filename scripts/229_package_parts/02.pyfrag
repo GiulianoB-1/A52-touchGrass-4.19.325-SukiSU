@@ -1,3 +1,29 @@
+        "rs_roots": 48,
+    }
+    (root / "BUILD-IDENTITY.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
+    (root / "README-FIRST.txt").write_text(
+        "A52 GKI 5.10 Phase 229 KGSL TouchGrass binding-path candidate\n\n"
+        "FLASH ONLY AFTER SHA256SUMS AND THE PACKAGE AUDIT PASS:\n"
+        "  package/boot.img -> BOOT partition\n\n"
+        "Phase 229 preserves Phase 228 vold, odsign/odrefresh, SurfaceFlinger\n"
+        "and KGSL recording. It adds a bounded read-only trace of the live\n"
+        "qcom,kgsl-3d0 DT node, platform-device population, driver binding and\n"
+        "Adreno probe result, plus an exact comparison with pinned TouchGrass.\n\n"
+        "Reed-Solomon remains RS48. No DT, probe result, service, security,\n"
+        "display, GPU power or firmware behavior is changed.\n\n"
+        "CI-validated, not hardware-validated. Follow PHASE229-HARDWARE-TEST.txt.\n"
+    )
+
+    sums = root / "SHA256SUMS"
+    if sums.exists():
+        sums.unlink()
+    files = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
+    sums.write_text("".join(f"{sha256(p)}  ./{p.relative_to(root)}\n" for p in files))
+    for p in files:
+        if sha256(p) not in sums.read_text():
+            raise RuntimeError(f"checksum list missing {p}")
+
+    out = Path("phase229-out")
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(root, out)
@@ -5,7 +31,7 @@
 
 
 def main() -> int:
-    run_id, run_url, artifact_id = dispatch_and_wait()
+    run_id, run_url, artifact_id = select_source()
     work = Path("phase229-work")
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()

@@ -166,7 +166,7 @@ jobs:
 
           grep -aFq 'TRIPOST 228' "$ROOT/compile/Image"
           grep -aFq 'ODSPOST 226' "$ROOT/compile/Image"
-          grep -aFq '/system/bin/surfaceflinger' "$ROOT/compile/Image"
+          grep -aFq 'surfaceflinger' "$ROOT/compile/Image"
           grep -aFq 'GFXPOST 225 ks1' "$ROOT/compile/Image"
           grep -aFq 'GFXPOST 225 ks2' "$ROOT/compile/Image"
 

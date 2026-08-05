@@ -1,0 +1,218 @@
+CORE_HELPER = r'''/* A52_PHASE230_KGSL_DRIVERCORE_PATH
+ * Read-only supplier diagnostics for the qcom,kgsl-3d0 consumer.
+ */
+static atomic_t a52_r230_core_seen = ATOMIC_INIT(0);
+
+static bool a52_r230_core_once(unsigned int bit)
+{
+	int old, new;
+
+	do {
+		old = atomic_read(&a52_r230_core_seen);
+		if (old & BIT(bit))
+			return false;
+		new = old | BIT(bit);
+	} while (atomic_cmpxchg(&a52_r230_core_seen, old, new) != old);
+	return true;
+}
+
+static bool a52_r230_gpu_consumer(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0");
+}
+
+'''
+
+
+def patch_core(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    helper_anchor = (
+        "static bool a52_smmu_unsec_trace_dev(const struct device *dev)\n"
+        "{\n"
+        "\treturn dev && dev->of_node &&\n"
+        "\t\tof_device_is_compatible(dev->of_node, \"qcom,smmu_sde_unsec\");\n"
+        "}\n\n"
+    )
+    if text.count(helper_anchor) != 1:
+        raise RuntimeError(f"{label}: core helper anchor mismatch")
+    text = text.replace(helper_anchor, helper_anchor + "\n" + CORE_HELPER)
+
+    start_anchor = "\tstruct device_link *link;\n\tint ret = 0;\n\n\tif (a52_smmu_unsec_trace_dev(dev))\n"
+    if text.count(start_anchor) != 1:
+        raise RuntimeError(f"{label}: supplier check start mismatch")
+    text = text.replace(
+        start_anchor,
+        "\tstruct device_link *link;\n\tint ret = 0;\n\n"
+        "\tif (a52_r230_gpu_consumer(dev) && a52_r230_core_once(0))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 S in st=%d perm=%d fw=%d\",\n"
+        "\t\t\tdev->links.status, fw_devlink_is_permissive(),\n"
+        "\t\t\tdev->fwnode && !list_empty(&dev->fwnode->suppliers));\n\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev))\n",
+    )
+
+    fw_anchor = (
+        "\t\tdev_dbg(dev, \"probe deferral - wait for supplier %pfwP\\n\",\n"
+        "\t\t\tlist_first_entry(&dev->fwnode->suppliers,\n"
+        "\t\t\tstruct fwnode_link,\n"
+        "\t\t\tc_hook)->supplier);\n"
+    )
+    if text.count(fw_anchor) != 1:
+        raise RuntimeError(f"{label}: fwnode supplier anchor mismatch")
+    text = text.replace(
+        fw_anchor,
+        fw_anchor
+        + "\t\tif (a52_r230_gpu_consumer(dev) && a52_r230_core_once(1))\n"
+        + "\t\t\ta52_ackfr_record(\"KGBPOST 230 S fw=%pfwP\",\n"
+        + "\t\t\t\tlist_first_entry(&dev->fwnode->suppliers,\n"
+        + "\t\t\t\tstruct fwnode_link, c_hook)->supplier);\n",
+    )
+
+    blocked_anchor = (
+        "\t\tif (link->status != DL_STATE_AVAILABLE &&\n"
+        "\t\t    !(link->flags & DL_FLAG_SYNC_STATE_ONLY)) {\n"
+        "\t\t\tdevice_links_missing_supplier(dev);\n"
+    )
+    if text.count(blocked_anchor) != 1:
+        raise RuntimeError(f"{label}: managed supplier anchor mismatch")
+    text = text.replace(
+        blocked_anchor,
+        "\t\tif (link->status != DL_STATE_AVAILABLE &&\n"
+        "\t\t    !(link->flags & DL_FLAG_SYNC_STATE_ONLY)) {\n"
+        "\t\t\tif (a52_r230_gpu_consumer(dev) && a52_r230_core_once(2))\n"
+        "\t\t\t\ta52_ackfr_record(\"KGBPOST 230 S dl=%.22s ls=%d f=%x ss=%d\",\n"
+        "\t\t\t\t\tdev_name(link->supplier), link->status, link->flags,\n"
+        "\t\t\t\t\tlink->supplier->links.status);\n"
+        "\t\t\tdevice_links_missing_supplier(dev);\n",
+    )
+
+    exit_anchor = (
+        "\tdevice_links_write_unlock();\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev))\n"
+    )
+    if text.count(exit_anchor) != 1:
+        raise RuntimeError(f"{label}: supplier exit anchor mismatch")
+    text = text.replace(
+        exit_anchor,
+        "\tdevice_links_write_unlock();\n"
+        "\tif (a52_r230_gpu_consumer(dev) && a52_r230_core_once(3))\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 S out=%d st=%d\", ret,\n"
+        "\t\t\tdev->links.status);\n"
+        "\tif (a52_smmu_unsec_trace_dev(dev))\n",
+    )
+    for token in (PHASE230_MARKER, "KGBPOST 230 S fw", "KGBPOST 230 S dl", "KGBPOST 230 S out"):
+        if text.count(token) != 1:
+            raise RuntimeError(f"{label}: expected exactly one {token!r}")
+    return text
+
+
+def strip_dts_comments(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//.*", "", text)
+
+
+def gpu_node_blocks(path: Path) -> list[dict[str, object]]:
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    clean = strip_dts_comments(raw)
+    lines = clean.splitlines()
+    stack: list[tuple[int, int]] = []
+    matches: list[tuple[int, int]] = []
+    depth = 0
+    for idx, line in enumerate(lines):
+        opens = line.count("{")
+        closes = line.count("}")
+        for _ in range(opens):
+            stack.append((idx, depth))
+            depth += 1
+        if GPU_COMPAT in line and stack:
+            matches.append(stack[-1])
+        for _ in range(closes):
+            depth = max(depth - 1, 0)
+            if stack:
+                start, start_depth = stack[-1]
+                if start_depth >= depth:
+                    stack.pop()
+    out: list[dict[str, object]] = []
+    for start, start_depth in matches:
+        depth = 0
+        end = start
+        started = False
+        for idx in range(start, len(lines)):
+            line = lines[idx]
+            depth += line.count("{")
+            if line.count("{"):
+                started = True
+            depth -= line.count("}")
+            end = idx
+            if started and depth <= 0:
+                break
+        block = "\n".join(lines[start:end + 1]).strip() + "\n"
+        refs = sorted(set(re.findall(r"&([A-Za-z_][A-Za-z0-9_]*)", block)))
+        props = sorted(set(re.findall(r"(?m)^\s*([A-Za-z0-9,#._+\-]+)\s*=", block)))
+        out.append({
+            "path": str(path),
+            "start_line": start + 1,
+            "end_line": end + 1,
+            "sha256": hashlib.sha256(block.encode()).hexdigest(),
+            "references": refs,
+            "properties": props,
+            "block": block,
+        })
+    unique: list[dict[str, object]] = []
+    seen: set[tuple[int, int]] = set()
+    for row in out:
+        key = (int(row["start_line"]), int(row["end_line"]))
+        if key not in seen:
+            seen.add(key)
+            unique.append(row)
+    return unique
+
+
+def find_gpu_nodes(tree: Path) -> list[dict[str, object]]:
+    base = tree / "arch/arm64/boot/dts"
+    if not base.is_dir():
+        return []
+    rows: list[dict[str, object]] = []
+    for path in sorted(base.rglob("*.dts*")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if GPU_COMPAT not in text:
+            continue
+        for row in gpu_node_blocks(path):
+            row["path"] = str(path.relative_to(tree))
+            rows.append(row)
+    return rows
+
+
+def extract_function(text: str, name: str) -> str | None:
+    match = re.search(r"(?m)^(?:static\s+)?(?:[\w\s*]+)\b" + re.escape(name) + r"\s*\([^;]*\)\s*\{", text)
+    if not match:
+        return None
+    brace = text.find("{", match.start())
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(brace, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[match.start():idx + 1] + "\n"
+    return None
+
+

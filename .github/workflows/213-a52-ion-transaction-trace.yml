@@ -18,6 +18,20 @@ on:
       - scripts/227_phase226_retention_wrapper.py
       - scripts/227_design.md
       - scripts/227_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase226-odsign-gate-v1
+    paths:
+      - .github/workflows/213-a52-ion-transaction-trace.yml
+      - scripts/218_payload.py
+      - scripts/218_phase217_wrapper.py.z64
+      - scripts/226_driver_chunks/**
+      - scripts/226_payload_chunks/**
+      - scripts/226_design.md
+      - scripts/226_trigger.txt
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_design.md
+      - scripts/227_trigger.txt
 
 permissions:
   contents: read

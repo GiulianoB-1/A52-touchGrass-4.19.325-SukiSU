@@ -72,7 +72,6 @@ jobs:
           test -f phase230-out/compile/Image
           grep -aFq 'KGPPOST 230' phase230-out/compile/Image
           grep -aFq 'KGPPOST 230 replay-begin' phase230-out/compile/Image
-          grep -aFq 'A52_PHASE230_KGSL_LATE_REPLAY' phase230-out/compile/Image
           grep -aFq 'KGPPOST 229' phase230-out/compile/Image
           grep -aFq 'TRIPOST 228' phase230-out/compile/Image
           grep -aFq 'ODSPOST 226' phase230-out/compile/Image

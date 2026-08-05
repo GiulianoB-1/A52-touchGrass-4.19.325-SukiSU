@@ -1,0 +1,22 @@
+A52 Phase 229 hardware test
+
+1. Verify the downloaded artifact ZIP SHA-256 and run `sha256sum -c SHA256SUMS`.
+2. Flash only `package/boot.img` to the BOOT partition.
+3. Allow the phone to continue until it reboots on its own. Do not manually
+   restart it before 210 seconds unless recovery is required.
+4. After reboot, export the raw 1 MiB RAMOOPS region using the same frozen-first
+   collector used for Phase 228.
+5. Decode with the Phase 210+ RS48 transport-fusion decoder.
+6. Preserve all `KGPPOST 229`, `TRIPOST 228`, `ODSPOST 226`, `GFXPOST 225`,
+   `BOOTPOST` and shutdown records.
+
+Interpretation of KGPPOST d=node,available,pdev,bound:
+
+- d=0,0,0,0: live DT has no qcom,kgsl-3d0 compatible node
+- d=1,0,*,*: node exists but is disabled/unavailable
+- d=1,1,0,0: node exists and is enabled but no platform_device was populated
+- d=1,1,1,0: platform_device exists but did not bind to the Adreno driver
+- d=1,1,1,1 with p=0,*: investigate unexpected binding/probe accounting
+- p=1,1,<negative>: Adreno probe entered and returned the recorded error
+
+This phase is observational only and is not hardware-validated by CI.

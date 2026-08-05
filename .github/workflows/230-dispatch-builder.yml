@@ -4,6 +4,30 @@ run-name: Build and audit Phase 230 KGSL driver-core path candidate
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase230-kgsl-driver-core-path-v1
+    paths:
+      - .github/workflows/230-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/229_phase228_kgsl_wrapper.py
+      - scripts/230_patcher_parts/**
+      - scripts/230_fixtures/**
+      - scripts/230_package.py
+      - scripts/230_design.md
+      - scripts/230_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase229-kgsl-touchgrass-bindpath-v1
+    paths:
+      - .github/workflows/230-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/229_phase228_kgsl_wrapper.py
+      - scripts/230_patcher_parts/**
+      - scripts/230_fixtures/**
+      - scripts/230_package.py
+      - scripts/230_design.md
+      - scripts/230_trigger.txt
 
 permissions:
   actions: write

@@ -1,4 +1,4 @@
-# Dispatch generation 2: chained self-test root fixed
+# Dispatch generation 3: inherited self-test waits for restored kernel root
 name: 227 - Dispatch ODSPOST retention builder
 
 run-name: Dispatch and monitor Phase 227 builder

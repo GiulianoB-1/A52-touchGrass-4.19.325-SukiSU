@@ -57,3 +57,14 @@ Phase 230 does not:
 - change vold, odsign, odrefresh, SurfaceFlinger, shutdown or reboot behavior
 
 The candidate is CI-audited and still requires hardware validation.
+
+## Hardware-capture retention correction
+
+The first Phase 230 hardware capture contained 1,028 CRC-valid RS(255,207)
+records, but its surviving window began around 139 seconds. The driver-core
+records are one-shot early-boot events and had already been overwritten.
+
+The revised recorder journals the first 96 original `KGPPOST 230` messages in
+a bounded static metadata buffer and re-emits them unchanged at heartbeat ticks
+150 and 180, bracketed by `replay-begin` and `replay-end` records. Replay does
+not rerun matching or probing and does not modify any driver-core state.

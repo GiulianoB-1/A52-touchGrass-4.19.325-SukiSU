@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Run Phase 229, compare the GPU DT/driver core with TouchGrass, and trace the pre-probe boundary."""
+from __future__ import annotations
+
+import difflib
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+BASE_MARKER = "A52_PHASE229_KGSL_PLATFORM_PATH"
+PHASE230_MARKER = "A52_PHASE230_KGSL_DRIVERCORE_PATH"
+GPU_COMPAT = "qcom,kgsl-3d0"
+PLATFORM_REL = Path("drivers/base/platform.c")
+DD_REL = Path("drivers/base/dd.c")
+CORE_REL = Path("drivers/base/core.c")
+RECORDER_REL = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
+ADRENO_REL = Path("drivers/gpu/msm/adreno.c")
+KGB_ALLOW = '!strncmp(message, "KGBPOST ", 8)'
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def candidate_roots(arguments: list[str]) -> list[Path]:
+    roots: list[Path] = []
+    for value in arguments:
+        if value.startswith("-"):
+            continue
+        p = Path(value)
+        roots.extend((p, p.parent))
+    roots.extend((Path("workspace/gki-phase199-src"), Path("gki/common")))
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        key = root.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            out.append(root)
+    return out
+
+
+def locate_root(arguments: list[str]) -> Path:
+    matches: list[Path] = []
+    for root in candidate_roots(arguments):
+        paths = [root / rel for rel in (PLATFORM_REL, DD_REL, CORE_REL, RECORDER_REL, ADRENO_REL)]
+        if all(path.is_file() for path in paths):
+            recorder = paths[3].read_text(encoding="utf-8")
+            adreno = paths[4].read_text(encoding="utf-8")
+            if '!strncmp(message, "KGPPOST ", 8)' in recorder and BASE_MARKER in adreno:
+                matches.append(root)
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for root in matches:
+        key = root.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    if len(unique) != 1:
+        rendered = ", ".join(str(p) for p in unique) or "none"
+        raise RuntimeError(f"expected one generated Phase 229 source root, found {len(unique)}: {rendered}")
+    return unique[0]
+
+
+def allow_count(text: str, token: str) -> int:
+    return len(re.findall(r"(?m)^[ \t]*" + re.escape(token) + r" \|\|$", text))
+
+
+def patch_recorder(text: str, label: str) -> str:
+    if '!strncmp(message, "KGPPOST ", 8)' not in text:
+        raise RuntimeError(f"{label}: missing Phase 229 KGPPOST retention entry")
+    count = allow_count(text, KGB_ALLOW)
+    if count == 0:
+        anchor = re.compile(r'(?m)^(?P<i>[ \t]*)!strncmp\(message, "KGPPOST ", 8\) \|\|$')
+        matches = list(anchor.finditer(text))
+        if len(matches) != 1:
+            raise RuntimeError(f"{label}: expected one KGPPOST allowlist anchor, found {len(matches)}")
+        match = matches[0]
+        replacement = match.group(0) + "\n" + match.group("i") + KGB_ALLOW + " ||"
+        text = text[:match.start()] + replacement + text[match.end():]
+    elif count != 1:
+        raise RuntimeError(f"{label}: KGBPOST allowlist count is {count}")
+    if allow_count(text, KGB_ALLOW) != 1:
+        raise RuntimeError(f"{label}: final KGBPOST allowlist audit failed")
+    return text
+
+
+PLATFORM_HELPER = r'''/* A52_PHASE230_KGSL_DRIVERCORE_PATH
+ * Read-only trace of the qcom,kgsl-3d0 platform match. No match result,
+ * driver override, probe ordering, dependency or return value is changed.
+ */
+static atomic_t a52_r230_platform_logged = ATOMIC_INIT(0);
+
+static bool a52_r230_gpu_device(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0");
+}
+
+static bool a52_r230_adreno_driver(const struct device_driver *drv)
+{
+	const struct of_device_id *id;
+
+	if (!drv || !drv->of_match_table)
+		return false;
+	for (id = drv->of_match_table;
+	     id->name[0] || id->type[0] || id->compatible[0]; id++)
+		if (!strcmp(id->compatible, "qcom,kgsl-3d0"))
+			return true;
+	return false;
+}
+
+'''
+
+
+def patch_platform(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    anchor = "static int platform_match(struct device *dev, struct device_driver *drv)\n"
+    if text.count(anchor) != 1:
+        raise RuntimeError(f"{label}: platform_match anchor mismatch")
+    text = text.replace(anchor, PLATFORM_HELPER + anchor)
+    tail = (
+        "\telse\n"
+        "\t\tret = strcmp(pdev->name, drv->name) == 0;\n\n"
+        "\tif (dev->of_node &&\n"
+    )
+    if text.count(tail) != 1:
+        raise RuntimeError(f"{label}: platform_match result anchor mismatch")
+    replacement = (
+        "\telse\n"
+        "\t\tret = strcmp(pdev->name, drv->name) == 0;\n\n"
+        "\tif (a52_r230_gpu_device(dev) && a52_r230_adreno_driver(drv) &&\n"
+        "\t    atomic_cmpxchg(&a52_r230_platform_logged, 0, 1) == 0)\n"
+        "\t\ta52_ackfr_record(\"KGBPOST 230 M r=%d of=%d ov=%d id=%d n=%.16s\",\n"
+        "\t\t\tret, of_driver_match_device(dev, drv) ? 1 : 0,\n"
+        "\t\t\tpdev->driver_override ? 1 : 0, pdrv->id_table ? 1 : 0,\n"
+        "\t\t\tdrv->name ? drv->name : \"-\");\n\n"
+        "\tif (dev->of_node &&\n"
+    )
+    text = text.replace(tail, replacement)
+    expected = {PHASE230_MARKER: 1, "KGBPOST 230 M": 1, "a52_r230_adreno_driver": 2}
+    for token, count in expected.items():
+        if text.count(token) != count:
+            raise RuntimeError(f"{label}: expected {count} {token!r}, found {text.count(token)}")
+    return text
+
+

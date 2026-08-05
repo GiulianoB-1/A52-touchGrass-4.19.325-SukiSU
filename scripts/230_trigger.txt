@@ -13,9 +13,10 @@ Expected diagnostic outcome
 
 - KGPPOST 229 should continue proving node, platform-device and registration
   state.
-- KGPPOST 230 should identify one exact stop boundary:
-  platform match, attach traversal, supplier gate, pinctrl, DMA, sysfs,
-  PM-domain, or the platform callback.
+- `KGPPOST 230 replay-begin t=150` and/or `t=180` should survive.
+- The replayed original KGPPOST 230 records should identify one exact stop
+  boundary: platform match, attach traversal, supplier gate, pinctrl, DMA,
+  sysfs, PM-domain, or the platform callback.
 - If supplier-gated, the records should name the unresolved fwnode or managed
   device-link supplier and its bound-driver state.
 

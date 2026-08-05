@@ -1,0 +1,96 @@
+name: 231 - A52 exact GPU GX GDSC provider
+
+run-name: Build and audit Phase 231 GPU GX GDSC candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase231-gpu-gx-gdsc-v1
+    paths:
+      - .github/workflows/231-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/231_phase230_gpu_gdsc_wrapper.py
+      - scripts/231_fixtures/**
+      - scripts/231_package.py
+      - scripts/231_design.md
+      - scripts/231_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase230-kgsl-driver-core-path-v1
+    paths:
+      - .github/workflows/231-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/231_phase230_gpu_gdsc_wrapper.py
+      - scripts/231_fixtures/**
+      - scripts/231_package.py
+      - scripts/231_design.md
+      - scripts/231_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase231-gpu-gx-gdsc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 231
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 231 branch
+        uses: actions/checkout@v4
+
+      - name: Verify Phase 231 source
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/231_phase230_gpu_gdsc_wrapper.py \
+            scripts/231_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -Fq 'A52_PHASE231_GPU_GX_GDSC_PROVIDER' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          grep -Fq 'A52GDSC GPU_GX_PROFILE_V1' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          grep -Fq 'A52_GDSC_GPU_GX_ADDR      0x03d9100c' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          ! grep -Fq '"gpu_cx_gdsc"' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          grep -Fq 'device_links_check_suppliers()' scripts/231_design.md
+          grep -Fq 'Phase 230 driver-core tracing and late replay' \
+            scripts/231_design.md
+
+      - name: Dispatch inherited builder and package Phase 231
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/231_package.py
+          test -f phase231-out/package/boot.img
+          test -f phase231-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_PROFILE_V1' \
+            phase231-out/compile/Image
+          grep -aFq 'A52GDSC gpu-enable' phase231-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' \
+            phase231-out/compile/Image
+          grep -aFq 'KGPPOST 229' phase231-out/compile/Image
+          (
+            cd phase231-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 231 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase231-GPU-GX-GDSC-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase231-out
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,16 @@
+A52 Phase 231 hardware test
+
+1. Verify every entry in SHA256SUMS.
+2. Flash only package/boot.img to the BOOT partition.
+3. Allow one normal boot to run for at least 210 seconds, or until the
+   coordinated restart.
+4. Boot directly into recovery without another normal boot.
+5. Collect the untouched raw RAMOOPS ZIP.
+6. Upload the raw ZIP without decoding or editing it.
+
+Expected Phase 230 replay evidence:
+- supplier 3d9100c.qcom,gdsc has driver a52-legacy-gdsc-regulator
+- device_links_check_suppliers no longer stops KGSL on that supplier
+- adreno_probe entry is reached, or a later precise blocker is recorded
+
+This is CI-audited but not hardware-validated.

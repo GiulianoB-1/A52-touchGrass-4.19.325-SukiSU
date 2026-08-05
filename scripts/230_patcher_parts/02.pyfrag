@@ -1,0 +1,123 @@
+CORE_HELPER = r'''/* A52_PHASE230_KGSL_DRIVER_CORE_PATH
+ * Observe only qcom,kgsl-3d0 supplier state while the normal driver core
+ * performs its existing checks.  No fwnode link, device link, status, flag,
+ * deferred-probe reason, return value, or supplier decision is modified.
+ */
+static atomic_t a52_r230_core_records = ATOMIC_INIT(0);
+
+static bool a52_r230_gpu_consumer(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0");
+}
+
+static bool a52_r230_core_take(void)
+{
+	return atomic_inc_return(&a52_r230_core_records) <= 96;
+}
+
+#define A52_R230_CORE(_fmt, ...) \
+	do { \
+		if (a52_r230_core_take()) \
+			a52_ackfr_record("KGPPOST 230 " _fmt, ##__VA_ARGS__); \
+	} while (0)
+
+'''
+
+
+def patch_core(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    helper_anchor = '''static bool a52_smmu_unsec_trace_dev(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec");
+}
+
+'''
+    text = one(text, helper_anchor, helper_anchor + CORE_HELPER, f"{label}: helper")
+
+    entry_anchor = r'''int device_links_check_suppliers(struct device *dev)
+{
+	struct device_link *link;
+	int ret = 0;
+'''
+    entry_new = entry_anchor + r'''
+	if (a52_r230_gpu_consumer(dev))
+		A52_R230_CORE("sl-in d=%.24s ls=%d fw=%d perm=%d",
+			dev_name(dev), dev->links.status,
+			dev->fwnode && !list_empty(&dev->fwnode->suppliers),
+			fw_devlink_is_permissive());
+'''
+    text = one(text, entry_anchor, entry_new, f"{label}: supplier entry")
+
+    fw_anchor = '''\tif (dev->fwnode && !list_empty(&dev->fwnode->suppliers) &&\n\t    !fw_devlink_is_permissive()) {\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    fw_new = fw_anchor + '''\t\tif (a52_r230_gpu_consumer(dev)) {\n\t\t\tstruct fwnode_link *fwlink;\n\t\t\tunsigned int n = 0;\n\n\t\t\tlist_for_each_entry(fwlink, &dev->fwnode->suppliers, c_hook) {\n\t\t\t\tstruct device *sdev = fwlink->supplier ? fwlink->supplier->dev : NULL;\n\n\t\t\t\tif (n >= 12)\n\t\t\t\t\tbreak;\n\t\t\t\tA52_R230_CORE("fw n=%u p=%pfwP d=%.20s r=%.16s", n,\n\t\t\t\t\tfwlink->supplier, sdev ? dev_name(sdev) : "-",\n\t\t\t\t\tsdev && sdev->driver && sdev->driver->name ?\n\t\t\t\t\t\tsdev->driver->name : "-");\n\t\t\t\tn++;\n\t\t\t}\n\t\t}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, fw_anchor, fw_new, f"{label}: fwnode suppliers")
+
+    link_anchor = '''\tdevice_links_write_lock();\n\n\tlist_for_each_entry(link, &dev->links.suppliers, c_node) {\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    link_new = '''\tdevice_links_write_lock();\n\n\tlist_for_each_entry(link, &dev->links.suppliers, c_node) {\n\t\tif (a52_r230_gpu_consumer(dev)) {\n\t\t\tconst char *sdrv = link->supplier && link->supplier->driver &&\n\t\t\t\tlink->supplier->driver->name ? link->supplier->driver->name : "-";\n\t\t\tconst char *sof = link->supplier && link->supplier->of_node ?\n\t\t\t\tlink->supplier->of_node->full_name : "-";\n\n\t\t\tA52_R230_CORE("dl s=%.20s r=%.16s st=%d fl=%x ds=%d",\n\t\t\t\tlink->supplier ? dev_name(link->supplier) : "-", sdrv,\n\t\t\t\tlink->status, link->flags,\n\t\t\t\tlink->supplier ? link->supplier->links.status : -1);\n\t\t\tA52_R230_CORE("do p=%.48s", sof);\n\t\t}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, link_anchor, link_new, f"{label}: device suppliers")
+
+    exit_anchor = '''\tdevice_links_write_unlock();\n\tif (a52_smmu_unsec_trace_dev(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    exit_new = '''\tdevice_links_write_unlock();\n\tif (a52_r230_gpu_consumer(dev))\n\t\tA52_R230_CORE("sl-out rc=%d ls=%d", ret, dev->links.status);\n\tif (a52_smmu_unsec_trace_dev(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, exit_anchor, exit_new, f"{label}: supplier exit")
+
+    if text.count(PHASE230_MARKER) != 1:
+        raise RuntimeError(f"{label}: marker audit failed")
+    for token in ("sl-in", "fw n=", "dl s=", "sl-out"):
+        if token not in text:
+            raise RuntimeError(f"{label}: missing {token}")
+    return text
+
+
+def patch_generated(arguments: list[str]) -> Path:
+    root = locate_root(arguments)
+    files = {
+        PLATFORM_REL: patch_platform,
+        DD_REL: patch_dd,
+        CORE_REL: patch_core,
+    }
+    for rel, patcher in files.items():
+        path = root / rel
+        path.write_text(patcher(path.read_text(encoding="utf-8"), str(path)), encoding="utf-8")
+    return root
+
+
+def self_test() -> None:
+    fixture_root = Path(__file__).resolve().parent / "230_fixtures"
+    required = {
+        "platform.c": patch_platform,
+        "dd.c": patch_dd,
+        "core.c": patch_core,
+    }
+    for name, patcher in required.items():
+        path = fixture_root / name
+        if not path.is_file():
+            raise RuntimeError(f"missing Phase 230 fixture: {path}")
+        original = path.read_text(encoding="utf-8")
+        patched = patcher(original, f"fixture/{name}")
+        if patcher(patched, f"fixture/{name}/idempotent") != patched:
+            raise AssertionError(f"{name}: patch is not idempotent")
+        if PHASE230_MARKER not in patched or "KGPPOST 230" not in patched:
+            raise AssertionError(f"{name}: Phase 230 instrumentation missing")
+    print("Phase 230 KGSL driver-core path self-test: PASS")
+
+
+def main() -> int:
+    base = Path(__file__).with_name("229_phase228_kgsl_wrapper.py")
+    if not base.is_file():
+        raise SystemExit(f"missing Phase 229 base wrapper: {base}")
+    completed = subprocess.run([sys.executable, str(base), *sys.argv[1:]], check=False)
+    if completed.returncode:
+        return completed.returncode
+    if "--self-test" in sys.argv[1:]:
+        self_test()
+        return 0
+    root = patch_generated(sys.argv[1:])
+    print(f"Phase 230 KGSL driver-core path trace applied to {root}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

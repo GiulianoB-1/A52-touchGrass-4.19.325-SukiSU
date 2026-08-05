@@ -1,0 +1,153 @@
+PHASE230_REPLAY_MARKER = "A52_PHASE230_KGSL_LATE_REPLAY"
+
+REPLAY_HELPER = r'''/* A52_PHASE230_KGSL_LATE_REPLAY
+ * Preserve the bounded early KGPPOST 230 journal across RAMOOPS ring
+ * overwrite by replaying the original metadata records during the late
+ * heartbeat window.  No match, probe, supplier, DT or return value changes.
+ */
+#define A52_R230_JOURNAL_CAPACITY 96U
+#define A52_R230_REPLAY_TICK_FIRST 150U
+#define A52_R230_REPLAY_TICK_LAST 180U
+
+static char a52_r230_journal[A52_R230_JOURNAL_CAPACITY]
+	[A52_R179_MESSAGE_LEN];
+static unsigned int a52_r230_journal_count;
+static atomic_t a52_r230_journal_seen = ATOMIC_INIT(0);
+static atomic_t a52_r230_replay_active = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(a52_r230_journal_lock);
+
+static void a52_r230_journal_message(const char *message)
+{
+	unsigned long irq_flags;
+	unsigned int index;
+
+	if (!message || strncmp(message, "KGPPOST 230 ", 12) ||
+	    atomic_read(&a52_r230_replay_active))
+		return;
+
+	atomic_inc(&a52_r230_journal_seen);
+	spin_lock_irqsave(&a52_r230_journal_lock, irq_flags);
+	index = a52_r230_journal_count;
+	if (index < A52_R230_JOURNAL_CAPACITY) {
+		strscpy(a52_r230_journal[index], message,
+			sizeof(a52_r230_journal[index]));
+		a52_r230_journal_count = index + 1;
+	}
+	spin_unlock_irqrestore(&a52_r230_journal_lock, irq_flags);
+}
+
+static void a52_r230_replay_journal(unsigned int tick)
+{
+	char message[A52_R179_MESSAGE_LEN];
+	unsigned long irq_flags;
+	unsigned int count;
+	unsigned int index;
+	unsigned int seen;
+
+	if (tick != A52_R230_REPLAY_TICK_FIRST &&
+	    tick != A52_R230_REPLAY_TICK_LAST)
+		return;
+
+	spin_lock_irqsave(&a52_r230_journal_lock, irq_flags);
+	count = a52_r230_journal_count;
+	spin_unlock_irqrestore(&a52_r230_journal_lock, irq_flags);
+	seen = (unsigned int)atomic_read(&a52_r230_journal_seen);
+
+	atomic_set(&a52_r230_replay_active, 1);
+	a52_ackfr_record("KGPPOST 230 replay-begin t=%u kept=%u seen=%u",
+		tick, count, seen);
+	for (index = 0; index < count; index++) {
+		spin_lock_irqsave(&a52_r230_journal_lock, irq_flags);
+		strscpy(message, a52_r230_journal[index], sizeof(message));
+		spin_unlock_irqrestore(&a52_r230_journal_lock, irq_flags);
+		a52_ackfr_record("%s", message);
+	}
+	a52_ackfr_record("KGPPOST 230 replay-end t=%u kept=%u seen=%u",
+		tick, count, seen);
+	atomic_set(&a52_r230_replay_active, 0);
+}
+
+'''
+
+
+def patch_recorder_replay(text: str, label: str) -> str:
+    if PHASE230_REPLAY_MARKER in text:
+        return text
+    helper_anchor = "static void a52_r179_write_control(const char *kind)\n"
+    text = one(text, helper_anchor, REPLAY_HELPER + helper_anchor,
+               f"{label}: replay helper")
+
+    journal_anchor = "\tva_end(args);\n\ta52_r228_track_message(event.message);\n"
+    journal_new = (
+        "\tva_end(args);\n"
+        "\ta52_r230_journal_message(event.message);\n"
+        "\ta52_r228_track_message(event.message);\n"
+    )
+    text = one(text, journal_anchor, journal_new, f"{label}: journal hook")
+
+    heartbeat_anchor = (
+        "\ttick = (unsigned int)atomic_inc_return(&a52_r179_heartbeat_count);\n"
+        "\ta52_r226_task_snapshot(tick);\n"
+    )
+    heartbeat_new = (
+        "\ttick = (unsigned int)atomic_inc_return(&a52_r179_heartbeat_count);\n"
+        "\ta52_r230_replay_journal(tick);\n"
+        "\ta52_r226_task_snapshot(tick);\n"
+    )
+    text = one(text, heartbeat_anchor, heartbeat_new,
+               f"{label}: heartbeat replay")
+
+    checks = {
+        PHASE230_REPLAY_MARKER: 1,
+        "a52_r230_journal_message(event.message);": 1,
+        "a52_r230_replay_journal(tick);": 1,
+        '"KGPPOST 230 replay-begin ': 1,
+        '"KGPPOST 230 replay-end ': 1,
+        "A52_R230_JOURNAL_CAPACITY 96U": 1,
+        "A52_R230_REPLAY_TICK_FIRST 150U": 1,
+        "A52_R230_REPLAY_TICK_LAST 180U": 1,
+    }
+    for token, expected in checks.items():
+        count = text.count(token)
+        if count != expected:
+            raise RuntimeError(
+                f"{label}: expected {expected} {token!r}, found {count}"
+            )
+    return text
+
+
+_phase230_patch_generated_without_replay = patch_generated
+
+
+def patch_generated(arguments: list[str]) -> Path:
+    root = _phase230_patch_generated_without_replay(arguments)
+    recorder = root / RECORDER_REL
+    recorder.write_text(
+        patch_recorder_replay(recorder.read_text(encoding="utf-8"), str(recorder)),
+        encoding="utf-8",
+    )
+    return root
+
+
+_phase230_self_test_without_replay = self_test
+
+
+def self_test() -> None:
+    _phase230_self_test_without_replay()
+    fixture = Path(__file__).resolve().parent / "230_fixtures/recorder.c"
+    if not fixture.is_file():
+        raise RuntimeError(f"missing Phase 230 replay fixture: {fixture}")
+    original = fixture.read_text(encoding="utf-8")
+    patched = patch_recorder_replay(original, "fixture/recorder.c")
+    if patch_recorder_replay(patched, "fixture/recorder.c/idempotent") != patched:
+        raise AssertionError("recorder replay patch is not idempotent")
+    for token in (
+        PHASE230_REPLAY_MARKER,
+        "KGPPOST 230 replay-begin",
+        "KGPPOST 230 replay-end",
+        "a52_r230_journal_message(event.message);",
+        "a52_r230_replay_journal(tick);",
+    ):
+        if token not in patched:
+            raise AssertionError(f"recorder replay instrumentation missing: {token}")
+    print("Phase 230 KGSL late-replay self-test: PASS")

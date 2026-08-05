@@ -1,0 +1,61 @@
+name: 230 - Recover KGSL driver-core source artifact
+
+run-name: Recover and package Phase 230 source artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful inherited source-build run ID
+        required: true
+        type: string
+      source_artifact_id:
+        description: Artifact ID produced by that run
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  recover:
+    name: Audit and package Phase 230 source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify loaders
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/229_phase228_kgsl_wrapper.py \
+            scripts/230_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+      - name: Recover and package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE230_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          PHASE230_SOURCE_ARTIFACT_ID: ${{ inputs.source_artifact_id }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/230_package.py
+          test -f phase230-out/package/boot.img
+          grep -aFq 'KGPPOST 230' phase230-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' phase230-out/compile/Image
+          grep -aFq 'KGPPOST 229' phase230-out/compile/Image
+          (
+            cd phase230-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase230-KGSL-Driver-Core-Path-Recovered-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase230-out
+          if-no-files-found: error
+          retention-days: 30

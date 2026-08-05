@@ -1,0 +1,89 @@
+name: 230 - A52 KGSL driver-core path recorder
+
+run-name: Build and audit Phase 230 KGSL driver-core path candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase230-kgsl-driver-core-path-v1
+    paths:
+      - .github/workflows/230-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/229_phase228_kgsl_wrapper.py
+      - scripts/230_patcher_parts/**
+      - scripts/230_fixtures/**
+      - scripts/230_package.py
+      - scripts/230_design.md
+      - scripts/230_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase229-kgsl-touchgrass-bindpath-v1
+    paths:
+      - .github/workflows/230-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/229_phase228_kgsl_wrapper.py
+      - scripts/230_patcher_parts/**
+      - scripts/230_fixtures/**
+      - scripts/230_package.py
+      - scripts/230_design.md
+      - scripts/230_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase230-kgsl-driver-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 230
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 230 branch
+        uses: actions/checkout@v4
+
+      - name: Verify Phase 230 source
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/229_phase228_kgsl_wrapper.py \
+            scripts/230_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -RFq 'A52_PHASE230_KGSL_DRIVER_CORE_PATH' scripts/230_patcher_parts
+          grep -RFq 'A52_PHASE230_KGSL_LATE_REPLAY' scripts/230_patcher_parts
+          grep -RFq 'KGPPOST 230 replay-begin' scripts/230_patcher_parts
+          grep -Fq '__driver_attach()' scripts/230_design.md
+          grep -Fq '__device_attach_driver()' scripts/230_design.md
+          grep -Fq 'RS(255,207)' scripts/230_design.md
+
+      - name: Dispatch inherited builder and package Phase 230
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/230_package.py
+          test -f phase230-out/package/boot.img
+          test -f phase230-out/compile/Image
+          grep -aFq 'KGPPOST 230' phase230-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' phase230-out/compile/Image
+          grep -aFq 'KGPPOST 229' phase230-out/compile/Image
+          grep -aFq 'TRIPOST 228' phase230-out/compile/Image
+          grep -aFq 'ODSPOST 226' phase230-out/compile/Image
+          (
+            cd phase230-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 230 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase230-KGSL-Driver-Core-Path-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase230-out
+          if-no-files-found: error
+          retention-days: 30

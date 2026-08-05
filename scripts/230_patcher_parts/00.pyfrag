@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Run Phase 229, then trace the KGSL platform match and driver-core attach path."""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PHASE229_MARKER = "A52_PHASE229_KGSL_PLATFORM_PATH"
+PHASE230_MARKER = "A52_PHASE230_KGSL_DRIVER_CORE_PATH"
+ADRENO_REL = Path("drivers/gpu/msm/adreno.c")
+RECORDER_REL = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
+DD_REL = Path("drivers/base/dd.c")
+CORE_REL = Path("drivers/base/core.c")
+PLATFORM_REL = Path("drivers/base/platform.c")
+
+
+def one(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{label}: expected one anchor, found {count}")
+    return text.replace(old, new, 1)
+
+
+def candidate_roots(arguments: list[str]) -> list[Path]:
+    roots: list[Path] = []
+    for value in arguments:
+        if value.startswith("-"):
+            continue
+        p = Path(value)
+        roots.extend((p, p.parent))
+    roots.extend((Path("workspace/gki-phase199-src"), Path("gki/common")))
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        key = root.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            out.append(root)
+    return out
+
+
+def locate_root(arguments: list[str]) -> Path:
+    matches: list[Path] = []
+    for root in candidate_roots(arguments):
+        paths = [root / rel for rel in (ADRENO_REL, RECORDER_REL, DD_REL, CORE_REL, PLATFORM_REL)]
+        if not all(path.is_file() for path in paths):
+            continue
+        if PHASE229_MARKER not in (root / ADRENO_REL).read_text(encoding="utf-8"):
+            continue
+        matches.append(root)
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for root in matches:
+        key = root.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    if len(unique) != 1:
+        rendered = ", ".join(str(p) for p in unique) or "none"
+        raise RuntimeError(f"expected one generated Phase 229 source root, found {len(unique)}: {rendered}")
+    return unique[0]
+
+
+PLATFORM_HELPER = r'''/* A52_PHASE230_KGSL_DRIVER_CORE_PATH
+ * Observe only the exact qcom,kgsl-3d0 / kgsl-3d platform match.  The
+ * recorder does not alter match order, match results, driver_override, DT,
+ * probe dependencies, return values, or device state.
+ */
+static atomic_t a52_r230_platform_records = ATOMIC_INIT(0);
+
+static bool a52_r230_gpu_platform_pair(const struct device *dev,
+		const struct device_driver *drv)
+{
+	return dev && dev->of_node && drv && drv->name &&
+		of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0") &&
+		!strcmp(drv->name, "kgsl-3d");
+}
+
+static bool a52_r230_platform_take(void)
+{
+	return atomic_inc_return(&a52_r230_platform_records) <= 32;
+}
+
+'''
+
+
+def patch_platform(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    helper_anchor = '#include "power/power.h"\n\n'
+    text = one(text, helper_anchor, helper_anchor + PLATFORM_HELPER, f"{label}: helper")
+    old = r'''static int platform_match(struct device *dev, struct device_driver *drv)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_driver *pdrv = to_platform_driver(drv);
+	int ret;
+
+	/* When driver_override is set, only bind to the matching driver */
+	if (pdev->driver_override)
+		ret = !strcmp(pdev->driver_override, drv->name);
+	else if (of_driver_match_device(dev, drv))
+		ret = 1;
+	else if (acpi_driver_match_device(dev, drv))
+		ret = 1;
+	else if (pdrv->id_table)
+		ret = platform_match_id(pdrv->id_table, pdev) != NULL;
+	else
+		ret = strcmp(pdev->name, drv->name) == 0;
+
+	if (dev->of_node &&
+	    of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec") &&
+	    !strcmp(drv->name, "msmdrm_smmu"))
+		a52_ackfr_record("DCORE platform-match drv=%s rc=%d",
+			drv->name, ret);
+	return ret;
+}
+'''
+    new = r'''static int platform_match(struct device *dev, struct device_driver *drv)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_driver *pdrv = to_platform_driver(drv);
+	int ret;
+	int path;
+
+	/* When driver_override is set, only bind to the matching driver */
+	if (pdev->driver_override) {
+		path = 1;
+		ret = !strcmp(pdev->driver_override, drv->name);
+	} else if (of_driver_match_device(dev, drv)) {
+		path = 2;
+		ret = 1;
+	} else if (acpi_driver_match_device(dev, drv)) {
+		path = 3;
+		ret = 1;
+	} else if (pdrv->id_table) {
+		path = 4;
+		ret = platform_match_id(pdrv->id_table, pdev) != NULL;
+	} else {
+		path = 5;
+		ret = strcmp(pdev->name, drv->name) == 0;
+	}
+
+	if (a52_r230_gpu_platform_pair(dev, drv) && a52_r230_platform_take())
+		a52_ackfr_record("KGPPOST 230 pm d=%.22s p=%.22s r=%.16s o=%.16s x=%d t=%d rc=%d",
+			dev_name(dev), pdev->name ? pdev->name : "-", drv->name,
+			pdev->driver_override ? pdev->driver_override : "-", path,
+			drv->of_match_table != NULL, ret);
+
+	if (dev->of_node &&
+	    of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec") &&
+	    !strcmp(drv->name, "msmdrm_smmu"))
+		a52_ackfr_record("DCORE platform-match drv=%s rc=%d",
+			drv->name, ret);
+	return ret;
+}
+'''
+    text = one(text, old, new, f"{label}: platform_match")
+    if text.count(PHASE230_MARKER) != 1 or text.count('KGPPOST 230 pm ') != 1:
+        raise RuntimeError(f"{label}: platform audit failed")
+    return text
+
+

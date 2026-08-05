@@ -1,12 +1,12 @@
-name: 226 - A52 odsign gate RS48 recorder
+name: 227 - A52 ODSPOST retention RS48 recorder
 
-run-name: Build Phase 226 odsign post-fs-data gate recorder
+run-name: Build Phase 227 post-capacity ODSPOST retention candidate
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - agent/a52-phase226-odsign-gate-v1
+      - agent/a52-phase227-odspost-retention-v1
     paths:
       - .github/workflows/213-a52-ion-transaction-trace.yml
       - scripts/218_payload.py
@@ -15,13 +15,16 @@ on:
       - scripts/226_payload_chunks/**
       - scripts/226_design.md
       - scripts/226_trigger.txt
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_design.md
+      - scripts/227_trigger.txt
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: a52-phase226-odsign-gate-${{ github.ref }}
+  group: a52-phase227-odspost-retention-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -35,15 +38,15 @@ env:
 
 jobs:
   build-package:
-    name: Build and audit Phase 226 odsign recorder
+    name: Build and audit Phase 227 ODSPOST retention
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out Phase 226 branch
+      - name: Check out Phase 227 branch
         uses: actions/checkout@v4
 
-      - name: Materialize and verify Phase 213-226 scripts
+      - name: Materialize and verify Phase 213-227 scripts
         run: |
           set -Eeuo pipefail
           python3 scripts/213_payload.py
@@ -66,9 +69,11 @@ jobs:
           repaired = path.read_text(encoding='utf-8')
           if old in repaired or repaired.count(new) != 1:
               raise SystemExit('Phase 226 heartbeat audit repair failed')
-          print('Phase 217 heartbeat audit updated for Phase 226 limit 180U')
+          print('Phase 217 heartbeat audit updated for Phase 226/227 limit 180U')
           PY
-          cp scripts/218_phase217_wrapper.py \
+          mv scripts/218_phase217_wrapper.py \
+             scripts/218_phase217_wrapper_phase226.py
+          cp scripts/227_phase226_retention_wrapper.py \
              scripts/217_apply_graphics_service_trace.py
           sed -i 's|cp -a "$BASE_OUT" "$OUT"|cp -a "$BASE_OUT"/. "$OUT"/|' scripts/213_ci.sh
           grep -Fq 'cp -a "$BASE_OUT"/. "$OUT"/' scripts/213_ci.sh
@@ -103,8 +108,10 @@ jobs:
             scripts/224_apply_early_userspace_trace.py \
             scripts/225_apply_kgsl_late_state.py \
             scripts/226_apply_odsign_gate_trace.py \
-            scripts/218_phase217_wrapper.py \
+            scripts/218_phase217_wrapper_phase226.py \
+            scripts/227_phase226_retention_wrapper.py \
             scripts/217_apply_graphics_service_trace.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
           bash -n scripts/213_ci.sh
           bash -n scripts/214_ci.sh
           bash -n scripts/215_ci.sh
@@ -146,7 +153,8 @@ jobs:
             scripts/224_apply_early_userspace_trace.py \
             scripts/225_apply_kgsl_late_state.py \
             scripts/226_apply_odsign_gate_trace.py \
-            scripts/218_phase217_wrapper.py \
+            scripts/218_phase217_wrapper_phase226.py \
+            scripts/227_phase226_retention_wrapper.py \
             scripts/217_apply_graphics_service_trace.py \
             scripts/38_repack_a52_p1_boot.py
           bash -n scripts/208_reconstruct_phase206_source.sh
@@ -183,7 +191,7 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build, package and audit Phase 226
+      - name: Build, package and audit Phase 227
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -199,15 +207,35 @@ jobs:
           bash scripts/215_ci.sh
           bash scripts/216_ci.sh
           bash scripts/217_ci.sh
+
           OUT=artifacts/a52xq-graphics-startup-trace
           TRACE_ROOT=workspace/gki-phase199-src
           if test ! -f "$TRACE_ROOT/fs/exec.c"; then TRACE_ROOT=gki/common; fi
-          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          RECORDER="$TRACE_ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$RECORDER"
           grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/exec.c"
           grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/kernel/exit.c"
           grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/open.c"
           grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/fs/ioctl.c"
           grep -Fq 'A52_PHASE226_ODSIGN_GATE_TRACE' "$TRACE_ROOT/net/socket.c"
+          python3 - "$RECORDER" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding='utf-8')
+          token = '!strncmp(message, "ODSPOST ", 8)'
+          if text.count(token) != 1:
+              raise SystemExit(
+                  f'{path}: expected exactly one ODSPOST retention entry, found {text.count(token)}'
+              )
+          if '#define A52_R179_CAPACITY 896U' not in text:
+              raise SystemExit(f'{path}: recorder capacity audit failed')
+          if 'if (!buffered && !critical)' not in text:
+              raise SystemExit(f'{path}: post-capacity gate audit failed')
+          print('Phase 227 source audit: ODSPOST retained after capacity exactly once')
+          PY
+
           for marker in \
             'ODSPOST 226 ts' \
             'ODSPOST 226 exec' \
@@ -219,20 +247,97 @@ jobs:
             'GFXPOST 225 ks2'; do
             grep -aFq "$marker" "$OUT/compile/Image"
           done
+
+          mkdir -p "$OUT/audit/phase227"
+          cp "$RECORDER" "$OUT/audit/phase227/a52_ack_secure_flight_recorder.c"
+          cp scripts/227_phase226_retention_wrapper.py "$OUT/audit/phase227/"
           cp scripts/226_design.md "$OUT/PHASE226-DESIGN.md"
           cp scripts/226_trigger.txt "$OUT/PHASE226-HARDWARE-TEST.txt"
-          printf '%s\n' \
-            'Phase 226 adds metadata-only odsign/odrefresh gate tracing.' \
-            'It does not bypass signing, publish completion properties, weaken fs-verity, or record payload buffers or key material.' \
-            >> "$OUT/README-FIRST.txt"
+          cp scripts/227_design.md "$OUT/PHASE227-DESIGN.md"
+          cp scripts/227_trigger.txt "$OUT/PHASE227-HARDWARE-TEST.txt"
+
+          python3 - "$OUT/final-audit.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          data = json.loads(path.read_text(encoding='utf-8'))
+          data.update({
+              'phase': 227,
+              'base_phase': 226,
+              'functional_base_phase': 226,
+              'hardware_validated': False,
+              'status': 'phase227-odspost-retention-ci-audited-not-hardware-validated',
+              'trace_marker_prefix': 'ODSPOST 226',
+              'phase227_odspost_post_capacity_retained': True,
+              'phase227_change': 'recorder-post-capacity-retention-allowlist-only',
+              'phase227_behavior_changed': False,
+              'phase227_security_decisions_changed': False,
+              'phase227_recorder_capacity': 896,
+          })
+          retained = list(data.get('post_capacity_retention', []))
+          if 'ODSPOST' not in retained:
+              retained.append('ODSPOST')
+          data['post_capacity_retention'] = retained
+          limits = data.get('phase217_limits')
+          if isinstance(limits, dict):
+              limits['heartbeat'] = 180
+          data['phase226_trace_retained'] = True
+          data['phase225_kgsl_trace_retained'] = True
+          path.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+
+          cat > "$OUT/README-FIRST.txt" <<'README'
+          A52 GKI 5.10 Phase 227 ODSPOST post-capacity retention candidate
+
+          FLASH ONLY AFTER SHA256SUMS AND THE PACKAGE AUDIT PASS:
+            package/boot.img -> BOOT partition
+
+          Phase 227 changes only the persistent recorder retention allowlist. It
+          retains the existing bounded `ODSPOST 226` odsign/odrefresh metadata
+          after the recorder's initial 896-record buffer is full. The Phase 226
+          probes and Phase 225 KGSL trace are unchanged.
+
+          It does not bypass odsign, weaken fs-verity, alter return values, publish
+          completion properties, change files, or record payload buffers, key
+          material, authentication data, or arbitrary paths.
+
+          CI-validated, not hardware-validated. Follow PHASE227-HARDWARE-TEST.txt.
+          README
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          out = Path('artifacts/a52xq-graphics-startup-trace')
+          identity = {
+              'phase': 227,
+              'git_sha': os.environ.get('GITHUB_SHA'),
+              'git_ref': os.environ.get('GITHUB_REF'),
+              'run_id': os.environ.get('GITHUB_RUN_ID'),
+              'run_number': os.environ.get('GITHUB_RUN_NUMBER'),
+              'hardware_validated': False,
+              'change': 'retain ODSPOST after recorder capacity',
+          }
+          (out / 'BUILD-IDENTITY.json').write_text(
+              json.dumps(identity, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
           (
             cd "$OUT"
             find . -type f ! -name SHA256SUMS -print0 \
               | sort -z \
               | xargs -0 sha256sum > SHA256SUMS
             grep -Fq './README-FIRST.txt' SHA256SUMS
+            grep -Fq './BUILD-IDENTITY.json' SHA256SUMS
+            grep -Fq './final-audit.json' SHA256SUMS
             grep -Fq './PHASE226-DESIGN.md' SHA256SUMS
-            grep -Fq './PHASE226-HARDWARE-TEST.txt' SHA256SUMS
+            grep -Fq './PHASE227-DESIGN.md' SHA256SUMS
+            grep -Fq './PHASE227-HARDWARE-TEST.txt' SHA256SUMS
+            grep -Fq './audit/phase227/a52_ack_secure_flight_recorder.c' SHA256SUMS
+            grep -Fq './audit/phase227/227_phase226_retention_wrapper.py' SHA256SUMS
             sha256sum -c SHA256SUMS
           )
 
@@ -240,16 +345,16 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-odsign-gate-${{ github.run_number }}-FAILED-DIAGNOSTICS
+          name: a52xq-odspost-retention-${{ github.run_number }}-FAILED-DIAGNOSTICS
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Upload Phase 226 candidate
+      - name: Upload Phase 227 candidate
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-odsign-gate-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: a52xq-odspost-retention-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: artifacts/a52xq-graphics-startup-trace
           if-no-files-found: error
           retention-days: 30

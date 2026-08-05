@@ -1,0 +1,105 @@
+    unique = []
+    seen = set()
+    for root in matches:
+        key = root.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    if len(unique) != 1:
+        rendered = ", ".join(str(p) for p in unique) or "none"
+        raise RuntimeError(f"expected one generated Phase 228 source root, found {len(unique)}: {rendered}")
+    return unique[0]
+
+
+def allow_count(text: str, token: str) -> int:
+    return len(re.findall(r"(?m)^[ \t]*" + re.escape(token) + r" \|\|$", text))
+
+
+def patch_recorder(text: str, label: str) -> str:
+    if BASE_MARKER not in text:
+        raise RuntimeError(f"{label}: missing Phase 228 marker")
+    count = allow_count(text, KGP_ALLOW)
+    if count == 0:
+        anchor = re.compile(r'(?m)^(?P<i>[ \t]*)!strncmp\(message, "TRIPOST ", 8\) \|\|$')
+        matches = list(anchor.finditer(text))
+        if len(matches) != 1:
+            raise RuntimeError(f"{label}: expected one TRIPOST allowlist anchor, found {len(matches)}")
+        m = matches[0]
+        replacement = m.group(0) + "\n" + m.group("i") + KGP_ALLOW + " ||"
+        text = text[:m.start()] + replacement + text[m.end():]
+    elif count != 1:
+        raise RuntimeError(f"{label}: KGPPOST allowlist count is {count}")
+    if allow_count(text, KGP_ALLOW) != 1:
+        raise RuntimeError(f"{label}: final KGPPOST allowlist audit failed")
+    return text
+
+
+def replace_probe_returns(function_text: str) -> str:
+    pattern = re.compile(r"(?m)^(?P<i>[ \t]*)return (?P<v>[^;\n]+);$")
+    return pattern.sub(lambda m: f"{m.group('i')}return a52_r229_probe_return({m.group('v')});", function_text)
+
+
+def patch_adreno(text: str, label: str) -> str:
+    if PHASE229_MARKER in text:
+        return text
+    if text.count(INCLUDE_ANCHOR) != 1:
+        raise RuntimeError(f"{label}: of_fdt include anchor mismatch")
+    text = text.replace(
+        INCLUDE_ANCHOR,
+        INCLUDE_ANCHOR
+        + "#include <linux/of_platform.h>\n"
+        + "#include <linux/workqueue.h>\n"
+        + "#include <linux/a52_ack_secure_flight_recorder.h>\n",
+    )
+    if text.count(PROBE_ANCHOR) != 1:
+        raise RuntimeError(f"{label}: adreno_probe anchor mismatch")
+    text = text.replace(PROBE_ANCHOR, STATE_BLOCK + PROBE_ANCHOR)
+
+    start = text.index(PROBE_ANCHOR)
+    end_anchor = "static void _adreno_free_memories(struct adreno_device *adreno_dev)\n"
+    end = text.index(end_anchor, start)
+    fn = text[start:end]
+    decl = "\tunsigned int priv;\n\n"
+    if fn.count(decl) != 1:
+        raise RuntimeError(f"{label}: adreno_probe declaration anchor mismatch")
+    fn = fn.replace(
+        decl,
+        decl
+        + "\tatomic_set(&a52_r229_probe_seen, 1);\n"
+        + "\tatomic_set(&a52_r229_probe_rc, -EINPROGRESS);\n"
+        + "\ta52_ackfr_record(\"KGPPOST 229 probe-in name=%.20s\", dev_name(&pdev->dev));\n\n",
+    )
+    match_anchor = (
+        "\tof_id = of_match_device(adreno_match_table, &pdev->dev);\n"
+        "\tif (!of_id)\n"
+        "\t\treturn -EINVAL;\n"
+    )
+    if fn.count(match_anchor) != 1:
+        raise RuntimeError(f"{label}: adreno OF match anchor mismatch")
+    fn = fn.replace(
+        match_anchor,
+        "\tof_id = of_match_device(adreno_match_table, &pdev->dev);\n"
+        "\tatomic_set(&a52_r229_match_seen, of_id ? 1 : 0);\n"
+        "\tif (!of_id)\n"
+        "\t\treturn -EINVAL;\n",
+    )
+    fn = replace_probe_returns(fn)
+    text = text[:start] + fn + text[end:]
+
+    init_old = r'''static int __init kgsl_3d_init(void)
+{
+	int ret;
+
+	ret = platform_driver_register(&kgsl_bus_platform_driver);
+	if (ret)
+		return ret;
+
+	ret = platform_driver_register(&adreno_platform_driver);
+	if (ret)
+		platform_driver_unregister(&kgsl_bus_platform_driver);
+
+	return ret;
+}
+'''
+    init_new = r'''static int __init kgsl_3d_init(void)
+{

@@ -102,10 +102,16 @@ def main() -> int:
     base = Path(__file__).with_name("218_phase217_wrapper_phase226.py")
 
     if "--self-test" in sys.argv[1:]:
-        if base.is_file():
-            base_args = list(sys.argv[1:])
-            if "--root" not in base_args:
-                base_args[0:0] = ["--root", "."]
+        base_args = list(sys.argv[1:])
+        root: Path | None = None
+        for index, value in enumerate(base_args):
+            if value == "--root" and index + 1 < len(base_args):
+                root = Path(base_args[index + 1])
+                break
+            if value.startswith("--root="):
+                root = Path(value.split("=", 1)[1])
+                break
+        if base.is_file() and root is not None and (root / "fs/open.c").is_file():
             completed = subprocess.run(
                 [sys.executable, str(base), *base_args], check=False
             )

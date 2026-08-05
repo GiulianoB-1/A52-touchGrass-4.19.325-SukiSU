@@ -4,18 +4,6 @@ run-name: Build and audit Phase 229 KGSL TouchGrass binding-path candidate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/a52-phase229-kgsl-touchgrass-bindpath-v1
-    paths:
-      - .github/workflows/229-dispatch-builder.yml
-      - scripts/227_phase226_retention_wrapper.py
-      - scripts/228_phase227_tritrack_wrapper.py
-      - scripts/229_patcher_parts/**
-      - scripts/229_package.py
-      - scripts/229_package_parts/**
-      - scripts/229_design.md
-      - scripts/229_trigger.txt
 
 permissions:
   actions: write

@@ -1,0 +1,16 @@
+A52XQ Phase 232 hardware test
+
+1. Verify every entry in SHA256SUMS.
+2. Flash only package/boot.img to the BOOT partition.
+3. Start one normal boot and leave the phone untouched for at least 210 seconds,
+   or until the watchdog/coordinated restart occurs.
+4. Boot directly into recovery without attempting a second normal boot.
+5. Collect the untouched raw RAMOOPS ZIP.
+
+Expected retained evidence:
+- A52GDSC GPU_GX_PROFILE_V2 with aon=0
+- 3d9100c.qcom,gdsc bound to a52-legacy-gdsc-regulator
+- device_links_check_suppliers no longer blocked by the GPU GX GDSC
+- adreno_probe entered, or a later exact blocker recorded
+
+This image is CI-validated but not hardware-validated.

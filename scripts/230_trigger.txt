@@ -1,0 +1,22 @@
+A52 Phase 230 hardware test
+
+1. Verify every entry in SHA256SUMS.
+2. Flash only package/boot.img to the BOOT partition.
+3. Attempt one normal boot for at least 210 seconds, or until the device performs
+   its coordinated restart.
+4. Boot directly to recovery without another normal boot.
+5. Collect the untouched raw 1 MiB RAMOOPS image with the same Phase 210+
+   RS(255,207), 48-parity, CRC32C transport-fusion collector.
+6. Upload the resulting ZIP without opening or rewriting the raw image.
+
+Expected diagnostic outcome
+
+- KGPPOST 229 should continue proving node, platform-device and registration
+  state.
+- KGPPOST 230 should identify one exact stop boundary:
+  platform match, attach traversal, supplier gate, pinctrl, DMA, sysfs,
+  PM-domain, or the platform callback.
+- If supplier-gated, the records should name the unresolved fwnode or managed
+  device-link supplier and its bound-driver state.
+
+Do not flash another experimental kernel before collecting RAMOOPS.

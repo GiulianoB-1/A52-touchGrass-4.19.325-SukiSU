@@ -20,8 +20,8 @@ Fields:
 
 - `t`: heartbeat second
 - `v`: latest vold-related stage, value and total matched record count
-- `o`: latest ODS process, stage, value and total ODS record count
-- `f`: latest SurfaceFlinger stage, value and launch count
+- `o`: latest ODS process, meaningful operation stage, value and total ODS record count
+- `f`: latest main SurfaceFlinger lifecycle stage, value and launch count
 - `g`: `/dev/kgsl-3d0` open result, platform-probe-seen, device-register-seen and node-create-seen
 
 ODS process values:
@@ -32,7 +32,7 @@ ODS process values:
 
 Stage values:
 
-- `0`: none
+- `0`: none or no new meaningful operation
 - `1`: exec
 - `2`: exec return
 - `3`: exit
@@ -41,7 +41,8 @@ Stage values:
 - `6`: ioctl output
 - `7`: connect input
 - `8`: connect output
-- `9`: periodic ODS task snapshot
+
+Periodic ODS task snapshots increase the ODS record count but do not replace the last meaningful ODS operation stage. SurfaceFlinger state is taken only from the BOOTPOST main-process lifecycle records, preventing thread exits from replacing the main process SIGABRT result.
 
 Values and counters are clipped to the range `-999..999` so the complete checkpoint remains inside the 73-byte protected message payload.
 
@@ -62,5 +63,7 @@ This phase is observation-only. It does not:
 ## Expected evidence
 
 A useful capture should contain both the original detailed records and repeated cumulative checkpoints. The final surviving `TRIPOST 228` record should summarize the latest known state of every track reached before the recorder stopped or the device restarted.
+
+A replay against the Phase 227 210-second trace produces the expected terminal summary shape: odsign remains at exit stage with value 9, SurfaceFlinger remains at main exit stage with value 6 and 11 launches, and KGSL remains `open=-2, probe=0, register=0, node=0`.
 
 Phase 228 does not yet identify the sender of a signal delivered to odsign. It preserves the exit value and surrounding vold, ODS, SurfaceFlinger and KGSL progression so the next decision can be based on one correlated timeline.

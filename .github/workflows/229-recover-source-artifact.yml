@@ -1,0 +1,62 @@
+name: 229 - Recover package from successful KGSL source build
+
+run-name: Recover and audit Phase 229 KGSL TouchGrass candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase229-kgsl-touchgrass-bindpath-v1
+    paths:
+      - .github/workflows/229-recover-source-artifact.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  recover:
+    name: Audit and package Phase 229 source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out corrected Phase 229 branch
+        uses: actions/checkout@v4
+
+      - name: Verify source loaders
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/228_phase227_tritrack_wrapper.py \
+            scripts/229_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+      - name: Recover and audit Phase 229
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE229_SOURCE_RUN_ID: '31000888677'
+          PHASE229_SOURCE_ARTIFACT_ID: '8928755035'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/229_package.py
+          test -f phase229-out/package/boot.img
+          test -f phase229-out/compile/Image
+          test -f phase229-out/comparison/phase229-kgsl-touchgrass.json
+          test -f phase229-out/comparison/phase229-kgsl-key-diffs.txt
+          grep -aFq 'KGPPOST 229' phase229-out/compile/Image
+          grep -aFq 'TRIPOST 228' phase229-out/compile/Image
+          grep -aFq 'ODSPOST 226' phase229-out/compile/Image
+          (
+            cd phase229-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload recovered Phase 229 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase229-KGSL-TouchGrass-BindPath-Recovered-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase229-out
+          if-no-files-found: error
+          retention-days: 30

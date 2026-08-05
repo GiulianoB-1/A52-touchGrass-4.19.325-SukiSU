@@ -1,0 +1,64 @@
+name: 229 - A52 KGSL TouchGrass binding-path recorder
+
+run-name: Build and audit Phase 229 KGSL TouchGrass binding-path candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase229-kgsl-bindpath-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build, compare and package Phase 229
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 229 branch
+        uses: actions/checkout@v4
+
+      - name: Verify Phase 229 source
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/228_phase227_tritrack_wrapper.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/229_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -RFq 'A52_PHASE229_KGSL_PLATFORM_PATH' scripts/229_patcher_parts
+          grep -RFq 'KGPPOST 229' scripts/229_patcher_parts
+          grep -Fq 'RS(255,207)' scripts/229_design.md
+          grep -Fq 'vold, odsign/odrefresh' scripts/229_design.md
+          grep -Fq '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7' scripts/229_design.md
+
+      - name: Dispatch inherited builder and package Phase 229
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/229_package.py
+          test -f phase229-out/package/boot.img
+          test -f phase229-out/compile/Image
+          test -f phase229-out/comparison/phase229-kgsl-touchgrass.json
+          test -f phase229-out/comparison/phase229-kgsl-key-diffs.txt
+          grep -aFq 'KGPPOST 229' phase229-out/compile/Image
+          grep -aFq 'TRIPOST 228' phase229-out/compile/Image
+          grep -aFq 'ODSPOST 226' phase229-out/compile/Image
+          (
+            cd phase229-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 229 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase229-KGSL-TouchGrass-BindPath-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase229-out
+          if-no-files-found: error
+          retention-days: 30

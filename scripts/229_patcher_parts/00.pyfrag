@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Run Phase 228, compare KGSL with pinned TouchGrass, and trace Adreno binding."""
+from __future__ import annotations
+
+import difflib
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+BASE_MARKER = "A52_PHASE228_TRI_TRACK_SNAPSHOT"
+PHASE229_MARKER = "A52_PHASE229_KGSL_PLATFORM_PATH"
+ADRENO_REL = Path("drivers/gpu/msm/adreno.c")
+RECORDER_REL = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
+KGP_ALLOW = '!strncmp(message, "KGPPOST ", 8)'
+
+INCLUDE_ANCHOR = "#include <linux/of_fdt.h>\n"
+PROBE_ANCHOR = "static int adreno_probe(struct platform_device *pdev)\n"
+INIT_ANCHOR = "static int __init kgsl_3d_init(void)\n"
+EXIT_ANCHOR = "static void __exit kgsl_3d_exit(void)\n"
+
+STATE_BLOCK = r'''/* A52_PHASE229_KGSL_PLATFORM_PATH
+ * Observe the live qcom,kgsl-3d0 DT/platform binding path.  This changes no
+ * return value, ordering, DT property, power vote, security decision or probe
+ * dependency.  Snapshots remain bounded and metadata-only.
+ */
+static atomic_t a52_r229_bus_reg_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r229_adreno_reg_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r229_probe_seen = ATOMIC_INIT(0);
+static atomic_t a52_r229_match_seen = ATOMIC_INIT(0);
+static atomic_t a52_r229_probe_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r229_snapshot_count = ATOMIC_INIT(0);
+
+static void a52_r229_snapshot_once(void)
+{
+	struct device_node *node;
+	struct platform_device *pdev = NULL;
+	unsigned int n;
+	int dt = 0, avail = 0, present = 0, bound = 0;
+
+	n = (unsigned int)atomic_inc_return(&a52_r229_snapshot_count);
+	if (n > 110U)
+		return;
+
+	node = of_find_compatible_node(NULL, NULL, "qcom,kgsl-3d0");
+	if (node) {
+		dt = 1;
+		avail = of_device_is_available(node) ? 1 : 0;
+		pdev = of_find_device_by_node(node);
+		if (pdev) {
+			present = 1;
+			bound = READ_ONCE(pdev->dev.driver) ? 1 : 0;
+			put_device(&pdev->dev);
+		}
+		of_node_put(node);
+	}
+
+	a52_ackfr_record("KGPPOST 229 n=%u d=%d,%d,%d,%d r=%d,%d p=%d,%d,%d",
+		n, dt, avail, present, bound,
+		atomic_read(&a52_r229_bus_reg_rc),
+		atomic_read(&a52_r229_adreno_reg_rc),
+		atomic_read(&a52_r229_probe_seen),
+		atomic_read(&a52_r229_match_seen),
+		atomic_read(&a52_r229_probe_rc));
+}
+
+static void a52_r229_snapshot_workfn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(a52_r229_snapshot_work, a52_r229_snapshot_workfn);
+
+static void a52_r229_snapshot_workfn(struct work_struct *work)
+{
+	(void)work;
+	a52_r229_snapshot_once();
+	if (atomic_read(&a52_r229_snapshot_count) < 110)
+		schedule_delayed_work(&a52_r229_snapshot_work, 2 * HZ);
+}
+
+static int a52_r229_probe_return(int rc)
+{
+	atomic_set(&a52_r229_probe_rc, rc);
+	a52_r229_snapshot_once();
+	return rc;
+}
+
+'''
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def candidate_roots(arguments: list[str]) -> list[Path]:
+    roots: list[Path] = []
+    for value in arguments:
+        if value.startswith("-"):
+            continue
+        p = Path(value)
+        roots.extend((p, p.parent))
+    roots.extend((Path("workspace/gki-phase199-src"), Path("gki/common")))
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        key = root.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            out.append(root)
+    return out
+
+
+def locate_root(arguments: list[str]) -> Path:
+    matches = []
+    for root in candidate_roots(arguments):
+        adreno = root / ADRENO_REL
+        recorder = root / RECORDER_REL
+        if adreno.is_file() and recorder.is_file():
+            if BASE_MARKER in recorder.read_text(encoding="utf-8"):
+                matches.append(root)

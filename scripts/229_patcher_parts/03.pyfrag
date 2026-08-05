@@ -1,0 +1,66 @@
+        (dest / "phase229-kgsl-touchgrass.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        current = root / "drivers/gpu/msm"
+        tg = Path("workspace/touchgrass-a52xq/drivers/gpu/msm")
+        chunks = []
+        for name in ("adreno.c", "kgsl.c", "adreno.h", "kgsl_device.h", "Kconfig", "Makefile"):
+            cp, tp = current / name, tg / name
+            if not cp.is_file() or not tp.is_file():
+                chunks.append(f"### {name}: missing on one side\n")
+                continue
+            a = tp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            b = cp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            diff = list(difflib.unified_diff(a, b, fromfile=f"touchgrass/{name}", tofile=f"current-pre-phase229/{name}", n=3))
+            chunks.append(f"### {name}\n")
+            chunks.extend(diff[:4000] if diff else ["IDENTICAL\n"])
+            chunks.append("\n")
+        (dest / "phase229-kgsl-key-diffs.txt").write_text("".join(chunks), encoding="utf-8")
+
+    counts = report.get("counts", {})
+    print(f"Phase 229 TouchGrass KGSL comparison: {counts}")
+
+
+def patch_generated(arguments: list[str]) -> Path:
+    root = locate_root(arguments)
+    write_comparison(root)
+    adreno = root / ADRENO_REL
+    recorder = root / RECORDER_REL
+    adreno.write_text(patch_adreno(adreno.read_text(encoding="utf-8"), str(adreno)), encoding="utf-8")
+    recorder.write_text(patch_recorder(recorder.read_text(encoding="utf-8"), str(recorder)), encoding="utf-8")
+    return root
+
+
+def self_test() -> None:
+    recorder = (
+        "/* A52_PHASE228_TRI_TRACK_SNAPSHOT */\n"
+        "static bool critical(const char *message)\n{\n"
+        "\treturn !strncmp(message, \"BOOTPOST \", 9) ||\n"
+        "\t       !strncmp(message, \"TRIPOST \", 8) ||\n"
+        "\t       !strncmp(message, \"GFXPOST \", 8);\n}\n"
+    )
+    patched_recorder = patch_recorder(recorder, "recorder-fixture")
+    if patch_recorder(patched_recorder, "recorder-idempotent") != patched_recorder:
+        raise AssertionError("recorder patch is not idempotent")
+
+    probe_returns = "".join(f"\treturn {v};\n" for v in ("-EINVAL", "-ENODEV", "status", "-ENODEV", "status", "status", "status", "status"))
+    adreno = (
+        "#include <linux/of_fdt.h>\n"
+        "static const struct of_device_id adreno_match_table[] = {\n"
+        "\t{ .compatible = \"qcom,kgsl-3d0\" },\n};\n"
+        "static int adreno_probe(struct platform_device *pdev)\n{\n"
+        "\tconst struct of_device_id *of_id;\n\tint status;\n\tunsigned int priv;\n\n"
+        "\tof_id = of_match_device(adreno_match_table, &pdev->dev);\n"
+        "\tif (!of_id)\n\t\treturn -EINVAL;\n"
+        + probe_returns.replace("\treturn -EINVAL;\n", "", 1)
+        + "}\n\n"
+        "static void _adreno_free_memories(struct adreno_device *adreno_dev)\n{\n}\n\n"
+        "static struct platform_driver adreno_platform_driver;\n"
+        "static struct platform_driver kgsl_bus_platform_driver;\n"
+        "static int __init kgsl_3d_init(void)\n{\n\tint ret;\n\n"
+        "\tret = platform_driver_register(&kgsl_bus_platform_driver);\n\tif (ret)\n\t\treturn ret;\n\n"
+        "\tret = platform_driver_register(&adreno_platform_driver);\n\tif (ret)\n\t\tplatform_driver_unregister(&kgsl_bus_platform_driver);\n\n\treturn ret;\n}\n\n"
+        "static void __exit kgsl_3d_exit(void)\n{\n\tplatform_driver_unregister(&adreno_platform_driver);\n\tplatform_driver_unregister(&kgsl_bus_platform_driver);\n}\n"
+    )
+    patched = patch_adreno(adreno, "adreno-fixture")
+    if patch_adreno(patched, "adreno-idempotent") != patched:
+        raise AssertionError("adreno patch is not idempotent")

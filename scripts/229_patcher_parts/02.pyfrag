@@ -1,0 +1,102 @@
+	int ret;
+
+	ret = platform_driver_register(&kgsl_bus_platform_driver);
+	atomic_set(&a52_r229_bus_reg_rc, ret);
+	if (ret) {
+		a52_r229_snapshot_once();
+		return ret;
+	}
+
+	ret = platform_driver_register(&adreno_platform_driver);
+	atomic_set(&a52_r229_adreno_reg_rc, ret);
+	if (ret) {
+		platform_driver_unregister(&kgsl_bus_platform_driver);
+		a52_r229_snapshot_once();
+		return ret;
+	}
+
+	a52_r229_snapshot_once();
+	schedule_delayed_work(&a52_r229_snapshot_work, 2 * HZ);
+	return 0;
+}
+'''
+    if text.count(init_old) != 1:
+        raise RuntimeError(f"{label}: kgsl_3d_init body mismatch")
+    text = text.replace(init_old, init_new)
+
+    exit_old = r'''static void __exit kgsl_3d_exit(void)
+{
+	platform_driver_unregister(&adreno_platform_driver);
+	platform_driver_unregister(&kgsl_bus_platform_driver);
+}
+'''
+    exit_new = r'''static void __exit kgsl_3d_exit(void)
+{
+	cancel_delayed_work_sync(&a52_r229_snapshot_work);
+	platform_driver_unregister(&adreno_platform_driver);
+	platform_driver_unregister(&kgsl_bus_platform_driver);
+}
+'''
+    if text.count(exit_old) != 1:
+        raise RuntimeError(f"{label}: kgsl_3d_exit body mismatch")
+    text = text.replace(exit_old, exit_new)
+
+    checks = {
+        PHASE229_MARKER: 1,
+        '"qcom,kgsl-3d0"': 2,  # original match table plus snapshot lookup
+        'a52_ackfr_record("KGPPOST 229 ': 2,
+        "schedule_delayed_work(&a52_r229_snapshot_work, 2 * HZ);": 2,
+        "return a52_r229_probe_return(": 8,
+    }
+    for token, expected in checks.items():
+        count = text.count(token)
+        if count != expected:
+            raise RuntimeError(f"{label}: expected {expected} {token!r}, found {count}")
+    return text
+
+
+def compare_touchgrass(root: Path) -> dict[str, object]:
+    current = root / "drivers/gpu/msm"
+    touchgrass = Path("workspace/touchgrass-a52xq/drivers/gpu/msm")
+    report: dict[str, object] = {
+        "phase": 229,
+        "comparison_point": "current source immediately before Phase 229 instrumentation",
+        "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
+        "current_root": str(current),
+        "touchgrass_root": str(touchgrass),
+        "touchgrass_available": touchgrass.is_dir(),
+    }
+    if not touchgrass.is_dir():
+        report["error"] = "pinned TouchGrass source directory not found"
+        return report
+
+    current_files = {p.relative_to(current) for p in current.rglob("*") if p.is_file()}
+    tg_files = {p.relative_to(touchgrass) for p in touchgrass.rglob("*") if p.is_file()}
+    rows = []
+    identical = changed = current_only = tg_only = 0
+    for rel in sorted(current_files | tg_files, key=lambda p: str(p)):
+        cp, tp = current / rel, touchgrass / rel
+        if cp.is_file() and tp.is_file():
+            ch, th = sha256(cp), sha256(tp)
+            same = ch == th
+            identical += int(same)
+            changed += int(not same)
+            rows.append({"path": str(rel), "status": "identical" if same else "changed", "current_sha256": ch, "touchgrass_sha256": th})
+        elif cp.is_file():
+            current_only += 1
+            rows.append({"path": str(rel), "status": "current-only", "current_sha256": sha256(cp)})
+        else:
+            tg_only += 1
+            rows.append({"path": str(rel), "status": "touchgrass-only", "touchgrass_sha256": sha256(tp)})
+    report.update({
+        "counts": {"identical": identical, "changed": changed, "current_only": current_only, "touchgrass_only": tg_only},
+        "files": rows,
+    })
+    return report
+
+
+def write_comparison(root: Path) -> None:
+    report = compare_touchgrass(root)
+    destinations = [Path("workspace/phase229-comparison"), Path("artifacts/a52xq-graphics-startup-trace/comparison")]
+    for dest in destinations:
+        dest.mkdir(parents=True, exist_ok=True)

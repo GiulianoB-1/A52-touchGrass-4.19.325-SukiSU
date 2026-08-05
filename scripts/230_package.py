@@ -119,7 +119,9 @@ def locate_root(base: Path) -> Path:
 def verify_markers(image: Path) -> None:
     data = image.read_bytes()
     for marker in (
-        b"KGPPOST 230", b"KGPPOST 229", b"TRIPOST 228", b"ODSPOST 226",
+        b"KGPPOST 230", b"KGPPOST 230 replay-begin",
+        b"A52_PHASE230_KGSL_LATE_REPLAY", b"KGPPOST 229",
+        b"TRIPOST 228", b"ODSPOST 226",
         b"GFXPOST 225 ks1", b"GFXPOST 225 ks2",
     ):
         if marker not in data:
@@ -155,6 +157,9 @@ def package(root: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase230_platform_record_limit": 32,
         "phase230_dd_record_limit": 160,
         "phase230_core_record_limit": 96,
+        "phase230_replay_journal_capacity": 96,
+        "phase230_replay_ticks": [150, 180],
+        "phase230_early_records_replayed_late": True,
         "phase230_behavior_changed": False,
         "phase230_supplier_decisions_changed": False,
         "phase230_return_values_changed": False,
@@ -177,7 +182,7 @@ def package(root: Path, source_run_id: int, source_run_url: str) -> Path:
         "source_builder_run_url": source_run_url,
         "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
         "hardware_validated": False,
-        "change": "KGSL platform-match, bidirectional attach, supplier and pre-probe trace",
+        "change": "KGSL platform-match, bidirectional attach, supplier trace and bounded late replay",
         "rs_roots": 48,
     }
     (root / "BUILD-IDENTITY.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
@@ -188,7 +193,9 @@ def package(root: Path, source_run_id: int, source_run_url: str) -> Path:
         "Phase 230 preserves Phase 229 and adds bounded metadata-only tracing\n"
         "for the exact qcom,kgsl-3d0 / kgsl-3d platform match, both attach\n"
         "directions, deferred-probe state, supplier identities and every\n"
-        "pre-callback driver-core boundary.\n\n"
+        "pre-callback driver-core boundary. Early KGPPOST 230 records are\n"
+        "journaled and replayed at heartbeat ticks 150 and 180 so they survive\n"
+        "the observed RAMOOPS overwrite window.\n\n"
         "No match, supplier, DT, return-value, power, IOMMU, firmware, service\n"
         "or security behavior is changed. Reed-Solomon remains RS48.\n\n"
         "CI-validated, not hardware-validated. Follow PHASE230-HARDWARE-TEST.txt.\n"

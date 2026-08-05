@@ -1,0 +1,97 @@
+name: 232 - A52 GPU GX optional AON reset
+
+run-name: Build and audit Phase 232 GPU GX optional-AON candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase232-gpu-gx-optional-aon-v1
+    paths:
+      - .github/workflows/232-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/231_phase230_gpu_gdsc_wrapper.py
+      - scripts/232_phase231_optional_aon_wrapper.py
+      - scripts/232_package.py
+      - scripts/232_design.md
+      - scripts/232_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase231-gpu-gx-gdsc-v1
+    paths:
+      - .github/workflows/232-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/231_phase230_gpu_gdsc_wrapper.py
+      - scripts/232_phase231_optional_aon_wrapper.py
+      - scripts/232_package.py
+      - scripts/232_design.md
+      - scripts/232_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase232-gpu-gx-optional-aon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 232
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 232 branch
+        uses: actions/checkout@v4
+
+      - name: Verify Phase 232 source
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/231_phase230_gpu_gdsc_wrapper.py \
+            scripts/232_phase231_optional_aon_wrapper.py \
+            scripts/232_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -Fq 'A52_PHASE232_GPU_GX_OPTIONAL_AON' \
+            scripts/232_phase231_optional_aon_wrapper.py
+          grep -Fq 'EXPECTED_AFTER_SHA256' \
+            scripts/232_phase231_optional_aon_wrapper.py
+          grep -Fq 'if (gdsc->reset_aon)' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          ! grep -Fq '"gpu_cx_gdsc"' \
+            scripts/231_fixtures/a52-legacy-gdsc-after.c
+          grep -Fq 'device_links_check_suppliers()' scripts/232_design.md
+          grep -Fq 'Phase 230 driver-core tracing and late replay' \
+            scripts/232_design.md
+
+      - name: Dispatch inherited builder and package Phase 232
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/232_package.py
+          test -f phase232-out/package/boot.img
+          test -f phase232-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_PROFILE_V2' \
+            phase232-out/compile/Image
+          grep -aFq 'A52GDSC gpu-enable' phase232-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' \
+            phase232-out/compile/Image
+          grep -aFq 'KGPPOST 229' phase232-out/compile/Image
+          (
+            cd phase232-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 232 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase232-GPU-GX-OPTIONAL-AON-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase232-out
+          if-no-files-found: error
+          retention-days: 30

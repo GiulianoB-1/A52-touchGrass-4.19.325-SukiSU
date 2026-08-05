@@ -65,34 +65,31 @@ def dispatch_and_wait() -> tuple[int, str, int]:
     return run_id, run["html_url"], int(artifact["id"])
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def download_artifact(artifact_id: int, dest: Path) -> None:
-    dest.write_bytes(request(f"{API}/actions/artifacts/{artifact_id}/zip"))
+    api_url = f"{API}/actions/artifacts/{artifact_id}/zip"
+    req = urllib.request.Request(api_url, method="GET")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        opener.open(req, timeout=120)
+        raise RuntimeError("artifact download unexpectedly returned without redirect")
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (301, 302, 303, 307, 308):
+            raise
+        location = exc.headers.get("Location")
+        if not location:
+            raise RuntimeError("artifact redirect did not include Location") from exc
+    with urllib.request.urlopen(location, timeout=120) as response:
+        dest.write_bytes(response.read())
 
 
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def locate_root(base: Path) -> Path:
-    matches = list(base.rglob("package/boot.img"))
-    if len(matches) != 1:
-        raise RuntimeError(f"expected one package/boot.img, found {len(matches)}")
-    return matches[0].parent.parent
-
-
-def verify_markers(image: Path) -> None:
-    data = image.read_bytes()
-    for marker in (b"KGPPOST 229", b"TRIPOST 228", b"ODSPOST 226", b"GFXPOST 225 ks1", b"GFXPOST 225 ks2"):
-        if marker not in data:
-            raise RuntimeError(f"missing binary marker: {marker.decode()}")
-        print(f"binary marker present: {marker.decode()}")
-
-
-def package(root: Path, source_run_id: int, source_run_url: str) -> Path:
-    verify_markers(root / "compile/Image")
-    for name in ("phase229-kgsl-touchgrass.json", "phase229-kgsl-key-diffs.txt"):
-        if not (root / "comparison" / name).is_file():
+def select_source() -> tuple[int, str, int]:
+    artifact = os.environ.get("PHASE229_SOURCE_ARTIFACT_ID")
+    run = os.environ.get("PHASE229_SOURCE_RUN_ID")

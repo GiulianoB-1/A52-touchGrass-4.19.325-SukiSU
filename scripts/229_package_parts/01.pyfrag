@@ -1,3 +1,38 @@
+    if artifact and run:
+        run_id = int(run)
+        return run_id, f"https://github.com/{REPO}/actions/runs/{run_id}", int(artifact)
+    if artifact or run:
+        raise RuntimeError("both PHASE229_SOURCE_ARTIFACT_ID and PHASE229_SOURCE_RUN_ID are required")
+    return dispatch_and_wait()
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def locate_root(base: Path) -> Path:
+    matches = list(base.rglob("package/boot.img"))
+    if len(matches) != 1:
+        raise RuntimeError(f"expected one package/boot.img, found {len(matches)}")
+    return matches[0].parent.parent
+
+
+def verify_markers(image: Path) -> None:
+    data = image.read_bytes()
+    for marker in (b"KGPPOST 229", b"TRIPOST 228", b"ODSPOST 226", b"GFXPOST 225 ks1", b"GFXPOST 225 ks2"):
+        if marker not in data:
+            raise RuntimeError(f"missing binary marker: {marker.decode()}")
+        print(f"binary marker present: {marker.decode()}")
+
+
+def package(root: Path, source_run_id: int, source_run_url: str) -> Path:
+    verify_markers(root / "compile/Image")
+    for name in ("phase229-kgsl-touchgrass.json", "phase229-kgsl-key-diffs.txt"):
+        if not (root / "comparison" / name).is_file():
             raise RuntimeError(f"missing comparison output: {name}")
 
     audit_dir = root / "audit/phase229"
@@ -46,29 +81,3 @@
         "touchgrass_commit": "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7",
         "hardware_validated": False,
         "change": "KGSL TouchGrass source comparison and live Adreno platform-binding trace",
-        "rs_roots": 48,
-    }
-    (root / "BUILD-IDENTITY.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
-    (root / "README-FIRST.txt").write_text(
-        "A52 GKI 5.10 Phase 229 KGSL TouchGrass binding-path candidate\n\n"
-        "FLASH ONLY AFTER SHA256SUMS AND THE PACKAGE AUDIT PASS:\n"
-        "  package/boot.img -> BOOT partition\n\n"
-        "Phase 229 preserves Phase 228 vold, odsign/odrefresh, SurfaceFlinger\n"
-        "and KGSL recording. It adds a bounded read-only trace of the live\n"
-        "qcom,kgsl-3d0 DT node, platform-device population, driver binding and\n"
-        "Adreno probe result, plus an exact comparison with pinned TouchGrass.\n\n"
-        "Reed-Solomon remains RS48. No DT, probe result, service, security,\n"
-        "display, GPU power or firmware behavior is changed.\n\n"
-        "CI-validated, not hardware-validated. Follow PHASE229-HARDWARE-TEST.txt.\n"
-    )
-
-    sums = root / "SHA256SUMS"
-    if sums.exists():
-        sums.unlink()
-    files = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
-    sums.write_text("".join(f"{sha256(p)}  ./{p.relative_to(root)}\n" for p in files))
-    for p in files:
-        if sha256(p) not in sums.read_text():
-            raise RuntimeError(f"checksum list missing {p}")
-
-    out = Path("phase229-out")

@@ -1,0 +1,31 @@
+A52 GKI Phase 228 hardware test
+
+1. Verify the candidate artifact SHA256SUMS completely.
+2. Keep the known-good boot image and recovery path available.
+3. Flash only package/boot.img to the BOOT partition.
+4. Cold boot the phone without USB attached.
+5. Let it run for at least 210 seconds, or until it restarts by itself.
+6. Enter recovery immediately after the attempt.
+7. Collect the complete raw 1 MiB RAMOOPS image before another normal boot.
+8. Decode it only with the Phase 210+ R48 transport-fusion decoder.
+
+Required validation:
+
+- The decoder self-test passes.
+- CRC-valid records are recovered.
+- `TRIPOST 228` records appear at tick 1 and then on even heartbeat ticks.
+- Detailed vold/BOOTPOST or GFXPOST records remain present when the capture reaches that stage.
+- Detailed ODSPOST records remain present when odsign or odrefresh runs.
+- SurfaceFlinger launch/exit records and GFXPOST 225 KGSL snapshots remain present when boot reaches graphics.
+- The last surviving TRIPOST record is compared with the detailed records for consistency.
+
+TRIPOST interpretation:
+
+- v=<stage>,<value>,<count> describes the latest vold-related state.
+- o=<proc>,<stage>,<value>,<count> describes odsign or odrefresh.
+- f=<stage>,<value>,<count> describes SurfaceFlinger and its launch count.
+- g=<open>,<probe>,<register>,<node> describes the KGSL node path.
+
+Do not interpret missing early detailed records as proof that the event never happened when the cumulative checkpoint reports that it did. Use the checkpoint to retain the boundary, then use any surviving detailed records to identify the exact operation.
+
+Do not flash if the build audit reports missing TRIPOST, ODSPOST, SurfaceFlinger or KGSL markers.

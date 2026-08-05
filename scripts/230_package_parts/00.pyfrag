@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = os.environ["GITHUB_REPOSITORY"]
+TOKEN = os.environ["GH_TOKEN"]
+REF = "agent/a52-phase230-kgsl-drivercore-supplier-v1"
+WORKFLOW_ID = 325785868
+API = f"https://api.github.com/repos/{REPO}"
+
+
+def request(url: str, *, method: str = "GET", data: dict | None = None) -> bytes:
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    with urllib.request.urlopen(req, timeout=120) as response:
+        return response.read()
+
+
+def get_json(url: str) -> dict:
+    return json.loads(request(url))
+
+
+def dispatch_and_wait() -> tuple[int, str, int]:
+    started = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    request(f"{API}/actions/workflows/{WORKFLOW_ID}/dispatches", method="POST", data={"ref": REF})
+    run = None
+    for _ in range(40):
+        data = get_json(f"{API}/actions/workflows/{WORKFLOW_ID}/runs?branch={REF}&event=workflow_dispatch&per_page=20")
+        candidates = [row for row in data.get("workflow_runs", []) if row.get("created_at", "") >= started]
+        if candidates:
+            run = sorted(candidates, key=lambda row: row["created_at"])[-1]
+            break
+        time.sleep(15)
+    if not run:
+        raise RuntimeError("dispatched inherited Phase 230 source build was not found")
+    run_id = int(run["id"])
+    print(f"Monitoring {run['html_url']}", flush=True)
+    for _ in range(720):
+        run = get_json(f"{API}/actions/runs/{run_id}")
+        print(f"run={run_id} status={run['status']} conclusion={run.get('conclusion') or 'pending'}", flush=True)
+        if run["status"] == "completed":
+            break
+        time.sleep(30)
+    if run.get("conclusion") != "success":
+        raise RuntimeError(f"inherited builder conclusion: {run.get('conclusion')}")
+    artifacts = get_json(f"{API}/actions/runs/{run_id}/artifacts?per_page=100").get("artifacts", [])
+    artifacts = [artifact for artifact in artifacts if not artifact.get("expired")]
+    if not artifacts:
+        raise RuntimeError("successful inherited build produced no artifact")
+    artifact = artifacts[-1]
+    return run_id, run["html_url"], int(artifact["id"])
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def download_artifact(artifact_id: int, dest: Path) -> None:
+    api_url = f"{API}/actions/artifacts/{artifact_id}/zip"
+    req = urllib.request.Request(api_url, method="GET")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        opener.open(req, timeout=120)
+        raise RuntimeError("artifact download unexpectedly returned without redirect")
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (301, 302, 303, 307, 308):
+            raise
+        location = exc.headers.get("Location")
+        if not location:
+            raise RuntimeError("artifact redirect did not include Location") from exc
+    with urllib.request.urlopen(location, timeout=120) as response:
+        dest.write_bytes(response.read())
+
+

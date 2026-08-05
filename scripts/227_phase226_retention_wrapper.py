@@ -128,7 +128,7 @@ static void a52_r228_track_message(const char *message)
 		atomic_inc(&a52_r228_v_count);
 	}
 
-	if (!strncmp(message, "ODSPOST ", 8)) {
+	if (strncmp(message, "ODSPOST ", 8) == 0) {
 		stage = a52_r228_stage(message);
 		value = a52_r228_value(message, atomic_read(&a52_r228_o_value));
 		if (a52_r228_has(message, "odsign"))

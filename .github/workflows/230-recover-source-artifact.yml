@@ -13,11 +13,6 @@ on:
         description: Artifact ID produced by that run
         required: true
         type: string
-  push:
-    branches:
-      - agent/a52-phase230-kgsl-driver-core-path-v1
-    paths:
-      - .github/workflows/230-recover-source-artifact.yml
 
 permissions:
   actions: read
@@ -44,8 +39,8 @@ jobs:
       - name: Recover and package
         env:
           GH_TOKEN: ${{ github.token }}
-          PHASE230_SOURCE_RUN_ID: ${{ inputs.source_run_id || '31023267930' }}
-          PHASE230_SOURCE_ARTIFACT_ID: ${{ inputs.source_artifact_id || '8938481236' }}
+          PHASE230_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          PHASE230_SOURCE_ARTIFACT_ID: ${{ inputs.source_artifact_id }}
         run: |
           set -Eeuo pipefail
           python3 scripts/230_package.py

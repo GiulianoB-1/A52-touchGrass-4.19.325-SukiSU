@@ -1,0 +1,18 @@
+Phase 230 hardware capture
+
+1. Verify every file with SHA256SUMS.
+2. Flash only package/boot.img to the BOOT partition.
+3. Boot normally and do not interact with the phone.
+4. Allow the same automatic restart to occur.
+5. After recovery, collect the raw RAMOOPS archive exactly as for Phase 229.
+6. Preserve both frozen and live pstore copies when available.
+
+Expected retained markers:
+  KGBPOST 230
+  KGPPOST 229
+  TRIPOST 228
+  ODSPOST 226
+  GFXPOST 225 ks1
+  GFXPOST 225 ks2
+
+Do not interpret odsign exit value 9 as successful completion.

@@ -1,0 +1,197 @@
+DD_HELPER = r'''/* A52_PHASE230_KGSL_DRIVER_CORE_PATH
+ * Observe only the exact qcom,kgsl-3d0 / kgsl-3d attach and probe path.
+ * Bounded metadata records do not change matching, deferred-probe lists,
+ * supplier decisions, callback order, return values, or device state.
+ */
+static atomic_t a52_r230_dd_records = ATOMIC_INIT(0);
+
+static bool a52_r230_gpu_dev(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,kgsl-3d0");
+}
+
+static bool a52_r230_gpu_drv(const struct device_driver *drv)
+{
+	return drv && drv->name && !strcmp(drv->name, "kgsl-3d");
+}
+
+static bool a52_r230_gpu_pair(const struct device *dev,
+		const struct device_driver *drv)
+{
+	return a52_r230_gpu_dev(dev) && a52_r230_gpu_drv(drv);
+}
+
+static bool a52_r230_dd_take(void)
+{
+	return atomic_inc_return(&a52_r230_dd_records) <= 160;
+}
+
+#define A52_R230_DD(_fmt, ...) \
+	do { \
+		if (a52_r230_dd_take()) \
+			a52_ackfr_record("KGPPOST 230 " _fmt, ##__VA_ARGS__); \
+	} while (0)
+
+static const char *a52_r230_reason(const struct device *dev)
+{
+	return dev && dev->p && dev->p->deferred_probe_reason ?
+		dev->p->deferred_probe_reason : "-";
+}
+
+'''
+
+
+def patch_dd(text: str, label: str) -> str:
+    if PHASE230_MARKER in text:
+        return text
+    helper_anchor = '''static bool a52_smmu_unsec_trace_dev(const struct device *dev)
+{
+	return dev && dev->of_node &&
+		of_device_is_compatible(dev->of_node, "qcom,smmu_sde_unsec");
+}
+
+'''
+    text = one(text, helper_anchor, helper_anchor + DD_HELPER, f"{label}: helper")
+
+    text = one(
+        text,
+        '''\t\tdev = private->device;\n\t\tlist_del_init(&private->deferred_probe);\n'''.replace('\\t', '\t').replace('\\n', '\n'),
+        '''\t\tdev = private->device;\n\t\tif (a52_r230_gpu_dev(dev))\n\t\t\tA52_R230_DD("def-retry d=%.24s reason=%.28s",\n\t\t\t\tdev_name(dev), a52_r230_reason(dev));\n\t\tlist_del_init(&private->deferred_probe);\n'''.replace('\\t', '\t').replace('\\n', '\n'),
+        f"{label}: deferred retry",
+    )
+
+    add_anchor = "\tmutex_lock(&deferred_probe_mutex);\n\tif (list_empty(&dev->p->deferred_probe)) {\n"
+    add_new = (
+        "\tmutex_lock(&deferred_probe_mutex);\n"
+        "\tif (a52_r230_gpu_dev(dev))\n"
+        "\t\tA52_R230_DD(\"def-add d=%.24s empty=%d reason=%.28s\",\n"
+        "\t\t\tdev_name(dev), list_empty(&dev->p->deferred_probe),\n"
+        "\t\t\ta52_r230_reason(dev));\n"
+        "\tif (list_empty(&dev->p->deferred_probe)) {\n"
+    )
+    text = one(text, add_anchor, add_new, f"{label}: deferred add")
+
+    del_anchor = "void driver_deferred_probe_del(struct device *dev)\n{\n\tmutex_lock(&deferred_probe_mutex);\n"
+    del_new = (
+        "void driver_deferred_probe_del(struct device *dev)\n{\n"
+        "\tmutex_lock(&deferred_probe_mutex);\n"
+        "\tif (a52_r230_gpu_dev(dev))\n"
+        "\t\tA52_R230_DD(\"def-del d=%.24s listed=%d reason=%.28s\",\n"
+        "\t\t\tdev_name(dev), !list_empty(&dev->p->deferred_probe),\n"
+        "\t\t\ta52_r230_reason(dev));\n"
+    )
+    text = one(text, del_anchor, del_new, f"{label}: deferred del")
+
+    rp_decl = r'''static int really_probe(struct device *dev, struct device_driver *drv)
+{
+	int ret = -EPROBE_DEFER;
+	int local_trigger_count = atomic_read(&deferred_trigger_count);
+	bool test_remove = IS_ENABLED(CONFIG_DEBUG_TEST_DRIVER_REMOVE) &&
+			   !drv->suppress_bind_attrs;
+'''
+    rp_decl_new = rp_decl + r'''
+	if (a52_r230_gpu_pair(dev, drv))
+		A52_R230_DD("rp-in d=%.24s r=%.16s all=%d dead=%d cur=%.16s",
+			dev_name(dev), drv->name, defer_all_probes,
+			dev->p ? dev->p->dead : -1,
+			dev->driver && dev->driver->name ? dev->driver->name : "-");
+'''
+    text = one(text, rp_decl, rp_decl_new, f"{label}: really probe entry")
+
+    supplier_anchor = r'''\tret = device_links_check_suppliers(dev);
+'''.replace('\\t', '\t')
+    supplier_new = supplier_anchor + r'''\tif (a52_r230_gpu_pair(dev, drv))
+\t\tA52_R230_DD("rp-sup rc=%d ls=%d reason=%.32s", ret,
+\t\t\tdev->links.status, a52_r230_reason(dev));
+'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, supplier_anchor, supplier_new, f"{label}: supplier result")
+
+    ret_anchor = '''\tif (ret == -EPROBE_DEFER)\n\t\tdriver_deferred_probe_add_trigger(dev, local_trigger_count);\n\tif (ret)\n\t\treturn ret;\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    ret_new = '''\tif (ret == -EPROBE_DEFER)\n\t\tdriver_deferred_probe_add_trigger(dev, local_trigger_count);\n\tif (ret) {\n\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-stop stage=sup rc=%d reason=%.32s",\n\t\t\t\tret, a52_r230_reason(dev));\n\t\treturn ret;\n\t}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, ret_anchor, ret_new, f"{label}: supplier stop")
+
+    pin_anchor = '\tret = pinctrl_bind_pins(dev);\n'
+    pin_new = pin_anchor + '''\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("rp-pin rc=%d", ret);\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, pin_anchor, pin_new, f"{label}: pinctrl")
+
+    dma_anchor = '\t\tret = dev->bus->dma_configure(dev);\n'
+    dma_new = dma_anchor + '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-dma rc=%d mapped=%d", ret,\n\t\t\t\tdevice_iommu_mapped(dev));\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, dma_anchor, dma_new, f"{label}: dma")
+
+    sysfs_anchor = '''\tret = driver_sysfs_add(dev);\n\tif (a52_rscc_probe_device(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    sysfs_new = '''\tret = driver_sysfs_add(dev);\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("rp-sys rc=%d", ret);\n\tif (a52_rscc_probe_device(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, sysfs_anchor, sysfs_new, f"{label}: sysfs")
+
+    pm_anchor = '\t\tret = dev->pm_domain->activate(dev);\n'
+    pm_new = pm_anchor + '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-pm rc=%d", ret);\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, pm_anchor, pm_new, f"{label}: pm")
+
+    bus_anchor = '\t\tret = dev->bus->probe(dev);\n'
+    bus_new = '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-cb in bus=1");\n'''.replace('\\t', '\t').replace('\\n', '\n') + bus_anchor + '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-cb out rc=%d", ret);\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, bus_anchor, bus_new, f"{label}: bus callback")
+
+    drv_anchor = '\t\tret = drv->probe(dev);\n'
+    drv_new = '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-cb in bus=0");\n'''.replace('\\t', '\t').replace('\\n', '\n') + drv_anchor + '''\t\tif (a52_r230_gpu_pair(dev, drv))\n\t\t\tA52_R230_DD("rp-cb out rc=%d", ret);\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, drv_anchor, drv_new, f"{label}: driver callback")
+
+    probe_entry = r'''int driver_probe_device(struct device_driver *drv, struct device *dev)
+{
+	int ret = 0;
+'''
+    probe_entry_new = probe_entry + r'''
+	if (a52_r230_gpu_pair(dev, drv))
+		A52_R230_DD("dp-in d=%.24s r=%.16s reg=%d cur=%.16s",
+			dev_name(dev), drv->name, device_is_registered(dev),
+			dev->driver && dev->driver->name ? dev->driver->name : "-");
+'''
+    text = one(text, probe_entry, probe_entry_new, f"{label}: driver_probe entry")
+
+    probe_return = '''\tif (a52_rscc_probe_device(dev))\n\t\ta52_ackfr_record("RSCCCORE driver-probe exit dev=%s rc=%d bound=%s",\n\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n\t\t\tdev->driver->name : "-");\n\treturn ret;\n}\n\nstatic inline bool cmdline_requested_async_probing'''.replace('\\t', '\t').replace('\\n', '\n')
+    probe_return_new = '''\tif (a52_rscc_probe_device(dev))\n\t\ta52_ackfr_record("RSCCCORE driver-probe exit dev=%s rc=%d bound=%s",\n\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n\t\t\tdev->driver->name : "-");\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("dp-out rc=%d bound=%.16s reason=%.28s", ret,\n\t\t\tdev->driver && dev->driver->name ? dev->driver->name : "-",\n\t\t\ta52_r230_reason(dev));\n\treturn ret;\n}\n\nstatic inline bool cmdline_requested_async_probing'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, probe_return, probe_return_new, f"{label}: driver_probe return")
+
+    device_attach_match = '''\tret = driver_match_device(drv, dev);\n\tif (a52_smmu_unsec_trace_dev(dev) &&\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    device_attach_match_new = '''\tret = driver_match_device(drv, dev);\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("ad path=dev match=%d ca=%d wa=%d", ret,\n\t\t\tdata->check_async, data->want_async);\n\tif (a52_smmu_unsec_trace_dev(dev) &&\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, device_attach_match, device_attach_match_new, f"{label}: device attach match")
+
+    direct_return = '''\tif (a52_smmu_unsec_trace_dev(dev))\n\t\ta52_ackfr_record("DCORE match probe drv=%s async=%d",\n\t\t\tdrv->name, async_allowed);\n\treturn driver_probe_device(drv, dev);\n}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    direct_return_new = '''\tif (a52_smmu_unsec_trace_dev(dev))\n\t\ta52_ackfr_record("DCORE match probe drv=%s async=%d",\n\t\t\tdrv->name, async_allowed);\n\tret = driver_probe_device(drv, dev);\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("ad path=dev probe=%d async=%d", ret, async_allowed);\n\treturn ret;\n}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, direct_return, direct_return_new, f"{label}: device attach probe")
+
+    driver_attach_match = '''\tret = driver_match_device(drv, dev);\n\tif (a52_rscc_probe_device(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    driver_attach_match_new = '''\tret = driver_match_device(drv, dev);\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("ad path=drv match=%d dead=%d cur=%.16s", ret,\n\t\t\tdev->p ? dev->p->dead : -1,\n\t\t\tdev->driver && dev->driver->name ? dev->driver->name : "-");\n\tif (a52_rscc_probe_device(dev))\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, driver_attach_match, driver_attach_match_new, f"{label}: driver attach match")
+
+    dda_call = '''\tdevice_driver_attach(drv, dev);\n\n\treturn 0;\n}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    dda_new = '''\tret = device_driver_attach(drv, dev);\n\tif (a52_r230_gpu_pair(dev, drv))\n\t\tA52_R230_DD("ad path=drv probe=%d bound=%.16s", ret,\n\t\t\tdev->driver && dev->driver->name ? dev->driver->name : "-");\n\n\treturn 0;\n}\n'''.replace('\\t', '\t').replace('\\n', '\n')
+    text = one(text, dda_call, dda_new, f"{label}: driver attach probe")
+
+    driver_attach_fn = r'''int driver_attach(struct device_driver *drv)
+{
+	return bus_for_each_dev(drv->bus, NULL, drv, __driver_attach);
+}
+'''
+    driver_attach_fn_new = r'''int driver_attach(struct device_driver *drv)
+{
+	int ret;
+
+	if (a52_r230_gpu_drv(drv))
+		A52_R230_DD("walk-in r=%.16s bus=%.16s", drv->name,
+			drv->bus && drv->bus->name ? drv->bus->name : "-");
+	ret = bus_for_each_dev(drv->bus, NULL, drv, __driver_attach);
+	if (a52_r230_gpu_drv(drv))
+		A52_R230_DD("walk-out r=%.16s rc=%d", drv->name, ret);
+	return ret;
+}
+'''
+    text = one(text, driver_attach_fn, driver_attach_fn_new, f"{label}: driver walk")
+
+    if text.count(PHASE230_MARKER) != 1:
+        raise RuntimeError(f"{label}: marker audit failed")
+    for token in ("rp-sup", "path=dev", "path=drv", "walk-in", "def-add"):
+        if token not in text:
+            raise RuntimeError(f"{label}: missing {token}")
+    return text
+
+

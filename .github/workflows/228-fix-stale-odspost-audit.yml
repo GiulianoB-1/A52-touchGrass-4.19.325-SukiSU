@@ -1,0 +1,74 @@
+name: 228 - Repair stale ODSPOST audit collision
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase228-tritrack-snapshot-v1
+    paths:
+      - .github/workflows/228-fix-stale-odspost-audit.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: a52-phase228-audit-repair
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out Phase 228 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase228-tritrack-snapshot-v1
+          fetch-depth: 0
+
+      - name: Remove parser collision with inherited audit
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/227_phase226_retention_wrapper.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'if (!strncmp(message, "ODSPOST ", 8)) {'
+          new = 'if (strncmp(message, "ODSPOST ", 8) == 0) {'
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f'expected one Phase 228 ODS parser comparison, found {text.count(old)}'
+              )
+          text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          repaired = path.read_text(encoding='utf-8')
+          if old in repaired or repaired.count(new) != 1:
+              raise SystemExit('Phase 228 ODS parser audit-collision repair failed')
+          print('Phase 228 ODS parser comparison rewritten with identical semantics')
+          PY
+          python3 -m py_compile scripts/227_phase226_retention_wrapper.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+      - name: Commit repair
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/227_phase226_retention_wrapper.py
+          git diff --cached --check
+          git commit -m 'phase228: avoid stale ODSPOST audit collision'
+          git push origin HEAD:agent/a52-phase228-tritrack-snapshot-v1
+
+      - name: Dispatch corrected Phase 228 builder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/228-dispatch-builder.yml/dispatches" \
+            -d '{"ref":"agent/a52-phase228-tritrack-snapshot-v1"}'

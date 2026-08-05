@@ -1,0 +1,27 @@
+    if PHASE229_MARKER not in patched or "KGPPOST 229" not in patched:
+        raise AssertionError("Phase 229 instrumentation missing")
+    print("Phase 229 KGSL platform-path self-test: PASS")
+
+
+def main() -> int:
+    base = Path(__file__).with_name("228_phase227_tritrack_wrapper.py")
+    if "--self-test" in sys.argv[1:]:
+        if not base.is_file():
+            raise SystemExit(f"missing Phase 228 base wrapper: {base}")
+        completed = subprocess.run([sys.executable, str(base), "--self-test"], check=False)
+        if completed.returncode:
+            return completed.returncode
+        self_test()
+        return 0
+    if not base.is_file():
+        raise SystemExit(f"missing Phase 228 base wrapper: {base}")
+    completed = subprocess.run([sys.executable, str(base), *sys.argv[1:]], check=False)
+    if completed.returncode:
+        return completed.returncode
+    root = patch_generated(sys.argv[1:])
+    print(f"Phase 229 KGSL platform-path trace applied to {root}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

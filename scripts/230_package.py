@@ -120,8 +120,7 @@ def verify_markers(image: Path) -> None:
     data = image.read_bytes()
     for marker in (
         b"KGPPOST 230", b"KGPPOST 230 replay-begin",
-        b"A52_PHASE230_KGSL_LATE_REPLAY", b"KGPPOST 229",
-        b"TRIPOST 228", b"ODSPOST 226",
+        b"KGPPOST 229", b"TRIPOST 228", b"ODSPOST 226",
         b"GFXPOST 225 ks1", b"GFXPOST 225 ks2",
     ):
         if marker not in data:

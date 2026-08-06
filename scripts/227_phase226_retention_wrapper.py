@@ -117,17 +117,52 @@ def parse_config(path: Path) -> dict[str, str]:
     return states
 
 
-def repair_phase217_retention_snapshot() -> None:
+_phase233_retention_repaired = False
+
+
+def repair_phase217_retention_snapshot(*, require_final_state: bool) -> bool:
+    """Refresh the stale Phase 217 snapshot only after Phase 233 is final."""
+    global _phase233_retention_repaired
+    if _phase233_retention_repaired:
+        return True
+
     config = locate_authoritative_config()
     snapshot = (
         Path.cwd()
         / "artifacts/a52xq-graphics-startup-trace/config/before-phase217.config"
     )
     if config is None or not snapshot.is_file():
-        return
+        return False
 
     before = parse_config(snapshot)
     after = parse_config(config)
+    required_enabled = {
+        "CONFIG_GPU_CC_LAGOON",
+        "CONFIG_QCOM_MDT_LOADER",
+        "CONFIG_DRM_PANEL",
+        *SUPPLIER_CONFIGS.keys(),
+    }
+    wrong_enabled = sorted(
+        symbol for symbol in required_enabled if after.get(symbol) != "y"
+    )
+    wrong_disabled = sorted(
+        symbol
+        for symbol in ("CONFIG_DRM_MSM", "CONFIG_FB_MSM")
+        if after.get(symbol, "n") != "n"
+    )
+    if wrong_enabled or wrong_disabled:
+        if require_final_state:
+            details = []
+            if wrong_enabled:
+                details.append("not built-in: " + ", ".join(wrong_enabled))
+            if wrong_disabled:
+                details.append("not disabled: " + ", ".join(wrong_disabled))
+            raise SystemExit(
+                "Phase 233 final config state was not reached before retention repair: "
+                + "; ".join(details)
+            )
+        return False
+
     changed = {
         symbol
         for symbol in set(before) | set(after)
@@ -149,30 +184,14 @@ def repair_phase217_retention_snapshot() -> None:
             + ", ".join(unexpected)
         )
 
-    required_enabled = {
-        "CONFIG_GPU_CC_LAGOON",
-        "CONFIG_QCOM_MDT_LOADER",
-        "CONFIG_DRM_PANEL",
-        *SUPPLIER_CONFIGS.keys(),
-    }
-    wrong_enabled = sorted(
-        symbol for symbol in required_enabled if after.get(symbol) != "y"
-    )
-    if wrong_enabled:
-        raise SystemExit(
-            "Phase 233 required built-ins missing from authoritative config: "
-            + ", ".join(wrong_enabled)
-        )
-    for symbol in ("CONFIG_DRM_MSM", "CONFIG_FB_MSM"):
-        if after.get(symbol, "n") != "n":
-            raise SystemExit(f"Phase 233 requires {symbol} disabled")
-
     snapshot.write_bytes(config.read_bytes())
+    _phase233_retention_repaired = True
     print(
-        "Phase 233 retention snapshot updated after strict allowlist audit: "
+        "Phase 233 retention snapshot updated before inherited comparison: "
         + (", ".join(sorted(changed)) or "no semantic changes"),
         flush=True,
     )
+    return True
 
 
 def validate_disabled_config_symbol(path: Path, symbol: str) -> None:
@@ -287,10 +306,23 @@ def _phase233_read_text(path: Path, *args: object, **kwargs: object) -> str:
     return text
 
 
+_original_popen = subprocess.Popen
+
+
+def _phase233_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+    # The generated cumulative wrapper launches the inherited Phase 217 shell
+    # gate after applying Phase 233. Refresh the snapshot immediately before
+    # that process starts, but remain a no-op for earlier subprocesses.
+    repair_phase217_retention_snapshot(require_final_state=False)
+    return _original_popen(*args, **kwargs)
+
+
 Path.read_text = _phase233_read_text
+subprocess.Popen = _phase233_popen
 try:
     exec(compile(source, _source_filename, "exec"), globals(), globals())
 finally:
+    subprocess.Popen = _original_popen
     Path.read_text = _original_read_text
 
-repair_phase217_retention_snapshot()
+repair_phase217_retention_snapshot(require_final_state=True)

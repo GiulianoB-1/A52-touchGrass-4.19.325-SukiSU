@@ -30,3 +30,4 @@ Interpretation order:
 Do not use the bundled recorder-v3 decoder. This candidate intentionally retains the Phase 210 R48 RS48 + CRC32C format.
 
 Build retrigger: cumulative Phase 230 RSCC layout repair v2.
+Push-event trigger: Git data commit.

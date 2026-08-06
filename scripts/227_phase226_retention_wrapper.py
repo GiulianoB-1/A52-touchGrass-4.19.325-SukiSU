@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Load Phase 233 with final graphics and exact Lagoon supplier closure."""
 from __future__ import annotations
 
 import inspect
@@ -379,6 +378,189 @@ def repair_phase217_retention_snapshot(*, require_final_state: bool) -> bool:
     return True
 
 
+PHASE234_RECORDER_SENTINEL = "A52_PHASE234_RSCC_FOCUSED_RECORDER_V1"
+
+
+def _replace_exact_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one anchor, found {count}")
+    return text.replace(old, new, 1)
+
+
+def patch_phase234_recorder_text(text: str, label: str) -> str:
+    """Keep the RS48 transport but reserve persisted records for RSCC."""
+    if PHASE234_RECORDER_SENTINEL in text:
+        return text
+
+    text = _replace_exact_once(
+        text,
+        "\tu64 seq;\n\n\tseq = (u64)atomic64_inc_return(&a52_r179_sequence);",
+        "\tu64 seq;\n\n"
+        "\t/* " + PHASE234_RECORDER_SENTINEL + "\n"
+        "\t * Keep the proven Phase 210 RS48 + CRC32C wire format, but do\n"
+        "\t * not consume the useful window with inherited boot, GPU or broad\n"
+        "\t * driver-core traffic. Control records remain so the existing\n"
+        "\t * decoder can identify and validate every persisted slot.\n"
+        "\t */\n"
+        "\tif (!fmt)\n"
+        "\t\treturn;\n"
+        "\tif (strncmp(fmt, \"RSCC\", 4) &&\n"
+        "\t    strncmp(fmt, \"BOOT ctl=\", 9) &&\n"
+        "\t    strncmp(fmt, \"BOOT rs=ready\", 13))\n"
+        "\t\treturn;\n\n"
+        "\tseq = (u64)atomic64_inc_return(&a52_r179_sequence);",
+        f"{label}: focused recorder filter",
+    )
+    text = _replace_exact_once(
+        text,
+        'a52_ackfr_record("BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c",',
+        'a52_ackfr_record("BOOT rs=ready phase=234 focus=rscc roots=%u copies=3 crc=crc32c",',
+        f"{label}: focused recorder boot marker",
+    )
+    return text
+
+
+def patch_phase234_dd_text(text: str, label: str) -> str:
+    """Drop failed candidate-driver spam while retaining the real RSCC gate."""
+    if "A52_PHASE234_RSCC_MATCH_FILTER_V1" in text:
+        return text
+
+    helper_old = '''static bool a52_rscc_probe_device(const struct device *dev)
+{
+\treturn dev && dev->of_node &&
+\t\tof_device_is_compatible(dev->of_node, "qcom,sde-rsc");
+}
+'''
+    helper_new = helper_old + '''
+/* A52_PHASE234_RSCC_MATCH_FILTER_V1 */
+static bool a52_rscc_probe_driver(const struct device_driver *drv)
+{
+\treturn drv && drv->name && !strcmp(drv->name, "sde_rsc");
+}
+'''
+    text = _replace_exact_once(
+        text, helper_old, helper_new, f"{label}: RSCC driver helper"
+    )
+
+    old_device = '''\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev))
+\t\ta52_ackfr_record("RSCCCORE match path=device-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+'''
+    new_device = '''\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev) &&
+\t    (ret || a52_rscc_probe_driver(drv)))
+\t\ta52_ackfr_record("RSCCFOCUS match path=device-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+'''
+    text = _replace_exact_once(
+        text, old_device, new_device, f"{label}: device-attach match filter"
+    )
+
+    old_driver = '''\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev))
+\t\ta52_ackfr_record("RSCCCORE match path=driver-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+'''
+    new_driver = '''\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev) &&
+\t    (ret || a52_rscc_probe_driver(drv)))
+\t\ta52_ackfr_record("RSCCFOCUS match path=driver-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+'''
+    text = _replace_exact_once(
+        text, old_driver, new_driver, f"{label}: driver-attach match filter"
+    )
+    return text
+
+
+def locate_phase234_kernel_root() -> Path | None:
+    for candidate in (
+        Path.cwd() / "gki/common",
+        Path.cwd() / "workspace/gki-phase199-src",
+    ):
+        if (candidate / "drivers/base/dd.c").is_file():
+            return candidate
+    return None
+
+
+def apply_phase234_rscc_focus() -> None:
+    root = locate_phase234_kernel_root()
+    if root is None:
+        raise SystemExit("Phase 234 RSCC focus could not locate the generated kernel root")
+
+    recorder = root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+    dd = root / "drivers/base/dd.c"
+    for required in (recorder, dd):
+        if not required.is_file():
+            raise SystemExit(f"Phase 234 RSCC focus dependency missing: {required}")
+
+    recorder_text = patch_phase234_recorder_text(
+        recorder.read_text(encoding="utf-8"), str(recorder)
+    )
+    dd_text = patch_phase234_dd_text(dd.read_text(encoding="utf-8"), str(dd))
+    recorder.write_text(recorder_text, encoding="utf-8")
+    dd.write_text(dd_text, encoding="utf-8")
+
+    if "BOOT rs=ready phase=234 focus=rscc" not in recorder_text:
+        raise SystemExit("Phase 234 focused recorder marker was not applied")
+    if "RSCCFOCUS match path=device-attach" not in dd_text:
+        raise SystemExit("Phase 234 focused device-attach marker was not applied")
+    if "RSCCFOCUS match path=driver-attach" not in dd_text:
+        raise SystemExit("Phase 234 focused driver-attach marker was not applied")
+    print(
+        "Phase 234 RSCC-focused recorder applied: RS48 retained, "
+        "non-RSCC traffic suppressed, failed candidate matches suppressed",
+        flush=True,
+    )
+
+
+def phase234_rscc_focus_self_test() -> None:
+    recorder_fixture = '''void a52_ackfr_record(const char *fmt, ...)
+{
+\tu64 seq;
+
+\tseq = (u64)atomic64_inc_return(&a52_r179_sequence);
+}
+a52_ackfr_record("BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c",
+'''
+    recorder_result = patch_phase234_recorder_text(
+        recorder_fixture, "phase234-recorder-fixture"
+    )
+    if patch_phase234_recorder_text(
+        recorder_result, "phase234-recorder-idempotence"
+    ) != recorder_result:
+        raise AssertionError("Phase 234 recorder patch is not idempotent")
+    if PHASE234_RECORDER_SENTINEL not in recorder_result:
+        raise AssertionError("Phase 234 recorder sentinel missing")
+
+    dd_fixture = '''static bool a52_rscc_probe_device(const struct device *dev)
+{
+\treturn dev && dev->of_node &&
+\t\tof_device_is_compatible(dev->of_node, "qcom,sde-rsc");
+}
+
+\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev))
+\t\ta52_ackfr_record("RSCCCORE match path=device-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+
+\tret = driver_match_device(drv, dev);
+\tif (a52_rscc_probe_device(dev))
+\t\ta52_ackfr_record("RSCCCORE match path=driver-attach dev=%s drv=%s rc=%d",
+\t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
+'''
+    dd_result = patch_phase234_dd_text(dd_fixture, "phase234-dd-fixture")
+    if patch_phase234_dd_text(dd_result, "phase234-dd-idempotence") != dd_result:
+        raise AssertionError("Phase 234 driver-core patch is not idempotent")
+    if dd_result.count("RSCCFOCUS match path=") != 2:
+        raise AssertionError("Phase 234 focused match markers missing")
+    if 'a52_ackfr_record("RSCCCORE match path=' in dd_result:
+        raise AssertionError("Phase 234 broad match recorder remained")
+    print("Phase 234 RSCC-focused recorder self-test: PASS", flush=True)
+
+
 def validate_disabled_config_symbol(path: Path, symbol: str) -> None:
     """Reject enabled forms without mutating inherited config snapshots."""
     if not path.is_file():
@@ -402,6 +584,9 @@ for config_path in (
     Path.cwd() / ".config",
 ):
     validate_disabled_config_symbol(config_path, "CONFIG_FB_MSM")
+
+if _phase233_self_test:
+    phase234_rscc_focus_self_test()
 
 enable_exact_lagoon_suppliers()
 
@@ -501,6 +686,7 @@ try:
         # exec(), leaving the surrounding Phase 217 shell cmp with its stale
         # snapshot. Self-tests intentionally run before the final config state.
         if exc.code in (None, 0) and not _phase233_self_test:
+            apply_phase234_rscc_focus()
             resolve_phase233_kconfig()
             repair_phase217_retention_snapshot(require_final_state=True)
         raise
@@ -509,5 +695,6 @@ finally:
 
 # Also cover generated wrappers that return normally instead of SystemExit.
 if not _phase233_self_test:
+    apply_phase234_rscc_focus()
     resolve_phase233_kconfig()
     repair_phase217_retention_snapshot(require_final_state=True)

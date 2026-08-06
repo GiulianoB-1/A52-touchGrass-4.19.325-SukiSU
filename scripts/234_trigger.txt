@@ -31,3 +31,4 @@ Do not use the bundled recorder-v3 decoder. This candidate intentionally retains
 
 Build retrigger: cumulative Phase 230 RSCC layout repair v2.
 Push-event trigger: Git data commit.
+PR-event trigger: audited Phase 234 branch-head build.

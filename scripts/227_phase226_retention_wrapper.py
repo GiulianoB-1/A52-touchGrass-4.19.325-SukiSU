@@ -306,23 +306,20 @@ def _phase233_read_text(path: Path, *args: object, **kwargs: object) -> str:
     return text
 
 
-_original_popen = subprocess.Popen
-
-
-def _phase233_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
-    # The generated cumulative wrapper launches the inherited Phase 217 shell
-    # gate after applying Phase 233. Refresh the snapshot immediately before
-    # that process starts, but remain a no-op for earlier subprocesses.
-    repair_phase217_retention_snapshot(require_final_state=False)
-    return _original_popen(*args, **kwargs)
-
-
 Path.read_text = _phase233_read_text
-subprocess.Popen = _phase233_popen
 try:
-    exec(compile(source, _source_filename, "exec"), globals(), globals())
+    try:
+        exec(compile(source, _source_filename, "exec"), globals(), globals())
+    except SystemExit as exc:
+        # The generated wrapper terminates with ``raise SystemExit(main())``.
+        # A successful SystemExit would otherwise skip the statement after
+        # exec(), leaving the surrounding Phase 217 shell cmp with its stale
+        # snapshot. Repair strictly before propagating that successful exit.
+        if exc.code in (None, 0):
+            repair_phase217_retention_snapshot(require_final_state=True)
+        raise
 finally:
-    subprocess.Popen = _original_popen
     Path.read_text = _original_read_text
 
+# Also cover generated wrappers that return normally instead of SystemExit.
 repair_phase217_retention_snapshot(require_final_state=True)

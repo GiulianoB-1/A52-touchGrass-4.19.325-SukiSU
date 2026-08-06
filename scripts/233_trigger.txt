@@ -1,0 +1,14 @@
+A52 Phase 233 hardware validation
+
+1. Extract the artifact and run: sha256sum -c SHA256SUMS
+2. Flash only package/boot.img to the BOOT partition.
+3. Allow one normal boot to run for at least 210 seconds, or until watchdog restart.
+4. Boot directly into recovery without another normal boot.
+5. Collect and upload the untouched raw RAMOOPS ZIP.
+
+Expected retained evidence:
+- A52GDSC GPU_CX_PROFILE_V1
+- 3d9106c.qcom,gdsc bound to a52-legacy-gdsc-regulator
+- qcom,lagoon-gpucc provider registered
+- device_links_check_suppliers() returns 0 for qcom,kgsl-3d0
+- adreno_probe() is entered, or a later exact Adreno/GMU/firmware/IOMMU blocker appears

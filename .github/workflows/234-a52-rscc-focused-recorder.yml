@@ -15,10 +15,21 @@ on:
       - scripts/234_design.md
       - scripts/234_trigger.txt
       - scripts/234_repair_phase230_layout.py
+  pull_request:
+    branches:
+      - agent/a52-phase234-rscc-focused-recorder-v1
+    paths:
+      - .github/workflows/234-a52-rscc-focused-recorder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/233_payload.py
+      - scripts/234_package.py
+      - scripts/234_design.md
+      - scripts/234_trigger.txt
+      - scripts/234_repair_phase230_layout.py
 
 permissions:
   actions: write
-  contents: write
+  contents: read
 
 concurrency:
   group: a52-phase234-rscc-focused-recorder-${{ github.ref }}
@@ -31,35 +42,25 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Check out Phase 234 branch
+      - name: Check out Phase 234 source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Repair cumulative Phase 230 RSCC layout
+      - name: Repair cumulative Phase 230 RSCC layout in working tree
         run: |
           set -Eeuo pipefail
           python3 scripts/234_repair_phase230_layout.py
-          if git diff --quiet -- scripts/227_phase226_retention_wrapper.py; then
-            echo 'Phase 234 cumulative layout repair already committed'
-          else
-            python3 scripts/233_payload.py
-            python3 -m py_compile \
-              scripts/234_repair_phase230_layout.py \
-              scripts/227_phase226_retention_wrapper.py
-            python3 scripts/227_phase226_retention_wrapper.py --self-test
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add scripts/227_phase226_retention_wrapper.py
-            git diff --cached --check
-            git commit -m 'phase234: match cumulative Phase230 RSCC layout'
-            git push origin HEAD:agent/a52-phase234-rscc-focused-recorder-v1
-          fi
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/234_repair_phase230_layout.py \
+            scripts/227_phase226_retention_wrapper.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
 
       - name: Verify Phase 234 source and focused scope
         run: |
           set -Eeuo pipefail
-          python3 scripts/233_payload.py
           python3 - <<'PY'
           from pathlib import Path
           import re

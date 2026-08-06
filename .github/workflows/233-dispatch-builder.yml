@@ -1,0 +1,128 @@
+name: 233 - A52 final TouchGrass graphics parity
+
+run-name: Build and audit Phase 233 final graphics parity candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase233-final-graphics-parity-v1
+    paths:
+      - .github/workflows/233-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/231_phase230_gpu_gdsc_wrapper.py
+      - scripts/232_phase231_optional_aon_wrapper.py
+      - scripts/233_payload.py
+      - scripts/233_phase232_final_graphics_parity_wrapper.py
+      - scripts/233_package.py
+      - scripts/233_design.md
+      - scripts/233_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase232-gpu-gx-optional-aon-v1
+    paths:
+      - .github/workflows/233-dispatch-builder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/233_payload.py
+      - scripts/233_phase232_final_graphics_parity_wrapper.py
+      - scripts/233_package.py
+      - scripts/233_design.md
+      - scripts/233_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase233-final-graphics-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 233
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 233 branch
+        uses: actions/checkout@v4
+
+      - name: Verify Phase 233 source and parity scope
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/233_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/231_phase230_gpu_gdsc_wrapper.py \
+            scripts/232_phase231_optional_aon_wrapper.py \
+            scripts/233_phase232_final_graphics_parity_wrapper.py \
+            scripts/233_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -Fq 'A52_PHASE233_FINAL_GRAPHICS_PARITY' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'A52_GDSC_GPU_CX_ADDR' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'CONFIG_GPU_CC_LAGOON=y' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'A52_PHASE233_A615_ZAP_SCM_LOADER' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'A52_PHASE233_KGSL_SELECT_MDT_LOADER' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'GPU_GX_SKIP_ENABLE_V1' \
+            scripts/233_phase232_final_graphics_parity_wrapper.py
+          grep -Fq 'CONFIG_DRM_MSM' scripts/233_design.md
+          grep -Fq 'CONFIG_FB_MSM' scripts/233_design.md
+          grep -Fq 'Phase 230 late replay' scripts/233_design.md
+
+      - name: Dispatch inherited builder and package Phase 233
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/233_package.py
+          test -f phase233-out/package/boot.img
+          test -f phase233-out/compile/Image
+          test -f phase233-out/config/final.config
+          grep -aFq 'A52GDSC GPU_CX_PROFILE_V1' \
+            phase233-out/compile/Image
+          grep -aFq 'A52GDSC gpu-cx-disable' \
+            phase233-out/compile/Image
+          grep -aFq 'qcom,lagoon-gpucc' \
+            phase233-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_PROFILE_V2' \
+            phase233-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_SKIP_ENABLE_V1' \
+            phase233-out/compile/Image
+          grep -aFq 'A52ZAP 233 load' \
+            phase233-out/compile/Image
+          grep -aFq 'a615_zap.mdt' \
+            phase233-out/compile/Image
+          grep -aFq 'KGPPOST 230 replay-begin' \
+            phase233-out/compile/Image
+          grep -Fxq 'CONFIG_GPU_CC_LAGOON=y' \
+            phase233-out/config/final.config
+          grep -Fxq 'CONFIG_QCOM_MDT_LOADER=y' \
+            phase233-out/config/final.config
+          grep -Fxq 'CONFIG_DISP_CC_LAGOON=y' \
+            phase233-out/config/final.config
+          grep -Fxq 'CONFIG_DRM_PANEL=y' \
+            phase233-out/config/final.config
+          grep -Fxq '# CONFIG_DRM_MSM is not set' \
+            phase233-out/config/final.config
+          grep -Fxq '# CONFIG_FB_MSM is not set' \
+            phase233-out/config/final.config
+          (
+            cd phase233-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 233 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase233-FINAL-GRAPHICS-PARITY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase233-out
+          if-no-files-found: error
+          retention-days: 30

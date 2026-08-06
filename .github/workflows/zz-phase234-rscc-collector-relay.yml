@@ -1,26 +1,22 @@
 name: Phase 234 RSCC collector relay
 
 on:
-  pull_request_target:
-    branches:
-      - agent/a52-phase234-rscc-focused-recorder-v1
+  workflow_run:
+    workflows:
+      - 234 - A52 RSCC-focused recorder
     types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths:
-      - scripts/234_trigger.txt
-      - scripts/234_repair_phase230_layout.py
-      - scripts/227_phase226_retention_wrapper.py
+      - requested
 
 permissions:
   actions: write
   contents: write
 
 concurrency:
-  group: phase234-rscc-relay-${{ github.event.pull_request.number }}
+  group: phase234-rscc-relay
   cancel-in-progress: true
+
+env:
+  PHASE234_BUILD_REF: agent/a52-phase234-rscc-focused-recorder-build-v1
 
 jobs:
   build-package:
@@ -29,17 +25,15 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Check out same-repository PR head
+      - name: Check out Phase 234 build branch
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ env.PHASE234_BUILD_REF }}
           fetch-depth: 1
 
       - name: Repair and publish cumulative Phase 230 layout
         run: |
           set -Eeuo pipefail
-          test '${{ github.event.pull_request.head.repo.full_name }}' = '${{ github.repository }}'
           python3 scripts/234_repair_phase230_layout.py
           python3 scripts/233_payload.py
           python3 -m py_compile \
@@ -52,13 +46,12 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add scripts/227_phase226_retention_wrapper.py
             git commit -m 'phase234: match cumulative Phase230 RSCC layout'
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+            git push origin HEAD:${PHASE234_BUILD_REF}
           fi
 
       - name: Verify and package Phase 234
         env:
           GH_TOKEN: ${{ github.token }}
-          PHASE234_BUILD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'

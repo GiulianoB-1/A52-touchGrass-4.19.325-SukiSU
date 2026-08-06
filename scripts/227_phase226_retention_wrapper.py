@@ -142,6 +142,37 @@ def resolve_phase233_kconfig() -> None:
             "Phase 233 could not resolve Kconfig: authoritative config or build root missing"
         )
 
+    qcom_kconfig = build_root / "drivers/soc/qcom/Kconfig"
+    qcom_makefile = build_root / "drivers/soc/qcom/Makefile"
+    mdt_source = build_root / "drivers/soc/qcom/mdt_loader.c"
+    for required in (qcom_kconfig, qcom_makefile, mdt_source):
+        if not required.is_file():
+            raise SystemExit(f"Phase 233 MDT selector dependency missing: {required}")
+
+    kconfig_text = qcom_kconfig.read_text(encoding="utf-8")
+    original_stanza = (
+        "config QCOM_MDT_LOADER\n"
+        "\ttristate\n"
+        "\tselect QCOM_SCM"
+    )
+    selected_stanza = (
+        "config QCOM_MDT_LOADER\n"
+        "\ttristate\n"
+        "\tdefault y if GPU_CC_LAGOON\n"
+        "\tselect QCOM_SCM"
+    )
+    if selected_stanza not in kconfig_text:
+        if kconfig_text.count(original_stanza) != 1:
+            raise SystemExit(
+                "Phase 233 expected exactly one pristine QCOM_MDT_LOADER Kconfig stanza"
+            )
+        kconfig_text = kconfig_text.replace(original_stanza, selected_stanza, 1)
+        qcom_kconfig.write_text(kconfig_text, encoding="utf-8")
+
+    makefile_text = qcom_makefile.read_text(encoding="utf-8")
+    if "obj-$(CONFIG_QCOM_MDT_LOADER)" not in makefile_text or "mdt_loader.o" not in makefile_text:
+        raise SystemExit("Phase 233 MDT loader Makefile linkage is missing")
+
     command = [
         "make",
         "-C",

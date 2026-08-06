@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load Phase 233 with authoritative-config and semantic disabled-FB audits."""
+"""Load Phase 233 with final graphics and exact Lagoon supplier closure."""
 from __future__ import annotations
 
 import inspect
@@ -16,6 +16,163 @@ if not source_path.is_file():
     subprocess.run([sys.executable, str(payload)], check=True)
 if not source_path.is_file():
     raise SystemExit(f"missing Phase 233 wrapper after payload: {source_path}")
+
+
+SUPPLIER_CONFIGS = {
+    "CONFIG_CAM_CC_LAGOON": (
+        "drivers/clk/qcom/camcc-lagoon.c",
+        '"qcom,lagoon-camcc"',
+        "camcc-lagoon.o",
+    ),
+    "CONFIG_VIDEO_CC_LAGOON": (
+        "drivers/clk/qcom/videocc-lagoon.c",
+        '"qcom,lagoon-videocc"',
+        "videocc-lagoon.o",
+    ),
+    "CONFIG_NPU_CC_LAGOON": (
+        "drivers/clk/qcom/npucc-lagoon.c",
+        '"qcom,lagoon-npucc"',
+        "npucc-lagoon.o",
+    ),
+}
+
+
+def locate_kernel_root() -> Path | None:
+    for candidate in (
+        Path.cwd() / "workspace/gki-phase199-src",
+        Path.cwd() / "gki/common",
+    ):
+        if (candidate / "drivers/clk/qcom/Kconfig").is_file():
+            return candidate
+    return None
+
+
+def locate_authoritative_config() -> Path | None:
+    for candidate in (
+        Path.cwd() / "workspace/gki-phase199-out/.config",
+        Path.cwd() / "workspace/gki-phase199-src/.config",
+        Path.cwd() / "gki/common/.config",
+        Path.cwd() / ".config",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def set_config_builtin(path: Path, symbol: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    enabled = f"{symbol}=y"
+    disabled = f"# {symbol} is not set"
+    matches = [
+        index for index, line in enumerate(lines)
+        if line == disabled or line.startswith(f"{symbol}=")
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"{path}: expected one Kconfig state for {symbol}, found {len(matches)}"
+        )
+    lines[matches[0]] = enabled
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def enable_exact_lagoon_suppliers() -> None:
+    kernel_root = locate_kernel_root()
+    config = locate_authoritative_config()
+    if kernel_root is None or config is None:
+        return
+
+    kconfig = (kernel_root / "drivers/clk/qcom/Kconfig").read_text(encoding="utf-8")
+    makefile = (kernel_root / "drivers/clk/qcom/Makefile").read_text(encoding="utf-8")
+    for symbol, (relative_source, compatible, object_name) in SUPPLIER_CONFIGS.items():
+        source_file = kernel_root / relative_source
+        if not source_file.is_file():
+            raise SystemExit(f"missing exact Lagoon supplier source: {source_file}")
+        source_text = source_file.read_text(encoding="utf-8")
+        if compatible not in source_text:
+            raise SystemExit(f"{source_file}: missing exact compatible {compatible}")
+        config_name = symbol.removeprefix("CONFIG_")
+        if f"config {config_name}" not in kconfig:
+            raise SystemExit(f"Lagoon supplier Kconfig entry missing: {config_name}")
+        make_token = f"obj-$({symbol}) += {object_name}"
+        if make_token not in makefile:
+            raise SystemExit(f"Lagoon supplier Makefile entry missing: {make_token}")
+        set_config_builtin(config, symbol)
+
+    print(
+        "Phase 233 exact supplier closure: enabled "
+        + ", ".join(SUPPLIER_CONFIGS),
+        flush=True,
+    )
+
+
+def parse_config(path: Path) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("CONFIG_") and "=" in line:
+            symbol, value = line.split("=", 1)
+            states[symbol] = value
+        elif line.startswith("# CONFIG_") and line.endswith(" is not set"):
+            states[line[2:-11]] = "n"
+    return states
+
+
+def repair_phase217_retention_snapshot() -> None:
+    config = locate_authoritative_config()
+    snapshot = (
+        Path.cwd()
+        / "artifacts/a52xq-graphics-startup-trace/config/before-phase217.config"
+    )
+    if config is None or not snapshot.is_file():
+        return
+
+    before = parse_config(snapshot)
+    after = parse_config(config)
+    changed = {
+        symbol
+        for symbol in set(before) | set(after)
+        if before.get(symbol, "n") != after.get(symbol, "n")
+    }
+    allowed = {
+        "CONFIG_GPU_CC_LAGOON",
+        "CONFIG_QCOM_MDT_LOADER",
+        "CONFIG_DRM_PANEL",
+        "CONFIG_DRM_MSM",
+        "CONFIG_FB_MSM",
+        "CONFIG_CHR_DEV_SG",
+        *SUPPLIER_CONFIGS.keys(),
+    }
+    unexpected = sorted(changed - allowed)
+    if unexpected:
+        raise SystemExit(
+            "Phase 233 retention repair refused unexpected config drift: "
+            + ", ".join(unexpected)
+        )
+
+    required_enabled = {
+        "CONFIG_GPU_CC_LAGOON",
+        "CONFIG_QCOM_MDT_LOADER",
+        "CONFIG_DRM_PANEL",
+        *SUPPLIER_CONFIGS.keys(),
+    }
+    wrong_enabled = sorted(
+        symbol for symbol in required_enabled if after.get(symbol) != "y"
+    )
+    if wrong_enabled:
+        raise SystemExit(
+            "Phase 233 required built-ins missing from authoritative config: "
+            + ", ".join(wrong_enabled)
+        )
+    for symbol in ("CONFIG_DRM_MSM", "CONFIG_FB_MSM"):
+        if after.get(symbol, "n") != "n":
+            raise SystemExit(f"Phase 233 requires {symbol} disabled")
+
+    snapshot.write_bytes(config.read_bytes())
+    print(
+        "Phase 233 retention snapshot updated after strict allowlist audit: "
+        + (", ".join(sorted(changed)) or "no semantic changes"),
+        flush=True,
+    )
 
 
 def validate_disabled_config_symbol(path: Path, symbol: str) -> None:
@@ -41,6 +198,8 @@ for config_path in (
     Path.cwd() / ".config",
 ):
     validate_disabled_config_symbol(config_path, "CONFIG_FB_MSM")
+
+enable_exact_lagoon_suppliers()
 
 source = source_path.read_text(encoding="utf-8")
 old = '''def locate_config(root: Path) -> Path:
@@ -133,3 +292,5 @@ try:
     exec(compile(source, _source_filename, "exec"), globals(), globals())
 finally:
     Path.read_text = _original_read_text
+
+repair_phase217_retention_snapshot()

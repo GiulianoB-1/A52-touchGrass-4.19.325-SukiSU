@@ -7,7 +7,10 @@ import json
 import os
 import shutil
 import sys
+import time
+import urllib.parse
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 BRANCH = "agent/a52-phase234-rscc-focused-recorder-v1"
@@ -37,6 +40,126 @@ def load_phase233_package():
     spec.loader.exec_module(module)
     module.REF = BRANCH
     return module
+
+
+def _workflow_runs_url(base) -> str:
+    branch = urllib.parse.quote(base.REF, safe="")
+    return (
+        f"{base.API}/actions/workflows/{base.WORKFLOW_ID}/runs?"
+        f"branch={branch}&event=workflow_dispatch&per_page=100"
+    )
+
+
+def dispatch_inherited_and_wait(base) -> tuple[int, str, int]:
+    """Dispatch and bind to a new run at the exact current branch head."""
+    before = base.get_json(_workflow_runs_url(base))
+    known_ids = {
+        int(item["id"])
+        for item in before.get("workflow_runs", [])
+        if item.get("id") is not None
+    }
+
+    branch_name = urllib.parse.quote(base.REF, safe="")
+    branch_data = base.get_json(f"{base.API}/branches/{branch_name}")
+    expected_sha = branch_data.get("commit", {}).get("sha")
+    if not expected_sha:
+        raise RuntimeError(f"cannot resolve inherited branch head: {base.REF}")
+
+    started = (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    base.request(
+        f"{base.API}/actions/workflows/{base.WORKFLOW_ID}/dispatches",
+        method="POST",
+        data={"ref": base.REF},
+    )
+    print(
+        "Phase 234 inherited dispatch accepted: "
+        f"ref={base.REF} expected_sha={expected_sha} started={started}",
+        flush=True,
+    )
+
+    run = None
+    # GitHub may throttle webhook/run materialization. Allow 30 minutes for
+    # the newly accepted dispatch to appear, but never consume a pre-existing
+    # or wrong-head run.
+    for _ in range(120):
+        data = base.get_json(_workflow_runs_url(base))
+        candidates = [
+            item
+            for item in data.get("workflow_runs", [])
+            if int(item.get("id", 0)) not in known_ids
+            and item.get("event") == "workflow_dispatch"
+            and item.get("head_branch") == base.REF
+            and item.get("head_sha") == expected_sha
+            and int(item.get("workflow_id", 0)) == int(base.WORKFLOW_ID)
+        ]
+        if candidates:
+            # The oldest unseen exact-head run is the one most closely tied to
+            # this dispatch. Later concurrent requests must not steal it.
+            run = min(
+                candidates,
+                key=lambda item: (item.get("created_at", ""), int(item["id"])),
+            )
+            break
+        time.sleep(15)
+    if not run:
+        raise RuntimeError(
+            "dispatched inherited build was not found at exact branch head "
+            f"{expected_sha} after 30 minutes"
+        )
+
+    run_id = int(run["id"])
+    print(
+        f"Monitoring exact inherited run {run_id}: {run['html_url']}",
+        flush=True,
+    )
+    for _ in range(600):
+        run = base.get_json(f"{base.API}/actions/runs/{run_id}")
+        if run.get("head_sha") != expected_sha:
+            raise RuntimeError(
+                "inherited run head changed unexpectedly: "
+                f"{run.get('head_sha')} != {expected_sha}"
+            )
+        print(
+            f"run={run_id} status={run['status']} "
+            f"conclusion={run.get('conclusion') or 'pending'}",
+            flush=True,
+        )
+        if run["status"] == "completed":
+            break
+        time.sleep(30)
+    else:
+        raise RuntimeError(f"inherited builder timed out: run {run_id}")
+
+    if run.get("conclusion") != "success":
+        raise RuntimeError(
+            f"inherited builder conclusion: {run.get('conclusion')}"
+        )
+
+    artifacts = base.get_json(
+        f"{base.API}/actions/runs/{run_id}/artifacts?per_page=100"
+    ).get("artifacts", [])
+    artifacts = [item for item in artifacts if not item.get("expired")]
+    if not artifacts:
+        raise RuntimeError("successful inherited build produced no artifact")
+
+    candidate_artifacts = [
+        item
+        for item in artifacts
+        if "NOT-HARDWARE-VALIDATED" in item.get("name", "")
+    ]
+    if len(candidate_artifacts) != 1:
+        names = [item.get("name") for item in artifacts]
+        raise RuntimeError(
+            "expected exactly one inherited candidate artifact, found "
+            f"{len(candidate_artifacts)} among {names}"
+        )
+    artifact = candidate_artifacts[0]
+    return run_id, run["html_url"], int(artifact["id"])
 
 
 def verify_focused_image(image: Path) -> None:
@@ -150,7 +273,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
 
 def main() -> int:
     base = load_phase233_package()
-    run_id, run_url, artifact_id = base.dispatch_and_wait()
+    run_id, run_url, artifact_id = dispatch_inherited_and_wait(base)
     work = Path("phase234-work")
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()

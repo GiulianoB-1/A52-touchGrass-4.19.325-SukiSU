@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load Phase 233 with the authoritative-config locator correction."""
+"""Load Phase 233 with authoritative-config and disabled-FB audit corrections."""
 from __future__ import annotations
 
 import subprocess
@@ -15,6 +15,50 @@ if not source_path.is_file():
     subprocess.run([sys.executable, str(payload)], check=True)
 if not source_path.is_file():
     raise SystemExit(f"missing Phase 233 wrapper after payload: {source_path}")
+
+
+def canonicalize_disabled_config_symbol(path: Path, symbol: str) -> None:
+    """Write the canonical Kconfig disabled line when the symbol is absent.
+
+    A missing symbol and ``# CONFIG_FOO is not set`` are semantically
+    equivalent. Enabled built-in or module forms remain fatal because Phase 233
+    requires the legacy MSM framebuffer to stay disabled.
+    """
+    if not path.is_file():
+        return
+
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    assignment_prefix = f"{symbol}="
+    enabled = [line for line in lines if line.startswith(assignment_prefix)]
+    if enabled:
+        rendered = ", ".join(enabled)
+        raise SystemExit(
+            f"{path}: {symbol} must be disabled for Phase 233 parity; found {rendered}"
+        )
+
+    disabled = f"# {symbol} is not set"
+    if disabled in lines:
+        return
+
+    separator = "" if not text or text.endswith("\n") else "\n"
+    path.write_text(text + separator + disabled + "\n", encoding="utf-8")
+    print(
+        f"Phase 233 config normalization: wrote canonical disabled line in {path}: {disabled}",
+        flush=True,
+    )
+
+
+# The real cumulative build uses the O= output config. Some source-only and
+# reconstruction paths may retain an in-tree config as well, so normalize every
+# known existing candidate before the generated Phase 233 audit executes.
+for config_path in (
+    Path.cwd() / "workspace/gki-phase199-out/.config",
+    Path.cwd() / "workspace/gki-phase199-src/.config",
+    Path.cwd() / "gki/common/.config",
+    Path.cwd() / ".config",
+):
+    canonicalize_disabled_config_symbol(config_path, "CONFIG_FB_MSM")
 
 source = source_path.read_text(encoding="utf-8")
 old = '''def locate_config(root: Path) -> Path:

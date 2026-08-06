@@ -18,6 +18,21 @@ if not source_path.is_file():
     raise SystemExit(f"missing Phase 233 wrapper after payload: {source_path}")
 
 
+TOOLCHAIN_IDENTITY_SYMBOLS = (
+    "CONFIG_CC_VERSION_TEXT",
+    "CONFIG_CC_IS_CLANG",
+    "CONFIG_CC_IS_GCC",
+    "CONFIG_CLANG_VERSION",
+    "CONFIG_GCC_VERSION",
+    "CONFIG_AS_IS_LLVM",
+    "CONFIG_AS_IS_GNU",
+    "CONFIG_AS_VERSION",
+    "CONFIG_LD_IS_LLD",
+    "CONFIG_LD_VERSION",
+    "CONFIG_LLD_VERSION",
+)
+
+
 SUPPLIER_CONFIGS = {
     "CONFIG_CAM_CC_LAGOON": (
         "drivers/clk/qcom/camcc-lagoon.c",
@@ -173,22 +188,65 @@ def resolve_phase233_kconfig() -> None:
     if "obj-$(CONFIG_QCOM_MDT_LOADER)" not in makefile_text or "mdt_loader.o" not in makefile_text:
         raise SystemExit("Phase 233 MDT loader Makefile linkage is missing")
 
+    before_states = parse_config(config)
+    required_llvm_identity = {
+        "CONFIG_CC_IS_CLANG": "y",
+        "CONFIG_AS_IS_LLVM": "y",
+        "CONFIG_LD_IS_LLD": "y",
+    }
+    wrong_identity = sorted(
+        f"{symbol}={before_states.get(symbol, 'n')}"
+        for symbol, expected in required_llvm_identity.items()
+        if before_states.get(symbol, "n") != expected
+    )
+    if wrong_identity:
+        raise SystemExit(
+            "Phase 233 authoritative config is not a Clang/LLVM/LLD build: "
+            + ", ".join(wrong_identity)
+        )
+    toolchain_before = {
+        symbol: before_states.get(symbol, "n")
+        for symbol in TOOLCHAIN_IDENTITY_SYMBOLS
+    }
+
+    # Kconfig compiler capability symbols are generated from the active build
+    # toolchain. Use the same LLVM path as the Android GKI build instead of
+    # falling back to the runner's host GCC/binutils defaults.
     command = [
         "make",
         "-C",
         str(build_root),
         f"O={config.parent.resolve()}",
         "ARCH=arm64",
+        "LLVM=1",
+        "LLVM_IAS=1",
         "olddefconfig",
     ]
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(
-            f"Phase 233 olddefconfig failed with exit code {exc.returncode}"
+            f"Phase 233 LLVM olddefconfig failed with exit code {exc.returncode}"
         ) from exc
 
     states = parse_config(config)
+    toolchain_after = {
+        symbol: states.get(symbol, "n")
+        for symbol in TOOLCHAIN_IDENTITY_SYMBOLS
+    }
+    changed_toolchain = sorted(
+        symbol
+        for symbol in TOOLCHAIN_IDENTITY_SYMBOLS
+        if toolchain_before[symbol] != toolchain_after[symbol]
+    )
+    if changed_toolchain:
+        rendered = ", ".join(
+            f"{symbol}: {toolchain_before[symbol]} -> {toolchain_after[symbol]}"
+            for symbol in changed_toolchain
+        )
+        raise SystemExit(
+            "Phase 233 LLVM olddefconfig changed toolchain identity: " + rendered
+        )
     if states.get("CONFIG_QCOM_MDT_LOADER") != "y":
         raise SystemExit(
             "Phase 233 Kconfig resolution did not select CONFIG_QCOM_MDT_LOADER=y"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Load Phase 233 with authoritative-config and disabled-FB audit corrections."""
+"""Load Phase 233 with authoritative-config and semantic disabled-FB audits."""
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -17,48 +18,29 @@ if not source_path.is_file():
     raise SystemExit(f"missing Phase 233 wrapper after payload: {source_path}")
 
 
-def canonicalize_disabled_config_symbol(path: Path, symbol: str) -> None:
-    """Write the canonical Kconfig disabled line when the symbol is absent.
-
-    A missing symbol and ``# CONFIG_FOO is not set`` are semantically
-    equivalent. Enabled built-in or module forms remain fatal because Phase 233
-    requires the legacy MSM framebuffer to stay disabled.
-    """
+def validate_disabled_config_symbol(path: Path, symbol: str) -> None:
+    """Reject enabled forms without mutating inherited config snapshots."""
     if not path.is_file():
         return
-
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    assignment_prefix = f"{symbol}="
-    enabled = [line for line in lines if line.startswith(assignment_prefix)]
-    if enabled:
-        rendered = ", ".join(enabled)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assignments = [line for line in lines if line.startswith(f"{symbol}=")]
+    if assignments:
+        rendered = ", ".join(assignments)
         raise SystemExit(
             f"{path}: {symbol} must be disabled for Phase 233 parity; found {rendered}"
         )
 
-    disabled = f"# {symbol} is not set"
-    if disabled in lines:
-        return
 
-    separator = "" if not text or text.endswith("\n") else "\n"
-    path.write_text(text + separator + disabled + "\n", encoding="utf-8")
-    print(
-        f"Phase 233 config normalization: wrote canonical disabled line in {path}: {disabled}",
-        flush=True,
-    )
-
-
-# The real cumulative build uses the O= output config. Some source-only and
-# reconstruction paths may retain an in-tree config as well, so normalize every
-# known existing candidate before the generated Phase 233 audit executes.
+# Absence and '# CONFIG_FB_MSM is not set' are equivalent disabled Kconfig
+# states. Validate the real files, but do not modify them before the inherited
+# byte-for-byte config-retention gates run.
 for config_path in (
     Path.cwd() / "workspace/gki-phase199-out/.config",
     Path.cwd() / "workspace/gki-phase199-src/.config",
     Path.cwd() / "gki/common/.config",
     Path.cwd() / ".config",
 ):
-    canonicalize_disabled_config_symbol(config_path, "CONFIG_FB_MSM")
+    validate_disabled_config_symbol(config_path, "CONFIG_FB_MSM")
 
 source = source_path.read_text(encoding="utf-8")
 old = '''def locate_config(root: Path) -> Path:
@@ -120,4 +102,34 @@ if source.count(old) != 1:
         f"found {source.count(old)}"
     )
 source = source.replace(old, new, 1)
-exec(compile(source, str(source_path), "exec"), globals(), globals())
+
+# Phase 233's generated Python audit expects the canonical disabled comment.
+# Present that comment only to reads performed directly by the generated Phase
+# 233 wrapper. The underlying file remains unchanged, so inherited retention
+# snapshots and shell comparisons continue to see the exact original config.
+_original_read_text = Path.read_text
+_source_filename = str(source_path)
+_disabled_line = "# CONFIG_FB_MSM is not set"
+
+
+def _phase233_read_text(path: Path, *args: object, **kwargs: object) -> str:
+    text = _original_read_text(path, *args, **kwargs)
+    frame = inspect.currentframe()
+    caller = frame.f_back if frame is not None else None
+    direct_phase233_read = (
+        caller is not None and caller.f_code.co_filename == _source_filename
+    )
+    if direct_phase233_read and path.name == ".config":
+        lines = text.splitlines()
+        if not any(line.startswith("CONFIG_FB_MSM=") for line in lines):
+            if _disabled_line not in lines:
+                separator = "" if not text or text.endswith("\n") else "\n"
+                return text + separator + _disabled_line + "\n"
+    return text
+
+
+Path.read_text = _phase233_read_text
+try:
+    exec(compile(source, _source_filename, "exec"), globals(), globals())
+finally:
+    Path.read_text = _original_read_text

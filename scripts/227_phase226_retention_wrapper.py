@@ -33,6 +33,27 @@ TOOLCHAIN_IDENTITY_SYMBOLS = (
 )
 
 
+ARM64_COMPILER_CAPABILITY_SYMBOLS = (
+    "CONFIG_ARCH_SUPPORTS_SHADOW_CALL_STACK",
+    "CONFIG_ARCH_USES_HIGH_VMA_FLAGS",
+    "CONFIG_ARM64_AS_HAS_MTE",
+    "CONFIG_ARM64_BTI_KERNEL",
+    "CONFIG_ARM64_MTE",
+    "CONFIG_ARM64_PTR_AUTH",
+    "CONFIG_AS_HAS_CFI_NEGATE_RA_STATE",
+    "CONFIG_BROKEN_GAS_INST",
+    "CONFIG_CC_CAN_LINK",
+    "CONFIG_CC_CAN_LINK_STATIC",
+    "CONFIG_CC_HAS_BRANCH_PROT_PAC_RET",
+    "CONFIG_CC_HAS_BRANCH_PROT_PAC_RET_BTI",
+    "CONFIG_CC_HAS_SIGN_RETURN_ADDRESS",
+    "CONFIG_CC_HAVE_SHADOW_CALL_STACK",
+    "CONFIG_CC_HAVE_STACKPROTECTOR_SYSREG",
+    "CONFIG_HAVE_ARCH_KASAN_HW_TAGS",
+    "CONFIG_STACKPROTECTOR_PER_TASK",
+)
+
+
 SUPPLIER_CONFIGS = {
     "CONFIG_CAM_CC_LAGOON": (
         "drivers/clk/qcom/camcc-lagoon.c",
@@ -208,16 +229,22 @@ def resolve_phase233_kconfig() -> None:
         symbol: before_states.get(symbol, "n")
         for symbol in TOOLCHAIN_IDENTITY_SYMBOLS
     }
+    arm64_capabilities_before = {
+        symbol: before_states.get(symbol, "n")
+        for symbol in ARM64_COMPILER_CAPABILITY_SYMBOLS
+    }
 
-    # Kconfig compiler capability symbols are generated from the active build
-    # toolchain. Use the same LLVM path as the Android GKI build instead of
-    # falling back to the runner's host GCC/binutils defaults.
+    # Kconfig compiler capability symbols are generated from both the selected
+    # compiler and its target triple. Preserve the Android GKI LLVM path and
+    # the AArch64 target instead of probing the runner's native host target.
     command = [
         "make",
         "-C",
         str(build_root),
         f"O={config.parent.resolve()}",
         "ARCH=arm64",
+        "CROSS_COMPILE=aarch64-linux-gnu-",
+        "CLANG_TRIPLE=aarch64-linux-gnu-",
         "LLVM=1",
         "LLVM_IAS=1",
         "olddefconfig",
@@ -246,6 +273,26 @@ def resolve_phase233_kconfig() -> None:
         )
         raise SystemExit(
             "Phase 233 LLVM olddefconfig changed toolchain identity: " + rendered
+        )
+
+    arm64_capabilities_after = {
+        symbol: states.get(symbol, "n")
+        for symbol in ARM64_COMPILER_CAPABILITY_SYMBOLS
+    }
+    changed_arm64_capabilities = sorted(
+        symbol
+        for symbol in ARM64_COMPILER_CAPABILITY_SYMBOLS
+        if arm64_capabilities_before[symbol] != arm64_capabilities_after[symbol]
+    )
+    if changed_arm64_capabilities:
+        rendered = ", ".join(
+            f"{symbol}: {arm64_capabilities_before[symbol]} -> "
+            f"{arm64_capabilities_after[symbol]}"
+            for symbol in changed_arm64_capabilities
+        )
+        raise SystemExit(
+            "Phase 233 LLVM olddefconfig changed AArch64 compiler capabilities; "
+            "verify CROSS_COMPILE and CLANG_TRIPLE: " + rendered
         )
     if states.get("CONFIG_QCOM_MDT_LOADER") != "y":
         raise SystemExit(

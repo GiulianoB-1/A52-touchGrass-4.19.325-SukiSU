@@ -30,3 +30,4 @@ Interpretation order:
 Do not use the bundled recorder-v3 decoder. This candidate intentionally retains the Phase 210 R48 RS48 + CRC32C format.
 
 Artifact request: same-repository pull-request build after cumulative Phase 230 layout repair v2.
+Final audit trigger: committed wrapper repair and SHA-isolated concurrency.

@@ -1,0 +1,30 @@
+A52 Phase 234 RSCC-focused recorder hardware test
+
+1. Verify SHA256SUMS in the artifact.
+2. Flash only package/boot.img to BOOT.
+3. Boot once and reproduce the watchdog/reset condition without additional experiments.
+4. Collect the complete raw ramoops archive, including all three 256 KiB recorder banks and the frozen 1 MiB image.
+5. Decode with the Phase 210 R48 RS48 + CRC32C decoder. The transport format is unchanged. Confirm the identification record contains:
+
+   BOOT rs=ready phase=234 focus=rscc
+
+Interpretation order:
+
+- No RSCCFOCUS record naming sde_rsc:
+  inspect platform-driver registration and attach ordering.
+- RSCCFOCUS exact-driver match rc=0:
+  compatible or platform OF-match mismatch.
+- Match succeeds but no RSCCCORE really-probe entry:
+  inspect the driver-core attach gate.
+- RSCCCORE suppliers rc=-517:
+  inspect the recorded supplier links and deferred-probe reason.
+- RSCCCORE busprobe enter without RSCC probe enter:
+  inspect platform bus probe handoff.
+- RSCC probe enter followed by a failing stage:
+  use the recorded stage and return code directly.
+- RSCC component-add exit rc=0 without RSCC bind enter:
+  inspect DRM component-master assembly.
+- RSCC bind exit rc=0 followed by no DRMPOST atomic record:
+  continue after component binding rather than changing RSC.
+
+Do not use the bundled recorder-v3 decoder. This candidate intentionally retains the Phase 210 R48 RS48 + CRC32C format.

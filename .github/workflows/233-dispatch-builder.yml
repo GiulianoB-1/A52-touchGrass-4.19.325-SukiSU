@@ -52,6 +52,27 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 scripts/233_payload.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text()
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 233 package normalization expected exactly one "
+                  f"FB_MSM text token, found {count}"
+              )
+          package.write_text(source)
+          print(
+              "Phase 233 package audit normalized: absent FB_MSM and explicit "
+              "not-set are equivalent disabled states"
+          )
+          PY
           python3 -m py_compile \
             scripts/233_payload.py \
             scripts/227_phase226_retention_wrapper.py \
@@ -112,8 +133,16 @@ jobs:
             phase233-out/config/final.config
           grep -Fxq '# CONFIG_DRM_MSM is not set' \
             phase233-out/config/final.config
-          grep -Fxq '# CONFIG_FB_MSM is not set' \
-            phase233-out/config/final.config
+          if grep -Eq '^CONFIG_FB_MSM=' phase233-out/config/final.config; then
+            echo '::error::CONFIG_FB_MSM must remain disabled, but an assignment is present'
+            grep -E '^CONFIG_FB_MSM=' phase233-out/config/final.config >&2
+            exit 1
+          fi
+          if grep -Fxq '# CONFIG_FB_MSM is not set' phase233-out/config/final.config; then
+            echo 'final config parity present: CONFIG_FB_MSM explicitly disabled'
+          else
+            echo 'final config parity present: CONFIG_FB_MSM disabled by symbol absence'
+          fi
           (
             cd phase233-out
             sha256sum -c SHA256SUMS

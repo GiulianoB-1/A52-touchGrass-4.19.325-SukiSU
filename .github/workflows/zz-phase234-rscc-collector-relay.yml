@@ -5,18 +5,117 @@ on:
     workflows:
       - 227 - A52 ODSPOST retention RS48 recorder
     types:
-      - requested
+      - in_progress
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
-  group: phase234-rscc-relay
-  cancel-in-progress: true
+  group: phase234-rscc-relay-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
 
 jobs:
-  release-runner:
-    name: Release runner for inherited Phase 234 build
+  build-phase234:
+    name: Build corrected Phase 234 candidate
+    if: github.event.workflow_run.id == 31103668892
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
     steps:
-      - run: echo 'Phase 234 relay runner released; inherited build continues independently.'
+      - name: Check out corrected Phase 234 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase234-rscc-focused-recorder-build-v1
+          fetch-depth: 1
+
+      - name: Verify corrected branch routing
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "d1a9644b9ff7cc4aa573629b1e0c8c709c673e4c"
+          grep -Fq 'BRANCH = "agent/a52-phase234-rscc-focused-recorder-build-v1"' \
+            scripts/234_package.py
+          grep -Fq 'A52_PHASE234_PHASE230_LAYOUT_FIX_V2' \
+            scripts/227_phase226_retention_wrapper.py
+
+      - name: Prepare and validate Phase 234 source
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text()
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 234 inherited package normalization expected exactly one "
+                  f"FB_MSM text token, found {count}"
+              )
+          package.write_text(source)
+          print("Phase 234 inherited package audit normalized")
+          PY
+          python3 -m py_compile \
+            scripts/233_payload.py \
+            scripts/234_repair_phase230_layout.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/231_phase230_gpu_gdsc_wrapper.py \
+            scripts/232_phase231_optional_aon_wrapper.py \
+            scripts/233_phase232_final_graphics_parity_wrapper.py \
+            scripts/233_package.py \
+            scripts/234_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Dispatch inherited builder and package Phase 234
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_package.py
+          test -f phase234-out/package/boot.img
+          test -f phase234-out/compile/Image
+          test -f phase234-out/config/final.config
+          test -f phase234-out/final-audit.json
+          grep -aFq 'BOOT rs=ready phase=234 focus=rscc' phase234-out/compile/Image
+          grep -aFq 'RSCCFOCUS match path=device-attach' phase234-out/compile/Image
+          grep -aFq 'RSCCFOCUS match path=driver-attach' phase234-out/compile/Image
+          grep -aFq 'RSCC probe enter' phase234-out/compile/Image
+          grep -aFq 'RSCC component-add enter' phase234-out/compile/Image
+          grep -aFq 'RSCC bind enter' phase234-out/compile/Image
+          ! grep -aFq 'RSCCCORE match path=device-attach' phase234-out/compile/Image
+          ! grep -aFq 'RSCCCORE match path=driver-attach' phase234-out/compile/Image
+          grep -aFq 'A52GDSC GPU_CX_PROFILE_V1' phase234-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_PROFILE_V2' phase234-out/compile/Image
+          grep -aFq 'A52ZAP 233 load' phase234-out/compile/Image
+          grep -Fxq 'CONFIG_GPU_CC_LAGOON=y' phase234-out/config/final.config
+          grep -Fxq 'CONFIG_QCOM_MDT_LOADER=y' phase234-out/config/final.config
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          audit = json.loads(Path("phase234-out/final-audit.json").read_text())
+          assert audit["phase"] == 234
+          assert audit["base_phase"] == 233
+          assert audit["hardware_validated"] is False
+          assert audit["phase234_display_behavior_changed"] is False
+          assert audit["phase234_graphics_provider_behavior_changed"] is False
+          assert audit["phase234_recorder_behavior_changed"] is True
+          assert audit["phase234_failed_candidate_match_spam_suppressed"] is True
+          PY
+          (cd phase234-out && sha256sum -c SHA256SUMS)
+
+      - name: Upload corrected Phase 234 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase234-RSCC-FOCUSED-RECORDER-RELAY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase234-out
+          if-no-files-found: error
+          retention-days: 30

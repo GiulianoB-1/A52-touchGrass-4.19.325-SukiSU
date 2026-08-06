@@ -443,12 +443,21 @@ static bool a52_rscc_probe_driver(const struct device_driver *drv)
         text, helper_old, helper_new, f"{label}: RSCC driver helper"
     )
 
+    # Phase 202 added an SMMU-specific DCORE trace between the common match
+    # call and the inherited Phase 193 RSCC trace. Preserve that trace exactly
+    # while narrowing only the RSCC recorder gate.
     old_device = '''\tret = driver_match_device(drv, dev);
+\tif (a52_smmu_unsec_trace_dev(dev) &&
+\t    !strcmp(drv->name, "msmdrm_smmu"))
+\t\ta52_ackfr_record("DCORE match drv=%s rc=%d", drv->name, ret);
 \tif (a52_rscc_probe_device(dev))
 \t\ta52_ackfr_record("RSCCCORE match path=device-attach dev=%s drv=%s rc=%d",
 \t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
 '''
     new_device = '''\tret = driver_match_device(drv, dev);
+\tif (a52_smmu_unsec_trace_dev(dev) &&
+\t    !strcmp(drv->name, "msmdrm_smmu"))
+\t\ta52_ackfr_record("DCORE match drv=%s rc=%d", drv->name, ret);
 \tif (a52_rscc_probe_device(dev) &&
 \t    (ret || a52_rscc_probe_driver(drv)))
 \t\ta52_ackfr_record("RSCCFOCUS match path=device-attach dev=%s drv=%s rc=%d",
@@ -542,6 +551,9 @@ a52_ackfr_record("BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c",
 }
 
 \tret = driver_match_device(drv, dev);
+\tif (a52_smmu_unsec_trace_dev(dev) &&
+\t    !strcmp(drv->name, "msmdrm_smmu"))
+\t\ta52_ackfr_record("DCORE match drv=%s rc=%d", drv->name, ret);
 \tif (a52_rscc_probe_device(dev))
 \t\ta52_ackfr_record("RSCCCORE match path=device-attach dev=%s drv=%s rc=%d",
 \t\t\tdev_name(dev), drv && drv->name ? drv->name : "-", ret);
@@ -558,6 +570,8 @@ a52_ackfr_record("BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c",
         raise AssertionError("Phase 234 focused match markers missing")
     if 'a52_ackfr_record("RSCCCORE match path=' in dd_result:
         raise AssertionError("Phase 234 broad match recorder remained")
+    if 'a52_ackfr_record("DCORE match drv=%s rc=%d"' not in dd_result:
+        raise AssertionError("Phase 234 patch changed the Phase 202 SMMU trace")
     print("Phase 234 RSCC-focused recorder self-test: PASS", flush=True)
 
 

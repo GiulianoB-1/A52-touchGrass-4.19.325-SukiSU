@@ -3,7 +3,7 @@ name: Phase 234 RSCC collector relay
 on:
   workflow_run:
     workflows:
-      - 87 - Fix Workflow 84 postbuild audit
+      - 87 - Fix Workflow 84 post-build audit
     types:
       - requested
 

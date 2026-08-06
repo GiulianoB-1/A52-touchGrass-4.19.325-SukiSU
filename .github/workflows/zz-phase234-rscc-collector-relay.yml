@@ -3,123 +3,20 @@ name: Phase 234 RSCC collector relay
 on:
   workflow_run:
     workflows:
-      - 234 - A52 RSCC-focused recorder
+      - 85 - Inspect Workflow 84 failure
     types:
       - requested
 
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 concurrency:
   group: phase234-rscc-relay
   cancel-in-progress: true
 
-env:
-  PHASE234_BUILD_REF: agent/a52-phase234-rscc-focused-recorder-build-v1
-
 jobs:
-  build-package:
-    name: Build and audit Phase 234 collector
+  release-runner:
+    name: Release runner for inherited Phase 234 build
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
-
     steps:
-      - name: Check out Phase 234 build branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PHASE234_BUILD_REF }}
-          fetch-depth: 1
-
-      - name: Repair and publish cumulative Phase 230 layout
-        run: |
-          set -Eeuo pipefail
-          python3 scripts/234_repair_phase230_layout.py
-          python3 scripts/233_payload.py
-          python3 -m py_compile \
-            scripts/234_repair_phase230_layout.py \
-            scripts/227_phase226_retention_wrapper.py
-          python3 scripts/227_phase226_retention_wrapper.py --self-test
-          git diff --check
-          if ! git diff --quiet -- scripts/227_phase226_retention_wrapper.py; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add scripts/227_phase226_retention_wrapper.py
-            git commit -m 'phase234: match cumulative Phase230 RSCC layout'
-            git push origin HEAD:${PHASE234_BUILD_REF}
-          fi
-
-      - name: Verify and package Phase 234
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import re
-
-          package = Path("scripts/233_package.py")
-          source = package.read_text(encoding="utf-8")
-          pattern = re.compile(
-              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
-          )
-          source, count = pattern.subn("", source)
-          if count != 1:
-              raise SystemExit(
-                  "Phase 234 inherited package normalization expected exactly one "
-                  f"FB_MSM text token, found {count}"
-              )
-          package.write_text(source, encoding="utf-8")
-
-          phase234 = Path("scripts/234_package.py")
-          source = phase234.read_text(encoding="utf-8")
-          old = 'BRANCH = "agent/a52-phase234-rscc-focused-recorder-v1"'
-          new = f'BRANCH = "{os.environ["PHASE234_BUILD_REF"]}"'
-          if source.count(old) != 1:
-              raise SystemExit("Phase 234 packager branch anchor mismatch")
-          phase234.write_text(source.replace(old, new, 1), encoding="utf-8")
-          PY
-          python3 -m py_compile \
-            scripts/233_payload.py \
-            scripts/234_repair_phase230_layout.py \
-            scripts/227_phase226_retention_wrapper.py \
-            scripts/230_phase229_driver_core_wrapper.py \
-            scripts/231_phase230_gpu_gdsc_wrapper.py \
-            scripts/232_phase231_optional_aon_wrapper.py \
-            scripts/233_phase232_final_graphics_parity_wrapper.py \
-            scripts/233_package.py \
-            scripts/234_package.py
-          grep -Fq 'A52_PHASE234_PHASE230_LAYOUT_FIX_V2' \
-            scripts/227_phase226_retention_wrapper.py
-          python3 scripts/234_package.py
-          test -f phase234-out/package/boot.img
-          test -f phase234-out/compile/Image
-          test -f phase234-out/config/final.config
-          test -f phase234-out/final-audit.json
-          test "$(stat -c '%s' phase234-out/package/boot.img)" = 100663296
-          grep -aFq 'BOOT rs=ready phase=234 focus=rscc' phase234-out/compile/Image
-          grep -aFq 'RSCCFOCUS match path=device-attach' phase234-out/compile/Image
-          grep -aFq 'RSCCFOCUS match path=driver-attach' phase234-out/compile/Image
-          grep -aFq 'RSCC probe enter' phase234-out/compile/Image
-          grep -aFq 'RSCC component-add enter' phase234-out/compile/Image
-          grep -aFq 'RSCC bind enter' phase234-out/compile/Image
-          ! grep -aFq 'RSCCCORE match path=device-attach' phase234-out/compile/Image
-          ! grep -aFq 'RSCCCORE match path=driver-attach' phase234-out/compile/Image
-          grep -aFq 'A52GDSC GPU_CX_PROFILE_V1' phase234-out/compile/Image
-          grep -aFq 'A52GDSC GPU_GX_PROFILE_V2' phase234-out/compile/Image
-          grep -aFq 'A52ZAP 233 load' phase234-out/compile/Image
-          grep -Fxq 'CONFIG_GPU_CC_LAGOON=y' phase234-out/config/final.config
-          grep -Fxq 'CONFIG_QCOM_MDT_LOADER=y' phase234-out/config/final.config
-          (
-            cd phase234-out
-            sha256sum -c SHA256SUMS
-          )
-
-      - name: Upload Phase 234 collector
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-Phase234-RSCC-FOCUSED-RECORDER-RELAY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: phase234-out
-          if-no-files-found: error
-          retention-days: 30
+      - run: echo 'Phase 234 relay runner released; inherited build continues independently.'

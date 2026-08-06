@@ -3,7 +3,7 @@ name: Phase 234 RSCC collector relay
 on:
   workflow_run:
     workflows:
-      - 87 - Fix Workflow 84 post-build audit
+      - 227 - A52 ODSPOST retention RS48 recorder
     types:
       - requested
 

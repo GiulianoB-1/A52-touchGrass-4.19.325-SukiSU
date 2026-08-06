@@ -34,7 +34,7 @@ jobs:
                   raise SystemExit(
                       f"expected one Phase 234 override insertion anchor, found {text.count(anchor)}"
                   )
-              override = r'''
+              override = r"""
 
 # A52_PHASE234_PHASE230_LAYOUT_FIX_V2
 # Phase 230 inserts bounded KGSL records between driver_match_device() and the
@@ -87,7 +87,7 @@ static bool a52_rscc_probe_driver(const struct device_driver *drv)
         text, old_driver, new_driver, f"{label}: driver-attach focused block v2"
     )
     return text
-'''
+"""
               text = text.replace(anchor, override + anchor, 1)
               path.write_text(text, encoding="utf-8")
 

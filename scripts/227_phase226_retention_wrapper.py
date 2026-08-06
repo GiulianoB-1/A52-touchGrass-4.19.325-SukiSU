@@ -118,7 +118,55 @@ def parse_config(path: Path) -> dict[str, str]:
 
 
 _phase233_retention_repaired = False
+_phase233_kconfig_resolved = False
 _phase233_self_test = "--self-test" in sys.argv[1:]
+
+
+def resolve_phase233_kconfig() -> None:
+    """Resolve Phase 233 hidden Kconfig selections in the authoritative O= tree."""
+    global _phase233_kconfig_resolved
+    if _phase233_kconfig_resolved:
+        return
+
+    config = locate_authoritative_config()
+    build_root = None
+    for candidate in (
+        Path.cwd() / "gki/common",
+        Path.cwd() / "workspace/gki-phase199-src",
+    ):
+        if (candidate / "Makefile").is_file() and (candidate / "Kconfig").is_file():
+            build_root = candidate
+            break
+    if config is None or build_root is None:
+        raise SystemExit(
+            "Phase 233 could not resolve Kconfig: authoritative config or build root missing"
+        )
+
+    command = [
+        "make",
+        "-C",
+        str(build_root),
+        f"O={config.parent.resolve()}",
+        "ARCH=arm64",
+        "olddefconfig",
+    ]
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(
+            f"Phase 233 olddefconfig failed with exit code {exc.returncode}"
+        ) from exc
+
+    states = parse_config(config)
+    if states.get("CONFIG_QCOM_MDT_LOADER") != "y":
+        raise SystemExit(
+            "Phase 233 Kconfig resolution did not select CONFIG_QCOM_MDT_LOADER=y"
+        )
+    _phase233_kconfig_resolved = True
+    print(
+        "Phase 233 authoritative olddefconfig resolved CONFIG_QCOM_MDT_LOADER=y",
+        flush=True,
+    )
 
 
 def repair_phase217_retention_snapshot(*, require_final_state: bool) -> bool:
@@ -317,6 +365,7 @@ try:
         # exec(), leaving the surrounding Phase 217 shell cmp with its stale
         # snapshot. Self-tests intentionally run before the final config state.
         if exc.code in (None, 0) and not _phase233_self_test:
+            resolve_phase233_kconfig()
             repair_phase217_retention_snapshot(require_final_state=True)
         raise
 finally:
@@ -324,4 +373,5 @@ finally:
 
 # Also cover generated wrappers that return normally instead of SystemExit.
 if not _phase233_self_test:
+    resolve_phase233_kconfig()
     repair_phase217_retention_snapshot(require_final_state=True)

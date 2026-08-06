@@ -118,6 +118,7 @@ def parse_config(path: Path) -> dict[str, str]:
 
 
 _phase233_retention_repaired = False
+_phase233_self_test = "--self-test" in sys.argv[1:]
 
 
 def repair_phase217_retention_snapshot(*, require_final_state: bool) -> bool:
@@ -312,14 +313,15 @@ try:
         exec(compile(source, _source_filename, "exec"), globals(), globals())
     except SystemExit as exc:
         # The generated wrapper terminates with ``raise SystemExit(main())``.
-        # A successful SystemExit would otherwise skip the statement after
+        # A successful real apply would otherwise skip the statement after
         # exec(), leaving the surrounding Phase 217 shell cmp with its stale
-        # snapshot. Repair strictly before propagating that successful exit.
-        if exc.code in (None, 0):
+        # snapshot. Self-tests intentionally run before the final config state.
+        if exc.code in (None, 0) and not _phase233_self_test:
             repair_phase217_retention_snapshot(require_final_state=True)
         raise
 finally:
     Path.read_text = _original_read_text
 
 # Also cover generated wrappers that return normally instead of SystemExit.
-repair_phase217_retention_snapshot(require_final_state=True)
+if not _phase233_self_test:
+    repair_phase217_retention_snapshot(require_final_state=True)

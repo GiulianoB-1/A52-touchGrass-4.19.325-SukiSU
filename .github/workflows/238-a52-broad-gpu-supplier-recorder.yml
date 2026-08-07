@@ -1,0 +1,161 @@
+name: 238 - A52 broad GPU supplier-chain recorder
+
+run-name: Build Phase 238 broad GPU supplier-chain recorder candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase238-broad-gpu-supplier-recorder-v1
+    paths:
+      - .github/workflows/238-a52-broad-gpu-supplier-recorder.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/237_package.py
+      - scripts/238_package.py
+      - scripts/238_design.md
+      - scripts/238_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase238-broad-gpu-supplier-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 238
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 238 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/235_phase234_rscc_master_overlay.py \
+            scripts/236_phase235_display_init_overlay.py \
+            scripts/237_phase236_ofpop_probe_overlay.py \
+            scripts/238_phase237_broad_gpu_supplier_overlay.py \
+            scripts/237_package.py \
+            scripts/238_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          python3 scripts/236_phase235_display_init_overlay.py --self-test
+          git diff --check
+
+      - name: Verify Phase 238 source scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 238 inherited package normalization expected exactly one "
+                  f"CONFIG_FB_MSM token, found {count}"
+              )
+          package.write_text(source, encoding="utf-8")
+          PY
+          grep -Fq '238_phase237_broad_gpu_supplier_overlay.py' scripts/230_phase229_driver_core_wrapper.py
+          grep -Fq 'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'A52_PHASE238_PLATFORM_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'G238 D sup c=%s s=%s drv=%s st=%u fl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'G238 GD prop dev=%s nostatus=%u parent=%u hwctl=%u hwctrl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'msecs_to_jiffies(145000)' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'KGPPOST' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'device_links_check_suppliers' scripts/238_design.md
+          grep -Fq 'OrangeFox R48 collector v3.2' scripts/238_trigger.txt
+          grep -Fq 'agent/a52-phase238-broad-gpu-supplier-recorder-v1' scripts/238_package.py
+
+      - name: Dispatch inherited builder and package Phase 238
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/238_package.py
+
+      - name: Verify Phase 238 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase238-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          for marker in \
+            'BOOT rs=ready phase=238 focus=gpu-supplier-broad' \
+            'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' \
+            'A52_PHASE238_PLATFORM_GPU_TRACE_V1' \
+            'A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1' \
+            'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' \
+            'G238 P in dev=%s drv=%s node=%s' \
+            'G238 P out dev=%s rc=%d l=%d drv=%s' \
+            'G238 D in dev=%s drv=%s cur=%s' \
+            'G238 D sup c=%s s=%s drv=%s st=%u fl=%u' \
+            'G238 D sup-out dev=%s rc=%d' \
+            'G238 D out dev=%s rc=%d l=%d cur=%s' \
+            'G238 GD in dev=%s drv=%s rn=%s comp=%s cx=%u' \
+            'G238 GD st dev=%s s=%d op=%s l=%d' \
+            'G238 GD out dev=%s rc=%d l=%d drv=%s' \
+            'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
+            'G238 RP gd cx-probes=%d stage=%d rc=%d' \
+            '3d9106c.qcom,gdsc' \
+            'A52GDSC GPU_CX_PROFILE_V1' \
+            'A52GDSC GPU_GX_PROFILE_V2' \
+            'KGPPOST' \
+            'OFPOP enter' \
+            'P3P enter n=%d dev=%s drv=%s'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=237 focus=ofpop-probe' "$OUT/compile/Image"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase238-out/final-audit.json').read_text())
+          assert audit['phase'] == 238
+          assert audit['base_phase'] == 237
+          assert audit['functional_base_phase'] == 233
+          assert audit['hardware_validated'] is False
+          assert audit['phase238_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
+          assert audit['phase238_platform_event_limit'] == 768
+          assert audit['phase238_driver_core_event_limit'] == 768
+          assert audit['phase238_gdsc_property_limit'] == 40
+          assert audit['phase238_late_replay_ms'] == 145000
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 238 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase238-BROAD-GPU-SUPPLIER-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase238-out
+          if-no-files-found: error
+          retention-days: 30

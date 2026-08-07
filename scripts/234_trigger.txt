@@ -29,4 +29,6 @@ Interpretation order:
 
 Do not use the bundled recorder-v3 decoder. This candidate intentionally retains the Phase 210 R48 RS48 + CRC32C format.
 
+CI note: the inherited Phase 217 binary-marker gate is normalized to the Phase 234 boot banner only. RS48/CRC32C decoder self-tests and transport checks remain unchanged.
+
 Artifact request: same-repository pull-request build after cumulative Phase 230 layout repair v2.

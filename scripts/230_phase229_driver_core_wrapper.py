@@ -24,6 +24,7 @@ if __name__ == "__main__":
             ("235_phase234_rscc_master_overlay.py", "Phase 235 RSCC component-master"),
             ("236_phase235_display_init_overlay.py", "Phase 236 display-init"),
             ("237_phase236_ofpop_probe_overlay.py", "Phase 237 OF/platform-probe"),
+            ("238_phase237_platform_include_preflight.py", "Phase 238 platform include preflight"),
             ("238_phase237_broad_gpu_supplier_overlay.py", "Phase 238 broad GPU supplier recorder"),
             ("238_phase237_controlflow_safety_overlay.py", "Phase 238 control-flow safety pass"),
         ):

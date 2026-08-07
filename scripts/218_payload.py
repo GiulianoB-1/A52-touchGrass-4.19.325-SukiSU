@@ -16,6 +16,30 @@ if hashlib.sha256(raw).hexdigest() != 'e4b2ec578d8f1ce8a2d140abc374a0f21abb895f8
     raise SystemExit('Phase 226 driver raw sha256 mismatch')
 exec(compile(raw, 'scripts/226_payload_driver.py', 'exec'), {'__name__': '__main__'})
 
+# Phase 234 changes only the recorder identification banner while retaining
+# the Phase 210 R48 RS48 + CRC32C transport. The embedded Phase 226 payload
+# first verifies the pristine Phase 217 CI script, so normalize the inherited
+# binary-marker assertion only after that integrity gate has completed.
+ci_path = S / '217_ci.sh'
+ci_source = ci_path.read_text(encoding='utf-8')
+old_boot_marker = 'BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c'
+new_boot_marker = 'BOOT rs=ready phase=234 focus=rscc'
+old_count = ci_source.count(old_boot_marker)
+new_count = ci_source.count(new_boot_marker)
+if old_count != 1 or new_count != 0:
+    raise SystemExit(
+        'Phase 234 inherited Phase 217 boot-marker audit anchor mismatch: '
+        f'old={old_count} new={new_count}'
+    )
+ci_path.write_text(
+    ci_source.replace(old_boot_marker, new_boot_marker),
+    encoding='utf-8',
+)
+ci_repaired = ci_path.read_text(encoding='utf-8')
+if old_boot_marker in ci_repaired or ci_repaired.count(new_boot_marker) != 1:
+    raise SystemExit('Phase 234 inherited Phase 217 boot-marker audit repair failed')
+print('Phase 217 binary-marker audit updated for Phase 234 RSCC-focused boot banner')
+
 # The Phase 226 ioctl and connect trace points use the exported recorder API.
 # Add its existing public header to both translation units through the patcher,
 # then require the include during the patcher's own source verification.

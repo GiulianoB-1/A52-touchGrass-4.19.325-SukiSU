@@ -32,28 +32,6 @@ for output, (source, expected_encoded_sha, expected_raw_sha) in PAYLOADS.items()
     target.chmod(0o755)
     print(f'materialized {target} sha256={raw_sha} bytes={len(raw)}')
 
-# Phase 234 intentionally replaces the Phase 210 boot banner while retaining
-# the Phase 210 R48 RS48 + CRC32C transport. Update only the inherited Phase
-# 217 binary-marker assertion after materialization; decoder self-tests and
-# all transport/source checks remain unchanged.
-ci = SCRIPTS / '217_ci.sh'
-ci_text = ci.read_text(encoding='utf-8')
-old_boot_marker = 'BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c'
-new_boot_marker = 'BOOT rs=ready phase=234 focus=rscc'
-if ci_text.count(old_boot_marker) != 1:
-    raise SystemExit(
-        'Phase 234 inherited Phase 217 boot-marker audit expected exactly one '
-        f'stale token, found {ci_text.count(old_boot_marker)}'
-    )
-if new_boot_marker in ci_text:
-    raise SystemExit('Phase 234 boot-marker audit target already present before repair')
-ci_text = ci_text.replace(old_boot_marker, new_boot_marker)
-ci.write_text(ci_text, encoding='utf-8')
-repaired_ci = ci.read_text(encoding='utf-8')
-if old_boot_marker in repaired_ci or repaired_ci.count(new_boot_marker) != 1:
-    raise SystemExit('Phase 234 inherited Phase 217 boot-marker audit repair failed')
-print('Phase 217 binary-marker audit updated for Phase 234 RSCC-focused boot banner')
-
 patcher = SCRIPTS / '217_apply_graphics_service_trace.py'
 text = patcher.read_text(encoding='utf-8')
 old_budget = '''    elif path == RECORDER:

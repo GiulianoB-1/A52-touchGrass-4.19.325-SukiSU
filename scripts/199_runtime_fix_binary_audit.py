@@ -10,8 +10,8 @@ OLD = "for marker in 'A52R0199' 'phase199 triple-copy RS+CRC32C recorder enabled
 NEW = "for marker in 'phase199 triple-copy RS+CRC32C recorder enabled'"
 
 PHASE210_BOOT = "BOOT rs=ready phase=210 roots=%u copies=3 crc=crc32c"
-PHASE235_BOOT = (
-    "BOOT rs=ready phase=235 focus=rscc-master "
+PHASE236_BOOT = (
+    "BOOT rs=ready phase=236 focus=display-init "
     "roots=%u copies=3 crc=crc32c"
 )
 
@@ -35,14 +35,14 @@ def repair_phase199_binary_audit() -> None:
     )
 
 
-def repair_phase235_final_identity_audit() -> None:
-    """Update only the final Phase 217 Image audit for the Phase 235 identity."""
+def repair_phase236_final_identity_audit() -> None:
+    """Update only the final Phase 217 Image audit for the Phase 236 identity."""
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
 
     text = PHASE217_PATH.read_text(encoding="utf-8")
-    if PHASE235_BOOT in text and PHASE210_BOOT not in text:
-        print("Phase 217 final binary audit already expects Phase 235 recorder identity")
+    if PHASE236_BOOT in text and PHASE210_BOOT not in text:
+        print("Phase 217 final binary audit already expects Phase 236 recorder identity")
         return
 
     count = text.count(PHASE210_BOOT)
@@ -52,18 +52,18 @@ def repair_phase235_final_identity_audit() -> None:
             f"found {count}"
         )
 
-    text = text.replace(PHASE210_BOOT, PHASE235_BOOT, 1)
+    text = text.replace(PHASE210_BOOT, PHASE236_BOOT, 1)
     PHASE217_PATH.write_text(text, encoding="utf-8")
 
     verify = PHASE217_PATH.read_text(encoding="utf-8")
-    if PHASE210_BOOT in verify or verify.count(PHASE235_BOOT) != 1:
-        raise SystemExit("Phase 235 final boot-marker audit repair failed")
-    print("Phase 217 final binary audit updated for Phase 235 recorder identity")
+    if PHASE210_BOOT in verify or verify.count(PHASE236_BOOT) != 1:
+        raise SystemExit("Phase 236 final boot-marker audit repair failed")
+    print("Phase 217 final binary audit updated for Phase 236 recorder identity")
 
 
 def main() -> int:
     repair_phase199_binary_audit()
-    repair_phase235_final_identity_audit()
+    repair_phase236_final_identity_audit()
     return 0
 
 

@@ -3,7 +3,7 @@ PHASE 235 HARDWARE TEST - RSCC DRM COMPONENT MASTER
 1. Verify the Phase 235 artifact SHA256SUMS and final-audit.json.
 2. Flash only package/boot.img to BOOT using the same tested recovery/boot procedure.
 3. Boot once and allow the failure/watchdog window to occur. Do not perform extra boots before collection if avoidable.
-4. Boot OrangeFox recovery and run the existing R48 collector v3.2.
+4. Boot OrangeFox recovery and run the existing OrangeFox R48 collector v3.2.
 5. Preserve the complete A52_RAW_RAMOOPS_YYYYMMDD_HHMMSS.zip.
 
 Expected first identity record:

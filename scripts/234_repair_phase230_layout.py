@@ -63,15 +63,22 @@ static bool a52_rscc_probe_driver(const struct device_driver *drv)
 
 
 def main() -> int:
-    path = Path(__file__).with_name("227_phase226_retention_wrapper.py")
+    scripts = Path(__file__).resolve().parent
+    base_path = scripts / "227_phase226_retention_wrapper_base.py"
+    public_path = scripts / "227_phase226_retention_wrapper.py"
+    # A52_PHASE238_POST_PHASE233_LAYOUT_V1
+    # Phase 238 wraps the inherited Phase 227/233 entrypoint so its GDSC
+    # instrumentation runs only after the SHA-locked Phase 231/232/233 chain.
+    # Repair the preserved inherited wrapper when that layout is present.
+    path = base_path if base_path.is_file() else public_path
     text = path.read_text(encoding="utf-8")
     if MARKER in text:
-        print("Phase 234 cumulative Phase 230 layout repair already present")
+        print(f"Phase 234 cumulative Phase 230 layout repair already present: {path.name}")
         return 0
     count = text.count(ANCHOR)
     if count != 1:
         raise SystemExit(
-            f"expected one Phase 234 override insertion anchor, found {count}"
+            f"{path.name}: expected one Phase 234 override insertion anchor, found {count}"
         )
     text = text.replace(ANCHOR, OVERRIDE + ANCHOR, 1)
     required = (
@@ -85,7 +92,7 @@ def main() -> int:
         if token not in text:
             raise SystemExit(f"missing repaired Phase 234 token: {token}")
     path.write_text(text, encoding="utf-8")
-    print("Phase 234 cumulative Phase 230 RSCC layout repair: PASS")
+    print(f"Phase 234 cumulative Phase 230 RSCC layout repair: PASS ({path.name})")
     return 0
 
 

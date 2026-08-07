@@ -1,0 +1,143 @@
+name: 236 - A52 MSM DRM display-init recorder
+
+run-name: Build Phase 236 MSM DRM display-init recorder candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase236-display-init-recorder-v1
+    paths:
+      - .github/workflows/236-a52-display-init-recorder.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/236_package.py
+      - scripts/236_design.md
+      - scripts/236_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase236-display-init-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 236
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 236 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/235_phase234_rscc_master_overlay.py \
+            scripts/236_phase235_display_init_overlay.py \
+            scripts/236_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          python3 scripts/236_phase235_display_init_overlay.py --self-test
+          git diff --check
+
+      - name: Verify Phase 236 source scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 236 inherited package normalization expected exactly one "
+                  f"CONFIG_FB_MSM token, found {count}"
+              )
+          package.write_text(source, encoding="utf-8")
+          PY
+          grep -Fq 'A52_PHASE236_DISPLAY_INIT_RECORDER_V1' scripts/236_phase235_display_init_overlay.py
+          grep -Fq 'DISPINIT register enter modeset=%u' scripts/236_phase235_display_init_overlay.py
+          grep -Fq 'DISPINIT platform-register exit rc=%d' scripts/236_phase235_display_init_overlay.py
+          grep -Fq 'DISPINIT probe enter dev=%s sde=%u mdss=%u' scripts/236_phase235_display_init_overlay.py
+          grep -Fq 'BOOT phase=' scripts/236_design.md
+          grep -Fq 'OrangeFox R48 collector v3.2' scripts/236_trigger.txt
+          grep -Fq 'agent/a52-phase236-display-init-recorder-v1' scripts/236_package.py
+
+      - name: Dispatch inherited builder and package Phase 236
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/236_package.py
+
+      - name: Verify Phase 236 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase236-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          for marker in \
+            'BOOT rs=ready phase=236 focus=display-init' \
+            'DISPINIT register enter modeset=%u' \
+            'DISPINIT smmu-register done' \
+            'DISPINIT dsi-register done' \
+            'DISPINIT edp-register done' \
+            'DISPINIT hdmi-register done' \
+            'DISPINIT platform-register enter' \
+            'DISPINIT platform-register exit rc=%d' \
+            'DISPINIT probe enter dev=%s sde=%u mdss=%u' \
+            'BOOT phase=device' \
+            'DRMCOMP collect enter' \
+            'DRMCOMP master-add enter' \
+            'COMP master-add enter' \
+            'COMP slot i=' \
+            'RSCCFOCUS match path=device-attach' \
+            'RSCC probe enter' \
+            'RSCC bind enter'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=235 focus=rscc-master' "$OUT/compile/Image"
+          ! grep -aFq 'RSCCCORE match path=device-attach' "$OUT/compile/Image"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase236-out/final-audit.json').read_text())
+          assert audit['phase'] == 236
+          assert audit['base_phase'] == 235
+          assert audit['functional_base_phase'] == 233
+          assert audit['hardware_validated'] is False
+          assert audit['phase236_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
+          assert audit['phase236_msm_drm_register_trace_retained'] is True
+          assert audit['phase236_msm_pdev_probe_trace_retained'] is True
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 236 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase236-DISPLAY-INIT-RECORDER-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase236-out
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,44 @@
+A52 GKI Phase 237 hardware capture procedure
+
+Purpose:
+Identify the exact OF-population / platform-probe boundary after BOOT phase=arch.
+
+Use the same OrangeFox collector as Phase 234-236:
+A52_ORANGEFOX_PHASE234_RSCC_R48_COLLECTOR_v3.2_FLASHABLE.zip
+
+Procedure:
+1. Verify the Phase 237 package SHA256SUMS before flashing.
+2. Flash only package/boot.img to BOOT.
+3. Perform one fresh boot attempt and reproduce the same failure once.
+4. Do not perform extra reboot cycles after the reproduction.
+5. Enter OrangeFox directly after the failed boot/watchdog restart.
+6. Run the existing OrangeFox R48 collector v3.2 once.
+7. Preserve the raw collector ZIP unchanged.
+
+Expected current identity:
+BOOT rs=ready phase=237 focus=ofpop-probe roots=48 copies=3 crc=crc32c
+
+High-value records:
+BOOT phase=arch
+OFPOP enter
+OFPOP links-paused
+OFPOP reserved begin/end
+OFPOP firmware begin/end
+OFPOP root begin/end
+OFPOP exit rc=0
+P3P enter n=... dev=... drv=...
+P3P pd n=... drv=...
+P3P call n=... drv=...
+P3P exit n=... rc=...
+P3P exit n=... stage=clk rc=...
+P3P limit n=193
+
+Interpret the last incomplete P3P sequence:
+- enter only: clock-default path did not return.
+- enter + pd: PM-domain attach did not return.
+- enter + pd + call: the named driver's probe did not return.
+- exit present: that probe completed.
+
+If no OFPOP enter exists after BOOT phase=arch, the stall is in an ordinary arch initcall before of_platform_default_populate_init(), not in DT platform population.
+
+Do not change DT connectors from this test alone.

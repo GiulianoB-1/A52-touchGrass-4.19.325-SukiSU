@@ -19,6 +19,7 @@ OVERLAYS = (
     ("238_phase237_platform_include_preflight.py", "Phase 238 platform include preflight"),
     ("238_phase237_broad_gpu_supplier_overlay.py", "Phase 238 broad GPU supplier recorder"),
     ("238_phase237_controlflow_safety_overlay.py", "Phase 238 control-flow safety pass"),
+    ("238_phase237_c_indent_sanitize.py", "Phase 238 C indentation sanitize"),
 )
 
 

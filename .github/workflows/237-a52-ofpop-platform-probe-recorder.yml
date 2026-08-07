@@ -1,0 +1,151 @@
+name: 237 - A52 OF population platform-probe recorder
+
+run-name: Build Phase 237 OF population platform-probe recorder candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase237-ofpop-platform-probe-recorder-v1
+    paths:
+      - .github/workflows/237-a52-ofpop-platform-probe-recorder.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/237_package.py
+      - scripts/237_design.md
+      - scripts/237_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase237-ofpop-platform-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 237
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 237 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/235_phase234_rscc_master_overlay.py \
+            scripts/236_phase235_display_init_overlay.py \
+            scripts/237_phase236_ofpop_probe_overlay.py \
+            scripts/237_package.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          python3 scripts/236_phase235_display_init_overlay.py --self-test
+          python3 scripts/237_phase236_ofpop_probe_overlay.py --self-test
+          git diff --check
+
+      - name: Verify Phase 237 source scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 237 inherited package normalization expected exactly one "
+                  f"CONFIG_FB_MSM token, found {count}"
+              )
+          package.write_text(source, encoding="utf-8")
+          PY
+          grep -Fq 'A52_PHASE237_OFPOP_PLATFORM_PROBE_RECORDER_V1' scripts/237_phase236_ofpop_probe_overlay.py
+          grep -Fq 'OFPOP enter' scripts/237_phase236_ofpop_probe_overlay.py
+          grep -Fq 'P3P enter n=%d dev=%s drv=%s' scripts/237_phase236_ofpop_probe_overlay.py
+          grep -Fq 'P3P call n=%d drv=%s' scripts/237_phase236_ofpop_probe_overlay.py
+          grep -Fq 'A52_PHASE237_P3P_LIMIT 192' scripts/237_phase236_ofpop_probe_overlay.py
+          grep -Fq 'arch_initcall_sync' scripts/237_design.md
+          grep -Fq 'OrangeFox R48 collector v3.2' scripts/237_trigger.txt
+          grep -Fq 'agent/a52-phase237-ofpop-platform-probe-recorder-v1' scripts/237_package.py
+
+      - name: Dispatch inherited builder and package Phase 237
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/237_package.py
+
+      - name: Verify Phase 237 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase237-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          for marker in \
+            'BOOT rs=ready phase=237 focus=ofpop-probe' \
+            'OFPOP enter' \
+            'OFPOP links-paused' \
+            'OFPOP reserved begin' \
+            'OFPOP firmware begin' \
+            'OFPOP root begin' \
+            'OFPOP exit rc=0' \
+            'P3P enter n=%d dev=%s drv=%s' \
+            'P3P pd n=%d drv=%s' \
+            'P3P call n=%d drv=%s' \
+            'P3P exit n=%d rc=%d' \
+            'P3P limit n=%d' \
+            'DISPINIT register enter modeset=%u' \
+            'BOOT phase=arch' \
+            'BOOT phase=subsys' \
+            'DRMCOMP collect enter' \
+            'DRMCOMP master-add enter' \
+            'COMP master-add enter' \
+            'RSCC probe enter' \
+            'RSCC bind enter'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=236 focus=display-init' "$OUT/compile/Image"
+          ! grep -aFq 'RSCCCORE match path=device-attach' "$OUT/compile/Image"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase237-out/final-audit.json').read_text())
+          assert audit['phase'] == 237
+          assert audit['base_phase'] == 236
+          assert audit['functional_base_phase'] == 233
+          assert audit['hardware_validated'] is False
+          assert audit['phase237_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
+          assert audit['phase237_platform_probe_limit'] == 192
+          assert audit['phase237_ofpop_gate_retained'] is True
+          assert audit['phase237_phase236_display_init_trace_retained'] is True
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 237 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase237-OFPOP-PLATFORM-PROBE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase237-out
+          if-no-files-found: error
+          retention-days: 30

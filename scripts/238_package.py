@@ -102,7 +102,9 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "235_phase234_rscc_master_overlay.py",
         "236_phase235_display_init_overlay.py",
         "237_phase236_ofpop_probe_overlay.py",
+        "238_phase237_platform_include_preflight.py",
         "238_phase237_broad_gpu_supplier_overlay.py",
+        "238_phase237_controlflow_safety_overlay.py",
         "237_package.py",
         "238_package.py",
     ):
@@ -122,6 +124,8 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_provider_behavior_changed": False,
         "phase238_driver_core_behavior_changed": False,
         "phase238_recorder_behavior_changed": True,
+        "phase238_platform_include_preflight": True,
+        "phase238_controlflow_safety_pass": True,
         "phase238_recorder_transport": "Phase 210 R48 RS48 CRC32C unchanged",
         "phase238_focus": [
             "gpu_cx_gdsc@3d9106c",
@@ -147,6 +151,8 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "every custom GDSC probe return code",
             "late binding/supplier-chain replay",
             "existing Phase 230 KGPPOST direct/replay evidence",
+            "platform include preflight for cumulative Phase 237 sources",
+            "control-flow safety rewrite after broad instrumentation",
         ],
         "phase238_question": (
             "Why does 3d9106c.qcom,gdsc remain unbound: supplier gating before "

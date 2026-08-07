@@ -1,0 +1,197 @@
+name: 235 - A52 RSCC component-master recorder
+
+run-name: Build Phase 235 RSCC component-master recorder candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase235-rscc-master-recorder-build-v1
+    paths:
+      - .github/workflows/235-a52-rscc-master-recorder.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/233_payload.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/235_package.py
+      - scripts/235_design.md
+      - scripts/235_trigger.txt
+  pull_request:
+    branches:
+      - agent/a52-phase234-rscc-focused-recorder-build-v1
+    paths:
+      - .github/workflows/235-a52-rscc-master-recorder.yml
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/235_package.py
+      - scripts/235_design.md
+      - scripts/235_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase235-rscc-master-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 235
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 235 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative Phase 234 patch layout
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/234_repair_phase230_layout.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/235_phase234_rscc_master_overlay.py
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          git diff --check
+
+      - name: Verify Phase 235 source scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = Path("scripts/233_package.py")
+          source = package.read_text()
+          pattern = re.compile(
+              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
+          )
+          source, count = pattern.subn("", source)
+          if count != 1:
+              raise SystemExit(
+                  "Phase 235 inherited package normalization expected exactly one "
+                  f"FB_MSM text token, found {count}"
+              )
+          package.write_text(source)
+          print(
+              "Phase 235 inherited package audit normalized: absent FB_MSM and "
+              "explicit not-set are equivalent disabled states"
+          )
+          PY
+          python3 -m py_compile \
+            scripts/233_payload.py \
+            scripts/234_repair_phase230_layout.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/231_phase230_gpu_gdsc_wrapper.py \
+            scripts/232_phase231_optional_aon_wrapper.py \
+            scripts/233_phase232_final_graphics_parity_wrapper.py \
+            scripts/233_package.py \
+            scripts/235_phase234_rscc_master_overlay.py \
+            scripts/235_package.py
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          grep -Fq 'A52_PHASE234_RSCC_FOCUSED_RECORDER_V1' \
+            scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'A52_PHASE234_RSCC_MATCH_FILTER_V1' \
+            scripts/227_phase226_retention_wrapper.py
+          grep -Fq '235_phase234_rscc_master_overlay.py' \
+            scripts/230_phase229_driver_core_wrapper.py
+          grep -Fq 'A52_PHASE235_RSCC_MASTER_RECORDER_V1' \
+            scripts/235_phase234_rscc_master_overlay.py
+          grep -Fq 'BOOT rs=ready phase=235 focus=rscc-master' \
+            scripts/235_phase234_rscc_master_overlay.py
+          grep -Fq 'strncmp(fmt, "DRMCOMP", 7)' \
+            scripts/235_phase234_rscc_master_overlay.py
+          grep -Fq 'strncmp(fmt, "COMP ", 5)' \
+            scripts/235_phase234_rscc_master_overlay.py
+          grep -Fq 'DRMCOMP connector i=' scripts/191_apply.py
+          grep -Fq 'DRMCOMP match-add i=' scripts/191_apply.py
+          grep -Fq 'DRMCOMP master-add enter' scripts/191_apply.py
+          grep -Fq 'COMP master-add enter' scripts/191_apply.py
+          grep -Fq 'COMP slot i=' scripts/191_apply.py
+          grep -Fq 'COMP component-add result' scripts/191_apply.py
+          grep -Fq 'Phase 210 R48' scripts/235_design.md
+          grep -Fq 'OrangeFox R48 collector v3.2' scripts/235_trigger.txt
+
+      - name: Dispatch inherited builder and package Phase 235
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/235_package.py
+          test -f phase235-out/package/boot.img
+          test -f phase235-out/compile/Image
+          test -f phase235-out/config/final.config
+          test -f phase235-out/final-audit.json
+          grep -aFq 'BOOT rs=ready phase=235 focus=rscc-master' \
+            phase235-out/compile/Image
+          grep -aFq 'RSCCFOCUS match path=device-attach' \
+            phase235-out/compile/Image
+          grep -aFq 'RSCCFOCUS match path=driver-attach' \
+            phase235-out/compile/Image
+          grep -aFq 'RSCC probe enter' phase235-out/compile/Image
+          grep -aFq 'RSCC component-add enter' phase235-out/compile/Image
+          grep -aFq 'RSCC bind enter' phase235-out/compile/Image
+          grep -aFq 'DRMCOMP connectors prop=' phase235-out/compile/Image
+          grep -aFq 'DRMCOMP connector i=' phase235-out/compile/Image
+          grep -aFq 'DRMCOMP match-add i=' phase235-out/compile/Image
+          grep -aFq 'DRMCOMP master-add enter' phase235-out/compile/Image
+          grep -aFq 'COMP master-add enter' phase235-out/compile/Image
+          grep -aFq 'COMP master stage=' phase235-out/compile/Image
+          grep -aFq 'COMP slot i=' phase235-out/compile/Image
+          grep -aFq 'COMP component-add result' phase235-out/compile/Image
+          if grep -aFq 'BOOT rs=ready phase=234 focus=rscc' \
+              phase235-out/compile/Image; then
+            echo '::error::stale Phase 234 boot identity remained'
+            exit 1
+          fi
+          if grep -aFq 'RSCCCORE match path=device-attach' \
+              phase235-out/compile/Image; then
+            echo '::error::broad RSCC device-attach marker remained'
+            exit 1
+          fi
+          if grep -aFq 'RSCCCORE match path=driver-attach' \
+              phase235-out/compile/Image; then
+            echo '::error::broad RSCC driver-attach marker remained'
+            exit 1
+          fi
+          grep -aFq 'A52GDSC GPU_CX_PROFILE_V1' phase235-out/compile/Image
+          grep -aFq 'A52GDSC GPU_GX_PROFILE_V2' phase235-out/compile/Image
+          grep -aFq 'A52ZAP 233 load' phase235-out/compile/Image
+          grep -Fxq 'CONFIG_GPU_CC_LAGOON=y' phase235-out/config/final.config
+          grep -Fxq 'CONFIG_QCOM_MDT_LOADER=y' phase235-out/config/final.config
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          audit = json.loads(Path("phase235-out/final-audit.json").read_text())
+          assert audit["phase"] == 235
+          assert audit["base_phase"] == 234
+          assert audit["hardware_validated"] is False
+          assert audit["phase235_display_behavior_changed"] is False
+          assert audit["phase235_graphics_provider_behavior_changed"] is False
+          assert audit["phase235_recorder_behavior_changed"] is True
+          assert audit["phase235_failed_candidate_match_spam_suppressed"] is True
+          assert audit["phase235_drm_connectors_trace_retained"] is True
+          assert audit["phase235_component_slot_trace_retained"] is True
+          PY
+          (
+            cd phase235-out
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload Phase 235 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase235-RSCC-COMPONENT-MASTER-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase235-out
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,34 @@
+PHASE 236 HARDWARE TEST - MSM DRM DISPLAY INIT
+
+1. Verify Phase 236 SHA256SUMS and final-audit.json.
+2. Flash only package/boot.img to BOOT using the same tested procedure.
+3. Boot once and allow the normal failure/watchdog window to occur.
+4. Boot OrangeFox recovery and run the existing OrangeFox R48 collector v3.2.
+5. Preserve the complete A52_RAW_RAMOOPS_YYYYMMDD_HHMMSS.zip.
+
+Expected Phase 236 identity record:
+  BOOT rs=ready phase=236 focus=display-init roots=48 copies=3 crc=crc32c
+
+Important: accepted DISPINIT/BOOT phase events may have sequence numbers before
+the identity record because the recorder can buffer pre-RS events and flush them
+when the R48 backend becomes ready.
+
+Key records:
+  BOOT phase=pre_smp/pure/core/postcore/arch/subsys/fs/device/late
+  DISPINIT register enter modeset=
+  DISPINIT smmu-register done
+  DISPINIT dsi-register done
+  DISPINIT edp-register done
+  DISPINIT hdmi-register done
+  DISPINIT platform-register enter
+  DISPINIT platform-register exit rc=
+  DISPINIT probe enter dev=
+  DRMCOMP collect/connectors/match-add/master-add
+  COMP master-add/master stage/slot/component-add
+  RSCCFOCUS / RSCC probe / component-add / bind
+
+Interpret the last record before the gap. If platform registration returns 0 but
+probe never enters, the next boundary is targeted msm_drm driver/device matching
+and DT platform-device availability.
+
+R48/RS48/CRC32C transport and the OrangeFox collector remain unchanged.

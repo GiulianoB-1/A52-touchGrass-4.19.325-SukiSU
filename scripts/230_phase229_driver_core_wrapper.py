@@ -45,6 +45,7 @@ if __name__ == "__main__":
 source = source.replace(main_guard, "\n", 1) + phase237_guard
 exec(compile(source, str(payload_dir / "phase230_patcher_impl.py"), "exec"), globals(), globals())
 
+# A52_PHASE238_POST_PHASE233_ORDER_V2
 # Phase 238 source-scope audit anchors. These are intentionally NOT invoked
 # from Phase 230; scripts/227_phase226_retention_wrapper.py runs them only after
 # the complete Phase 231 -> 232 -> 233 SHA-locked GDSC chain has succeeded.

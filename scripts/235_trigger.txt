@@ -25,3 +25,5 @@ Key records to inspect:
   RSCC bind enter/exit
 
 The Phase 210 R48 RS48 + CRC32C transport and the recovery collector/decoder remain unchanged.
+
+CI note: the final inherited Phase 217 Image audit is repaired at runtime to expect the Phase 235 recorder identity; this changes audit expectations only, not kernel behavior or recorder transport.

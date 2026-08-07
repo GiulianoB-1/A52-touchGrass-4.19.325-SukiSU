@@ -14,7 +14,9 @@ on:
       - scripts/235_phase234_rscc_master_overlay.py
       - scripts/236_phase235_display_init_overlay.py
       - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_platform_include_preflight.py
       - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/238_phase237_controlflow_safety_overlay.py
       - scripts/237_package.py
       - scripts/238_package.py
       - scripts/238_design.md
@@ -52,7 +54,9 @@ jobs:
             scripts/235_phase234_rscc_master_overlay.py \
             scripts/236_phase235_display_init_overlay.py \
             scripts/237_phase236_ofpop_probe_overlay.py \
+            scripts/238_phase237_platform_include_preflight.py \
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
+            scripts/238_phase237_controlflow_safety_overlay.py \
             scripts/237_package.py \
             scripts/238_package.py
           python3 scripts/227_phase226_retention_wrapper.py --self-test
@@ -80,11 +84,15 @@ jobs:
               )
           package.write_text(source, encoding="utf-8")
           PY
+          grep -Fq '238_phase237_platform_include_preflight.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_broad_gpu_supplier_overlay.py' scripts/230_phase229_driver_core_wrapper.py
+          grep -Fq '238_phase237_controlflow_safety_overlay.py' scripts/230_phase229_driver_core_wrapper.py
+          grep -Fq 'Phase 238 platform include preflight applied' scripts/238_phase237_platform_include_preflight.py
           grep -Fq 'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
           grep -Fq 'A52_PHASE238_PLATFORM_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
           grep -Fq 'A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
           grep -Fq 'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
+          grep -Fq 'A52_PHASE238_CONTROLFLOW_SAFE_V1' scripts/238_phase237_controlflow_safety_overlay.py
           grep -Fq 'G238 D sup c=%s s=%s drv=%s st=%u fl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
           grep -Fq 'G238 GD prop dev=%s nostatus=%u parent=%u hwctl=%u hwctrl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
           grep -Fq 'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' scripts/238_phase237_broad_gpu_supplier_overlay.py
@@ -149,6 +157,8 @@ jobs:
           assert audit['phase238_driver_core_event_limit'] == 768
           assert audit['phase238_gdsc_property_limit'] == 40
           assert audit['phase238_late_replay_ms'] == 145000
+          assert audit['phase238_platform_include_preflight'] is True
+          assert audit['phase238_controlflow_safety_pass'] is True
           PY
           (cd "$OUT" && sha256sum -c SHA256SUMS)
 

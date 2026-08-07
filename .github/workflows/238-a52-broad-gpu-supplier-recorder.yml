@@ -126,10 +126,6 @@ jobs:
           test -s "$OUT/SHA256SUMS"
           for marker in \
             'BOOT rs=ready phase=238 focus=gpu-supplier-broad' \
-            'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' \
-            'A52_PHASE238_PLATFORM_GPU_TRACE_V1' \
-            'A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1' \
-            'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' \
             'G238 P in dev=%s drv=%s node=%s' \
             'G238 P out dev=%s rc=%d l=%d drv=%s' \
             'G238 D in dev=%s drv=%s cur=%s' \
@@ -164,7 +160,9 @@ jobs:
           assert audit['phase238_gdsc_property_limit'] == 40
           assert audit['phase238_late_replay_ms'] == 145000
           assert audit['phase238_platform_include_preflight'] is True
+          assert audit['phase238_broad_gpu_supplier_recorder'] is True
           assert audit['phase238_controlflow_safety_pass'] is True
+          assert audit['phase238_c_indent_sanitize'] is True
           PY
           (cd "$OUT" && sha256sum -c SHA256SUMS)
 

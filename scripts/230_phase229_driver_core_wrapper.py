@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Load Phase 230 and apply the Phase 235 + 236 + 237 + 238 recorder overlays."""
+"""Load Phase 230 and apply only the Phase 235 + 236 + 237 recorder overlays.
+
+Phase 238 also instruments the legacy GDSC provider. Phases 231/232/233 pin
+that provider by SHA, so Phase 238 is deliberately deferred until the complete
+Phase 233 final-parity chain returns through the Phase 227 entrypoint.
+"""
 from __future__ import annotations
 
 import subprocess
@@ -16,7 +21,7 @@ if source.count(main_guard) != 1:
     raise SystemExit(
         f"expected one Phase 230 main guard before extension, found {source.count(main_guard)}"
     )
-phase238_guard = '''
+phase237_guard = '''
 if __name__ == "__main__":
     _phase230_rc = main()
     if not _phase230_rc and "--self-test" not in sys.argv[1:]:
@@ -24,9 +29,6 @@ if __name__ == "__main__":
             ("235_phase234_rscc_master_overlay.py", "Phase 235 RSCC component-master"),
             ("236_phase235_display_init_overlay.py", "Phase 236 display-init"),
             ("237_phase236_ofpop_probe_overlay.py", "Phase 237 OF/platform-probe"),
-            ("238_phase237_platform_include_preflight.py", "Phase 238 platform include preflight"),
-            ("238_phase237_broad_gpu_supplier_overlay.py", "Phase 238 broad GPU supplier recorder"),
-            ("238_phase237_controlflow_safety_overlay.py", "Phase 238 control-flow safety pass"),
         ):
             _overlay = Path(__file__).with_name(_overlay_name)
             if not _overlay.is_file():
@@ -40,5 +42,12 @@ if __name__ == "__main__":
                 break
     raise SystemExit(_phase230_rc)
 '''
-source = source.replace(main_guard, "\n", 1) + phase238_guard
+source = source.replace(main_guard, "\n", 1) + phase237_guard
 exec(compile(source, str(payload_dir / "phase230_patcher_impl.py"), "exec"), globals(), globals())
+
+# Phase 238 source-scope audit anchors. These are intentionally NOT invoked
+# from Phase 230; scripts/227_phase226_retention_wrapper.py runs them only after
+# the complete Phase 231 -> 232 -> 233 SHA-locked GDSC chain has succeeded.
+# 238_phase237_platform_include_preflight.py
+# 238_phase237_broad_gpu_supplier_overlay.py
+# 238_phase237_controlflow_safety_overlay.py

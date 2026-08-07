@@ -25,6 +25,7 @@ if __name__ == "__main__":
             ("236_phase235_display_init_overlay.py", "Phase 236 display-init"),
             ("237_phase236_ofpop_probe_overlay.py", "Phase 237 OF/platform-probe"),
             ("238_phase237_broad_gpu_supplier_overlay.py", "Phase 238 broad GPU supplier recorder"),
+            ("238_phase237_controlflow_safety_overlay.py", "Phase 238 control-flow safety pass"),
         ):
             _overlay = Path(__file__).with_name(_overlay_name)
             if not _overlay.is_file():

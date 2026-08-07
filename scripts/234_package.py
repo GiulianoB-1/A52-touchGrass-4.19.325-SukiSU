@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRANCH = "agent/a52-phase234-rscc-focused-recorder-v1"
+BRANCH = "agent/a52-phase234-rscc-focused-recorder-build-v1"
 TOUCHGRASS_COMMIT = "6bf351bdf18bdb228db79e66f14a7a9c0178e5d7"
 
 

@@ -14,6 +14,10 @@ PHASE237_BOOT = (
     "BOOT rs=ready phase=237 focus=ofpop-probe "
     "roots=%u copies=3 crc=crc32c"
 )
+PHASE238_BOOT = (
+    "BOOT rs=ready phase=238 focus=gpu-supplier-broad "
+    "roots=%u copies=3 crc=crc32c"
+)
 
 
 def repair_phase199_binary_audit() -> None:
@@ -35,35 +39,42 @@ def repair_phase199_binary_audit() -> None:
     )
 
 
-def repair_phase237_final_identity_audit() -> None:
-    """Update only the final Phase 217 Image audit for the Phase 237 identity."""
+def repair_phase238_final_identity_audit() -> None:
+    """Update only the final Phase 217 Image audit for the Phase 238 identity."""
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
 
     text = PHASE217_PATH.read_text(encoding="utf-8")
-    if PHASE237_BOOT in text and PHASE210_BOOT not in text:
-        print("Phase 217 final binary audit already expects Phase 237 recorder identity")
+    if PHASE238_BOOT in text and PHASE210_BOOT not in text and PHASE237_BOOT not in text:
+        print("Phase 217 final binary audit already expects Phase 238 recorder identity")
         return
 
-    count = text.count(PHASE210_BOOT)
-    if count != 1:
+    stale_count = text.count(PHASE210_BOOT) + text.count(PHASE237_BOOT)
+    if stale_count != 1:
         raise SystemExit(
-            "expected exactly one stale Phase 210 final boot audit, "
-            f"found {count}"
+            "expected exactly one stale Phase 210/237 final boot audit, "
+            f"found {stale_count}"
         )
 
-    text = text.replace(PHASE210_BOOT, PHASE237_BOOT, 1)
+    if PHASE237_BOOT in text:
+        text = text.replace(PHASE237_BOOT, PHASE238_BOOT, 1)
+    else:
+        text = text.replace(PHASE210_BOOT, PHASE238_BOOT, 1)
     PHASE217_PATH.write_text(text, encoding="utf-8")
 
     verify = PHASE217_PATH.read_text(encoding="utf-8")
-    if PHASE210_BOOT in verify or verify.count(PHASE237_BOOT) != 1:
-        raise SystemExit("Phase 237 final boot-marker audit repair failed")
-    print("Phase 217 final binary audit updated for Phase 237 recorder identity")
+    if (
+        PHASE210_BOOT in verify
+        or PHASE237_BOOT in verify
+        or verify.count(PHASE238_BOOT) != 1
+    ):
+        raise SystemExit("Phase 238 final boot-marker audit repair failed")
+    print("Phase 217 final binary audit updated for Phase 238 recorder identity")
 
 
 def main() -> int:
     repair_phase199_binary_audit()
-    repair_phase237_final_identity_audit()
+    repair_phase238_final_identity_audit()
     return 0
 
 

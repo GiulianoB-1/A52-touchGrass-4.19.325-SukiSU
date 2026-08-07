@@ -1,0 +1,39 @@
+Phase 238 hardware test - broad GPU supplier-chain recorder
+
+1. Build the Phase 238 workflow artifact from branch:
+   agent/a52-phase238-broad-gpu-supplier-recorder-v1
+
+2. Verify SHA256SUMS and package audit before flashing.
+
+3. Flash only:
+   package/boot.img -> BOOT partition
+
+4. Boot the phone normally.
+
+5. Let the failing boot run for at least 155 seconds so the 145-second Phase 238 replay executes. If the same watchdog behavior remains, letting the device continue until the natural watchdog reboot is preferred because it also preserves the later SurfaceFlinger/KGSL attempts.
+
+6. Use the existing OrangeFox R48 collector v3.2 to capture the raw ramoops exactly as with Phase 237. Do not switch decoders or collectors.
+
+Expected Phase 238 evidence prefixes:
+
+  G238 D   driver-core / supplier gating
+  G238 P   generic platform probe
+  G238 GD  custom legacy GDSC provider
+  G238 RP  late retention-safe replay
+  KGPPOST  inherited Phase 230 KGSL supplier replay/direct records
+
+Highest-value lines include:
+
+  G238 D in dev=3d9106c.qcom,gdsc ...
+  G238 D sup c=3d9106c.qcom,gdsc s=...
+  G238 D sup-out dev=3d9106c.qcom,gdsc rc=...
+  G238 P in dev=3d9106c.qcom,gdsc drv=...
+  G238 P out dev=3d9106c.qcom,gdsc rc=...
+  G238 GD in dev=3d9106c.qcom,gdsc ... rn=gpu_cx_gdsc ...
+  G238 GD st dev=3d9106c.qcom,gdsc s=... op=... l=...
+  G238 GD out dev=3d9106c.qcom,gdsc rc=... l=...
+  G238 RP plat cx-att=... stage=... rc=... drv=...
+  G238 RP dev=3d9106c.qcom,gdsc found=1 drv=...
+  G238 RP gd cx-probes=... stage=... rc=...
+
+Do not conclude that absence of an early line means the event never happened until the G238 RP replay is also checked. Phase 237 proved that early recorder regions can be lost from the final 1 MiB capture.

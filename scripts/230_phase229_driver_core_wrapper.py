@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load the checked-in Phase 230 implementation and apply the Phase 235 recorder overlay."""
+"""Load Phase 230 and apply the Phase 235 + Phase 236 recorder overlays."""
 from __future__ import annotations
 
 import subprocess
@@ -16,23 +16,25 @@ if source.count(main_guard) != 1:
     raise SystemExit(
         f"expected one Phase 230 main guard before extension, found {source.count(main_guard)}"
     )
-phase235_guard = '''
+phase236_guard = '''
 if __name__ == "__main__":
     _phase230_rc = main()
     if not _phase230_rc and "--self-test" not in sys.argv[1:]:
-        _phase235_overlay = Path(__file__).with_name(
-            "235_phase234_rscc_master_overlay.py"
-        )
-        if not _phase235_overlay.is_file():
-            raise SystemExit(
-                f"missing Phase 235 RSCC component-master overlay: {_phase235_overlay}"
+        for _overlay_name, _overlay_label in (
+            ("235_phase234_rscc_master_overlay.py", "Phase 235 RSCC component-master"),
+            ("236_phase235_display_init_overlay.py", "Phase 236 display-init"),
+        ):
+            _overlay = Path(__file__).with_name(_overlay_name)
+            if not _overlay.is_file():
+                raise SystemExit(f"missing {_overlay_label} overlay: {_overlay}")
+            _run = subprocess.run(
+                [sys.executable, str(_overlay), *sys.argv[1:]],
+                check=False,
             )
-        _phase235_run = subprocess.run(
-            [sys.executable, str(_phase235_overlay), *sys.argv[1:]],
-            check=False,
-        )
-        _phase230_rc = _phase235_run.returncode
+            _phase230_rc = _run.returncode
+            if _phase230_rc:
+                break
     raise SystemExit(_phase230_rc)
 '''
-source = source.replace(main_guard, "\n", 1) + phase235_guard
+source = source.replace(main_guard, "\n", 1) + phase236_guard
 exec(compile(source, str(payload_dir / "phase230_patcher_impl.py"), "exec"), globals(), globals())

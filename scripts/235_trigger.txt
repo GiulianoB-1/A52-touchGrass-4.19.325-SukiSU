@@ -1,0 +1,27 @@
+PHASE 235 HARDWARE TEST - RSCC DRM COMPONENT MASTER
+
+1. Verify the Phase 235 artifact SHA256SUMS and final-audit.json.
+2. Flash only package/boot.img to BOOT using the same tested recovery/boot procedure.
+3. Boot once and allow the failure/watchdog window to occur. Do not perform extra boots before collection if avoidable.
+4. Boot OrangeFox recovery and run the existing R48 collector v3.2.
+5. Preserve the complete A52_RAW_RAMOOPS_YYYYMMDD_HHMMSS.zip.
+
+Expected first identity record:
+  BOOT rs=ready phase=235 focus=rscc-master roots=48 copies=3 crc=crc32c
+
+Key records to inspect:
+  DRMCOMP collect enter
+  DRMCOMP connectors prop=
+  DRMCOMP connector i=
+  DRMCOMP match-add i=
+  DRMCOMP master-add enter/exit
+  COMP master-add enter/result
+  COMP master stage=
+  COMP slot i=
+  COMP component-add enter/result
+  RSCCFOCUS match path=
+  RSCC probe enter
+  RSCC component-add enter
+  RSCC bind enter/exit
+
+The Phase 210 R48 RS48 + CRC32C transport and the recovery collector/decoder remain unchanged.

@@ -34,13 +34,10 @@ def load_phase237_package():
 
 
 def verify_phase238_image(image: Path) -> None:
+    """Audit runtime evidence only; source-only preprocessor tokens are audited in CI."""
     data = image.read_bytes()
     required = (
         b"BOOT rs=ready phase=238 focus=gpu-supplier-broad",
-        b"A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1",
-        b"A52_PHASE238_PLATFORM_GPU_TRACE_V1",
-        b"A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1",
-        b"A52_PHASE238_GDSC_PROVIDER_TRACE_V1",
         b"G238 P in dev=%s drv=%s node=%s",
         b"G238 P out dev=%s rc=%d l=%d drv=%s",
         b"G238 D in dev=%s drv=%s cur=%s",
@@ -105,6 +102,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "238_phase237_platform_include_preflight.py",
         "238_phase237_broad_gpu_supplier_overlay.py",
         "238_phase237_controlflow_safety_overlay.py",
+        "238_phase237_c_indent_sanitize.py",
         "237_package.py",
         "238_package.py",
     ):
@@ -125,7 +123,9 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_driver_core_behavior_changed": False,
         "phase238_recorder_behavior_changed": True,
         "phase238_platform_include_preflight": True,
+        "phase238_broad_gpu_supplier_recorder": True,
         "phase238_controlflow_safety_pass": True,
+        "phase238_c_indent_sanitize": True,
         "phase238_recorder_transport": "Phase 210 R48 RS48 CRC32C unchanged",
         "phase238_focus": [
             "gpu_cx_gdsc@3d9106c",
@@ -153,6 +153,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "existing Phase 230 KGPPOST direct/replay evidence",
             "platform include preflight for cumulative Phase 237 sources",
             "control-flow safety rewrite after broad instrumentation",
+            "C indentation sanitization after instrumentation",
         ],
         "phase238_question": (
             "Why does 3d9106c.qcom,gdsc remain unbound: supplier gating before "
@@ -180,7 +181,8 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "late_replay_ms": 145000,
     }
     (out / "BUILD-IDENTITY.json").write_text(
-        json.dumps(identity, indent=2, sort_keys=True) + "\n"
+        json.dumps(identity, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
     (out / "README-FIRST.txt").write_text(
         "A52 GKI 5.10 Phase 238 broad GPU supplier-chain recorder candidate\n\n"
@@ -192,14 +194,16 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "legacy GDSC provider, DT/phandle/MMIO/regulator checkpoints, and a late\n"
         "145-second replay so early CX evidence survives recorder retention.\n\n"
         "Use the existing OrangeFox R48 collector v3.2 after one test boot.\n"
-        "CI-validated only until hardware capture confirms behavior.\n"
+        "CI-validated only until hardware capture confirms behavior.\n",
+        encoding="utf-8",
     )
 
     sums = out / "SHA256SUMS"
     sums.unlink(missing_ok=True)
     files = sorted(path for path in out.rglob("*") if path.is_file())
     sums.write_text(
-        "".join(f"{sha256(path)}  ./{path.relative_to(out)}\n" for path in files)
+        "".join(f"{sha256(path)}  ./{path.relative_to(out)}\n" for path in files),
+        encoding="utf-8",
     )
     return out
 

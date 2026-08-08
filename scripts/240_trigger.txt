@@ -1,0 +1,43 @@
+PHASE 240 HARDWARE VALIDATION
+
+Flash only the CI-audited Phase 240 package/boot.img after SHA256SUMS and the
+package audit pass.
+
+Expected runtime identity:
+  BOOT rs=ready phase=240 focus=cx-supplier-gate-latch
+
+Collect the same frozen 1 MiB ramoops evidence bundle after the watchdog reboot.
+Decode it only with the bundled current R48/RS48 transport-fusion decoder.
+Do not use the obsolete recorder-v3 decoder.
+
+Highest-value Phase 240 records:
+  CXF240 replay-begin
+  CXF240 drvwalk-in
+  CXF240 drv-match
+  CXF240 sup-in
+  CXF240 sup n=
+  CXF240 sup-out
+  CXF240 drv-probe
+
+Interpretation:
+- no drvwalk-in:
+    the custom GDSC driver registration/attach path did not run in the retained
+    boot path; investigate registration/initcall/loading before provider code.
+- drvwalk-in but no drv-match:
+    the driver walk did not visit/positively match exact CX; inspect platform
+    enumeration/matching state.
+- drv-match rc <= 0:
+    matching itself is the blocker.
+- positive drv-match + sup-out rc=-517:
+    the preceding CXF240 sup lines identify the supplier/link state responsible
+    for preventing really_probe() from reaching the platform/GDSC callback.
+- sup-out rc=0 + drv-probe failure:
+    the blocker is later in really_probe()/platform probe; correlate G238,
+    P3P and A52GDSC records.
+- A52GDSC CX_VDD_PARENT_GET_V1 appears:
+    the legacy GDSC provider probe body has finally been reached; use its exact
+    rc and subsequent vote/state records to localize the provider path.
+
+Do not infer hardware validation merely from a successful boot to watchdog.
+The pass criterion for this phase is obtaining an unambiguous exact CX
+registration/match/supplier/probe boundary from the frozen replay latch.

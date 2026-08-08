@@ -113,8 +113,10 @@ jobs:
           grep -Fq 'a52-legacy-gdsc-regulator' scripts/238_phase237_cx_journal_extension.py
           grep -Fq '3d9106c' scripts/238_phase237_cx_journal_extension.py
           grep -Fq 'Phase 238 retention-safe replay timing repair' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'msecs_to_jiffies(145000)' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'msecs_to_jiffies(155000)' scripts/238_phase237_retention_replay_timing_repair.py
+          grep -Fq 'OLD_MS = "145000"' scripts/238_phase237_retention_replay_timing_repair.py
+          grep -Fq 'NEW_MS = "155000"' scripts/238_phase237_retention_replay_timing_repair.py
+          grep -Fq 'a52_g238_platform_replay_work' scripts/238_phase237_retention_replay_timing_repair.py
+          grep -Fq 'a52_g238_gd_replay_work' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'Phase 238 C indentation sanitize' scripts/238_phase237_c_indent_sanitize.py
           grep -Fq 'Phase 238 platform include preflight applied' scripts/238_phase237_platform_include_preflight.py
           grep -Fq 'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py

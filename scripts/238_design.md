@@ -6,6 +6,24 @@ Phase 237 hardware ruled out OF default population as the boot blocker. The reco
 
 The unresolved question is therefore narrower: why does the CX GDSC platform device remain unbound even though CX compatibility code exists in the image?
 
+## First Phase 238 hardware result
+
+Capture `A52_RAW_RAMOOPS_20260808_091140.zip`, decoded with the Phase 210 R48 transport-fusion decoder, confirms the KGSL dependency progression.
+
+At approximately 448 ms, `3d90000.qcom,gpucc` passes `device_links_check_suppliers()` with `rc=0` and its CXLVL RPMh supplier already has a bound driver. Therefore a globally unavailable CXLVL RPMh provider is not the explanation for the missing CX binding.
+
+The retained Phase 230 late journal at approximately 154.9 s shows:
+
+1. An early KGSL attempt stops on unbound QFPROM.
+2. On a later retry QFPROM is bound.
+3. `3d9100c.qcom,gdsc` / GPU GX is bound.
+4. The next supplier is `3d9106c.qcom,gdsc` / GPU CX, with no bound driver and link status zero.
+5. `device_links_check_suppliers()` immediately returns `-EPROBE_DEFER` after reaching CX.
+
+The Phase 230 journal prints device-link flags with `%x`, so `fl=160` is hexadecimal `0x160`, not decimal 160. In this 5.10 device-link layout that link includes `AUTOPROBE_CONSUMER`, `MANAGED`, and `INFERRED`. The current first unavailable managed KGSL supplier is therefore conclusively the CX GDSC itself.
+
+The same capture exposed a retention issue in Phase 238 diagnostics: the recorder retains records through roughly 0.556 s and resumes around 148.369 s, while the original G238 replay was scheduled at 145 s. That replay fell inside the missing-record window.
+
 ## Phase 238 goal
 
 Record every plausible stage that can explain the missing `gpu_cx_gdsc` supplier while preserving the Phase 210 R48/RS48/CRC32C transport and all inherited graphics diagnostics.
@@ -40,7 +58,18 @@ For every focused attempt record:
 
 This detects a hidden supplier that prevents the CX provider from reaching its platform probe.
 
-### 2. Generic platform probe
+### 2. Exact CX path in the inherited late journal
+
+The first Phase 238 capture proved the normal early G238 records can be lost even when the later Phase 230 KGPPOST journal survives. Phase 238 now extends the already-proven Phase 230 journal selection to the exact CX device/driver pair:
+
+- device `3d9106c.qcom,gdsc`
+- driver `a52-legacy-gdsc-regulator`
+
+The extension records and later replays the CX platform match/attach path, `really_probe()` path, `device_links_check_suppliers()` entry/result, device-link suppliers, and fwnode suppliers when supplier checking runs.
+
+The extension changes only trace selection. Matching, supplier decisions, deferred-probe behavior, callback order, and return values remain untouched.
+
+### 3. Generic platform probe
 
 Keep Phase 237 P3P tracing and add `G238 P` tracing that is not limited to the OF-population window.
 
@@ -55,7 +84,7 @@ Record:
 
 This distinguishes no match / no platform callback from a provider callback that returns an error.
 
-### 3. Phase 233 legacy GDSC provider
+### 4. Phase 233 legacy GDSC provider
 
 Instrument `drivers/regulator/a52-legacy-gdsc-regulator.c` directly for both CX and GX, with CX as the primary target.
 
@@ -74,38 +103,40 @@ Dump bounded DT information:
 - `qcom,clk-dis-wait-val`
 - `qcom,gds-timeout`
 - `qcom,no-status-check-on-disable`
-- presence of `vdd_parent-supply`
+- presence of TouchGrass `parent-supply`
 - presence of both `hw-ctl-addr` and `hw-ctrl-addr`
 
 Resolve and record phandles for:
 
-- `vdd_parent-supply`
+- `parent-supply`
+- `vdd_parent-supply` as a diagnostic control spelling only
 - `hw-ctl-addr`
 - `hw-ctrl-addr`
 
 For resolved phandles record the target node and, when represented by a platform device, its currently bound driver.
 
-### 4. Provider call-site checkpoints
+The original Phase 238 logger accidentally used `vdd_parent-supply` for its `parent=` summary. A post-overlay diagnostic repair now makes `parent-supply` authoritative while retaining one `vdd_parent-supply` control trace. No provider behavior is changed.
+
+### 5. Provider call-site checkpoints
 
 Before suspicious operations in the custom GDSC probe, emit a stage marker with operation and source line. Operations include:
 
-- regulator acquisition
+- regulator acquisition / registration
 - MMIO resource lookup / ioremap
-- regulator registration
 - syscon / regmap resolution
 - OF phandle/property parsing
-- regulator enable / voltage / load
-- clock enable
+- regulator enable / voltage / load where present
+- clock enable where present
 - readl / writel
 - CX profile-selection branches where present
 
 Every custom GDSC probe return is wrapped so the exact return code and source line are recorded.
 
-### 5. Retention-safe late replay
+### 6. Retention-safe late replay
 
-The Phase 237 capture showed that early records can be lost from the 1 MiB ramoops window. Phase 238 therefore schedules a diagnostic replay at approximately 145 seconds.
+The first Phase 238 hardware capture showed the 145 s replay itself landed inside the observed recorder hole. A post-overlay timing repair now changes only the three Phase 238 delayed-work timers from 145000 ms to 155000 ms.
 
-The late replay records:
+The 155 s late replay records:
 
 - number of CX platform-probe attempts
 - last CX platform stage and return code
@@ -116,17 +147,21 @@ The late replay records:
 - last custom-provider stage and return code
 - remembered CX MMIO/property summary
 
-The existing Phase 230 KGPPOST supplier replay is retained, and `KGPPOST*` is admitted by the Phase 238 recorder filter.
+The existing Phase 230 KGPPOST replay remains at its established heartbeat window and now also retains the exact CX path described above.
 
 ## Interpretation matrix
 
-### No `G238 D in` and late replay finds CX with `drv=-`
+### KGPPOST shows CX match but CX supplier check returns `-517`
 
-The CX platform device exists but no driver reached `really_probe()`. Investigate match/attachment/driver-registration parity.
+CX itself is blocked before the platform callback. The preceding CX `fw n=` or `dl s=` records identify the supplier edge responsible.
 
-### `G238 D in` followed by `G238 D sup-out ... rc=-517`, with no `G238 P in`
+### KGPPOST shows CX match and supplier check succeeds, but no `G238 P in`
 
-CX is itself blocked by one of its device-link suppliers. The preceding `G238 D sup` records identify that supplier.
+Investigate the driver-core path after supplier gating and before the platform callback.
+
+### No CX KGPPOST match/attach records and late replay finds CX with `drv=-`
+
+The CX platform device exists but the expected driver did not reach the normal match/attach path. Investigate driver registration or platform matching.
 
 ### `G238 P in` but no `G238 GD in`
 
@@ -151,4 +186,5 @@ Use the retained Phase 230 KGPPOST chain to identify the next supplier after CX.
 - No graphics-provider functional workaround is added.
 - No SurfaceFlinger or userspace behavior is changed.
 - Logging is bounded and GPU-focused to reduce unrelated recorder pressure.
-- Late replay is diagnostic and does not modify device state.
+- The CX journal extension changes trace selection only.
+- The 155 s replay is diagnostic and does not modify device state.

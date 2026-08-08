@@ -1,15 +1,14 @@
-name: 239 - A52 GPU CX vdd_parent parity
+name: 240 - A52 GPU CX supplier-gate latch
 
-run-name: Build Phase 239 GPU CX vdd_parent functional-fix candidate
+run-name: Build Phase 240 GPU CX supplier-gate diagnostic candidate
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - agent/a52-phase239-gpu-cx-vdd-parent-v1
+      - agent/a52-phase240-cx-supplier-gate-v1
     paths:
       - .github/workflows/238-a52-broad-gpu-supplier-recorder.yml
-      - scripts/199_runtime_fix_binary_audit.py
       - scripts/227_phase226_retention_wrapper.py
       - scripts/230_phase229_driver_core_wrapper.py
       - scripts/234_repair_phase230_layout.py
@@ -27,27 +26,31 @@ on:
       - scripts/239_phase233_fb_msm_audit_repair.py
       - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
       - scripts/239_phase238_identity_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay.py
+      - scripts/240_phase239_identity_overlay.py
       - scripts/237_package.py
       - scripts/238_package.py
       - scripts/239_design.md
       - scripts/239_trigger.txt
+      - scripts/240_design.md
+      - scripts/240_trigger.txt
 
 permissions:
   actions: write
   contents: read
 
 concurrency:
-  group: a52-phase239-gpu-cx-vdd-parent-${{ github.ref }}
+  group: a52-phase240-cx-supplier-gate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-package:
-    name: Build and package Phase 239
+    name: Build and package Phase 240
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out Phase 239 source
+      - name: Check out Phase 240 source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -66,6 +69,8 @@ jobs:
             scripts/239_phase233_fb_msm_audit_repair.py \
             scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
             scripts/239_phase238_identity_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay.py \
+            scripts/240_phase239_identity_overlay.py \
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
             scripts/238_phase237_cx_driver_walk_extension.py \
             scripts/238_phase237_retention_replay_timing_repair.py \
@@ -73,16 +78,18 @@ jobs:
           python3 scripts/199_runtime_fix_binary_audit.py --self-test
           python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
           python3 scripts/239_phase238_identity_overlay.py --self-test
+          python3 scripts/240_phase239_cx_frozen_latch_overlay.py --self-test
+          python3 scripts/240_phase239_identity_overlay.py --self-test
           python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
           python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
           python3 scripts/227_phase226_retention_wrapper.py --self-test
           git diff --check
 
-      - name: Verify Phase 239 source scope
+      - name: Verify Phase 240 source scope
         run: |
           set -Eeuo pipefail
-          grep -Fq 'PHASE239_BOOT' scripts/199_runtime_fix_binary_audit.py
-          grep -Fq 'PHASE239_IDENTITY_MARKER' scripts/199_runtime_fix_binary_audit.py
+          grep -Fq 'PHASE240_BOOT' scripts/199_runtime_fix_binary_audit.py
+          grep -Fq 'PHASE240_IDENTITY_MARKER' scripts/199_runtime_fix_binary_audit.py
           grep -Fq 'CONFIG_FB=n is the parent-level' scripts/239_phase233_fb_msm_audit_repair.py
           grep -Fq '"# CONFIG_FB is not set"' scripts/233_package.py
           ! grep -Fq '"# CONFIG_FB_MSM is not set"' scripts/233_package.py
@@ -94,30 +101,44 @@ jobs:
           grep -Fq 'A52GDSC CX_VDD_PARENT_VOTE_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
           grep -Fq '239_phase238_gpu_cx_vdd_parent_overlay.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '239_phase238_identity_overlay.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq 'agent/a52-phase239-gpu-cx-vdd-parent-v1' scripts/238_package.py
+          grep -Fq '240_phase239_cx_frozen_latch_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq '240_phase239_identity_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'A52_PHASE240_CX_FROZEN_LATCH_V1' scripts/240_phase239_cx_frozen_latch_overlay.py
+          grep -Fq 'A52_PHASE240_CX_SUPPLIER_GATE_V1' scripts/240_phase239_cx_frozen_latch_overlay.py
+          grep -Fq 'CXF240 sup-in' scripts/240_phase239_cx_frozen_latch_overlay.py
+          grep -Fq 'CXF240 sup-out' scripts/240_phase239_cx_frozen_latch_overlay.py
+          grep -Fq 'phase=240 focus=cx-supplier-gate-latch' scripts/240_phase239_identity_overlay.py
+          grep -Fq 'agent/a52-phase240-cx-supplier-gate-v1' scripts/238_package.py
 
-      - name: Dispatch inherited builder and package Phase 239
+      - name: Dispatch inherited builder and package Phase 240
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           python3 scripts/238_package.py
 
-      - name: Verify Phase 239 candidate
+      - name: Verify Phase 240 candidate
         run: |
           set -Eeuo pipefail
-          OUT=phase239-out
+          OUT=phase240-out
           test -s "$OUT/package/boot.img"
           test -s "$OUT/compile/Image"
           test -s "$OUT/final-audit.json"
           test -s "$OUT/BUILD-IDENTITY.json"
           test -s "$OUT/SHA256SUMS"
           for marker in \
-            'BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent' \
+            'BOOT rs=ready phase=240 focus=cx-supplier-gate-latch' \
             'A52GDSC CX_VDD_PARENT_GET_V1 dev=%s rc=%d' \
             'A52GDSC CX_VDD_PARENT_VOTE_V1 name=%s rc=%d' \
             'A52GDSC CX_VDD_PARENT_UNVOTE_V1 name=%s rc=%d' \
             'A52GDSC CX_VDD_PARENT_STATE_V1 name=%s enabled=%d' \
+            'CXF240 replay-begin t=%u kept=%u seen=%u' \
+            'CXF240 drvwalk-in r=%.24s bus=%.16s' \
+            'CXF240 drv-match d=%.20s r=%.20s rc=%d dead=%d cur=%.16s' \
+            'CXF240 drv-probe d=%.20s r=%.20s rc=%d bound=%.16s' \
+            'CXF240 sup-in d=%.20s r=%.20s ls=%d' \
+            'CXF240 sup n=%u s=%.20s r=%.20s st=%u fl=%x ds=%d' \
+            'CXF240 sup-out d=%.20s rc=%d ls=%d' \
             'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
             'KGPPOST 230 cxw cand r=' \
             'KGPPOST 230 cxw probe r=' \
@@ -125,24 +146,26 @@ jobs:
             'A52GDSC GPU_CX_PROFILE_V1'; do
             grep -aFq "$marker" "$OUT/compile/Image"
           done
+          ! grep -aFq 'BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent' "$OUT/compile/Image"
           ! grep -aFq 'BOOT rs=ready phase=238 focus=gpu-supplier-broad' "$OUT/compile/Image"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          audit = json.loads(Path('phase239-out/final-audit.json').read_text())
-          assert audit['phase'] == 239
-          assert audit['base_phase'] == 238
+          audit = json.loads(Path('phase240-out/final-audit.json').read_text())
+          assert audit['phase'] == 240
+          assert audit['base_phase'] == 239
           assert audit['hardware_validated'] is False
-          assert audit['phase239_gpu_cx_vdd_parent_restored'] is True
-          assert audit['phase239_parent_supply_ordering_retained'] is True
-          assert audit['phase239_driver_core_behavior_changed'] is False
+          assert audit['phase240_phase239_vdd_parent_fix_retained'] is True
+          assert audit['phase240_exact_cx_driver_pair_latched'] is True
+          assert audit['phase240_exact_cx_supplier_gate_latched'] is True
+          assert audit['phase240_driver_core_behavior_changed'] is False
           PY
           (cd "$OUT" && sha256sum -c SHA256SUMS)
 
-      - name: Upload Phase 239 candidate
+      - name: Upload Phase 240 candidate
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase239-GPU-CX-VDD-PARENT-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: phase239-out
+          name: A52XQ-Phase240-CX-SUPPLIER-GATE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase240-out
           if-no-files-found: error
           retention-days: 30

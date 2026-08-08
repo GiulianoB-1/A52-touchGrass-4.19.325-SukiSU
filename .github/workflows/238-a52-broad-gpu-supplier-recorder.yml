@@ -19,6 +19,7 @@ on:
       - scripts/238_phase237_platform_include_preflight.py
       - scripts/238_phase237_broad_gpu_supplier_overlay.py
       - scripts/238_phase237_gdsc_parent_diag_repair.py
+      - scripts/238_phase237_cx_journal_extension.py
       - scripts/238_phase237_controlflow_safety_overlay.py
       - scripts/238_phase237_retention_replay_timing_repair.py
       - scripts/238_phase237_c_indent_sanitize.py
@@ -62,6 +63,7 @@ jobs:
             scripts/238_phase237_platform_include_preflight.py \
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
             scripts/238_phase237_gdsc_parent_diag_repair.py \
+            scripts/238_phase237_cx_journal_extension.py \
             scripts/238_phase237_controlflow_safety_overlay.py \
             scripts/238_phase237_retention_replay_timing_repair.py \
             scripts/238_phase237_c_indent_sanitize.py \
@@ -71,6 +73,7 @@ jobs:
           python3 scripts/235_phase234_rscc_master_overlay.py --self-test
           python3 scripts/236_phase235_display_init_overlay.py --self-test
           python3 scripts/238_phase237_gdsc_parent_diag_repair.py --self-test
+          python3 scripts/238_phase237_cx_journal_extension.py --self-test
           python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
           git diff --check
 
@@ -97,12 +100,18 @@ jobs:
           grep -Fq '238_phase237_platform_include_preflight.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_broad_gpu_supplier_overlay.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_gdsc_parent_diag_repair.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq '238_phase237_cx_journal_extension.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '238_phase237_controlflow_safety_overlay.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_retention_replay_timing_repair.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '238_phase237_c_indent_sanitize.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq 'Phase 238 GDSC parent-supply diagnostic repair' scripts/238_phase237_gdsc_parent_diag_repair.py
           grep -Fq 'parent-supply' scripts/238_phase237_gdsc_parent_diag_repair.py
           grep -Fq 'vdd_parent-supply' scripts/238_phase237_gdsc_parent_diag_repair.py
+          grep -Fq 'A52_PHASE238_CX_JOURNAL_PLATFORM_V1' scripts/238_phase237_cx_journal_extension.py
+          grep -Fq 'A52_PHASE238_CX_JOURNAL_DD_V1' scripts/238_phase237_cx_journal_extension.py
+          grep -Fq 'A52_PHASE238_CX_JOURNAL_CORE_V1' scripts/238_phase237_cx_journal_extension.py
+          grep -Fq 'a52-legacy-gdsc-regulator' scripts/238_phase237_cx_journal_extension.py
+          grep -Fq '3d9106c' scripts/238_phase237_cx_journal_extension.py
           grep -Fq 'Phase 238 retention-safe replay timing repair' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'msecs_to_jiffies(145000)' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'msecs_to_jiffies(155000)' scripts/238_phase237_retention_replay_timing_repair.py
@@ -154,6 +163,9 @@ jobs:
             '3d9106c.qcom,gdsc' \
             'parent-supply' \
             'vdd_parent-supply' \
+            'KGPPOST 230 sl-in d=' \
+            'KGPPOST 230 fw n=' \
+            'KGPPOST 230 dl s=' \
             'A52GDSC GPU_CX_PROFILE_V1' \
             'A52GDSC GPU_GX_PROFILE_V2' \
             'KGPPOST' \
@@ -178,6 +190,7 @@ jobs:
           assert audit['phase238_platform_include_preflight'] is True
           assert audit['phase238_broad_gpu_supplier_recorder'] is True
           assert audit['phase238_gdsc_parent_diag_repair'] is True
+          assert audit['phase238_cx_late_journal_extension'] is True
           assert audit['phase238_controlflow_safety_pass'] is True
           assert audit['phase238_retention_replay_timing_repair'] is True
           assert audit['phase238_c_indent_sanitize'] is True

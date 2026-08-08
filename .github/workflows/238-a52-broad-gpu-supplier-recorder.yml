@@ -1,15 +1,14 @@
-name: 238 - A52 broad GPU supplier-chain recorder
+name: 239 - A52 GPU CX vdd_parent parity
 
-run-name: Build Phase 238 broad GPU supplier-chain recorder candidate
+run-name: Build Phase 239 GPU CX vdd_parent functional-fix candidate
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - agent/a52-phase238-broad-gpu-supplier-recorder-v1
+      - agent/a52-phase239-gpu-cx-vdd-parent-v1
     paths:
       - .github/workflows/238-a52-broad-gpu-supplier-recorder.yml
-      - scripts/199_runtime_fix_binary_audit.py
       - scripts/227_phase226_retention_wrapper.py
       - scripts/230_phase229_driver_core_wrapper.py
       - scripts/234_repair_phase230_layout.py
@@ -24,203 +23,114 @@ on:
       - scripts/238_phase237_controlflow_safety_overlay.py
       - scripts/238_phase237_retention_replay_timing_repair.py
       - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+      - scripts/239_phase238_identity_overlay.py
       - scripts/237_package.py
       - scripts/238_package.py
-      - scripts/238_design.md
-      - scripts/238_trigger.txt
+      - scripts/239_design.md
+      - scripts/239_trigger.txt
 
 permissions:
   actions: write
   contents: read
 
 concurrency:
-  group: a52-phase238-broad-gpu-supplier-${{ github.ref }}
+  group: a52-phase239-gpu-cx-vdd-parent-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-package:
-    name: Build and package Phase 238
+    name: Build and package Phase 239
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      - name: Check out Phase 238 source
+      - name: Check out Phase 239 source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Restore cumulative patch layout
+      - name: Restore cumulative patch layout and self-test
         run: |
           set -Eeuo pipefail
           python3 scripts/234_repair_phase230_layout.py
           python3 scripts/233_payload.py
           python3 -m py_compile \
-            scripts/199_runtime_fix_binary_audit.py \
             scripts/227_phase226_retention_wrapper.py \
             scripts/230_phase229_driver_core_wrapper.py \
-            scripts/235_phase234_rscc_master_overlay.py \
-            scripts/236_phase235_display_init_overlay.py \
-            scripts/237_phase236_ofpop_probe_overlay.py \
-            scripts/238_phase237_platform_include_preflight.py \
+            scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
+            scripts/239_phase238_identity_overlay.py \
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
-            scripts/238_phase237_gdsc_parent_diag_repair.py \
-            scripts/238_phase237_cx_journal_extension.py \
             scripts/238_phase237_cx_driver_walk_extension.py \
-            scripts/238_phase237_controlflow_safety_overlay.py \
             scripts/238_phase237_retention_replay_timing_repair.py \
-            scripts/238_phase237_c_indent_sanitize.py \
-            scripts/237_package.py \
             scripts/238_package.py
-          python3 scripts/227_phase226_retention_wrapper.py --self-test
-          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
-          python3 scripts/236_phase235_display_init_overlay.py --self-test
-          python3 scripts/238_phase237_gdsc_parent_diag_repair.py --self-test
-          python3 scripts/238_phase237_cx_journal_extension.py --self-test
+          python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
+          python3 scripts/239_phase238_identity_overlay.py --self-test
           python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
           python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
           git diff --check
 
-      - name: Verify Phase 238 source scope
+      - name: Verify Phase 239 source scope
         run: |
           set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          grep -Fq 'A52_PHASE239_GPU_CX_VDD_PARENT_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq 'vdd_parent-supply' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq 'devm_regulator_get(&pdev->dev' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq 'RPMH_REGULATOR_LEVEL_LOW_SVS' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq 'A52GDSC CX_VDD_PARENT_GET_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq 'A52GDSC CX_VDD_PARENT_VOTE_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+          grep -Fq '239_phase238_gpu_cx_vdd_parent_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq '239_phase238_identity_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'agent/a52-phase239-gpu-cx-vdd-parent-v1' scripts/238_package.py
 
-          package = Path("scripts/233_package.py")
-          source = package.read_text(encoding="utf-8")
-          pattern = re.compile(
-              r"(?m)^[ \t]*([\"'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n"
-          )
-          source, count = pattern.subn("", source)
-          if count != 1:
-              raise SystemExit(
-                  "Phase 238 inherited package normalization expected exactly one "
-                  f"CONFIG_FB_MSM token, found {count}"
-              )
-          package.write_text(source, encoding="utf-8")
-          PY
-          grep -Fq '238_phase237_platform_include_preflight.py' scripts/230_phase229_driver_core_wrapper.py
-          grep -Fq '238_phase237_broad_gpu_supplier_overlay.py' scripts/230_phase229_driver_core_wrapper.py
-          grep -Fq '238_phase237_gdsc_parent_diag_repair.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq '238_phase237_cx_journal_extension.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq '238_phase237_cx_driver_walk_extension.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq '238_phase237_controlflow_safety_overlay.py' scripts/230_phase229_driver_core_wrapper.py
-          grep -Fq '238_phase237_retention_replay_timing_repair.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq '238_phase237_c_indent_sanitize.py' scripts/227_phase226_retention_wrapper.py
-          grep -Fq 'Phase 238 GDSC parent-supply diagnostic repair' scripts/238_phase237_gdsc_parent_diag_repair.py
-          grep -Fq 'parent-supply' scripts/238_phase237_gdsc_parent_diag_repair.py
-          grep -Fq 'vdd_parent-supply' scripts/238_phase237_gdsc_parent_diag_repair.py
-          grep -Fq 'A52_PHASE238_CX_JOURNAL_PLATFORM_V1' scripts/238_phase237_cx_journal_extension.py
-          grep -Fq 'A52_PHASE238_CX_JOURNAL_DD_V1' scripts/238_phase237_cx_journal_extension.py
-          grep -Fq 'A52_PHASE238_CX_JOURNAL_CORE_V1' scripts/238_phase237_cx_journal_extension.py
-          grep -Fq 'a52-legacy-gdsc-regulator' scripts/238_phase237_cx_journal_extension.py
-          grep -Fq '3d9106c' scripts/238_phase237_cx_journal_extension.py
-          grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_V1' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_JOURNAL_V1' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'A52_R238_CXW("cand r=%.24s of=%d"' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'A52_R238_CXW("match r=%.24s rc=%d"' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'A52_R238_CXW("probe r=%.24s rc=%d"' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'A52_R230_JOURNAL_CAPACITY 128U' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'Phase 238 retention-safe replay timing repair' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'OLD_MS = "145000"' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'NEW_MS = "155000"' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'a52_g238_platform_replay_work' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'a52_g238_gd_replay_work' scripts/238_phase237_retention_replay_timing_repair.py
-          grep -Fq 'Phase 238 C indentation sanitize' scripts/238_phase237_c_indent_sanitize.py
-          grep -Fq 'Phase 238 platform include preflight applied' scripts/238_phase237_platform_include_preflight.py
-          grep -Fq 'A52_PHASE238_BROAD_GPU_SUPPLIER_RECORDER_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'A52_PHASE238_PLATFORM_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'A52_PHASE238_DRIVER_CORE_GPU_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'A52_PHASE238_CONTROLFLOW_SAFE_V1' scripts/238_phase237_controlflow_safety_overlay.py
-          grep -Fq 'G238 D sup c=%s s=%s drv=%s st=%u fl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'G238 GD prop dev=%s nostatus=%u parent=%u hwctl=%u hwctrl=%u' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'msecs_to_jiffies(145000)' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'KGPPOST' scripts/238_phase237_broad_gpu_supplier_overlay.py
-          grep -Fq 'device_links_check_suppliers' scripts/238_design.md
-          grep -Fq 'OrangeFox R48 collector v3.2' scripts/238_trigger.txt
-          grep -Fq 'agent/a52-phase238-broad-gpu-supplier-recorder-v1' scripts/238_package.py
-
-      - name: Dispatch inherited builder and package Phase 238
+      - name: Dispatch inherited builder and package Phase 239
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           python3 scripts/238_package.py
 
-      - name: Verify Phase 238 candidate
+      - name: Verify Phase 239 candidate
         run: |
           set -Eeuo pipefail
-          OUT=phase238-out
+          OUT=phase239-out
           test -s "$OUT/package/boot.img"
           test -s "$OUT/compile/Image"
           test -s "$OUT/final-audit.json"
           test -s "$OUT/BUILD-IDENTITY.json"
           test -s "$OUT/SHA256SUMS"
           for marker in \
-            'BOOT rs=ready phase=238 focus=gpu-supplier-broad' \
-            'G238 P in dev=%s drv=%s node=%s' \
-            'G238 P out dev=%s rc=%d l=%d drv=%s' \
-            'G238 D in dev=%s drv=%s cur=%s' \
-            'G238 D sup c=%s s=%s drv=%s st=%u fl=%u' \
-            'G238 D sup-out dev=%s rc=%d' \
-            'G238 D out dev=%s rc=%d l=%d cur=%s' \
-            'G238 GD in dev=%s drv=%s rn=%s comp=%s cx=%u' \
-            'G238 GD st dev=%s s=%d op=%s l=%d' \
-            'G238 GD out dev=%s rc=%d l=%d drv=%s' \
+            'BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent' \
+            'A52GDSC CX_VDD_PARENT_GET_V1 dev=%s rc=%d' \
+            'A52GDSC CX_VDD_PARENT_VOTE_V1 name=%s rc=%d' \
+            'A52GDSC CX_VDD_PARENT_UNVOTE_V1 name=%s rc=%d' \
+            'A52GDSC CX_VDD_PARENT_STATE_V1 name=%s enabled=%d' \
             'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
-            'G238 RP gd cx-probes=%d stage=%d rc=%d' \
-            '3d9106c.qcom,gdsc' \
-            'parent-supply' \
-            'vdd_parent-supply' \
-            'KGPPOST 230 sl-in d=' \
-            'KGPPOST 230 fw n=' \
-            'KGPPOST 230 dl s=' \
             'KGPPOST 230 cxw cand r=' \
-            'KGPPOST 230 cxw match r=' \
             'KGPPOST 230 cxw probe r=' \
-            'KGPPOST 230 cxw attach-in a=' \
-            'KGPPOST 230 cxw attach-out rc=' \
-            'A52GDSC GPU_CX_PROFILE_V1' \
-            'A52GDSC GPU_GX_PROFILE_V2' \
-            'KGPPOST' \
-            'OFPOP enter' \
-            'P3P enter n=%d dev=%s drv=%s'; do
+            '3d9106c.qcom,gdsc' \
+            'A52GDSC GPU_CX_PROFILE_V1'; do
             grep -aFq "$marker" "$OUT/compile/Image"
           done
-          ! grep -aFq 'BOOT rs=ready phase=237 focus=ofpop-probe' "$OUT/compile/Image"
+          ! grep -aFq 'BOOT rs=ready phase=238 focus=gpu-supplier-broad' "$OUT/compile/Image"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          audit = json.loads(Path('phase238-out/final-audit.json').read_text())
-          assert audit['phase'] == 238
-          assert audit['base_phase'] == 237
-          assert audit['functional_base_phase'] == 233
+          audit = json.loads(Path('phase239-out/final-audit.json').read_text())
+          assert audit['phase'] == 239
+          assert audit['base_phase'] == 238
           assert audit['hardware_validated'] is False
-          assert audit['phase238_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
-          assert audit['phase238_platform_event_limit'] == 768
-          assert audit['phase238_driver_core_event_limit'] == 768
-          assert audit['phase238_cx_driver_walk_event_limit'] == 24
-          assert audit['phase238_phase230_journal_capacity'] == 128
-          assert audit['phase238_gdsc_property_limit'] == 40
-          assert audit['phase238_late_replay_ms'] == 155000
-          assert audit['phase238_platform_include_preflight'] is True
-          assert audit['phase238_broad_gpu_supplier_recorder'] is True
-          assert audit['phase238_gdsc_parent_diag_repair'] is True
-          assert audit['phase238_cx_late_journal_extension'] is True
-          assert audit['phase238_cx_driver_walk_extension'] is True
-          assert audit['phase238_controlflow_safety_pass'] is True
-          assert audit['phase238_retention_replay_timing_repair'] is True
-          assert audit['phase238_c_indent_sanitize'] is True
+          assert audit['phase239_gpu_cx_vdd_parent_restored'] is True
+          assert audit['phase239_parent_supply_ordering_retained'] is True
+          assert audit['phase239_driver_core_behavior_changed'] is False
           PY
           (cd "$OUT" && sha256sum -c SHA256SUMS)
 
-      - name: Upload Phase 238 candidate
+      - name: Upload Phase 239 candidate
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase238-BROAD-GPU-SUPPLIER-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
-          path: phase238-out
+          name: A52XQ-Phase239-GPU-CX-VDD-PARENT-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase239-out
           if-no-files-found: error
           retention-days: 30

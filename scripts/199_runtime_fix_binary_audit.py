@@ -7,6 +7,7 @@ from pathlib import Path
 PATH = Path("scripts/199_ci.sh")
 PHASE217_PATH = Path("scripts/217_ci.sh")
 PHASE239_IDENTITY_PATH = Path("scripts/239_phase238_identity_overlay.py")
+PHASE240_IDENTITY_PATH = Path("scripts/240_phase239_identity_overlay.py")
 
 OLD = "for marker in 'A52R0199' 'phase199 triple-copy RS+CRC32C recorder enabled'"
 NEW = "for marker in 'phase199 triple-copy RS+CRC32C recorder enabled'"
@@ -25,6 +26,11 @@ PHASE239_BOOT = (
     "roots=%u copies=3 crc=crc32c"
 )
 PHASE239_IDENTITY_MARKER = "A52_PHASE239_GPU_CX_VDD_PARENT_IDENTITY_V1"
+PHASE240_BOOT = (
+    "BOOT rs=ready phase=240 focus=cx-supplier-gate-latch "
+    "roots=%u copies=3 crc=crc32c"
+)
+PHASE240_IDENTITY_MARKER = "A52_PHASE240_CX_SUPPLIER_GATE_LATCH_IDENTITY_V1"
 
 
 def repair_phase199_binary_audit() -> None:
@@ -53,8 +59,15 @@ def phase239_identity_present() -> bool:
     return PHASE239_IDENTITY_MARKER in text and PHASE239_BOOT in text
 
 
+def phase240_identity_present() -> bool:
+    if not PHASE240_IDENTITY_PATH.is_file():
+        return False
+    text = PHASE240_IDENTITY_PATH.read_text(encoding="utf-8")
+    return PHASE240_IDENTITY_MARKER in text and PHASE240_BOOT in text
+
+
 def repair_final_identity_text(text: str, target_boot: str, label: str) -> str:
-    known = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT)
+    known = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT, PHASE240_BOOT)
 
     target_count = text.count(target_boot)
     stale = tuple(marker for marker in known if marker != target_boot)
@@ -109,6 +122,18 @@ def self_test() -> None:
     ) != phase239:
         raise AssertionError("Phase 239 final identity audit repair is not idempotent")
 
+    phase240 = repair_final_identity_text(
+        prefix + PHASE239_BOOT + suffix,
+        PHASE240_BOOT,
+        "fixture/phase240",
+    )
+    if PHASE240_BOOT not in phase240 or PHASE239_BOOT in phase240:
+        raise AssertionError("Phase 240 final identity audit repair failed")
+    if repair_final_identity_text(
+        phase240, PHASE240_BOOT, "fixture/phase240-idempotent"
+    ) != phase240:
+        raise AssertionError("Phase 240 final identity audit repair is not idempotent")
+
     print("final binary identity audit phase-awareness self-test: PASS")
 
 
@@ -117,7 +142,10 @@ def repair_final_identity_audit() -> None:
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
 
-    if phase239_identity_present():
+    if phase240_identity_present():
+        target_boot = PHASE240_BOOT
+        phase = "Phase 240"
+    elif phase239_identity_present():
         target_boot = PHASE239_BOOT
         phase = "Phase 239"
     else:

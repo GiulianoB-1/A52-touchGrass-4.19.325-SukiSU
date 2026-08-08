@@ -8,6 +8,7 @@ on:
     branches:
       - agent/a52-phase227-odspost-retention-v1
       - agent/a52-phase233-final-graphics-parity-v1
+      - agent/a52-phase238-broad-gpu-supplier-recorder-v1
     paths:
       - .github/workflows/213-a52-ion-transaction-trace.yml
       - scripts/218_payload.py
@@ -19,6 +20,7 @@ on:
       - scripts/227_phase226_retention_wrapper.py
       - scripts/227_design.md
       - scripts/227_trigger.txt
+      - scripts/238*
   pull_request:
     branches:
       - agent/a52-phase226-odsign-gate-v1

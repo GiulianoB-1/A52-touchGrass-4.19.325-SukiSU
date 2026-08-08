@@ -17,6 +17,7 @@ OVERLAYS = (
     ("238_phase237_platform_include_preflight.py", "Phase 238 platform include preflight"),
     ("239_phase238_cx_vdd_parent_fix.py", "Phase 239 GPU CX vdd_parent fix"),
     ("238_phase237_broad_gpu_supplier_overlay.py", "Phase 238 broad GPU supplier recorder"),
+    ("239_phase238_runtime_identity.py", "Phase 239 runtime identity"),
     ("238_phase237_gdsc_parent_diag_repair.py", "Phase 238 GDSC parent-supply diagnostic repair"),
     ("238_phase237_cx_journal_extension.py", "Phase 238 exact CX late-journal extension"),
     ("238_phase237_cx_driver_walk_extension.py", "Phase 238 exact CX pre-match driver-walk extension"),
@@ -28,6 +29,7 @@ EXPECTED_PHASE239_ORDER = (
     "238_phase237_platform_include_preflight.py",
     "239_phase238_cx_vdd_parent_fix.py",
     "238_phase237_broad_gpu_supplier_overlay.py",
+    "239_phase238_runtime_identity.py",
     "238_phase237_gdsc_parent_diag_repair.py",
     "238_phase237_cx_journal_extension.py",
     "238_phase237_cx_driver_walk_extension.py",
@@ -95,6 +97,10 @@ def phase239_self_test() -> int:
     ):
         if token not in cx:
             raise RuntimeError(f"Phase 239 CX fix source missing {token}")
+
+    identity = (ROOT / "239_phase238_runtime_identity.py").read_text(encoding="utf-8")
+    if "BOOT rs=ready phase=239 focus=cx-vdd-parent-fix" not in identity:
+        raise RuntimeError("Phase 239 runtime identity is missing")
 
     print(
         "Phase 239 post-parity wrapper self-test: PASS "

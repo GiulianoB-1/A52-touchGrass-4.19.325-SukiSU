@@ -9,6 +9,7 @@ on:
       - agent/a52-phase239-gpu-cx-vdd-parent-v1
     paths:
       - .github/workflows/238-a52-broad-gpu-supplier-recorder.yml
+      - scripts/199_runtime_fix_binary_audit.py
       - scripts/227_phase226_retention_wrapper.py
       - scripts/230_phase229_driver_core_wrapper.py
       - scripts/234_repair_phase230_layout.py
@@ -56,6 +57,7 @@ jobs:
           python3 scripts/234_repair_phase230_layout.py
           python3 scripts/233_payload.py
           python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
             scripts/227_phase226_retention_wrapper.py \
             scripts/230_phase229_driver_core_wrapper.py \
             scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
@@ -64,6 +66,7 @@ jobs:
             scripts/238_phase237_cx_driver_walk_extension.py \
             scripts/238_phase237_retention_replay_timing_repair.py \
             scripts/238_package.py
+          python3 scripts/199_runtime_fix_binary_audit.py --self-test
           python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
           python3 scripts/239_phase238_identity_overlay.py --self-test
           python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
@@ -74,6 +77,8 @@ jobs:
       - name: Verify Phase 239 source scope
         run: |
           set -Eeuo pipefail
+          grep -Fq 'PHASE239_BOOT' scripts/199_runtime_fix_binary_audit.py
+          grep -Fq 'PHASE239_IDENTITY_MARKER' scripts/199_runtime_fix_binary_audit.py
           grep -Fq 'A52_PHASE239_GPU_CX_VDD_PARENT_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
           grep -Fq 'vdd_parent-supply' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
           grep -Fq 'devm_regulator_get(&pdev->dev' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py

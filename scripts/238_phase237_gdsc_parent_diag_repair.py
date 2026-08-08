@@ -3,9 +3,10 @@
 
 Phase 233 preserves regulator ordering through TouchGrass's `parent-supply`.
 The original Phase 238 helper accidentally used `vdd_parent-supply` for its
-parent-present state. Replace those three generated diagnostic references with
-`parent-supply`, then retain one additional `vdd_parent-supply` phandle trace as
-a negative/control observation. Refuse any unexpected source shape.
+parent-present diagnostics. Phase 239 also adds a *functional*
+`vdd_parent-supply` lookup inside the real GDSC probe, so the repair must never
+do a file-global replacement. Rewrite only the Phase 238 helper block, retain
+one helper control phandle trace, and leave the functional probe untouched.
 """
 from __future__ import annotations
 
@@ -17,40 +18,69 @@ TARGET = Path("drivers/regulator/a52-legacy-gdsc-regulator.c")
 MARKER = "A52_PHASE238_GDSC_PROVIDER_TRACE_V1"
 OLD = '"vdd_parent-supply"'
 NEW = '"parent-supply"'
-EXPECTED_OLD_COUNT = 3
+EXPECTED_HELPER_OLD_COUNT = 3
 PHANDLE_OLD = 'a52_g238_gd_phandle(pdev, "vdd_parent-supply");'
 PHANDLE_NEW = 'a52_g238_gd_phandle(pdev, "parent-supply");'
+PROBE_ANCHOR = "static int a52_legacy_gdsc_probe("
+
+
+def helper_split(text: str, label: str) -> tuple[str, str]:
+    positions: list[int] = []
+    start = 0
+    while True:
+        idx = text.find(PROBE_ANCHOR, start)
+        if idx < 0:
+            break
+        positions.append(idx)
+        start = idx + 1
+    if len(positions) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one GDSC probe anchor, found {len(positions)}"
+        )
+    idx = positions[0]
+    return text[:idx], text[idx:]
 
 
 def repair(text: str, label: str) -> str:
     if MARKER not in text:
         raise RuntimeError(f"{label}: missing Phase 238 GDSC trace marker")
-    old_count = text.count(OLD)
-    if old_count != EXPECTED_OLD_COUNT:
+
+    helper, functional = helper_split(text, label)
+    old_count = helper.count(OLD)
+    if old_count != EXPECTED_HELPER_OLD_COUNT:
         raise RuntimeError(
-            f"{label}: expected {EXPECTED_OLD_COUNT} diagnostic {OLD} references, "
-            f"found {old_count}"
+            f"{label}: expected {EXPECTED_HELPER_OLD_COUNT} diagnostic {OLD} "
+            f"references in helper block, found {old_count}"
         )
-    if text.count(PHANDLE_OLD) != 1:
-        raise RuntimeError(f"{label}: expected exactly one old parent phandle trace")
+    if helper.count(PHANDLE_OLD) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one old parent phandle trace in helper block"
+        )
 
-    repaired = text.replace(OLD, NEW)
-    if OLD in repaired:
-        raise RuntimeError(f"{label}: stale {OLD} diagnostic reference remains")
-    if repaired.count(PHANDLE_NEW) != 1:
-        raise RuntimeError(f"{label}: expected exactly one corrected parent phandle trace")
+    repaired_helper = helper.replace(OLD, NEW)
+    if OLD in repaired_helper:
+        raise RuntimeError(f"{label}: stale helper diagnostic {OLD} remains")
+    if repaired_helper.count(PHANDLE_NEW) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one corrected parent phandle trace"
+        )
 
-    # Keep the old spelling only as a second explicit control trace. The
-    # `parent=` state and the primary phandle trace now use `parent-supply`.
-    repaired = repaired.replace(
+    # Keep the old spelling only as a second explicit diagnostic/control trace.
+    repaired_helper = repaired_helper.replace(
         PHANDLE_NEW,
         PHANDLE_NEW + "\n\\t" + PHANDLE_OLD,
         1,
     )
-    if repaired.count(PHANDLE_NEW) != 1 or repaired.count(PHANDLE_OLD) != 1:
+    if repaired_helper.count(PHANDLE_NEW) != 1 or repaired_helper.count(PHANDLE_OLD) != 1:
         raise RuntimeError(f"{label}: dual parent phandle trace verification failed")
-    if repaired.count(OLD) != 1:
-        raise RuntimeError(f"{label}: old spelling must remain only in control phandle trace")
+    if repaired_helper.count(OLD) != 1:
+        raise RuntimeError(
+            f"{label}: helper old spelling must remain only in control phandle trace"
+        )
+
+    repaired = repaired_helper + functional
+    if functional not in repaired:
+        raise RuntimeError(f"{label}: functional probe was unexpectedly modified")
     return repaired
 
 
@@ -104,21 +134,44 @@ def locate_generated(args: list[str], cwd: Path | None = None) -> Path:
 
 
 def self_test() -> None:
-    fixture = (
+    helper = (
         "/* A52_PHASE238_GDSC_PROVIDER_TRACE_V1 */\n"
         'a("vdd_parent-supply");\n'
         'b("vdd_parent-supply");\n'
         'a52_g238_gd_phandle(pdev, "vdd_parent-supply");\n'
-        'functional("parent-supply");\n'
+        'diagnostic("parent-supply");\n'
     )
+    probe = (
+        "static int a52_legacy_gdsc_probe(struct platform_device *pdev)\n"
+        "{\n"
+        '    functional("vdd_parent-supply");\n'
+        '    ordering("parent-supply");\n'
+        "    return 0;\n"
+        "}\n"
+    )
+    fixture = helper + probe
     repaired = repair(fixture, "fixture")
-    if repaired.count(PHANDLE_NEW) != 1 or repaired.count(PHANDLE_OLD) != 1:
+    repaired_helper, repaired_probe = helper_split(repaired, "fixture/repaired")
+    if repaired_helper.count(PHANDLE_NEW) != 1 or repaired_helper.count(PHANDLE_OLD) != 1:
         raise AssertionError("Phase 238 parent diagnostic repair self-test failed")
-    if repaired.count(OLD) != 1 or repaired.count(NEW) != 4:
-        raise AssertionError("Phase 238 parent property count self-test failed")
+    if repaired_helper.count(OLD) != 1:
+        raise AssertionError("Phase 238 helper old-property scope self-test failed")
+    if repaired_probe != probe:
+        raise AssertionError("Phase 239 functional vdd_parent probe was modified")
+    if repaired_probe.count(OLD) != 1:
+        raise AssertionError("Phase 239 functional vdd_parent property was not preserved")
 
-    # Regression test for the inherited-builder layout: the workflow runs from
-    # the repository root while the generated kernel source lives in gki/common.
+    # Also prove backward compatibility with the original Phase 238 source,
+    # where no functional vdd_parent lookup follows the helper block.
+    legacy_probe = (
+        "static int a52_legacy_gdsc_probe(struct platform_device *pdev)\n"
+        "{\n    return 0;\n}\n"
+    )
+    legacy = repair(helper + legacy_probe, "fixture/phase238")
+    legacy_helper, legacy_functional = helper_split(legacy, "fixture/phase238/repaired")
+    if legacy_helper.count(OLD) != 1 or OLD in legacy_functional:
+        raise AssertionError("Phase 238 backward compatibility self-test failed")
+
     with tempfile.TemporaryDirectory() as temp:
         repo = Path(temp)
         generated = repo / "gki/common"
@@ -131,7 +184,10 @@ def self_test() -> None:
                 f"Phase 238 generated-root locator selected {found}, expected {generated}"
             )
 
-    print("Phase 238 GDSC parent-supply diagnostic repair self-test: PASS", flush=True)
+    print(
+        "Phase 239-safe GDSC parent diagnostic repair self-test: PASS",
+        flush=True,
+    )
 
 
 def main() -> int:
@@ -145,8 +201,8 @@ def main() -> int:
     repaired = repair(original, str(path))
     path.write_text(repaired, encoding="utf-8")
     print(
-        "Phase 238 GDSC parent diagnostic repair: parent-supply primary, "
-        f"vdd_parent-supply control trace retained in {path}",
+        "Phase 238 GDSC parent diagnostic repair: helper uses parent-supply, "
+        f"functional vdd_parent-supply preserved in {path}",
         flush=True,
     )
     return 0

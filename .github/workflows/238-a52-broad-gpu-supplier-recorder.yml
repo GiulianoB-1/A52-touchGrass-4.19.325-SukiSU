@@ -24,6 +24,7 @@ on:
       - scripts/238_phase237_controlflow_safety_overlay.py
       - scripts/238_phase237_retention_replay_timing_repair.py
       - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase233_fb_msm_audit_repair.py
       - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
       - scripts/239_phase238_identity_overlay.py
       - scripts/237_package.py
@@ -56,10 +57,13 @@ jobs:
           set -Eeuo pipefail
           python3 scripts/234_repair_phase230_layout.py
           python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
           python3 -m py_compile \
             scripts/199_runtime_fix_binary_audit.py \
             scripts/227_phase226_retention_wrapper.py \
             scripts/230_phase229_driver_core_wrapper.py \
+            scripts/239_phase233_fb_msm_audit_repair.py \
             scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
             scripts/239_phase238_identity_overlay.py \
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
@@ -79,6 +83,9 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'PHASE239_BOOT' scripts/199_runtime_fix_binary_audit.py
           grep -Fq 'PHASE239_IDENTITY_MARKER' scripts/199_runtime_fix_binary_audit.py
+          grep -Fq 'CONFIG_FB=n is the parent-level' scripts/239_phase233_fb_msm_audit_repair.py
+          grep -Fq '"# CONFIG_FB is not set"' scripts/233_package.py
+          ! grep -Fq '"# CONFIG_FB_MSM is not set"' scripts/233_package.py
           grep -Fq 'A52_PHASE239_GPU_CX_VDD_PARENT_V1' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
           grep -Fq 'vdd_parent-supply' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
           grep -Fq 'devm_regulator_get(&pdev->dev' scripts/239_phase238_gpu_cx_vdd_parent_overlay.py

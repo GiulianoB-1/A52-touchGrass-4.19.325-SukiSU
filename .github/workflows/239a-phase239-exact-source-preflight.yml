@@ -1,0 +1,60 @@
+name: 239a - Phase 239 exact-source preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase239-cx-vdd-parent-fix-v1
+    paths:
+      - .github/workflows/239a-phase239-exact-source-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct exact Phase 233 GDSC and apply Phase 239
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/233_payload.py
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          def load(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              mod = importlib.util.module_from_spec(spec)
+              assert spec.loader is not None
+              spec.loader.exec_module(mod)
+              return mod
+
+          root = Path('scripts')
+          p232 = load('p232', root / '232_phase231_optional_aon_wrapper.py')
+          p233 = load('p233', root / '233_phase232_final_graphics_parity_wrapper.py')
+          p239 = load('p239', root / '239_phase238_cx_vdd_parent_fix.py')
+
+          fixture = (root / '231_fixtures/a52-legacy-gdsc-after.c').read_text(encoding='utf-8')
+          phase232 = p232.patch_gdsc(fixture, 'exact/phase232')
+          phase233 = p233.patch_gdsc(phase232, 'exact/phase233')
+          phase239 = p239.patch_gdsc(phase233, 'exact/phase239')
+          p239.validate(phase239, 'exact/phase239')
+
+          assert p239.patch_gdsc(phase239, 'exact/idempotent') == phase239
+          assert phase239.count('A52_PHASE239_GPU_CX_VDD_PARENT_V1') == 1
+          assert phase239.count('devm_regulator_get(&pdev->dev,') == 1
+          assert phase239.count('"vdd_parent-supply"') == 1
+          assert 'init_data->supply_regulator = "parent"' in phase239
+          assert 'A52_GDSC_PROFILE_GPU_GX' in phase239
+          assert 'A52_GDSC_PROFILE_GPU_CX' in phase239
+          assert 'A52GDSC GPU_GX_PROFILE_V2' in phase239
+          assert 'A52GDSC GPU_CX_PROFILE_V1' in phase239
+
+          out = Path('/tmp/a52-legacy-gdsc-phase239.c')
+          out.write_text(phase239, encoding='utf-8')
+          print('Phase 239 exact Phase233-source transformation: PASS')
+          print(f'generated_bytes={len(phase239.encode())}')
+          PY
+          git diff --check

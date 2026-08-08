@@ -1,0 +1,15 @@
+A52 Phase 239 hardware validation
+
+1. Flash only package/boot.img from the CI-audited Phase 239 artifact.
+2. Boot once and leave the phone untouched through the normal ~210 s failure window if Android does not reach UI.
+3. Collect ramoops with the existing OrangeFox R48 collector v3.2.
+4. Keep the frozen raw 1 MiB snapshot untouched.
+5. Decode with the bundled R48/RS48 transport-fusion decoder.
+
+Expected retained evidence:
+- BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent
+- A52GDSC CX_VDD_PARENT_GET_V1 ... rc=0, or an exact deferred/error result
+- A52GDSC CX_VDD_PARENT_VOTE_V1 ... rc=0 when CX is enabled/accessed
+- 3d9106c.qcom,gdsc bound to a52-legacy-gdsc-regulator
+- KGSL supplier checking advances beyond GPU CX
+- adreno_probe() is entered, or a later exact supplier/GMU/firmware/IOMMU blocker is retained

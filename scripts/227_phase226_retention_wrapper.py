@@ -25,7 +25,7 @@ OVERLAYS = (
     ("238_phase237_retention_replay_timing_repair.py", "Phase 238 retention-safe replay timing repair"),
     ("238_phase237_c_indent_sanitize.py", "Phase 238 C indentation sanitize"),
     ("239_phase238_identity_overlay.py", "Phase 239 runtime identity"),
-    ("240_phase239_cx_frozen_latch_overlay.py", "Phase 240 CX frozen supplier-gate latch"),
+    ("240_phase239_cx_frozen_latch_overlay_v2.py", "Phase 240 CX frozen supplier-gate latch (post-sanitize compatible)"),
     ("240_phase239_identity_overlay.py", "Phase 240 runtime identity"),
 )
 EXPECTED_PHASE240_ORDER = tuple(name for name, _label in OVERLAYS)
@@ -87,6 +87,17 @@ def phase240_self_test() -> int:
     ):
         if token not in latch:
             raise RuntimeError(f"Phase 240 latch overlay missing {token}")
+
+    compat = ROOT / "240_phase239_cx_frozen_latch_overlay_v2.py"
+    compat_result = subprocess.run(
+        [sys.executable, str(compat), "--self-test"],
+        check=False,
+    )
+    if compat_result.returncode:
+        raise RuntimeError(
+            "Phase 240 post-sanitize driver-walk compatibility self-test failed: "
+            f"rc={compat_result.returncode}"
+        )
 
     identity = (ROOT / "240_phase239_identity_overlay.py").read_text(
         encoding="utf-8"

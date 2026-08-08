@@ -18,6 +18,10 @@ PHASE238_BOOT = (
     "BOOT rs=ready phase=238 focus=gpu-supplier-broad "
     "roots=%u copies=3 crc=crc32c"
 )
+PHASE239_BOOT = (
+    "BOOT rs=ready phase=239 focus=cx-vdd-parent-fix "
+    "roots=%u copies=3 crc=crc32c"
+)
 
 
 def repair_phase199_binary_audit() -> None:
@@ -39,42 +43,45 @@ def repair_phase199_binary_audit() -> None:
     )
 
 
-def repair_phase238_final_identity_audit() -> None:
-    """Update only the final Phase 217 Image audit for the Phase 238 identity."""
+def repair_phase239_final_identity_audit() -> None:
+    """Require the exact Phase 239 runtime identity in the inherited final Image audit."""
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
 
     text = PHASE217_PATH.read_text(encoding="utf-8")
-    if PHASE238_BOOT in text and PHASE210_BOOT not in text and PHASE237_BOOT not in text:
-        print("Phase 217 final binary audit already expects Phase 238 recorder identity")
+    stale = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT)
+
+    if PHASE239_BOOT in text and not any(marker in text for marker in stale):
+        if text.count(PHASE239_BOOT) != 1:
+            raise SystemExit(
+                "Phase 239 final boot-marker audit is not exact: "
+                f"found {text.count(PHASE239_BOOT)} copies"
+            )
+        print("Phase 217 final binary audit already expects Phase 239 recorder identity")
         return
 
-    stale_count = text.count(PHASE210_BOOT) + text.count(PHASE237_BOOT)
-    if stale_count != 1:
+    stale_count = sum(text.count(marker) for marker in stale)
+    if stale_count != 1 or PHASE239_BOOT in text:
         raise SystemExit(
-            "expected exactly one stale Phase 210/237 final boot audit, "
-            f"found {stale_count}"
+            "expected exactly one stale Phase 210/237/238 final boot audit and no "
+            f"Phase 239 audit, found stale={stale_count} phase239={text.count(PHASE239_BOOT)}"
         )
 
-    if PHASE237_BOOT in text:
-        text = text.replace(PHASE237_BOOT, PHASE238_BOOT, 1)
-    else:
-        text = text.replace(PHASE210_BOOT, PHASE238_BOOT, 1)
+    for marker in stale:
+        if marker in text:
+            text = text.replace(marker, PHASE239_BOOT, 1)
+            break
     PHASE217_PATH.write_text(text, encoding="utf-8")
 
     verify = PHASE217_PATH.read_text(encoding="utf-8")
-    if (
-        PHASE210_BOOT in verify
-        or PHASE237_BOOT in verify
-        or verify.count(PHASE238_BOOT) != 1
-    ):
-        raise SystemExit("Phase 238 final boot-marker audit repair failed")
-    print("Phase 217 final binary audit updated for Phase 238 recorder identity")
+    if any(marker in verify for marker in stale) or verify.count(PHASE239_BOOT) != 1:
+        raise SystemExit("Phase 239 final boot-marker audit repair failed")
+    print("Phase 217 final binary audit updated for Phase 239 recorder identity")
 
 
 def main() -> int:
     repair_phase199_binary_audit()
-    repair_phase238_final_identity_audit()
+    repair_phase239_final_identity_audit()
     return 0
 
 

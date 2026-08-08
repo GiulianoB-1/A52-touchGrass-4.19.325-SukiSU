@@ -11,6 +11,7 @@ does not change matching, supplier checks, return codes, or device state.
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 PLATFORM = Path("drivers/base/platform.c")
@@ -85,6 +86,12 @@ static bool a52_r230_gpu_consumer(const struct device *dev)
 }
 '''
 
+TARGETS = (
+    (PLATFORM, PLATFORM_OLD, PLATFORM_NEW, "A52_PHASE238_CX_JOURNAL_PLATFORM_V1"),
+    (DD, DD_OLD, DD_NEW, "A52_PHASE238_CX_JOURNAL_DD_V1"),
+    (CORE, CORE_OLD, CORE_NEW, "A52_PHASE238_CX_JOURNAL_CORE_V1"),
+)
+
 
 def replace_exact(text: str, old: str, new: str, label: str) -> str:
     if new in text:
@@ -93,6 +100,63 @@ def replace_exact(text: str, old: str, new: str, label: str) -> str:
     if count != 1:
         raise RuntimeError(f"{label}: expected exactly one Phase 230 helper, found {count}")
     return text.replace(old, new, 1)
+
+
+def candidate_roots(args: list[str], cwd: Path) -> list[Path]:
+    roots: list[Path] = []
+    for value in args:
+        if value.startswith("-"):
+            continue
+        path = Path(value)
+        if not path.is_absolute():
+            path = cwd / path
+        roots.extend((path, path.parent))
+    roots.extend((cwd / "workspace/gki-phase199-src", cwd / "gki/common"))
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        key = root.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return unique
+
+
+def root_has_expected_sources(root: Path) -> bool:
+    for rel, old, new, marker in TARGETS:
+        path = root / rel
+        if not path.is_file():
+            return False
+        text = path.read_text(encoding="utf-8")
+        if marker in text:
+            if text.count(marker) != 1:
+                return False
+            continue
+        if new in text or text.count(old) != 1:
+            return False
+    return True
+
+
+def locate_generated(args: list[str], cwd: Path | None = None) -> Path:
+    base = cwd if cwd is not None else Path.cwd()
+    matches = [root for root in candidate_roots(args, base)
+               if root_has_expected_sources(root)]
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for root in matches:
+        key = root.resolve()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    if len(unique) != 1:
+        rendered = ", ".join(str(root) for root in unique) or "none"
+        raise RuntimeError(
+            "expected exactly one generated Phase 230/238 CX journal source root, "
+            f"found {len(unique)}: {rendered}"
+        )
+    return unique[0]
 
 
 def patch_one(path: Path, old: str, new: str, marker: str) -> None:
@@ -117,6 +181,22 @@ def self_test() -> None:
             raise AssertionError(f"{label}: CX journal self-test failed")
         if replace_exact(patched, old, new, f"fixture/{label}/idempotent") != patched:
             raise AssertionError(f"{label}: CX journal patch is not idempotent")
+
+    # Regression test for the inherited-builder layout.  The wrapper executes
+    # from the repository root while the generated kernel tree is gki/common.
+    with tempfile.TemporaryDirectory() as temp:
+        repo = Path(temp)
+        generated = repo / "gki/common"
+        for rel, old, _new, _marker in TARGETS:
+            path = generated / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(old, encoding="utf-8")
+        found = locate_generated([], cwd=repo)
+        if found.resolve() != generated.resolve():
+            raise AssertionError(
+                f"CX journal generated-root locator selected {found}, expected {generated}"
+            )
+
     print("Phase 238 CX journal extension self-test: PASS", flush=True)
 
 
@@ -124,13 +204,13 @@ def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
         return 0
-    patch_one(PLATFORM, PLATFORM_OLD, PLATFORM_NEW,
-              "A52_PHASE238_CX_JOURNAL_PLATFORM_V1")
-    patch_one(DD, DD_OLD, DD_NEW, "A52_PHASE238_CX_JOURNAL_DD_V1")
-    patch_one(CORE, CORE_OLD, CORE_NEW, "A52_PHASE238_CX_JOURNAL_CORE_V1")
+
+    root = locate_generated(sys.argv[1:])
+    for rel, old, new, marker in TARGETS:
+        patch_one(root / rel, old, new, marker)
     print(
         "Phase 238 CX journal extension: exact CX match/attach/supplier path will "
-        "reuse the inherited KGPPOST 230 late journal",
+        f"reuse the inherited KGPPOST 230 late journal in {root}",
         flush=True,
     )
     return 0

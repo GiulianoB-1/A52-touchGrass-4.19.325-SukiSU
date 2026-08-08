@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct exact Phase 233 GDSC and apply Phase 239
+      - name: Reconstruct exact Phase 233 GDSC through Phase 239 and retained tracing
         run: |
           set -Eeuo pipefail
           python3 scripts/233_payload.py
@@ -35,6 +35,10 @@ jobs:
           p232 = load('p232', root / '232_phase231_optional_aon_wrapper.py')
           p233 = load('p233', root / '233_phase232_final_graphics_parity_wrapper.py')
           p239 = load('p239', root / '239_phase238_cx_vdd_parent_fix.py')
+          p238b = load('p238b', root / '238_phase237_broad_gpu_supplier_overlay.py')
+          p238r = load('p238r', root / '238_phase237_gdsc_parent_diag_repair.py')
+          p238c = load('p238c', root / '238_phase237_controlflow_safety_overlay.py')
+          p238i = load('p238i', root / '238_phase237_c_indent_sanitize.py')
 
           fixture = (root / '231_fixtures/a52-legacy-gdsc-after.c').read_text(encoding='utf-8')
           phase232 = p232.patch_gdsc(fixture, 'exact/phase232')
@@ -52,9 +56,34 @@ jobs:
           assert 'A52GDSC GPU_GX_PROFILE_V2' in phase239
           assert 'A52GDSC GPU_CX_PROFILE_V1' in phase239
 
-          out = Path('/tmp/a52-legacy-gdsc-phase239.c')
-          out.write_text(phase239, encoding='utf-8')
+          traced = p238b.patch_gdsc(phase239, 'exact/phase238-broad')
+          assert traced.count('"vdd_parent-supply"') == 4, traced.count('"vdd_parent-supply"')
+          repaired = p238r.repair(traced, 'exact/phase238-parent-repair')
+          # One functional lookup + one explicit diagnostic control trace.
+          assert repaired.count('"vdd_parent-supply"') == 2, repaired.count('"vdd_parent-supply"')
+          probe = repaired[repaired.index('static int a52_legacy_gdsc_probe('):]
+          assert 'of_find_property(pdev->dev.of_node, "vdd_parent-supply", NULL)' in probe
+          assert 'devm_regulator_get(&pdev->dev' in probe
+          assert '"vdd_parent"' in probe
+
+          safe = p238c.patch_gdsc(repaired)
+          normalized, changed = p238i.normalize_leading_tab_escapes(safe)
+          assert 'A52_PHASE238_GDSC_PROVIDER_TRACE_V1' in normalized
+          assert 'A52_PHASE238_CONTROLFLOW_SAFE_V1' in normalized
+          assert 'A52_PHASE239_GPU_CX_VDD_PARENT_V1' in normalized
+          assert 'devm_regulator_get' in normalized
+          assert 'regulator_set_voltage' in normalized
+          assert 'regulator_enable' in normalized
+          assert 'regulator_disable' in normalized
+          assert 'A52GDSC CX_VDD_PARENT get rc=%d' in normalized
+          assert 'A52GDSC CX_VDD_PARENT enable-vote rc=%d' in normalized
+          assert 'A52GDSC CX_VDD_PARENT disable-unvote rc=%d' in normalized
+
+          out = Path('/tmp/a52-legacy-gdsc-phase239-traced.c')
+          out.write_text(normalized, encoding='utf-8')
           print('Phase 239 exact Phase233-source transformation: PASS')
-          print(f'generated_bytes={len(phase239.encode())}')
+          print('Phase 239 + retained Phase238 GDSC overlay composition: PASS')
+          print(f'generated_bytes={len(normalized.encode())} indent_repairs={changed}')
           PY
+          python3 scripts/238_phase237_gdsc_parent_diag_repair.py --self-test
           git diff --check

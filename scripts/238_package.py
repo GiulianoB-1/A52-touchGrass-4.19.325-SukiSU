@@ -66,6 +66,11 @@ def verify_phase238_image(image: Path) -> None:
         b"KGPPOST 230 sl-in d=",
         b"KGPPOST 230 fw n=",
         b"KGPPOST 230 dl s=",
+        b"KGPPOST 230 cxw cand r=",
+        b"KGPPOST 230 cxw match r=",
+        b"KGPPOST 230 cxw probe r=",
+        b"KGPPOST 230 cxw attach-in a=",
+        b"KGPPOST 230 cxw attach-out rc=",
         b"KGPPOST",
         b"OFPOP enter",
         b"P3P enter n=%d dev=%s drv=%s",
@@ -107,6 +112,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "238_phase237_broad_gpu_supplier_overlay.py",
         "238_phase237_gdsc_parent_diag_repair.py",
         "238_phase237_cx_journal_extension.py",
+        "238_phase237_cx_driver_walk_extension.py",
         "238_phase237_controlflow_safety_overlay.py",
         "238_phase237_retention_replay_timing_repair.py",
         "238_phase237_c_indent_sanitize.py",
@@ -133,6 +139,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_broad_gpu_supplier_recorder": True,
         "phase238_gdsc_parent_diag_repair": True,
         "phase238_cx_late_journal_extension": True,
+        "phase238_cx_driver_walk_extension": True,
         "phase238_controlflow_safety_pass": True,
         "phase238_retention_replay_timing_repair": True,
         "phase238_c_indent_sanitize": True,
@@ -144,10 +151,13 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "kgsl-3d0@3d00000",
             "qfprom@780000",
             "CX-level RPMh suppliers and device-links",
+            "CX pre-platform-match driver iteration and competing OF matches",
         ],
         "phase238_recorder_filter_additions": ["G238*", "KGPPOST*"],
         "phase238_platform_event_limit": 768,
         "phase238_driver_core_event_limit": 768,
+        "phase238_cx_driver_walk_event_limit": 24,
+        "phase238_phase230_journal_capacity": 128,
         "phase238_gdsc_property_limit": 40,
         "phase238_late_replay_ms": 155000,
         "phase238_records": [
@@ -161,6 +171,10 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "every custom GDSC probe return code",
             "retention-safe 155-second late binding/supplier-chain replay",
             "exact CX platform-match/driver-core/supplier path retained in inherited KGPPOST 230 journal",
+            "CX device-attach entry/exit before the expected provider is reached",
+            "every OF-matching platform driver encountered by the exact CX device-side walk",
+            "match and probe returns for competing CX candidates and the exact compatibility driver",
+            "custom a52-legacy-gdsc-regulator driver registration walk entry/exit",
             "CX fwnode supplier records retained by the Phase 230 late journal when supplier checking runs",
             "existing Phase 230 KGSL direct/replay evidence",
             "platform include preflight for cumulative Phase 237 sources",
@@ -170,9 +184,10 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "C indentation sanitization after instrumentation",
         ],
         "phase238_question": (
-            "Why does 3d9106c.qcom,gdsc remain unbound: supplier gating before "
-            "platform probe, driver mismatch, or an exact failure inside the "
-            "Phase 233 gpu_cx_gdsc compatibility provider?"
+            "Why is the expected a52-legacy-gdsc-regulator never reached for "
+            "3d9106c.qcom,gdsc: no CX device attach walk, an earlier competing "
+            "OF match that stops the device-side walk, or missing custom-driver "
+            "registration traversal?"
         ),
         "phase238_touchgrass_reference_commit": TOUCHGRASS_COMMIT,
         "phase238_collector_compatibility": "OrangeFox R48 collector v3.2 unchanged",
@@ -190,8 +205,9 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "touchgrass_commit": TOUCHGRASS_COMMIT,
         "hardware_validated": False,
         "functional_base_phase": 233,
-        "change": "broad GPU supplier recorder with CX late journal and retention-safe replay",
+        "change": "GPU supplier recorder with CX pre-match driver-walk retention",
         "rs_roots": 48,
+        "phase230_journal_capacity": 128,
         "late_replay_ms": 155000,
     }
     (out / "BUILD-IDENTITY.json").write_text(
@@ -206,9 +222,9 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "earlier graphics/OF/KGSL instrumentation. It adds broad but GPU-focused\n"
         "records around driver-core supplier gating, platform probe, the Phase 233\n"
         "legacy GDSC provider, corrected parent-supply diagnostics, exact CX\n"
-        "match/supplier retention in the inherited late journal, and a late\n"
-        "155-second replay moved beyond the retention hole observed in the first\n"
-        "Phase 238 hardware capture.\n\n"
+        "match/supplier retention, and the pre-platform-match CX device/driver\n"
+        "walk in the inherited KGPPOST journal. The journal is bounded at 128\n"
+        "records and the late G238 replay remains at 155 seconds.\n\n"
         "Use the existing OrangeFox R48 collector v3.2 after one test boot.\n"
         "CI-validated only until hardware capture confirms behavior.\n",
         encoding="utf-8",

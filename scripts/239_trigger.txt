@@ -1,0 +1,24 @@
+PHASE 239 HARDWARE VALIDATION
+
+1. Flash only the Phase239 package/boot.img after SHA256SUMS verification.
+2. Attempt one normal boot and allow the same ~210 s failure window if Android does not finish.
+3. Collect ramoops with the existing OrangeFox R48 collector v3.2.
+4. Decode the untouched frozen 1 MiB image with the bundled R48/RS48 transport-fusion decoder.
+
+Required Phase239 identity/evidence:
+- BOOT rs=ready phase=239 focus=cx-vdd-parent-fix
+- A52GDSC CX_VDD_PARENT get rc=0
+- A52GDSC CX_VDD_PARENT enable-vote rc=0
+
+Success boundary:
+- 3d9106c.qcom,gdsc drv=a52-legacy-gdsc-regulator / bound state
+- KGSL supplier check no longer returns -517 because of 3d9106c
+- adreno/KGSL probe advances beyond the Phase238 supplier gate
+
+If it still defers, retain and inspect:
+- KGPPOST 230 cxw cand/match/probe/attach records
+- G238 D supplier lists and return codes
+- G238 GD probe stages
+- vdd_parent supplier driver/bind state
+
+Do not use decode-a52-recorder-v3.py or triple-only decoding for the late evidence.

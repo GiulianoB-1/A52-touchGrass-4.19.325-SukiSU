@@ -17,6 +17,11 @@ from pathlib import Path
 
 OLD_MS = "145000"
 NEW_MS = "155000"
+# Phase 238 helper bodies are injected from Python raw strings. Before the
+# later C-indentation sanitizer runs, indentation can therefore be represented
+# by the two literal characters "\\t" rather than an actual tab. Match either
+# representation without widening the timer scope beyond the named work item.
+C_GAP = r"(?:\s|\\t)*"
 
 
 @dataclass(frozen=True)
@@ -89,8 +94,9 @@ def locate_generated(arguments: list[str], cwd: Path | None = None) -> Path:
 
 def timer_pattern(work: str) -> re.Pattern[str]:
     return re.compile(
-        rf"(schedule_delayed_work\(\s*&{re.escape(work)}\s*,\s*"
-        rf"msecs_to_jiffies\(\s*)({OLD_MS}|{NEW_MS})(\s*\)\s*\)\s*;)",
+        rf"(schedule_delayed_work\({C_GAP}&{re.escape(work)}{C_GAP},{C_GAP}"
+        rf"msecs_to_jiffies\({C_GAP})({OLD_MS}|{NEW_MS})"
+        rf"({C_GAP}\){C_GAP}\){C_GAP};)",
         re.MULTILINE,
     )
 
@@ -147,65 +153,75 @@ def patch_one(path: Path, target: ReplayTarget) -> None:
     )
 
 
-def fake_source(target: ReplayTarget, timer_ms: str) -> str:
-    return f"""before
-schedule_delayed_work(&{target.work},
-                      msecs_to_jiffies({timer_ms}));
-schedule_delayed_work(&unrelated_work,
-                      msecs_to_jiffies({OLD_MS}));
-after
-"""
+def fake_source(target: ReplayTarget, timer_ms: str, escaped_tabs: bool) -> str:
+    indent = r"\t" if escaped_tabs else "\t"
+    continuation = (r"\t\t\t      " if escaped_tabs else "\t\t\t      ")
+    return (
+        "before\n"
+        f"{indent}schedule_delayed_work(&{target.work},\n"
+        f"{continuation}msecs_to_jiffies({timer_ms}));\n"
+        "schedule_delayed_work(&unrelated_work,\n"
+        f"                      msecs_to_jiffies({OLD_MS}));\n"
+        "after\n"
+    )
+
+
+def exercise_fixture(generated: Path, escaped_tabs: bool) -> None:
+    for target in TARGETS:
+        path = generated / target.rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(fake_source(target, OLD_MS, escaped_tabs), encoding="utf-8")
+
+    for target in TARGETS:
+        path = generated / target.rel
+        patch_one(path, target)
+        text = path.read_text(encoding="utf-8")
+        if target_timer_ms(text, target, str(path)) != NEW_MS:
+            raise AssertionError(f"replay timing self-test patch failed: {target.rel}")
+        if text.count(f"msecs_to_jiffies({OLD_MS})") != 1:
+            raise AssertionError(
+                f"unrelated 145 s timer was modified in self-test: {target.rel}"
+            )
+
+        # A second pass must be harmless.
+        before = text
+        patch_one(path, target)
+        after = path.read_text(encoding="utf-8")
+        if after != before:
+            raise AssertionError(f"replay timing patch is not idempotent: {target.rel}")
 
 
 def self_test() -> None:
     if OLD_MS == NEW_MS or len(TARGETS) != 2:
         raise AssertionError("Phase 238 replay timing repair constants are invalid")
 
-    # Reproduce the inherited-builder layout that caused the real failure:
+    # Reproduce the inherited-builder layout that caused the real failures:
     # wrapper cwd = repository root, generated kernel source = gki/common.
-    with tempfile.TemporaryDirectory() as temp:
-        repo = Path(temp)
-        generated = repo / "gki/common"
-        for target in TARGETS:
-            path = generated / target.rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(fake_source(target, OLD_MS), encoding="utf-8")
+    # Test both the raw-string pre-sanitizer form (literal "\\t") and the
+    # post-sanitizer form (real tabs) so sequencing cannot break this repair.
+    for escaped_tabs in (True, False):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            generated = repo / "gki/common"
+            exercise_fixture(generated, escaped_tabs)
 
-        # dd.c is intentionally not a Phase 238 delayed-work target. The old
-        # helper incorrectly required it to contain a 145 s replay timer.
-        dd = generated / "drivers/base/dd.c"
-        dd.parent.mkdir(parents=True, exist_ok=True)
-        dd.write_text("/* no Phase 238 delayed-work replay lives here */\n", encoding="utf-8")
+            # dd.c is intentionally not a Phase 238 delayed-work target. The old
+            # helper incorrectly required it to contain a 145 s replay timer.
+            dd = generated / "drivers/base/dd.c"
+            dd.parent.mkdir(parents=True, exist_ok=True)
+            dd.write_text("/* no Phase 238 delayed-work replay lives here */\n", encoding="utf-8")
 
-        found_from_repo = locate_generated([], cwd=repo)
-        if found_from_repo.resolve() != generated.resolve():
-            raise AssertionError(
-                f"repository-root locator failed: {found_from_repo} != {generated}"
-            )
-
-        found_from_kernel = locate_generated([], cwd=generated)
-        if found_from_kernel.resolve() != generated.resolve():
-            raise AssertionError(
-                f"kernel-root locator failed: {found_from_kernel} != {generated}"
-            )
-
-        for target in TARGETS:
-            path = generated / target.rel
-            patch_one(path, target)
-            text = path.read_text(encoding="utf-8")
-            if target_timer_ms(text, target, str(path)) != NEW_MS:
-                raise AssertionError(f"replay timing self-test patch failed: {target.rel}")
-            if text.count(f"msecs_to_jiffies({OLD_MS})") != 1:
+            found_from_repo = locate_generated([], cwd=repo)
+            if found_from_repo.resolve() != generated.resolve():
                 raise AssertionError(
-                    f"unrelated 145 s timer was modified in self-test: {target.rel}"
+                    f"repository-root locator failed: {found_from_repo} != {generated}"
                 )
 
-            # A second pass must be harmless.
-            before = text
-            patch_one(path, target)
-            after = path.read_text(encoding="utf-8")
-            if after != before:
-                raise AssertionError(f"replay timing patch is not idempotent: {target.rel}")
+            found_from_kernel = locate_generated([], cwd=generated)
+            if found_from_kernel.resolve() != generated.resolve():
+                raise AssertionError(
+                    f"kernel-root locator failed: {found_from_kernel} != {generated}"
+                )
 
     print("Phase 238 replay timing repair self-test: PASS", flush=True)
 

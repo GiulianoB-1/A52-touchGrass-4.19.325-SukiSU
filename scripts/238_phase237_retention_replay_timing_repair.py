@@ -20,7 +20,8 @@ NEW_MS = "155000"
 # Phase 238 helper bodies are injected from Python raw strings. Before the
 # later C-indentation sanitizer runs, indentation can therefore be represented
 # by the two literal characters "\\t" rather than an actual tab. Match either
-# representation without widening the timer scope beyond the named work item.
+# representation for whitespace, but scope the replacement to the exact
+# replay init function and named delayed-work item.
 C_GAP = r"(?:\s|\\t)*"
 
 
@@ -28,16 +29,19 @@ C_GAP = r"(?:\s|\\t)*"
 class ReplayTarget:
     rel: Path
     work: str
+    init: str
 
 
 TARGETS = (
     ReplayTarget(
         Path("drivers/base/platform.c"),
         "a52_g238_platform_replay_work",
+        "a52_g238_platform_replay_init",
     ),
     ReplayTarget(
         Path("drivers/regulator/a52-legacy-gdsc-regulator.c"),
         "a52_g238_gd_replay_work",
+        "a52_g238_gd_replay_init",
     ),
 )
 
@@ -92,23 +96,65 @@ def locate_generated(arguments: list[str], cwd: Path | None = None) -> Path:
     return unique[0]
 
 
-def timer_pattern(work: str) -> re.Pattern[str]:
+def init_body_span(text: str, target: ReplayTarget, label: str) -> tuple[int, int]:
+    signature = re.compile(
+        rf"static{C_GAP}int{C_GAP}__init{C_GAP}{re.escape(target.init)}"
+        rf"{C_GAP}\({C_GAP}void{C_GAP}\){C_GAP}\{{",
+        re.MULTILINE,
+    )
+    matches = list(signature.finditer(text))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one replay init function "
+            f"{target.init}, found {len(matches)}"
+        )
+
+    body_start = matches[0].end()
+    body_end = text.find("}", body_start)
+    if body_end < 0:
+        raise RuntimeError(f"{label}: replay init function {target.init} is unterminated")
+    return body_start, body_end
+
+
+def timer_pattern() -> re.Pattern[str]:
     return re.compile(
-        rf"(schedule_delayed_work\({C_GAP}&{re.escape(work)}{C_GAP},{C_GAP}"
-        rf"msecs_to_jiffies\({C_GAP})({OLD_MS}|{NEW_MS})"
-        rf"({C_GAP}\){C_GAP}\){C_GAP};)",
+        rf"(msecs_to_jiffies\({C_GAP})({OLD_MS}|{NEW_MS})({C_GAP}\))",
         re.MULTILINE,
     )
 
 
-def target_timer_ms(text: str, target: ReplayTarget, label: str) -> str:
-    matches = list(timer_pattern(target.work).finditer(text))
+def target_timer_match(
+    text: str, target: ReplayTarget, label: str
+) -> tuple[re.Match[str], int, int]:
+    body_start, body_end = init_body_span(text, target, label)
+    body = text[body_start:body_end]
+
+    work_pattern = re.compile(rf"&{C_GAP}{re.escape(target.work)}\b", re.MULTILINE)
+    work_matches = list(work_pattern.finditer(body))
+    if len(work_matches) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one named work reference for "
+            f"{target.work} inside {target.init}, found {len(work_matches)}"
+        )
+
+    if body.count("schedule_delayed_work") != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one schedule_delayed_work call inside "
+            f"{target.init}, found {body.count('schedule_delayed_work')}"
+        )
+
+    matches = list(timer_pattern().finditer(body))
     if len(matches) != 1:
         raise RuntimeError(
-            f"{label}: expected exactly one Phase 238 timer for "
-            f"{target.work}, found {len(matches)}"
+            f"{label}: expected exactly one Phase 238 timer inside "
+            f"{target.init}, found {len(matches)}"
         )
-    return matches[0].group(2)
+    return matches[0], body_start, body_end
+
+
+def target_timer_ms(text: str, target: ReplayTarget, label: str) -> str:
+    match, _body_start, _body_end = target_timer_match(text, target, label)
+    return match.group(2)
 
 
 def patch_one(path: Path, target: ReplayTarget) -> None:
@@ -116,15 +162,7 @@ def patch_one(path: Path, target: ReplayTarget) -> None:
         raise RuntimeError(f"Phase 238 replay timing repair missing generated source: {path}")
 
     text = path.read_text(encoding="utf-8")
-    pattern = timer_pattern(target.work)
-    matches = list(pattern.finditer(text))
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Phase 238 replay timing repair expected exactly one named timer "
-            f"for {target.work} in {path}, found {len(matches)}"
-        )
-
-    match = matches[0]
+    match, body_start, _body_end = target_timer_match(text, target, str(path))
     current = match.group(2)
     if current == NEW_MS:
         print(
@@ -138,7 +176,9 @@ def patch_one(path: Path, target: ReplayTarget) -> None:
             f"in {path}: {current} ms"
         )
 
-    patched = text[:match.start(2)] + NEW_MS + text[match.end(2):]
+    absolute_start = body_start + match.start(2)
+    absolute_end = body_start + match.end(2)
+    patched = text[:absolute_start] + NEW_MS + text[absolute_end:]
     if target_timer_ms(patched, target, str(path)) != NEW_MS:
         raise RuntimeError(
             f"Phase 238 replay timing repair verification failed for "
@@ -155,13 +195,16 @@ def patch_one(path: Path, target: ReplayTarget) -> None:
 
 def fake_source(target: ReplayTarget, timer_ms: str, escaped_tabs: bool) -> str:
     indent = r"\t" if escaped_tabs else "\t"
-    continuation = (r"\t\t\t      " if escaped_tabs else "\t\t\t      ")
+    continuation = r"\t\t\t      " if escaped_tabs else "\t\t\t      "
     return (
-        "before\n"
-        f"{indent}schedule_delayed_work(&{target.work},\n"
-        f"{continuation}msecs_to_jiffies({timer_ms}));\n"
         "schedule_delayed_work(&unrelated_work,\n"
         f"                      msecs_to_jiffies({OLD_MS}));\n"
+        f"static int __init {target.init}(void)\n"
+        "{\n"
+        f"{indent}schedule_delayed_work( {indent}& {target.work} ,\n"
+        f"{continuation}msecs_to_jiffies( {timer_ms} ));\n"
+        f"{indent}return 0;\n"
+        "}\n"
         "after\n"
     )
 
@@ -178,7 +221,7 @@ def exercise_fixture(generated: Path, escaped_tabs: bool) -> None:
         text = path.read_text(encoding="utf-8")
         if target_timer_ms(text, target, str(path)) != NEW_MS:
             raise AssertionError(f"replay timing self-test patch failed: {target.rel}")
-        if text.count(f"msecs_to_jiffies({OLD_MS})") != 1:
+        if text.count(OLD_MS) != 1:
             raise AssertionError(
                 f"unrelated 145 s timer was modified in self-test: {target.rel}"
             )
@@ -195,10 +238,10 @@ def self_test() -> None:
     if OLD_MS == NEW_MS or len(TARGETS) != 2:
         raise AssertionError("Phase 238 replay timing repair constants are invalid")
 
-    # Reproduce the inherited-builder layout that caused the real failures:
-    # wrapper cwd = repository root, generated kernel source = gki/common.
-    # Test both the raw-string pre-sanitizer form (literal "\\t") and the
-    # post-sanitizer form (real tabs) so sequencing cannot break this repair.
+    # Reproduce the inherited-builder layout that caused the real failures.
+    # Also vary formatting inside schedule_delayed_work(): the repair is
+    # intentionally anchored to the init function + named work item instead of
+    # the exact formatting of the complete call.
     for escaped_tabs in (True, False):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

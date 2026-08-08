@@ -24,6 +24,15 @@ OVERLAYS = (
     ("238_phase237_retention_replay_timing_repair.py", "Phase 238 retention-safe replay timing repair"),
     ("238_phase237_c_indent_sanitize.py", "Phase 238 C indentation sanitize"),
 )
+EXPECTED_PHASE238_ORDER = (
+    "238_phase237_platform_include_preflight.py",
+    "238_phase237_broad_gpu_supplier_overlay.py",
+    "238_phase237_gdsc_parent_diag_repair.py",
+    "238_phase237_cx_journal_extension.py",
+    "238_phase237_controlflow_safety_overlay.py",
+    "238_phase237_retention_replay_timing_repair.py",
+    "238_phase237_c_indent_sanitize.py",
+)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -35,11 +44,59 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
+def phase238_self_test() -> int:
+    actual = tuple(name for name, _label in OVERLAYS)
+    if actual != EXPECTED_PHASE238_ORDER:
+        raise RuntimeError(
+            "Phase 238 post-parity overlay order drifted: "
+            f"actual={actual!r} expected={EXPECTED_PHASE238_ORDER!r}"
+        )
+    if len(set(actual)) != len(actual):
+        raise RuntimeError("Phase 238 post-parity overlay list contains duplicates")
+
+    for name in actual:
+        path = ROOT / name
+        if not path.is_file():
+            raise RuntimeError(f"Phase 238 post-parity overlay missing: {path}")
+        text = path.read_text(encoding="utf-8")
+        if "gki/common" not in text:
+            raise RuntimeError(
+                f"Phase 238 overlay lacks generated-tree gki/common locator: {name}"
+            )
+
+    timing = (ROOT / "238_phase237_retention_replay_timing_repair.py").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "locate_generated",
+        'cwd / "gki/common"',
+        'cwd / "workspace/gki-phase199-src"',
+        "TemporaryDirectory",
+    ):
+        if token not in timing:
+            raise RuntimeError(
+                f"Phase 238 replay timing locator regression: missing {token}"
+            )
+    if "ROOT = Path.cwd()" in timing:
+        raise RuntimeError(
+            "Phase 238 replay timing repair regressed to repository-root-only paths"
+        )
+
+    print(
+        "Phase 238 post-parity wrapper self-test: PASS "
+        "(overlay order and generated-root locators)",
+        flush=True,
+    )
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     rc = run_script(BASE, args, "Phase 227/233 inherited final-parity base")
-    if rc or "--self-test" in args:
+    if rc:
         return rc
+    if "--self-test" in args:
+        return phase238_self_test()
 
     # A52_PHASE238_POST_PHASE233_ORDER_V1
     # The GDSC source is SHA-locked by Phases 231/232/233, therefore Phase 238

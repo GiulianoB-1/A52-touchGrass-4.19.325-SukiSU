@@ -118,9 +118,9 @@ jobs:
           grep -Fq '3d9106c' scripts/238_phase237_cx_journal_extension.py
           grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_V1' scripts/238_phase237_cx_driver_walk_extension.py
           grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_JOURNAL_V1' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'cxw cand r=%.24s of=%d' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'cxw match r=%.24s rc=%d' scripts/238_phase237_cx_driver_walk_extension.py
-          grep -Fq 'cxw probe r=%.24s rc=%d' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'A52_R238_CXW("cand r=%.24s of=%d"' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'A52_R238_CXW("match r=%.24s rc=%d"' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'A52_R238_CXW("probe r=%.24s rc=%d"' scripts/238_phase237_cx_driver_walk_extension.py
           grep -Fq 'A52_R230_JOURNAL_CAPACITY 128U' scripts/238_phase237_cx_driver_walk_extension.py
           grep -Fq 'Phase 238 retention-safe replay timing repair' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'OLD_MS = "145000"' scripts/238_phase237_retention_replay_timing_repair.py

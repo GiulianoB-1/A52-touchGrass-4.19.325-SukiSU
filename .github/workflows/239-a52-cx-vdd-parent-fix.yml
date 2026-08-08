@@ -1,0 +1,186 @@
+name: 239 - A52 GPU CX vdd_parent fix
+
+run-name: Build Phase 239 GPU CX vdd_parent fix candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase239-cx-vdd-parent-fix-v1
+    paths:
+      - .github/workflows/239-a52-cx-vdd-parent-fix.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_platform_include_preflight.py
+      - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/238_phase237_gdsc_parent_diag_repair.py
+      - scripts/238_phase237_cx_journal_extension.py
+      - scripts/238_phase237_cx_driver_walk_extension.py
+      - scripts/238_phase237_controlflow_safety_overlay.py
+      - scripts/238_phase237_retention_replay_timing_repair.py
+      - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase238_cx_vdd_parent_fix.py
+      - scripts/239_phase238_runtime_identity.py
+      - scripts/237_package.py
+      - scripts/238_package.py
+      - scripts/239_package.py
+      - scripts/239_design.md
+      - scripts/239_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase239-cx-vdd-parent-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 239
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 239 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/235_phase234_rscc_master_overlay.py \
+            scripts/236_phase235_display_init_overlay.py \
+            scripts/237_phase236_ofpop_probe_overlay.py \
+            scripts/238_phase237_platform_include_preflight.py \
+            scripts/238_phase237_broad_gpu_supplier_overlay.py \
+            scripts/238_phase237_gdsc_parent_diag_repair.py \
+            scripts/238_phase237_cx_journal_extension.py \
+            scripts/238_phase237_cx_driver_walk_extension.py \
+            scripts/238_phase237_controlflow_safety_overlay.py \
+            scripts/238_phase237_retention_replay_timing_repair.py \
+            scripts/238_phase237_c_indent_sanitize.py \
+            scripts/239_phase238_cx_vdd_parent_fix.py \
+            scripts/239_phase238_runtime_identity.py \
+            scripts/237_package.py \
+            scripts/238_package.py \
+            scripts/239_package.py
+          python3 scripts/239_phase238_cx_vdd_parent_fix.py --self-test
+          python3 scripts/239_phase238_runtime_identity.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          python3 scripts/235_phase234_rscc_master_overlay.py --self-test
+          python3 scripts/236_phase235_display_init_overlay.py --self-test
+          python3 scripts/238_phase237_gdsc_parent_diag_repair.py --self-test
+          python3 scripts/238_phase237_cx_journal_extension.py --self-test
+          python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
+          python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
+          git diff --check
+
+      - name: Verify Phase 239 source scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          package = Path('scripts/233_package.py')
+          source = package.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r'(?m)^[ \t]*([\"\'])# CONFIG_FB_MSM is not set\1,?[ \t]*(?:#.*)?\n'
+          )
+          source, count = pattern.subn('', source)
+          if count != 1:
+              raise SystemExit(
+                  'Phase 239 inherited package normalization expected exactly one '
+                  f'CONFIG_FB_MSM token, found {count}'
+              )
+          package.write_text(source, encoding='utf-8')
+          PY
+          grep -Fq '239_phase238_cx_vdd_parent_fix.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq '239_phase238_runtime_identity.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'A52_PHASE239_GPU_CX_VDD_PARENT_V1' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'vdd_parent-supply' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'devm_regulator_get(&pdev->dev' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'A52_GDSC_VDD_PARENT_LOW_SVS 64' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'regulator_is_enabled(gdsc->parent_regulator)' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'regulator_enable(gdsc->parent_regulator)' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'regulator_disable(gdsc->parent_regulator)' scripts/239_phase238_cx_vdd_parent_fix.py
+          grep -Fq 'BOOT rs=ready phase=239 focus=cx-vdd-parent-fix' scripts/239_phase238_runtime_identity.py
+          grep -Fq 'agent/a52-phase239-cx-vdd-parent-fix-v1' scripts/239_package.py
+          grep -Fq 'Phase 210 R48/RS48/CRC32C' scripts/239_design.md
+
+      - name: Dispatch inherited builder and package Phase 239
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/239_package.py
+
+      - name: Verify Phase 239 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase239-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          for marker in \
+            'BOOT rs=ready phase=239 focus=cx-vdd-parent-fix' \
+            'A52GDSC CX_VDD_PARENT get rc=%d' \
+            'A52GDSC CX_VDD_PARENT get rc=0' \
+            'A52GDSC CX_VDD_PARENT enable-vote rc=%d' \
+            'A52GDSC CX_VDD_PARENT disable-unvote rc=%d' \
+            'A52GDSC CX_VDD_PARENT is-enabled parent=%d' \
+            'A52GDSC CX_VDD_PARENT is-enabled=%u reg=0x%x' \
+            'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
+            'KGPPOST 230 cxw cand r=' \
+            'KGPPOST 230 cxw match r=' \
+            'KGPPOST 230 cxw probe r=' \
+            'A52GDSC GPU_CX_PROFILE_V1' \
+            'A52GDSC GPU_GX_PROFILE_V2' \
+            'A52ZAP 233 load'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=238 focus=gpu-supplier-broad' "$OUT/compile/Image"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase239-out/final-audit.json').read_text())
+          assert audit['phase'] == 239
+          assert audit['base_phase'] == 238
+          assert audit['functional_base_phase'] == 239
+          assert audit['hardware_validated'] is False
+          assert audit['phase239_provider_behavior_changed'] is True
+          assert audit['phase239_cx_vdd_parent_acquire'] is True
+          assert audit['phase239_cx_low_svs_vote'] == 64
+          assert audit['phase239_cx_is_enabled_parent_guard'] is True
+          assert audit['phase239_cx_enable_vote_retained_until_disable'] is True
+          assert audit['phase239_cx_disable_unvote'] is True
+          assert audit['phase239_parent_supply_ordering_retained'] is True
+          assert audit['phase239_phase238_tracing_retained'] is True
+          assert audit['phase239_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
+          identity = json.loads(Path('phase239-out/BUILD-IDENTITY.json').read_text())
+          assert identity['phase'] == 239
+          assert identity['hardware_validated'] is False
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 239 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase239-CX-VDD-PARENT-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase239-out
+          if-no-files-found: error
+          retention-days: 30

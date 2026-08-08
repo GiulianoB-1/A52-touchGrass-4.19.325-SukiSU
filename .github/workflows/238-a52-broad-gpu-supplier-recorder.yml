@@ -20,6 +20,7 @@ on:
       - scripts/238_phase237_broad_gpu_supplier_overlay.py
       - scripts/238_phase237_gdsc_parent_diag_repair.py
       - scripts/238_phase237_cx_journal_extension.py
+      - scripts/238_phase237_cx_driver_walk_extension.py
       - scripts/238_phase237_controlflow_safety_overlay.py
       - scripts/238_phase237_retention_replay_timing_repair.py
       - scripts/238_phase237_c_indent_sanitize.py
@@ -64,6 +65,7 @@ jobs:
             scripts/238_phase237_broad_gpu_supplier_overlay.py \
             scripts/238_phase237_gdsc_parent_diag_repair.py \
             scripts/238_phase237_cx_journal_extension.py \
+            scripts/238_phase237_cx_driver_walk_extension.py \
             scripts/238_phase237_controlflow_safety_overlay.py \
             scripts/238_phase237_retention_replay_timing_repair.py \
             scripts/238_phase237_c_indent_sanitize.py \
@@ -74,6 +76,7 @@ jobs:
           python3 scripts/236_phase235_display_init_overlay.py --self-test
           python3 scripts/238_phase237_gdsc_parent_diag_repair.py --self-test
           python3 scripts/238_phase237_cx_journal_extension.py --self-test
+          python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
           python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
           git diff --check
 
@@ -101,6 +104,7 @@ jobs:
           grep -Fq '238_phase237_broad_gpu_supplier_overlay.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_gdsc_parent_diag_repair.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '238_phase237_cx_journal_extension.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq '238_phase237_cx_driver_walk_extension.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '238_phase237_controlflow_safety_overlay.py' scripts/230_phase229_driver_core_wrapper.py
           grep -Fq '238_phase237_retention_replay_timing_repair.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '238_phase237_c_indent_sanitize.py' scripts/227_phase226_retention_wrapper.py
@@ -112,6 +116,12 @@ jobs:
           grep -Fq 'A52_PHASE238_CX_JOURNAL_CORE_V1' scripts/238_phase237_cx_journal_extension.py
           grep -Fq 'a52-legacy-gdsc-regulator' scripts/238_phase237_cx_journal_extension.py
           grep -Fq '3d9106c' scripts/238_phase237_cx_journal_extension.py
+          grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_V1' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'A52_PHASE238_CX_DRIVER_WALK_JOURNAL_V1' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'cxw cand r=%.24s of=%d' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'cxw match r=%.24s rc=%d' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'cxw probe r=%.24s rc=%d' scripts/238_phase237_cx_driver_walk_extension.py
+          grep -Fq 'A52_R230_JOURNAL_CAPACITY 128U' scripts/238_phase237_cx_driver_walk_extension.py
           grep -Fq 'Phase 238 retention-safe replay timing repair' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'OLD_MS = "145000"' scripts/238_phase237_retention_replay_timing_repair.py
           grep -Fq 'NEW_MS = "155000"' scripts/238_phase237_retention_replay_timing_repair.py
@@ -168,6 +178,11 @@ jobs:
             'KGPPOST 230 sl-in d=' \
             'KGPPOST 230 fw n=' \
             'KGPPOST 230 dl s=' \
+            'KGPPOST 230 cxw cand r=' \
+            'KGPPOST 230 cxw match r=' \
+            'KGPPOST 230 cxw probe r=' \
+            'KGPPOST 230 cxw attach-in a=' \
+            'KGPPOST 230 cxw attach-out rc=' \
             'A52GDSC GPU_CX_PROFILE_V1' \
             'A52GDSC GPU_GX_PROFILE_V2' \
             'KGPPOST' \
@@ -187,12 +202,15 @@ jobs:
           assert audit['phase238_recorder_transport'] == 'Phase 210 R48 RS48 CRC32C unchanged'
           assert audit['phase238_platform_event_limit'] == 768
           assert audit['phase238_driver_core_event_limit'] == 768
+          assert audit['phase238_cx_driver_walk_event_limit'] == 24
+          assert audit['phase238_phase230_journal_capacity'] == 128
           assert audit['phase238_gdsc_property_limit'] == 40
           assert audit['phase238_late_replay_ms'] == 155000
           assert audit['phase238_platform_include_preflight'] is True
           assert audit['phase238_broad_gpu_supplier_recorder'] is True
           assert audit['phase238_gdsc_parent_diag_repair'] is True
           assert audit['phase238_cx_late_journal_extension'] is True
+          assert audit['phase238_cx_driver_walk_extension'] is True
           assert audit['phase238_controlflow_safety_pass'] is True
           assert audit['phase238_retention_replay_timing_repair'] is True
           assert audit['phase238_c_indent_sanitize'] is True

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Run inherited final parity, then apply Phase 239 over Phase 238 tracing.
+"""Run inherited final parity, retain Phase 239, then add Phase 240 CX supplier-gate diagnostics.
 
-Phases 231/232/233 pin exact legacy-GDSC source hashes.  Phase 239 therefore
-restores the missing GPU-CX vdd_parent behavior only after that historical chain
-has completed, then keeps the Phase 238 recorder overlays around the corrected
-provider and finally updates the runtime identity to Phase 239.
+Phases 231/232/233 pin exact legacy-GDSC source hashes. Phase 239 keeps
+the GPU-CX vdd_parent parity fix. Phase 240 adds a dedicated append-only latch
+for the exact CX driver registration/match/probe and supplier-gate path without
+changing matching, link state, return codes, provider behavior, or transport.
 """
 from __future__ import annotations
 
@@ -25,8 +25,10 @@ OVERLAYS = (
     ("238_phase237_retention_replay_timing_repair.py", "Phase 238 retention-safe replay timing repair"),
     ("238_phase237_c_indent_sanitize.py", "Phase 238 C indentation sanitize"),
     ("239_phase238_identity_overlay.py", "Phase 239 runtime identity"),
+    ("240_phase239_cx_frozen_latch_overlay.py", "Phase 240 CX frozen supplier-gate latch"),
+    ("240_phase239_identity_overlay.py", "Phase 240 runtime identity"),
 )
-EXPECTED_PHASE239_ORDER = tuple(name for name, _label in OVERLAYS)
+EXPECTED_PHASE240_ORDER = tuple(name for name, _label in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -38,24 +40,24 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase239_self_test() -> int:
+def phase240_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE239_ORDER:
+    if actual != EXPECTED_PHASE240_ORDER:
         raise RuntimeError(
-            "Phase 239 post-parity overlay order drifted: "
-            f"actual={actual!r} expected={EXPECTED_PHASE239_ORDER!r}"
+            "Phase 240 post-parity overlay order drifted: "
+            f"actual={actual!r} expected={EXPECTED_PHASE240_ORDER!r}"
         )
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 239 post-parity overlay list contains duplicates")
+        raise RuntimeError("Phase 240 post-parity overlay list contains duplicates")
 
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 239 post-parity overlay missing: {path}")
+            raise RuntimeError(f"Phase 240 post-parity overlay missing: {path}")
         text = path.read_text(encoding="utf-8")
         if "gki/common" not in text:
             raise RuntimeError(
-                f"Phase 239 overlay lacks generated-tree gki/common locator: {name}"
+                f"Phase 240 overlay lacks generated-tree gki/common locator: {name}"
             )
 
     vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(
@@ -72,6 +74,26 @@ def phase239_self_test() -> int:
         if token not in vdd:
             raise RuntimeError(f"Phase 239 vdd_parent overlay missing {token}")
 
+    latch = (ROOT / "240_phase239_cx_frozen_latch_overlay.py").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "A52_PHASE240_CX_FROZEN_LATCH_V1",
+        "A52_PHASE240_CX_SUPPLIER_GATE_V1",
+        "CXF240 drv-match",
+        "CXF240 sup-in",
+        "CXF240 sup-out",
+        "A52_R240_CXF_CAPACITY",
+    ):
+        if token not in latch:
+            raise RuntimeError(f"Phase 240 latch overlay missing {token}")
+
+    identity = (ROOT / "240_phase239_identity_overlay.py").read_text(
+        encoding="utf-8"
+    )
+    if "phase=240 focus=cx-supplier-gate-latch" not in identity:
+        raise RuntimeError("Phase 240 identity overlay missing runtime identity")
+
     timing = (ROOT / "238_phase237_retention_replay_timing_repair.py").read_text(
         encoding="utf-8"
     )
@@ -87,8 +109,8 @@ def phase239_self_test() -> int:
             )
 
     print(
-        "Phase 239 post-parity wrapper self-test: PASS "
-        "(functional CX fix precedes Phase 238 instrumentation)",
+        "Phase 240 post-parity wrapper self-test: PASS "
+        "(Phase 239 behavior retained; Phase 240 diagnostics are append-only)",
         flush=True,
     )
     return 0
@@ -100,15 +122,15 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase239_self_test()
+        return phase240_self_test()
 
-    # A52_PHASE239_POST_PHASE233_ORDER_V1
+    # A52_PHASE240_POST_PHASE239_LATCH_ORDER_V1
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
 
-    print("Phase 239 post-Phase233 functional + recorder overlay ordering completed", flush=True)
+    print("Phase 240 post-Phase239 supplier-gate diagnostic ordering completed", flush=True)
     return 0
 
 

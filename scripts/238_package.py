@@ -102,6 +102,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "238_phase237_platform_include_preflight.py",
         "238_phase237_broad_gpu_supplier_overlay.py",
         "238_phase237_controlflow_safety_overlay.py",
+        "238_phase237_retention_replay_timing_repair.py",
         "238_phase237_c_indent_sanitize.py",
         "237_package.py",
         "238_package.py",
@@ -125,6 +126,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_platform_include_preflight": True,
         "phase238_broad_gpu_supplier_recorder": True,
         "phase238_controlflow_safety_pass": True,
+        "phase238_retention_replay_timing_repair": True,
         "phase238_c_indent_sanitize": True,
         "phase238_recorder_transport": "Phase 210 R48 RS48 CRC32C unchanged",
         "phase238_focus": [
@@ -139,7 +141,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_platform_event_limit": 768,
         "phase238_driver_core_event_limit": 768,
         "phase238_gdsc_property_limit": 40,
-        "phase238_late_replay_ms": 145000,
+        "phase238_late_replay_ms": 155000,
         "phase238_records": [
             "focused platform probe entry/stage/return",
             "really_probe supplier list and supplier-check result",
@@ -149,10 +151,11 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "vdd_parent/hw-control phandle target and bound platform driver",
             "suspicious regulator/MMIO/syscon/property call checkpoints",
             "every custom GDSC probe return code",
-            "late binding/supplier-chain replay",
+            "retention-safe 155-second late binding/supplier-chain replay",
             "existing Phase 230 KGPPOST direct/replay evidence",
             "platform include preflight for cumulative Phase 237 sources",
             "control-flow safety rewrite after broad instrumentation",
+            "retention timing repair after the first Phase 238 hardware capture",
             "C indentation sanitization after instrumentation",
         ],
         "phase238_question": (
@@ -176,9 +179,9 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "touchgrass_commit": TOUCHGRASS_COMMIT,
         "hardware_validated": False,
         "functional_base_phase": 233,
-        "change": "broad focused GPU supplier-chain recorder over Phase 237",
+        "change": "broad focused GPU supplier-chain recorder with retention-safe replay",
         "rs_roots": 48,
-        "late_replay_ms": 145000,
+        "late_replay_ms": 155000,
     }
     (out / "BUILD-IDENTITY.json").write_text(
         json.dumps(identity, indent=2, sort_keys=True) + "\n",
@@ -192,7 +195,8 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "earlier graphics/OF/KGSL instrumentation. It adds broad but GPU-focused\n"
         "records around driver-core supplier gating, platform probe, the Phase 233\n"
         "legacy GDSC provider, DT/phandle/MMIO/regulator checkpoints, and a late\n"
-        "145-second replay so early CX evidence survives recorder retention.\n\n"
+        "155-second replay moved beyond the retention hole observed in the first\n"
+        "Phase 238 hardware capture.\n\n"
         "Use the existing OrangeFox R48 collector v3.2 after one test boot.\n"
         "CI-validated only until hardware capture confirms behavior.\n",
         encoding="utf-8",

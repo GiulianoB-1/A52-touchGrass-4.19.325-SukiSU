@@ -10,6 +10,7 @@ RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 OLD = "BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent roots=%u copies=3 crc=crc32c"
 NEW = "BOOT rs=ready phase=240 focus=cx-supplier-gate-latch roots=%u copies=3 crc=crc32c"
 MARKER = "A52_PHASE240_CX_SUPPLIER_GATE_LATCH_IDENTITY_V1"
+IDENTITY_ANCHOR = "\t * A52_PHASE240_CX_FROZEN_LATCH_V1\n"
 
 
 def patch(text: str, label: str) -> str:
@@ -18,10 +19,16 @@ def patch(text: str, label: str) -> str:
     if text.count(OLD) != 1:
         raise RuntimeError(f"{label}: expected exactly one Phase 239 boot identity")
     text = text.replace(OLD, NEW, 1)
-    anchor = "A52_PHASE240_CX_FROZEN_LATCH_V1"
-    if text.count(anchor) != 1:
-        raise RuntimeError(f"{label}: Phase 240 latch marker count drifted")
-    text = text.replace(anchor, anchor + "\n\t * " + MARKER, 1)
+    if text.count(IDENTITY_ANCHOR) != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one Phase 240 identity-chain anchor, "
+            f"found {text.count(IDENTITY_ANCHOR)}"
+        )
+    text = text.replace(
+        IDENTITY_ANCHOR,
+        IDENTITY_ANCHOR + "\t * " + MARKER + "\n",
+        1,
+    )
     return text
 
 
@@ -70,7 +77,16 @@ def locate_generated(args: list[str], cwd: Path | None = None) -> Path:
 
 
 def self_test() -> None:
-    fixture = "/* A52_PHASE240_CX_FROZEN_LATCH_V1 */\n" + OLD + "\n"
+    fixture = (
+        "/* recorder identity\n"
+        + IDENTITY_ANCHOR
+        + " */\n"
+        + "/* A52_PHASE240_CX_FROZEN_LATCH_V1 helper */\n"
+        + OLD
+        + "\n"
+    )
+    if fixture.count("A52_PHASE240_CX_FROZEN_LATCH_V1") != 2:
+        raise AssertionError("Phase 240 identity fixture must model both latch markers")
     out = patch(fixture, "fixture")
     if NEW not in out or MARKER not in out or OLD in out:
         raise AssertionError("Phase 240 identity replacement failed")

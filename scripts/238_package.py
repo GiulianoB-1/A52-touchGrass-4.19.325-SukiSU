@@ -59,6 +59,7 @@ def verify_phase238_image(image: Path) -> None:
         b"3d9100c.qcom,gdsc",
         b"3d90000.qcom,gpucc",
         b"3d00000.qcom,kgsl-3d0",
+        b"parent-supply",
         b"vdd_parent-supply",
         b"hw-ctl-addr",
         b"hw-ctrl-addr",
@@ -101,6 +102,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "237_phase236_ofpop_probe_overlay.py",
         "238_phase237_platform_include_preflight.py",
         "238_phase237_broad_gpu_supplier_overlay.py",
+        "238_phase237_gdsc_parent_diag_repair.py",
         "238_phase237_controlflow_safety_overlay.py",
         "238_phase237_retention_replay_timing_repair.py",
         "238_phase237_c_indent_sanitize.py",
@@ -125,6 +127,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "phase238_recorder_behavior_changed": True,
         "phase238_platform_include_preflight": True,
         "phase238_broad_gpu_supplier_recorder": True,
+        "phase238_gdsc_parent_diag_repair": True,
         "phase238_controlflow_safety_pass": True,
         "phase238_retention_replay_timing_repair": True,
         "phase238_c_indent_sanitize": True,
@@ -148,12 +151,13 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
             "GDSC regulator-name, compatible, MMIO resource",
             "all CX/GX DT property names up to bounded limit",
             "CX wait/timeout/no-status/parent/hw-control properties",
-            "vdd_parent/hw-control phandle target and bound platform driver",
+            "parent-supply phandle plus vdd_parent-supply control phandle",
             "suspicious regulator/MMIO/syscon/property call checkpoints",
             "every custom GDSC probe return code",
             "retention-safe 155-second late binding/supplier-chain replay",
             "existing Phase 230 KGPPOST direct/replay evidence",
             "platform include preflight for cumulative Phase 237 sources",
+            "corrected TouchGrass parent-supply diagnostic after broad overlay",
             "control-flow safety rewrite after broad instrumentation",
             "retention timing repair after the first Phase 238 hardware capture",
             "C indentation sanitization after instrumentation",
@@ -179,7 +183,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "touchgrass_commit": TOUCHGRASS_COMMIT,
         "hardware_validated": False,
         "functional_base_phase": 233,
-        "change": "broad focused GPU supplier-chain recorder with retention-safe replay",
+        "change": "broad GPU supplier recorder with corrected parent diagnostics and retention-safe replay",
         "rs_roots": 48,
         "late_replay_ms": 155000,
     }
@@ -194,7 +198,7 @@ def finalize(base_out: Path, source_run_id: int, source_run_url: str) -> Path:
         "Phase 238 preserves the Phase 210 R48 RS48 + CRC32C transport and all\n"
         "earlier graphics/OF/KGSL instrumentation. It adds broad but GPU-focused\n"
         "records around driver-core supplier gating, platform probe, the Phase 233\n"
-        "legacy GDSC provider, DT/phandle/MMIO/regulator checkpoints, and a late\n"
+        "legacy GDSC provider, corrected parent-supply diagnostics, and a late\n"
         "155-second replay moved beyond the retention hole observed in the first\n"
         "Phase 238 hardware capture.\n\n"
         "Use the existing OrangeFox R48 collector v3.2 after one test boot.\n"

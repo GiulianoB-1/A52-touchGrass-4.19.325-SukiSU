@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase 242, then add Phase 243 live CX/GX supplier diagnostics.
+"""Run inherited parity through Phase243, then add Phase244 initcall diagnostics.
 
-Phase243 is diagnostic-only. It preserves Phase239 vdd_parent behavior and the
-Phase240/241 source-side hooks, keeps Phase241 bulk replay disabled, disables the
-Phase242 sticky runtime hooks, and adds only live phase-unique CX/GX match, own-
-supplier gate, and provider-entry records with adjacent logical redundancy.
+Phase244 is diagnostic-only. It preserves Phase239 vdd_parent behavior and all
+Phase243 live source hooks, then records only the subsys initcall framework and
+legacy GDSC registration boundary with phase-unique critical triple copies.
 """
 from __future__ import annotations
 
@@ -38,8 +37,11 @@ OVERLAYS = (
     ("243_phase242_cxgx_live_supplier_overlay.py", "Phase 243 live CX/GX own-supplier corridor"),
     ("243_phase242_identity_overlay.py", "Phase 243 runtime identity"),
     ("243_phase242_generated_source_audit.py", "Phase 243 final generated-source audit"),
+    ("244_phase243_gdsc_subsys_initcall_overlay.py", "Phase 244 GDSC subsys-initcall corridor"),
+    ("244_phase243_identity_overlay.py", "Phase 244 runtime identity"),
+    ("244_phase243_generated_source_audit.py", "Phase 244 final generated-source audit"),
 )
-EXPECTED_PHASE243_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE244_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -51,19 +53,19 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase243_self_test() -> int:
+def phase244_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE243_ORDER:
-        raise RuntimeError(f"Phase 243 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE243_ORDER!r}")
+    if actual != EXPECTED_PHASE244_ORDER:
+        raise RuntimeError(f"Phase 244 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE244_ORDER!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 243 overlay list contains duplicates")
+        raise RuntimeError("Phase 244 overlay list contains duplicates")
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 243 overlay missing: {path}")
+            raise RuntimeError(f"Phase 244 overlay missing: {path}")
         text = path.read_text(encoding="utf-8")
         if "gki/common" not in text:
-            raise RuntimeError(f"Phase 243 overlay lacks generated-tree gki/common locator: {name}")
+            raise RuntimeError(f"Phase 244 overlay lacks generated-tree gki/common locator: {name}")
 
     vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(encoding="utf-8")
     for token in ("A52_PHASE239_GPU_CX_VDD_PARENT_V1", '"vdd_parent-supply"', '"vdd_parent"',
@@ -83,10 +85,13 @@ def phase243_self_test() -> int:
                  "242_phase241_generated_source_audit.py",
                  "243_phase242_cxgx_live_supplier_overlay.py",
                  "243_phase242_identity_overlay.py",
-                 "243_phase242_generated_source_audit.py"):
+                 "243_phase242_generated_source_audit.py",
+                 "244_phase243_gdsc_subsys_initcall_overlay.py",
+                 "244_phase243_identity_overlay.py",
+                 "244_phase243_generated_source_audit.py"):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 243 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 244 inherited/new self-test failed: {name} rc={result.returncode}")
 
     live = (ROOT / "243_phase242_cxgx_live_supplier_overlay.py").read_text(encoding="utf-8")
     for token in ("A52_PHASE243_CXGX_LIVE_SUPPLIER_V1",
@@ -98,7 +103,12 @@ def phase243_self_test() -> int:
                   "CXF243 P c=%c q=%d"):
         if token not in live:
             raise RuntimeError(f"Phase 243 live-supplier overlay missing {token}")
-    print("Phase 243 wrapper self-test: PASS (Phase239 behavior retained; Phase242 runtime disabled; live CX/GX supplier corridor only)", flush=True)
+    p244 = (ROOT / "244_phase243_gdsc_subsys_initcall_overlay.py").read_text(encoding="utf-8")
+    for token in ("A52_PHASE244_GDSC_SUBSYS_INITCALL_V1", "CXF244 V q=%d l=%d",
+                  "CXF244 I q=%d s=E", "CXF244 I q=%d s=B", "CXF244 I q=%d s=X rc=%d"):
+        if token not in p244:
+            raise RuntimeError(f"Phase 244 initcall overlay missing {token}")
+    print("Phase 244 wrapper self-test: PASS (Phase239 behavior retained; Phase243 hooks retained; initcall/GDSC diagnostics only)", flush=True)
     return 0
 
 
@@ -108,12 +118,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase243_self_test()
+        return phase244_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 243 live CX/GX own-supplier diagnostic ordering completed", flush=True)
+    print("Phase 244 GDSC subsys-initcall diagnostic ordering completed", flush=True)
     return 0
 
 

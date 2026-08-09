@@ -299,15 +299,18 @@ def validate_dd(text: str, label: str) -> None:
             raise RuntimeError(f"{label}: missing {token}")
 
 
+GDSC_HOOK = "A52_PHASE243_GDSC_SUPPLIER_HOOK_V1"
+
 GDSC_HELPER = r'''/* A52_PHASE243_CXGX_LIVE_SUPPLIER_V1 */
-static void a52_r243_provider3(struct platform_device *pdev, const char *name)
+static void a52_r243_provider3(struct platform_device *pdev)
 {
+	const char *name = dev_name(&pdev->dev);
 	char tag = 0;
 	int q;
 
-	if (name && !strcmp(name, "gpu_cx_gdsc"))
+	if (name && strstr(name, "3d9106c"))
 		tag = 'C';
-	else if (name && !strcmp(name, "gpu_gx_gdsc"))
+	else if (name && strstr(name, "3d9100c"))
 		tag = 'G';
 	if (!tag)
 		return;
@@ -326,20 +329,23 @@ def patch_gdsc(text: str, label: str) -> str:
     text = text[:start] + GDSC_HELPER + text[start:]
     start, end = function_bounds(text, r"static\s+int\s+a52_legacy_gdsc_probe\s*\(", f"{label}: gdsc probe patched")
     fn = text[start:end]
-    anchor = 'if (of_property_read_string(pdev->dev.of_node, "regulator-name", &name))\n        return -EINVAL;\n'
-    if anchor not in fn:
-        anchor = 'if (of_property_read_string(pdev->dev.of_node, "regulator-name", &name))\n\t\treturn -EINVAL;\n'
-    if anchor not in fn:
-        raise RuntimeError(f"{label}: regulator-name anchor missing")
-    fn = fn.replace(anchor, anchor + "\n\ta52_r243_provider3(pdev, name);\n", 1)
+    match = re.search(r"(?m)^(?P<indent>[ \t]*)gdsc->timeout_us = A52_GDSC_TIMEOUT_US;[ \t]*$", fn)
+    if not match:
+        raise RuntimeError(f"{label}: GDSC timeout anchor missing")
+    indent = match.group("indent")
+    hook = (f"{indent}/* {GDSC_HOOK} */\n"
+            f"{indent}a52_r243_provider3(pdev);\n"
+            + match.group(0))
+    fn = fn[:match.start()] + hook + fn[match.end():]
     text = text[:start] + fn + text[end:]
     validate_gdsc(text, label)
     return text
 
 
 def validate_gdsc(text: str, label: str) -> None:
-    for token in (MARKER, 'CXF243 P c=%c q=%d',
-                  'a52_r243_provider3(pdev, name);', 'gpu_cx_gdsc', 'gpu_gx_gdsc'):
+    for token in (MARKER, GDSC_HOOK, 'CXF243 P c=%c q=%d',
+                  'a52_r243_provider3(pdev);', '3d9106c', '3d9100c',
+                  'gdsc->timeout_us = A52_GDSC_TIMEOUT_US;'):
         if token not in text:
             raise RuntimeError(f"{label}: missing {token}")
 
@@ -402,11 +408,11 @@ def self_test() -> None:
     dd2 = patch_dd(dd, "fixture/dd")
     assert patch_dd(dd2, "fixture/dd2") == dd2
 
-    gd = ('static int a52_legacy_gdsc_probe(struct platform_device *pdev)\n{\n'
-          '    const char *name;\n'
-          '    if (of_property_read_string(pdev->dev.of_node, "regulator-name", &name))\n'
-          '        return -EINVAL;\n'
-          '    return 0;\n}\n')
+    gd = ('#define A52_CX_GDSC_NAME "gcc_gpu_memnoc_gfx"\n'
+          'static int a52_legacy_gdsc_probe(struct platform_device *pdev)\n{\n'
+          '\tstruct a52_legacy_gdsc *gdsc = platform_get_drvdata(pdev);\n\n'
+          '\tgdsc->timeout_us = A52_GDSC_TIMEOUT_US;\n'
+          '\treturn 0;\n}\n')
     gd2 = patch_gdsc(gd, "fixture/gdsc")
     assert patch_gdsc(gd2, "fixture/gdsc2") == gd2
     print("Phase 243 live CX/GX own-supplier overlay self-test: PASS", flush=True)

@@ -1,0 +1,20 @@
+PHASE 244 HARDWARE VALIDATION
+
+Identity: BOOT rs=ready phase=244 focus=gdsc-subsys-initcall
+
+Purpose: determine whether the initcall framework reaches the subsys level and whether
+a52_legacy_gdsc_init reaches/returns from platform_driver_register.
+
+Expected live markers (each q=0,1,2):
+  CXF244 V q=%d l=%d          subsys initcall level reached (l=4)
+  CXF244 I q=%d s=E          a52_legacy_gdsc_init entered
+  CXF244 I q=%d s=B          immediately before platform_driver_register
+  CXF244 I q=%d s=X rc=%d    platform_driver_register returned
+
+Interpretation:
+- V present, no I/E: framework reached subsys but legacy GDSC initcall did not enter.
+- I/E and I/B present, no I/X: platform_driver_register did not return before failure.
+- I/X rc!=0: registration returned an error.
+- I/X rc=0: continue with inherited Phase243 match/supplier/provider markers.
+
+No Phase244 functional behavior change is permitted. Phase239 vdd_parent remains the functional base.

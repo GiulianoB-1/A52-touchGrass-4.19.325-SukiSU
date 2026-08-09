@@ -284,7 +284,7 @@ def self_test() -> None:
             "static void a52_r241_corridor_replay(unsigned int tick) {}\n"
             "void a52_ackfr_record(const char *fmt, ...)\n{\n"
             "if (strncmp(fmt, \"CXF241\", 6) &&\n    1) return;\n"
-            "a52_r241_corridor_latch(event.message);\n}\n"
+            "\ta52_r241_corridor_latch(event.message);\n}\n"
             "static void a52_r179_heartbeat_fn(struct work_struct *work)\n{\n"
             "\ta52_r228_tripost_snapshot(tick);\n"
             "\ta52_ackfr_record(\"HB tick=%u online=%u run=%lu j=%lu\", tick,\n"

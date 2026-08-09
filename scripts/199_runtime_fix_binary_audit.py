@@ -11,6 +11,7 @@ PHASE240_IDENTITY_PATH = Path("scripts/240_phase239_identity_overlay.py")
 PHASE241_IDENTITY_PATH = Path("scripts/241_phase240_identity_overlay.py")
 PHASE242_IDENTITY_PATH = Path("scripts/242_phase241_identity_overlay.py")
 PHASE243_IDENTITY_PATH = Path("scripts/243_phase242_identity_overlay.py")
+PHASE244_IDENTITY_PATH = Path("scripts/244_phase243_identity_overlay.py")
 
 OLD = "for marker in 'A52R0199' 'phase199 triple-copy RS+CRC32C recorder enabled'"
 NEW = "for marker in 'phase199 triple-copy RS+CRC32C recorder enabled'"
@@ -49,6 +50,11 @@ PHASE243_BOOT = (
     "roots=%u copies=3 crc=crc32c"
 )
 PHASE243_IDENTITY_MARKER = "A52_PHASE243_CXGX_LIVE_SUPPLIER_IDENTITY_V1"
+PHASE244_BOOT = (
+    "BOOT rs=ready phase=244 focus=gdsc-subsys-initcall "
+    "roots=%u copies=3 crc=crc32c"
+)
+PHASE244_IDENTITY_MARKER = "A52_PHASE244_GDSC_SUBSYS_INITCALL_IDENTITY_V1"
 
 
 def repair_phase199_binary_audit() -> None:
@@ -97,10 +103,14 @@ def phase243_identity_present() -> bool:
     return identity_present(PHASE243_IDENTITY_PATH, PHASE243_IDENTITY_MARKER, PHASE243_BOOT)
 
 
+def phase244_identity_present() -> bool:
+    return identity_present(PHASE244_IDENTITY_PATH, PHASE244_IDENTITY_MARKER, PHASE244_BOOT)
+
+
 def repair_final_identity_text(text: str, target_boot: str, label: str) -> str:
     known = (
         PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT,
-        PHASE240_BOOT, PHASE241_BOOT, PHASE242_BOOT, PHASE243_BOOT,
+        PHASE240_BOOT, PHASE241_BOOT, PHASE242_BOOT, PHASE243_BOOT, PHASE244_BOOT,
     )
     target_count = text.count(target_boot)
     stale = tuple(marker for marker in known if marker != target_boot)
@@ -158,13 +168,26 @@ def self_test() -> None:
         raise AssertionError("Phase 243 final identity audit repair failed")
     if repair_final_identity_text(phase243, PHASE243_BOOT, "fixture/phase243-idempotent") != phase243:
         raise AssertionError("Phase 243 final identity audit repair is not idempotent")
-    print("final binary identity audit phase-awareness self-test: PASS through Phase 243")
+    from tempfile import TemporaryDirectory
+    with TemporaryDirectory() as temp:
+        probe = Path(temp) / "identity.py"
+        probe.write_text(PHASE244_IDENTITY_MARKER + "\n" + PHASE244_BOOT + "\n", encoding="utf-8")
+        if not identity_present(probe, PHASE244_IDENTITY_MARKER, PHASE244_BOOT):
+            raise AssertionError("Phase 244 identity presence helper failed")
+    phase244 = repair_final_identity_text(prefix + PHASE243_BOOT + suffix, PHASE244_BOOT, "fixture/phase244")
+    if PHASE244_BOOT not in phase244 or PHASE243_BOOT in phase244:
+        raise AssertionError("Phase 244 final identity audit repair failed")
+    if repair_final_identity_text(phase244, PHASE244_BOOT, "fixture/phase244-idempotent") != phase244:
+        raise AssertionError("Phase 244 final identity audit repair is not idempotent")
+    print("final binary identity audit phase-awareness self-test: PASS through Phase 244")
 
 
 def repair_final_identity_audit() -> None:
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
-    if phase243_identity_present():
+    if phase244_identity_present():
+        target_boot, phase = PHASE244_BOOT, "Phase 244"
+    elif phase243_identity_present():
         target_boot, phase = PHASE243_BOOT, "Phase 243"
     elif phase242_identity_present():
         target_boot, phase = PHASE242_BOOT, "Phase 242"
@@ -188,7 +211,7 @@ def repair_final_identity_audit() -> None:
     verify = PHASE217_PATH.read_text(encoding="utf-8")
     if verify.count(target_boot) != 1:
         raise SystemExit(f"{phase} final boot-marker audit repair failed")
-    stale = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT, PHASE240_BOOT, PHASE241_BOOT, PHASE242_BOOT, PHASE243_BOOT)
+    stale = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT, PHASE240_BOOT, PHASE241_BOOT, PHASE242_BOOT, PHASE243_BOOT, PHASE244_BOOT)
     leftovers = [marker for marker in stale if marker != target_boot and marker in verify]
     if leftovers:
         raise SystemExit(f"{phase} stale boot-marker audit remains: {leftovers!r}")

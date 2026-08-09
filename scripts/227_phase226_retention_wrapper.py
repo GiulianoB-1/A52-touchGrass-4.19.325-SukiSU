@@ -2,8 +2,9 @@
 """Run inherited parity, retain Phase239/240, then add Phase241 broad CX diagnostics.
 
 Phase241 is diagnostic-only: it preserves the Phase239 vdd_parent behavior and
-Phase240 hooks, freezes a broader upstream-to-supplier corridor, and audits that
-the late replay call is structurally reachable from the live HB function.
+Phase240 hooks, freezes a broader upstream-to-supplier corridor, explicitly
+retains CXF241 after recorder capacity, and audits that the late replay call is
+structurally reachable from the live HB function.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ OVERLAYS = (
     ("240_phase239_cx_frozen_latch_overlay_v2.py", "Phase 240 CX frozen supplier-gate latch"),
     ("240_phase239_identity_overlay.py", "Phase 240 runtime identity"),
     ("241_phase240_cx_broad_corridor_latch_overlay.py", "Phase 241 broad CX failure-corridor latch"),
+    ("241_phase240_cxf241_postcapacity_repair.py", "Phase 241 CXF241 post-capacity retention repair"),
     ("241_phase240_identity_overlay.py", "Phase 241 runtime identity"),
     ("241_phase240_generated_source_audit.py", "Phase 241 final generated-source reachability audit"),
 )
@@ -44,6 +46,7 @@ EXPECTED_PHASE241_ORDER = (
     "240_phase239_cx_frozen_latch_overlay_v2.py",
     "240_phase239_identity_overlay.py",
     "241_phase240_cx_broad_corridor_latch_overlay.py",
+    "241_phase240_cxf241_postcapacity_repair.py",
     "241_phase240_identity_overlay.py",
     "241_phase240_generated_source_audit.py",
 )
@@ -84,6 +87,7 @@ def phase241_self_test() -> int:
         raise RuntimeError("Phase 240 latch compatibility self-test failed")
 
     for name in ("241_phase240_cx_broad_corridor_latch_overlay.py",
+                 "241_phase240_cxf241_postcapacity_repair.py",
                  "241_phase240_identity_overlay.py",
                  "241_phase240_generated_source_audit.py"):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
@@ -97,13 +101,20 @@ def phase241_self_test() -> int:
         if token not in broad:
             raise RuntimeError(f"Phase 241 broad latch overlay missing {token}")
 
+    retention = (ROOT / "241_phase240_cxf241_postcapacity_repair.py").read_text(encoding="utf-8")
+    for token in ("A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1",
+                  'return !strncmp(message, "CXF241 ", 7) ||',
+                  "critical = a52_r179_is_critical_message(event.message);"):
+        if token not in retention:
+            raise RuntimeError(f"Phase 241 post-capacity repair missing {token}")
+
     audit = (ROOT / "241_phase240_generated_source_audit.py").read_text(encoding="utf-8")
     for token in ('"HB tick=%u', 'a52_ackfr_record("CXF241 live t=%u", tick);',
                   "a52_r241_corridor_replay(tick);", "obsolete Phase240 replay"):
         if token not in audit:
             raise RuntimeError(f"Phase 241 generated-source audit missing {token}")
 
-    print("Phase 241 wrapper self-test: PASS (literal order; broad corridor; live-HB structural audit)", flush=True)
+    print("Phase 241 wrapper self-test: PASS (literal order; broad corridor; CXF241 post-capacity retention; live-HB structural audit)", flush=True)
     return 0
 
 

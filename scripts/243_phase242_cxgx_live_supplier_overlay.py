@@ -232,7 +232,7 @@ static void a52_r243_rp_links3(struct device *dev,
 		return;
 	list_for_each_entry(link, &dev->links.suppliers, c_node) {
 		const char *s = link->supplier ? dev_name(link->supplier) : "-";
-		int ds = link->supplier ? link->supplier->links.status : -1;
+		int ds = link->supplier ? (int)link->supplier->links.status : -1; /* A52_PHASE243_DL_STATE_CAST_V1 */
 		int bound = link->supplier && link->supplier->driver;
 
 		if (++n > 8)
@@ -292,7 +292,9 @@ def validate_dd(text: str, label: str) -> None:
                   "a52_r243_rp_enter3(dev, drv);",
                   "a52_r243_rp_links3(dev, drv);",
                   "a52_r243_rp_gate3(dev, drv, ret);",
-                  "device_links_check_suppliers(dev)"):
+                  "device_links_check_suppliers(dev)",
+                  "A52_PHASE243_DL_STATE_CAST_V1",
+                  "(int)link->supplier->links.status"):
         if token not in text:
             raise RuntimeError(f"{label}: missing {token}")
 

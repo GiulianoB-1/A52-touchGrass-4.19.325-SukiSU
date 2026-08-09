@@ -2,10 +2,11 @@
 """Finalize Phase 241 audit metadata after the inherited packager completes.
 
 The inherited Phase 241 packager predates the CXF241 classification/retention
-repair and still copies the Phase 240 hardware trigger. Keep its build/package
-path stable, then add the repair script to the artifact audit bundle, replace
-the stale trigger with the Phase 241 plan, pin the new guarantees in
-final-audit.json, and regenerate SHA256SUMS so every delivered file is covered.
+and C90 compile-shape repairs and still copies the Phase 240 hardware trigger.
+Keep its build/package path stable, then add both Phase 241 repair scripts to
+the artifact audit bundle, replace the stale trigger with the Phase 241 plan,
+pin the guarantees in final-audit.json, and regenerate SHA256SUMS so every
+delivered file is covered.
 """
 from __future__ import annotations
 
@@ -17,9 +18,11 @@ import tempfile
 from pathlib import Path
 
 OUT = Path("phase241-out")
-REPAIR = Path("scripts/241_phase240_cxf241_postcapacity_repair.py")
+RETENTION_REPAIR = Path("scripts/241_phase240_cxf241_postcapacity_repair.py")
+COMPILE_REPAIR = Path("scripts/241_phase240_compile_shape_repair.py")
 TRIGGER = Path("scripts/241_trigger.txt")
-AUDIT_REL = Path("audit/phase241/241_phase240_cxf241_postcapacity_repair.py")
+RETENTION_AUDIT_REL = Path("audit/phase241/241_phase240_cxf241_postcapacity_repair.py")
+COMPILE_AUDIT_REL = Path("audit/phase241/241_phase240_compile_shape_repair.py")
 HARDWARE_PLAN_REL = Path("PHASE241-HARDWARE-TEST.txt")
 
 
@@ -41,13 +44,16 @@ def regenerate_sums(out: Path) -> None:
     )
 
 
-def finalize(out: Path, repair: Path, trigger: Path) -> None:
+def finalize(out: Path, retention_repair: Path, compile_repair: Path, trigger: Path) -> None:
     if not out.is_dir():
         raise RuntimeError(f"Phase 241 output directory missing: {out}")
-    if not repair.is_file():
-        raise RuntimeError(f"Phase 241 repair script missing: {repair}")
-    if not trigger.is_file():
-        raise RuntimeError(f"Phase 241 hardware trigger missing: {trigger}")
+    for label, path in (
+        ("classification/retention repair", retention_repair),
+        ("compile-shape repair", compile_repair),
+        ("hardware trigger", trigger),
+    ):
+        if not path.is_file():
+            raise RuntimeError(f"Phase 241 {label} missing: {path}")
 
     required = (
         out / "package/boot.img",
@@ -59,9 +65,11 @@ def finalize(out: Path, repair: Path, trigger: Path) -> None:
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"Phase 241 required output missing/empty: {path}")
 
-    audit_copy = out / AUDIT_REL
-    audit_copy.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(repair, audit_copy)
+    retention_copy = out / RETENTION_AUDIT_REL
+    compile_copy = out / COMPILE_AUDIT_REL
+    retention_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(retention_repair, retention_copy)
+    shutil.copy2(compile_repair, compile_copy)
     shutil.copy2(trigger, out / HARDWARE_PLAN_REL)
 
     audit_path = out / "final-audit.json"
@@ -79,6 +87,9 @@ def finalize(out: Path, repair: Path, trigger: Path) -> None:
         "phase241_cxf241_postcapacity_critical": True,
         "phase241_phase240_replay_retention_hole_closed": True,
         "phase241_replay_recursion_guard_retained": True,
+        "phase241_c90_declaration_order_repaired": True,
+        "phase241_phase240_replay_helper_maybe_unused": True,
+        "phase241_compile_shape_repair_behavioral_scope": "compile-shape only; runtime decisions unchanged",
         "phase241_hardware_plan_current": True,
         "phase241_retention_repair_behavioral_scope": "diagnostic persistence/classification only",
     })
@@ -87,6 +98,8 @@ def finalize(out: Path, repair: Path, trigger: Path) -> None:
         "CXF241 late replay is admitted by the post-capacity critical classifier",
         "CXF241 create/dreg source records remain classifiable before replay",
         "a52_r241_replaying remains the replay recursion guard",
+        "Phase 241 create/dreg logging follows pre-existing C declarations",
+        "superseded Phase 240 replay helper is retained __maybe_unused without restoring its heartbeat call",
         "delivered hardware plan requires Phase 241 runtime identity before interpretation",
     ):
         if item not in guardrails:
@@ -99,14 +112,24 @@ def finalize(out: Path, repair: Path, trigger: Path) -> None:
 
     regenerate_sums(out)
 
-    delivered = (out / AUDIT_REL).read_text(encoding="utf-8")
+    delivered_retention = retention_copy.read_text(encoding="utf-8")
     for token in (
         "A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1",
         "A52_PHASE241_CXF241_SOURCE_CLASSIFICATION_V1",
         'return !strncmp(message, "CXF241 ", 7) ||',
     ):
-        if token not in delivered:
-            raise RuntimeError(f"delivered Phase 241 repair audit missing {token}")
+        if token not in delivered_retention:
+            raise RuntimeError(f"delivered Phase 241 retention audit missing {token}")
+
+    delivered_compile = compile_copy.read_text(encoding="utf-8")
+    for token in (
+        "A52_PHASE241_R240_REPLAY_MAYBE_UNUSED_V1",
+        "A52_PHASE241_OF_DECLARATION_ORDER_V1",
+        "A52_PHASE241_DRIVER_DECLARATION_ORDER_V1",
+        "__maybe_unused a52_r240_cxf_replay",
+    ):
+        if token not in delivered_compile:
+            raise RuntimeError(f"delivered Phase 241 compile-shape audit missing {token}")
 
     hardware_plan = (out / HARDWARE_PLAN_REL).read_text(encoding="utf-8")
     for token in (
@@ -124,7 +147,7 @@ def finalize(out: Path, repair: Path, trigger: Path) -> None:
         raise RuntimeError("stale Phase 240 hardware plan survived Phase 241 finalization")
 
     print(
-        "Phase 241 package final audit: repair bundled; current hardware plan installed; metadata pinned; SHA256SUMS regenerated",
+        "Phase 241 package final audit: retention + compile-shape repairs bundled; current hardware plan installed; metadata pinned; SHA256SUMS regenerated",
         flush=True,
     )
 
@@ -133,7 +156,8 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         out = root / "phase241-out"
-        repair = root / "repair.py"
+        retention = root / "retention.py"
+        compile_repair = root / "compile.py"
         trigger = root / "241_trigger.txt"
         (out / "package").mkdir(parents=True)
         (out / "compile").mkdir(parents=True)
@@ -153,10 +177,17 @@ def self_test() -> None:
             "PHASE 240 HARDWARE VALIDATION\n",
             encoding="utf-8",
         )
-        repair.write_text(
+        retention.write_text(
             "A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1\n"
             "A52_PHASE241_CXF241_SOURCE_CLASSIFICATION_V1\n"
             "return !strncmp(message, \"CXF241 \", 7) ||\n",
+            encoding="utf-8",
+        )
+        compile_repair.write_text(
+            "A52_PHASE241_R240_REPLAY_MAYBE_UNUSED_V1\n"
+            "A52_PHASE241_OF_DECLARATION_ORDER_V1\n"
+            "A52_PHASE241_DRIVER_DECLARATION_ORDER_V1\n"
+            "__maybe_unused a52_r240_cxf_replay\n",
             encoding="utf-8",
         )
         trigger.write_text(
@@ -166,14 +197,18 @@ def self_test() -> None:
             "CXF241 pop i=\nCXF241 drv i=\nCXF241 prb i=\nCXF241 sup i=\n",
             encoding="utf-8",
         )
-        finalize(out, repair, trigger)
+        finalize(out, retention, compile_repair, trigger)
         audit = json.loads((out / "final-audit.json").read_text(encoding="utf-8"))
         if audit.get("phase241_cxf241_postcapacity_critical") is not True:
             raise AssertionError("post-capacity audit flag missing")
+        if audit.get("phase241_c90_declaration_order_repaired") is not True:
+            raise AssertionError("compile-shape audit flag missing")
         if audit.get("phase241_hardware_plan_current") is not True:
             raise AssertionError("hardware-plan audit flag missing")
-        if not (out / AUDIT_REL).is_file():
-            raise AssertionError("repair script was not copied into audit bundle")
+        if not (out / RETENTION_AUDIT_REL).is_file():
+            raise AssertionError("retention repair was not copied into audit bundle")
+        if not (out / COMPILE_AUDIT_REL).is_file():
+            raise AssertionError("compile-shape repair was not copied into audit bundle")
         if "PHASE 241 HARDWARE VALIDATION" not in (out / HARDWARE_PLAN_REL).read_text(encoding="utf-8"):
             raise AssertionError("Phase 241 hardware plan was not installed")
         if not (out / "SHA256SUMS").is_file():
@@ -185,7 +220,7 @@ def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
         return 0
-    finalize(OUT, REPAIR, TRIGGER)
+    finalize(OUT, RETENTION_REPAIR, COMPILE_REPAIR, TRIGGER)
     return 0
 
 

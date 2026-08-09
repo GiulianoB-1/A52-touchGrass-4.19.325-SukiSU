@@ -101,13 +101,6 @@ jobs:
           test ! -e scripts/244_phase243_identity_overlay.py
           grep -Fq 'agent/a52-phase245-fwdevlink-permissive-v2' scripts/245_package.py
 
-      - name: Prepare Phase 243 binary-audit identity
-        run: |
-          set -Eeuo pipefail
-          python3 scripts/199_runtime_fix_binary_audit.py
-          grep -Fq 'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers roots=%u copies=3 crc=crc32c' scripts/217_ci.sh
-          ! grep -Fq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall roots=%u copies=3 crc=crc32c' scripts/217_ci.sh
-
       - name: Dispatch inherited builder and package Phase 245
         env:
           GH_TOKEN: ${{ github.token }}

@@ -35,6 +35,7 @@ on:
       - scripts/241_phase240_cx_broad_corridor_latch_overlay.py
       - scripts/241_phase240_cxf241_postcapacity_repair.py
       - scripts/241_phase240_compile_shape_repair.py
+      - scripts/241_phase240_package_gate_repair.py
       - scripts/241_phase240_identity_overlay.py
       - scripts/241_phase240_generated_source_audit.py
       - scripts/241_package_postcapacity_audit.py
@@ -83,6 +84,7 @@ jobs:
             scripts/241_phase240_cx_broad_corridor_latch_overlay.py \
             scripts/241_phase240_cxf241_postcapacity_repair.py \
             scripts/241_phase240_compile_shape_repair.py \
+            scripts/241_phase240_package_gate_repair.py \
             scripts/241_phase240_identity_overlay.py \
             scripts/241_phase240_generated_source_audit.py \
             scripts/241_package_postcapacity_audit.py \
@@ -98,6 +100,7 @@ jobs:
           python3 scripts/241_phase240_cx_broad_corridor_latch_overlay.py --self-test
           python3 scripts/241_phase240_cxf241_postcapacity_repair.py --self-test
           python3 scripts/241_phase240_compile_shape_repair.py --self-test
+          python3 scripts/241_phase240_package_gate_repair.py --self-test
           python3 scripts/241_phase240_identity_overlay.py --self-test
           python3 scripts/241_phase240_generated_source_audit.py --self-test
           python3 scripts/241_package_postcapacity_audit.py --self-test
@@ -120,6 +123,7 @@ jobs:
           grep -Fq 'A52_PHASE241_OF_DECLARATION_ORDER_V1' scripts/241_phase240_compile_shape_repair.py
           grep -Fq 'A52_PHASE241_DRIVER_DECLARATION_ORDER_V1' scripts/241_phase240_compile_shape_repair.py
           grep -Fq '__maybe_unused a52_r240_cxf_replay' scripts/241_phase240_compile_shape_repair.py
+          grep -Fq 'A52_PHASE241_STALE_R240_REPLAY_IMAGE_GATE_REMOVED_V1' scripts/241_phase240_package_gate_repair.py
           grep -Fq '241_phase240_cxf241_postcapacity_repair.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq '241_phase240_compile_shape_repair.py' scripts/227_phase226_retention_wrapper.py
           grep -Fq 'A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1' scripts/241_phase240_generated_source_audit.py
@@ -133,6 +137,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+          python3 scripts/241_phase240_package_gate_repair.py
           python3 scripts/238_package.py
           python3 scripts/241_package_postcapacity_audit.py
 
@@ -148,6 +153,7 @@ jobs:
           test -s "$OUT/PHASE241-HARDWARE-TEST.txt"
           test -s "$OUT/audit/phase241/241_phase240_cxf241_postcapacity_repair.py"
           test -s "$OUT/audit/phase241/241_phase240_compile_shape_repair.py"
+          grep -Fq 'A52_PHASE241_STALE_R240_REPLAY_IMAGE_GATE_REMOVED_V1' "$OUT/audit/phase241/238_package.py"
           for marker in \
             'BOOT rs=ready phase=241 focus=cx-broad-corridor-latch' \
             'CXF241 live t=%u' \

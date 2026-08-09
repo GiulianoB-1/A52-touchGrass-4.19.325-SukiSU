@@ -1,0 +1,85 @@
+PHASE 242 HARDWARE VALIDATION
+=============================
+
+Expected runtime identity:
+  BOOT rs=ready phase=242 focus=cx-sticky-state roots=48 copies=3 crc=crc32c
+
+Purpose
+-------
+Phase 241 proved that gpu_cx_gdsc@3d9106c is populated, but its large late
+bucket replay did not execute reliably. Phase 242 does not depend on replay.
+Existing Phase 240/241 source-side diagnostics update fixed sticky state before
+the recorder capacity rejection, and compact CXF242 summaries are emitted
+BEFORE the heartbeat at selected ticks.
+
+Test
+----
+1. Flash package/boot.img from this exact Phase 242 artifact.
+2. Boot normally and leave the phone running for about 200-210 seconds.
+3. Collect the raw ramoops ZIP exactly as before.
+4. Do not reuse an older ramoops ZIP.
+
+Highest-value records
+---------------------
+  CXF242 A t=120/140/145/150/155/160/165/170/175 ...
+  CXF242 B t=120/140/145/150/155/160/165/170/175 ...
+  CXF242 U t=... <frozen unresolved supplier>   [only if observed]
+
+A fields
+--------
+  c   CX platform-device creation outcome for 3d9106c (-1 unseen, 0 failed, 1 created)
+  g   GX platform-device creation outcome for 3d9100c (-1 unseen, 0 failed, 1 created)
+  dr  legacy-GDSC driver registration count / last rc
+  dw  legacy-GDSC driver-walk count / last walk-out rc
+  dm  exact CX driver-match count / last match rc
+
+B fields
+--------
+  sp  exact CX supplier-gate count / last rc
+  pr  exact CX device_driver_attach result count / last rc
+  gd  Phase239 CX provider-body vdd_parent-get count / last rc
+
+The return-code sentinel -4096 means that boundary was never observed.
+
+Interpretation
+--------------
+1. c=1 and g=1, dr=0/-4096:
+   platform devices exist, but a52-legacy-gdsc-regulator never reaches a
+   successful driver_register() trace. Investigate provider registration/init.
+
+2. dr>0/0, dw=0/-4096:
+   driver_register() succeeded, but the driver attach walk did not execute.
+
+3. dw>0/0, dm=0/-4096:
+   the driver walk ran but did not reach the exact 3d9106c CX pair.
+
+4. dm>0 with match rc<=0:
+   exact CX pair is reached but does not positively match. Compare the exact
+   TouchGrass compatible/match table before changing probe behavior.
+
+5. dm>0/positive, sp>0/-517:
+   CX matches but its own supplier gate defers. CXF242 U should preserve the
+   first unresolved supplier line, identifying the next upstream dependency.
+
+6. dm>0/positive, sp>0/0, gd=0/-4096:
+   supplier gate clears but the Phase239 provider body is not reached. Narrow
+   inside device_driver_attach / platform probe dispatch.
+
+7. gd>0 with rc=-517:
+   the provider body is reached and vdd_parent acquisition itself defers.
+
+8. gd>0/0 but CX remains unbound later:
+   provider probe progressed beyond vdd_parent acquisition; inspect later
+   regulator registration or probe return with the retained Phase240 evidence.
+
+A valid Phase 242 result requires at least one CXF242 A/B checkpoint. Because
+these summaries execute before HB, an HB at a selected tick without the
+preceding CXF242 A/B pair is itself a diagnostic failure and must not be
+interpreted as CX registration evidence.
+
+Guardrails
+----------
+- Phase239 vdd_parent behavior remains unchanged.
+- No device-link, match, probe, defer, driver-order or initcall behavior changes.
+- Phase210 R48/RS48/CRC32C transport remains unchanged.
+- Phase241 bulk replay is intentionally not called from heartbeat.

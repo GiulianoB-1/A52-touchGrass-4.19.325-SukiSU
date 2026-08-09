@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run inherited parity, retain Phase239/240, then add Phase241 broad CX diagnostics.
+"""Run inherited parity through Phase241, then add Phase242 sticky CX state.
 
-Phase241 is diagnostic-only: it preserves the Phase239 vdd_parent behavior and
-Phase240 hooks, freezes a broader upstream-to-supplier corridor, explicitly
-retains CXF241 after recorder capacity, repairs C90 compile shape without
-changing runtime decisions, and audits that the late replay call is
-structurally reachable from the live HB function.
+Phase242 is diagnostic-only. It preserves Phase239 vdd_parent behavior and all
+Phase240/241 source-side hooks, but disables the unreliable Phase241 bulk replay
+from the heartbeat path. Existing early records update compact sticky state and
+late checkpoints emit only bounded critical summaries before HB.
 """
 from __future__ import annotations
 
@@ -33,8 +32,11 @@ OVERLAYS = (
     ("241_phase240_compile_shape_repair.py", "Phase 241 C90 compile-shape repair"),
     ("241_phase240_identity_overlay.py", "Phase 241 runtime identity"),
     ("241_phase240_generated_source_audit.py", "Phase 241 final generated-source reachability audit"),
+    ("242_phase241_cx_sticky_state_overlay.py", "Phase 242 compact sticky CX state"),
+    ("242_phase241_identity_overlay.py", "Phase 242 runtime identity"),
+    ("242_phase241_generated_source_audit.py", "Phase 242 final generated-source audit"),
 )
-EXPECTED_PHASE241_ORDER = (
+EXPECTED_PHASE242_ORDER = (
     "238_phase237_platform_include_preflight.py",
     "239_phase238_gpu_cx_vdd_parent_overlay.py",
     "238_phase237_broad_gpu_supplier_overlay.py",
@@ -52,6 +54,9 @@ EXPECTED_PHASE241_ORDER = (
     "241_phase240_compile_shape_repair.py",
     "241_phase240_identity_overlay.py",
     "241_phase240_generated_source_audit.py",
+    "242_phase241_cx_sticky_state_overlay.py",
+    "242_phase241_identity_overlay.py",
+    "242_phase241_generated_source_audit.py",
 )
 
 
@@ -64,19 +69,19 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase241_self_test() -> int:
+def phase242_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE241_ORDER:
-        raise RuntimeError(f"Phase 241 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE241_ORDER!r}")
+    if actual != EXPECTED_PHASE242_ORDER:
+        raise RuntimeError(f"Phase 242 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE242_ORDER!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 241 overlay list contains duplicates")
+        raise RuntimeError("Phase 242 overlay list contains duplicates")
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 241 overlay missing: {path}")
+            raise RuntimeError(f"Phase 242 overlay missing: {path}")
         text = path.read_text(encoding="utf-8")
         if "gki/common" not in text:
-            raise RuntimeError(f"Phase 241 overlay lacks generated-tree gki/common locator: {name}")
+            raise RuntimeError(f"Phase 242 overlay lacks generated-tree gki/common locator: {name}")
 
     vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(encoding="utf-8")
     for token in ("A52_PHASE239_GPU_CX_VDD_PARENT_V1", '"vdd_parent-supply"', '"vdd_parent"',
@@ -128,7 +133,22 @@ def phase241_self_test() -> int:
         if token not in audit:
             raise RuntimeError(f"Phase 241 generated-source audit missing {token}")
 
-    print("Phase 241 wrapper self-test: PASS (literal order; broad corridor; classification/retention; C90 compile shape; live-HB structural audit)", flush=True)
+    for name in ("242_phase241_cx_sticky_state_overlay.py",
+                 "242_phase241_identity_overlay.py",
+                 "242_phase241_generated_source_audit.py"):
+        result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
+        if result.returncode:
+            raise RuntimeError(f"Phase 242 self-test failed: {name} rc={result.returncode}")
+
+    sticky = (ROOT / "242_phase241_cx_sticky_state_overlay.py").read_text(encoding="utf-8")
+    for token in ("A52_PHASE242_CX_STICKY_STATE_V1",
+                  "A52_PHASE242_PHASE241_REPLAY_DISABLED_V1",
+                  "CXF242 A t=%u", "CXF242 B t=%u", "CXF242 U t=%u",
+                  "a52_r242_snapshot(tick);", "a52_r242_sticky_latch(event.message);"):
+        if token not in sticky:
+            raise RuntimeError(f"Phase 242 sticky overlay missing {token}")
+
+    print("Phase 242 wrapper self-test: PASS (Phase239 behavior retained; Phase240/241 source hooks retained; compact pre-HB sticky state; bulk replay disabled)", flush=True)
     return 0
 
 
@@ -138,14 +158,14 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase241_self_test()
+        return phase242_self_test()
 
-    # A52_PHASE241_POST_PHASE240_BROAD_CORRIDOR_ORDER_V1
+    # A52_PHASE242_POST_PHASE241_STICKY_STATE_ORDER_V1
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 241 post-Phase240 broad CX corridor diagnostic ordering completed", flush=True)
+    print("Phase 242 post-Phase241 compact sticky CX diagnostic ordering completed", flush=True)
     return 0
 
 

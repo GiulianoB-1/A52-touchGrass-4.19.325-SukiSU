@@ -1,0 +1,201 @@
+name: 242 - A52 GPU CX sticky state
+
+run-name: Build Phase 242 GPU CX sticky-state diagnostic candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase242-cx-sticky-state-v1
+    paths:
+      - .github/workflows/242-a52-cx-sticky-state.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_phase226_retention_wrapper_base.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/233_payload.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_platform_include_preflight.py
+      - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/238_phase237_gdsc_parent_diag_repair.py
+      - scripts/238_phase237_cx_journal_extension.py
+      - scripts/238_phase237_cx_driver_walk_extension.py
+      - scripts/238_phase237_controlflow_safety_overlay.py
+      - scripts/238_phase237_retention_replay_timing_repair.py
+      - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase233_fb_msm_audit_repair.py
+      - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+      - scripts/239_phase238_identity_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay_v2.py
+      - scripts/240_phase239_identity_overlay.py
+      - scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+      - scripts/241_phase240_cxf241_postcapacity_repair.py
+      - scripts/241_phase240_compile_shape_repair.py
+      - scripts/241_phase240_identity_overlay.py
+      - scripts/241_phase240_generated_source_audit.py
+      - scripts/242_phase241_cx_sticky_state_overlay.py
+      - scripts/242_phase241_identity_overlay.py
+      - scripts/242_phase241_generated_source_audit.py
+      - scripts/242_package.py
+      - scripts/242_trigger.txt
+      - scripts/237_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase242-cx-sticky-state-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 242
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 242 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/239_phase233_fb_msm_audit_repair.py \
+            scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
+            scripts/239_phase238_identity_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay_v2.py \
+            scripts/240_phase239_identity_overlay.py \
+            scripts/241_phase240_cx_broad_corridor_latch_overlay.py \
+            scripts/241_phase240_cxf241_postcapacity_repair.py \
+            scripts/241_phase240_compile_shape_repair.py \
+            scripts/241_phase240_identity_overlay.py \
+            scripts/241_phase240_generated_source_audit.py \
+            scripts/242_phase241_cx_sticky_state_overlay.py \
+            scripts/242_phase241_identity_overlay.py \
+            scripts/242_phase241_generated_source_audit.py \
+            scripts/242_package.py \
+            scripts/238_phase237_broad_gpu_supplier_overlay.py \
+            scripts/238_phase237_cx_driver_walk_extension.py \
+            scripts/238_phase237_retention_replay_timing_repair.py
+          python3 scripts/199_runtime_fix_binary_audit.py --self-test
+          python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
+          python3 scripts/239_phase238_identity_overlay.py --self-test
+          python3 scripts/240_phase239_cx_frozen_latch_overlay_v2.py --self-test
+          python3 scripts/240_phase239_identity_overlay.py --self-test
+          python3 scripts/241_phase240_cx_broad_corridor_latch_overlay.py --self-test
+          python3 scripts/241_phase240_cxf241_postcapacity_repair.py --self-test
+          python3 scripts/241_phase240_compile_shape_repair.py --self-test
+          python3 scripts/241_phase240_identity_overlay.py --self-test
+          python3 scripts/241_phase240_generated_source_audit.py --self-test
+          python3 scripts/242_phase241_cx_sticky_state_overlay.py --self-test
+          python3 scripts/242_phase241_identity_overlay.py --self-test
+          python3 scripts/242_phase241_generated_source_audit.py --self-test
+          python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
+          python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 242 source scope
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'A52_PHASE242_CX_STICKY_STATE_V1' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'A52_PHASE242_PHASE241_REPLAY_DISABLED_V1' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'a52_r242_sticky_latch(event.message);' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'a52_r242_snapshot(tick);' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'CXF242 A t=%u' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'CXF242 B t=%u' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'CXF242 U t=%u' scripts/242_phase241_cx_sticky_state_overlay.py
+          grep -Fq 'phase=242 focus=cx-sticky-state' scripts/242_phase241_identity_overlay.py
+          grep -Fq 'PHASE 242 HARDWARE VALIDATION' scripts/242_trigger.txt
+          grep -Fq 'agent/a52-phase242-cx-sticky-state-v1' scripts/242_package.py
+          grep -Fq '242_phase241_cx_sticky_state_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'PHASE242_IDENTITY_PATH' scripts/199_runtime_fix_binary_audit.py
+
+      - name: Dispatch inherited builder and package Phase 242
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/242_package.py
+
+      - name: Verify Phase 242 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase242-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE242-HARDWARE-TEST.txt"
+          test -s "$OUT/audit/phase242/242_phase241_cx_sticky_state_overlay.py"
+          test -s "$OUT/audit/phase242/242_phase241_generated_source_audit.py"
+          for marker in \
+            'BOOT rs=ready phase=242 focus=cx-sticky-state' \
+            'CXF242 A t=%u c=%d g=%d dr=%d/%d dw=%d/%d dm=%d/%d' \
+            'CXF242 B t=%u sp=%d/%d pr=%d/%d gd=%d/%d' \
+            'CXF242 U t=%u %.68s' \
+            'CXF241 create-in node=%.64s' \
+            'CXF241 create-out node=%.52s ok=%u dev=%.24s l=%d' \
+            'CXF241 dreg-in r=%.32s bus=%.16s' \
+            'CXF241 dreg-out r=%.32s rc=%d l=%d' \
+            'CXF240 drvwalk-in r=%.24s bus=%.16s' \
+            'CXF240 drv-match d=%.20s r=%.20s rc=%d dead=%d cur=%.16s' \
+            'CXF240 drv-probe d=%.20s r=%.20s rc=%d bound=%.16s' \
+            'CXF240 sup-out d=%.20s rc=%d ls=%d' \
+            'A52GDSC CX_VDD_PARENT_GET_V1 dev=%s rc=%d' \
+            'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
+            '3d9106c.qcom,gdsc' \
+            '3d9100c.qcom,gdsc' \
+            '3d00000.qcom,kgsl-3d0'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=241 focus=cx-broad-corridor-latch' "$OUT/compile/Image"
+          ! grep -aFq 'BOOT rs=ready phase=240 focus=cx-supplier-gate-latch' "$OUT/compile/Image"
+          grep -Fq 'BOOT rs=ready phase=242 focus=cx-sticky-state' "$OUT/PHASE242-HARDWARE-TEST.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase242-out/final-audit.json').read_text())
+          assert audit['phase'] == 242
+          assert audit['base_phase'] == 241
+          assert audit['functional_base_phase'] == 239
+          assert audit['hardware_validated'] is False
+          assert audit['phase242_phase239_vdd_parent_fix_retained'] is True
+          assert audit['phase242_phase240_diagnostics_retained'] is True
+          assert audit['phase242_phase241_source_hooks_retained'] is True
+          assert audit['phase242_phase241_bulk_replay_disabled'] is True
+          assert audit['phase242_sticky_latch_before_capacity_rejection'] is True
+          assert audit['phase242_sticky_snapshot_before_hb'] is True
+          assert audit['phase242_graphics_behavior_changed'] is False
+          assert audit['phase242_provider_behavior_changed'] is False
+          assert audit['phase242_driver_core_functional_behavior_changed'] is False
+          assert audit['phase242_recorder_transport_changed'] is False
+          assert audit['phase242_snapshot_ticks'] == [120, 140, 145, 150, 155, 160, 165, 170, 175]
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 242 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase242-CX-STICKY-STATE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase242-out
+          if-no-files-found: error
+          retention-days: 30

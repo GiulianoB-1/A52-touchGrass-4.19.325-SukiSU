@@ -8,6 +8,7 @@ PATH = Path("scripts/199_ci.sh")
 PHASE217_PATH = Path("scripts/217_ci.sh")
 PHASE239_IDENTITY_PATH = Path("scripts/239_phase238_identity_overlay.py")
 PHASE240_IDENTITY_PATH = Path("scripts/240_phase239_identity_overlay.py")
+PHASE241_IDENTITY_PATH = Path("scripts/241_phase240_identity_overlay.py")
 
 OLD = "for marker in 'A52R0199' 'phase199 triple-copy RS+CRC32C recorder enabled'"
 NEW = "for marker in 'phase199 triple-copy RS+CRC32C recorder enabled'"
@@ -31,6 +32,11 @@ PHASE240_BOOT = (
     "roots=%u copies=3 crc=crc32c"
 )
 PHASE240_IDENTITY_MARKER = "A52_PHASE240_CX_SUPPLIER_GATE_LATCH_IDENTITY_V1"
+PHASE241_BOOT = (
+    "BOOT rs=ready phase=241 focus=cx-broad-corridor-latch "
+    "roots=%u copies=3 crc=crc32c"
+)
+PHASE241_IDENTITY_MARKER = "A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_IDENTITY_V1"
 
 
 def repair_phase199_binary_audit() -> None:
@@ -52,22 +58,46 @@ def repair_phase199_binary_audit() -> None:
     )
 
 
-def phase239_identity_present() -> bool:
-    if not PHASE239_IDENTITY_PATH.is_file():
+def identity_present(path: Path, marker: str, boot: str) -> bool:
+    if not path.is_file():
         return False
-    text = PHASE239_IDENTITY_PATH.read_text(encoding="utf-8")
-    return PHASE239_IDENTITY_MARKER in text and PHASE239_BOOT in text
+    text = path.read_text(encoding="utf-8")
+    return marker in text and boot in text
+
+
+def phase239_identity_present() -> bool:
+    return identity_present(
+        PHASE239_IDENTITY_PATH,
+        PHASE239_IDENTITY_MARKER,
+        PHASE239_BOOT,
+    )
 
 
 def phase240_identity_present() -> bool:
-    if not PHASE240_IDENTITY_PATH.is_file():
-        return False
-    text = PHASE240_IDENTITY_PATH.read_text(encoding="utf-8")
-    return PHASE240_IDENTITY_MARKER in text and PHASE240_BOOT in text
+    return identity_present(
+        PHASE240_IDENTITY_PATH,
+        PHASE240_IDENTITY_MARKER,
+        PHASE240_BOOT,
+    )
+
+
+def phase241_identity_present() -> bool:
+    return identity_present(
+        PHASE241_IDENTITY_PATH,
+        PHASE241_IDENTITY_MARKER,
+        PHASE241_BOOT,
+    )
 
 
 def repair_final_identity_text(text: str, target_boot: str, label: str) -> str:
-    known = (PHASE210_BOOT, PHASE237_BOOT, PHASE238_BOOT, PHASE239_BOOT, PHASE240_BOOT)
+    known = (
+        PHASE210_BOOT,
+        PHASE237_BOOT,
+        PHASE238_BOOT,
+        PHASE239_BOOT,
+        PHASE240_BOOT,
+        PHASE241_BOOT,
+    )
 
     target_count = text.count(target_boot)
     stale = tuple(marker for marker in known if marker != target_boot)
@@ -134,7 +164,19 @@ def self_test() -> None:
     ) != phase240:
         raise AssertionError("Phase 240 final identity audit repair is not idempotent")
 
-    print("final binary identity audit phase-awareness self-test: PASS")
+    phase241 = repair_final_identity_text(
+        prefix + PHASE240_BOOT + suffix,
+        PHASE241_BOOT,
+        "fixture/phase241",
+    )
+    if PHASE241_BOOT not in phase241 or PHASE240_BOOT in phase241:
+        raise AssertionError("Phase 241 final identity audit repair failed")
+    if repair_final_identity_text(
+        phase241, PHASE241_BOOT, "fixture/phase241-idempotent"
+    ) != phase241:
+        raise AssertionError("Phase 241 final identity audit repair is not idempotent")
+
+    print("final binary identity audit phase-awareness self-test: PASS through Phase 241")
 
 
 def repair_final_identity_audit() -> None:
@@ -142,7 +184,10 @@ def repair_final_identity_audit() -> None:
     if not PHASE217_PATH.is_file():
         raise SystemExit(f"missing final binary audit script: {PHASE217_PATH}")
 
-    if phase240_identity_present():
+    if phase241_identity_present():
+        target_boot = PHASE241_BOOT
+        phase = "Phase 241"
+    elif phase240_identity_present():
         target_boot = PHASE240_BOOT
         phase = "Phase 240"
     elif phase239_identity_present():
@@ -170,6 +215,17 @@ def repair_final_identity_audit() -> None:
     verify = PHASE217_PATH.read_text(encoding="utf-8")
     if verify.count(target_boot) != 1:
         raise SystemExit(f"{phase} final boot-marker audit repair failed")
+    stale = (
+        PHASE210_BOOT,
+        PHASE237_BOOT,
+        PHASE238_BOOT,
+        PHASE239_BOOT,
+        PHASE240_BOOT,
+        PHASE241_BOOT,
+    )
+    leftovers = [marker for marker in stale if marker != target_boot and marker in verify]
+    if leftovers:
+        raise SystemExit(f"{phase} stale boot-marker audit remains: {leftovers!r}")
 
     print(f"Phase 217 final binary audit updated for {phase} recorder identity")
 

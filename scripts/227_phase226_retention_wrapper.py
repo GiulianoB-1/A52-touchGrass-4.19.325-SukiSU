@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase243, then add Phase244 initcall diagnostics.
+"""Run inherited parity through Phase 243, then apply Phase 245 fw_devlink A/B.
 
-Phase244 is diagnostic-only. It preserves Phase239 vdd_parent behavior and all
-Phase243 live source hooks, then records only the subsys initcall framework and
-legacy GDSC registration boundary with phase-unique critical triple copies.
+Phase 245 deliberately skips the broken Phase 244 initcall diagnostics.  It
+retains the exact Phase 243 recorder and GPU/GDSC state, then changes only the
+compiled fw_devlink default from ON to PERMISSIVE.
 """
 from __future__ import annotations
 
@@ -37,11 +37,9 @@ OVERLAYS = (
     ("243_phase242_cxgx_live_supplier_overlay.py", "Phase 243 live CX/GX own-supplier corridor"),
     ("243_phase242_identity_overlay.py", "Phase 243 runtime identity"),
     ("243_phase242_generated_source_audit.py", "Phase 243 final generated-source audit"),
-    ("244_phase243_gdsc_subsys_initcall_overlay.py", "Phase 244 GDSC subsys-initcall corridor"),
-    ("244_phase243_identity_overlay.py", "Phase 244 runtime identity"),
-    ("244_phase243_generated_source_audit.py", "Phase 244 final generated-source audit"),
+    ("245_phase243_fwdevlink_permissive_overlay.py", "Phase 245 fw_devlink permissive A/B"),
 )
-EXPECTED_PHASE244_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE245_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -53,62 +51,51 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase244_self_test() -> int:
+def phase245_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE244_ORDER:
-        raise RuntimeError(f"Phase 244 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE244_ORDER!r}")
+    if actual != EXPECTED_PHASE245_ORDER:
+        raise RuntimeError(f"Phase 245 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE245_ORDER!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 244 overlay list contains duplicates")
+        raise RuntimeError("Phase 245 overlay list contains duplicates")
+    if any(name.startswith("244_") for name in actual):
+        raise RuntimeError("Phase 245 must not apply any Phase 244 overlay")
+    if actual[-1] != "245_phase243_fwdevlink_permissive_overlay.py":
+        raise RuntimeError("Phase 245 fw_devlink overlay is not last")
+
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 244 overlay missing: {path}")
+            raise RuntimeError(f"Phase 245 overlay missing: {path}")
         text = path.read_text(encoding="utf-8")
         if "gki/common" not in text:
-            raise RuntimeError(f"Phase 244 overlay lacks generated-tree gki/common locator: {name}")
+            raise RuntimeError(f"Phase 245 overlay lacks generated-tree gki/common locator: {name}")
 
-    vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(encoding="utf-8")
-    for token in ("A52_PHASE239_GPU_CX_VDD_PARENT_V1", '"vdd_parent-supply"', '"vdd_parent"',
-                  "RPMH_REGULATOR_LEVEL_LOW_SVS", "A52GDSC CX_VDD_PARENT_GET_V1",
-                  "A52GDSC CX_VDD_PARENT_VOTE_V1"):
-        if token not in vdd:
-            raise RuntimeError(f"Phase 239 vdd_parent overlay missing {token}")
-
-    for name in ("240_phase239_cx_frozen_latch_overlay_v2.py",
-                 "241_phase240_cx_broad_corridor_latch_overlay.py",
-                 "241_phase240_cxf241_postcapacity_repair.py",
-                 "241_phase240_compile_shape_repair.py",
-                 "241_phase240_identity_overlay.py",
-                 "241_phase240_generated_source_audit.py",
-                 "242_phase241_cx_sticky_state_overlay.py",
-                 "242_phase241_identity_overlay.py",
-                 "242_phase241_generated_source_audit.py",
-                 "243_phase242_cxgx_live_supplier_overlay.py",
-                 "243_phase242_identity_overlay.py",
-                 "243_phase242_generated_source_audit.py",
-                 "244_phase243_gdsc_subsys_initcall_overlay.py",
-                 "244_phase243_identity_overlay.py",
-                 "244_phase243_generated_source_audit.py"):
+    for name in (
+        "239_phase238_gpu_cx_vdd_parent_overlay.py",
+        "243_phase242_cxgx_live_supplier_overlay.py",
+        "243_phase242_identity_overlay.py",
+        "243_phase242_generated_source_audit.py",
+        "245_phase243_fwdevlink_permissive_overlay.py",
+    ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 244 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 245 inherited/new self-test failed: {name} rc={result.returncode}")
 
-    live = (ROOT / "243_phase242_cxgx_live_supplier_overlay.py").read_text(encoding="utf-8")
-    for token in ("A52_PHASE243_CXGX_LIVE_SUPPLIER_V1",
-                  "A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1",
-                  "CXF243 M c=%c q=%d rc=%d",
-                  "CXF243 R c=%c q=%d ls=%d",
-                  "CXF243 L c=%c q=%d n=%d",
-                  "CXF243 G c=%c q=%d rc=%d",
-                  "CXF243 P c=%c q=%d"):
-        if token not in live:
-            raise RuntimeError(f"Phase 243 live-supplier overlay missing {token}")
-    p244 = (ROOT / "244_phase243_gdsc_subsys_initcall_overlay.py").read_text(encoding="utf-8")
-    for token in ("A52_PHASE244_GDSC_SUBSYS_INITCALL_V1", "CXF244 V q=%d l=%d",
-                  "CXF244 I q=%d s=E", "CXF244 I q=%d s=B", "CXF244 I q=%d s=X rc=%d"):
-        if token not in p244:
-            raise RuntimeError(f"Phase 244 initcall overlay missing {token}")
-    print("Phase 244 wrapper self-test: PASS (Phase239 behavior retained; Phase243 hooks retained; initcall/GDSC diagnostics only)", flush=True)
+    p245 = (ROOT / "245_phase243_fwdevlink_permissive_overlay.py").read_text(encoding="utf-8")
+    for token in (
+        "FW_DEVLINK_FLAGS_ON",
+        "FW_DEVLINK_FLAGS_PERMISSIVE",
+        "static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_ON;",
+        "static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_PERMISSIVE;",
+        "A52_PHASE243_CXGX_LIVE_SUPPLIER_V1",
+    ):
+        if token not in p245:
+            raise RuntimeError(f"Phase 245 overlay missing {token}")
+
+    print(
+        "Phase 245 wrapper self-test: PASS (Phase243 runtime retained; Phase244 skipped; fw_devlink default only)",
+        flush=True,
+    )
     return 0
 
 
@@ -118,12 +105,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase244_self_test()
+        return phase245_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 244 GDSC subsys-initcall diagnostic ordering completed", flush=True)
+    print("Phase 245 fw_devlink permissive A/B ordering completed", flush=True)
     return 0
 
 

@@ -1,0 +1,180 @@
+name: 245 - A52 fw_devlink permissive A/B
+
+run-name: Build Phase 245 fw_devlink permissive A/B candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase245-fwdevlink-permissive-v2
+    paths:
+      - .github/workflows/245-a52-fwdevlink-permissive.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_phase226_retention_wrapper_base.py
+      - scripts/233_payload.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/239_phase233_fb_msm_audit_repair.py
+      - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+      - scripts/239_phase238_identity_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay_v2.py
+      - scripts/240_phase239_identity_overlay.py
+      - scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+      - scripts/241_phase240_cxf241_postcapacity_repair.py
+      - scripts/241_phase240_compile_shape_repair.py
+      - scripts/241_phase240_identity_overlay.py
+      - scripts/241_phase240_generated_source_audit.py
+      - scripts/242_phase241_cx_sticky_state_overlay.py
+      - scripts/242_phase241_identity_overlay.py
+      - scripts/242_phase241_generated_source_audit.py
+      - scripts/243_phase242_cxgx_live_supplier_overlay.py
+      - scripts/243_phase242_identity_overlay.py
+      - scripts/243_phase242_generated_source_audit.py
+      - scripts/245_phase243_fwdevlink_permissive_overlay.py
+      - scripts/243_package.py
+      - scripts/245_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase245-fwdevlink-permissive-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 245
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 245 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
+            scripts/239_phase238_identity_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay_v2.py \
+            scripts/240_phase239_identity_overlay.py \
+            scripts/241_phase240_cx_broad_corridor_latch_overlay.py \
+            scripts/241_phase240_cxf241_postcapacity_repair.py \
+            scripts/241_phase240_compile_shape_repair.py \
+            scripts/241_phase240_identity_overlay.py \
+            scripts/241_phase240_generated_source_audit.py \
+            scripts/242_phase241_cx_sticky_state_overlay.py \
+            scripts/242_phase241_identity_overlay.py \
+            scripts/242_phase241_generated_source_audit.py \
+            scripts/243_phase242_cxgx_live_supplier_overlay.py \
+            scripts/243_phase242_identity_overlay.py \
+            scripts/243_phase242_generated_source_audit.py \
+            scripts/245_phase243_fwdevlink_permissive_overlay.py \
+            scripts/243_package.py \
+            scripts/245_package.py
+          python3 scripts/199_runtime_fix_binary_audit.py --self-test
+          python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
+          python3 scripts/243_phase242_cxgx_live_supplier_overlay.py --self-test
+          python3 scripts/243_phase242_identity_overlay.py --self-test
+          python3 scripts/243_phase242_generated_source_audit.py --self-test
+          python3 scripts/245_phase243_fwdevlink_permissive_overlay.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 245 experiment scope
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_ON;' scripts/245_phase243_fwdevlink_permissive_overlay.py
+          grep -Fq 'static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_PERMISSIVE;' scripts/245_phase243_fwdevlink_permissive_overlay.py
+          grep -Fq '245_phase243_fwdevlink_permissive_overlay.py' scripts/227_phase226_retention_wrapper.py
+          ! grep -Fq '("244_phase243_gdsc_subsys_initcall_overlay.py",' scripts/227_phase226_retention_wrapper.py
+          test ! -e scripts/244_phase243_identity_overlay.py
+          grep -Fq 'agent/a52-phase245-fwdevlink-permissive-v2' scripts/245_package.py
+
+      - name: Prepare Phase 243 binary-audit identity
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/199_runtime_fix_binary_audit.py
+          grep -Fq 'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers roots=%u copies=3 crc=crc32c' scripts/217_ci.sh
+          ! grep -Fq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall roots=%u copies=3 crc=crc32c' scripts/217_ci.sh
+
+      - name: Dispatch inherited builder and package Phase 245
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/245_package.py
+
+      - name: Verify Phase 245 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase245-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/audit/phase245/245_phase243_fwdevlink_permissive_overlay.py"
+          test -s "$OUT/audit/phase245/fwdevlink-source-audit.json"
+
+          grep -aFq 'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' "$OUT/compile/Image"
+          grep -aFq 'CXF243 M c=%c q=%d rc=%d' "$OUT/compile/Image"
+          grep -aFq 'CXF243 G c=%c q=%d rc=%d ls=%d' "$OUT/compile/Image"
+          ! grep -aFq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall' "$OUT/compile/Image"
+          ! grep -aFq 'CXF244 V q=%d l=%d' "$OUT/compile/Image"
+          ! grep -aFq 'CXF244 I q=%d s=' "$OUT/compile/Image"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase245-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 245
+          assert audit['base_phase'] == 243
+          assert audit['functional_base_phase'] == 243
+          assert audit['hardware_validated'] is False
+          assert audit['phase245_fw_devlink_behavior_changed'] is True
+          assert audit['phase245_dt_changed'] is False
+          assert audit['phase245_gdsc_provider_code_changed'] is False
+          assert audit['phase245_kgsl_code_changed'] is False
+          assert audit['phase245_gpucc_code_changed'] is False
+          assert audit['phase245_initcall_order_or_level_changed'] is False
+          assert audit['phase245_boot_cmdline_changed'] is False
+          assert audit['phase245_recorder_changed'] is False
+          assert audit['phase245_phase243_runtime_identity_retained'] is True
+          assert audit['phase245_phase244_overlay_applied'] is False
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          inv = repack['invariants']
+          for key in ('board_preserved', 'cmdline_preserved', 'dtb_preserved',
+                      'ramdisk_preserved', 'header_version_preserved',
+                      'partition_size_preserved', 'replacement_kernel_used'):
+              assert inv[key] is True, key
+          assert 'fw_devlink=' not in repack.get('cmdline', '')
+
+          source_audit = json.loads((out / 'audit/phase245/fwdevlink-source-audit.json').read_text())
+          if source_audit['packaged_core_snapshot_available']:
+              assert source_audit['packaged_core_exact_permissive_matches'], source_audit
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 245 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase245-FWDEVLINK-PERMISSIVE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase245-out
+          if-no-files-found: error
+          retention-days: 30

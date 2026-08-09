@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Run inherited final parity, retain Phase 239, then add Phase 240 CX supplier-gate diagnostics.
+"""Run inherited parity, retain Phase239/240, then add Phase241 broad CX diagnostics.
 
-Phases 231/232/233 pin exact legacy-GDSC source hashes. Phase 239 keeps
-the GPU-CX vdd_parent parity fix. Phase 240 adds a dedicated append-only latch
-for the exact CX driver registration/match/probe and supplier-gate path without
-changing matching, link state, return codes, provider behavior, or transport.
+Phase241 is diagnostic-only: it preserves the Phase239 vdd_parent behavior and
+Phase240 hooks, freezes a broader upstream-to-supplier corridor, and audits that
+the late replay call is structurally reachable from the live HB function.
 """
 from __future__ import annotations
 
@@ -25,10 +24,29 @@ OVERLAYS = (
     ("238_phase237_retention_replay_timing_repair.py", "Phase 238 retention-safe replay timing repair"),
     ("238_phase237_c_indent_sanitize.py", "Phase 238 C indentation sanitize"),
     ("239_phase238_identity_overlay.py", "Phase 239 runtime identity"),
-    ("240_phase239_cx_frozen_latch_overlay_v2.py", "Phase 240 CX frozen supplier-gate latch (post-sanitize/replay-symbol compatible)"),
+    ("240_phase239_cx_frozen_latch_overlay_v2.py", "Phase 240 CX frozen supplier-gate latch"),
     ("240_phase239_identity_overlay.py", "Phase 240 runtime identity"),
+    ("241_phase240_cx_broad_corridor_latch_overlay.py", "Phase 241 broad CX failure-corridor latch"),
+    ("241_phase240_identity_overlay.py", "Phase 241 runtime identity"),
+    ("241_phase240_generated_source_audit.py", "Phase 241 final generated-source reachability audit"),
 )
-EXPECTED_PHASE240_ORDER = tuple(name for name, _label in OVERLAYS)
+EXPECTED_PHASE241_ORDER = (
+    "238_phase237_platform_include_preflight.py",
+    "239_phase238_gpu_cx_vdd_parent_overlay.py",
+    "238_phase237_broad_gpu_supplier_overlay.py",
+    "238_phase237_gdsc_parent_diag_repair.py",
+    "238_phase237_cx_journal_extension.py",
+    "238_phase237_cx_driver_walk_extension.py",
+    "238_phase237_controlflow_safety_overlay.py",
+    "238_phase237_retention_replay_timing_repair.py",
+    "238_phase237_c_indent_sanitize.py",
+    "239_phase238_identity_overlay.py",
+    "240_phase239_cx_frozen_latch_overlay_v2.py",
+    "240_phase239_identity_overlay.py",
+    "241_phase240_cx_broad_corridor_latch_overlay.py",
+    "241_phase240_identity_overlay.py",
+    "241_phase240_generated_source_audit.py",
+)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -40,90 +58,52 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase240_self_test() -> int:
+def phase241_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE240_ORDER:
-        raise RuntimeError(
-            "Phase 240 post-parity overlay order drifted: "
-            f"actual={actual!r} expected={EXPECTED_PHASE240_ORDER!r}"
-        )
+    if actual != EXPECTED_PHASE241_ORDER:
+        raise RuntimeError(f"Phase 241 overlay order drifted: actual={actual!r} expected={EXPECTED_PHASE241_ORDER!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 240 post-parity overlay list contains duplicates")
-
+        raise RuntimeError("Phase 241 overlay list contains duplicates")
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 240 post-parity overlay missing: {path}")
+            raise RuntimeError(f"Phase 241 overlay missing: {path}")
         text = path.read_text(encoding="utf-8")
         if "gki/common" not in text:
-            raise RuntimeError(
-                f"Phase 240 overlay lacks generated-tree gki/common locator: {name}"
-            )
+            raise RuntimeError(f"Phase 241 overlay lacks generated-tree gki/common locator: {name}")
 
-    vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(
-        encoding="utf-8"
-    )
-    for token in (
-        "A52_PHASE239_GPU_CX_VDD_PARENT_V1",
-        '"vdd_parent-supply"',
-        '"vdd_parent"',
-        "RPMH_REGULATOR_LEVEL_LOW_SVS",
-        "A52GDSC CX_VDD_PARENT_GET_V1",
-        "A52GDSC CX_VDD_PARENT_VOTE_V1",
-    ):
+    vdd = (ROOT / "239_phase238_gpu_cx_vdd_parent_overlay.py").read_text(encoding="utf-8")
+    for token in ("A52_PHASE239_GPU_CX_VDD_PARENT_V1", '"vdd_parent-supply"', '"vdd_parent"',
+                  "RPMH_REGULATOR_LEVEL_LOW_SVS", "A52GDSC CX_VDD_PARENT_GET_V1",
+                  "A52GDSC CX_VDD_PARENT_VOTE_V1"):
         if token not in vdd:
             raise RuntimeError(f"Phase 239 vdd_parent overlay missing {token}")
 
-    latch = (ROOT / "240_phase239_cx_frozen_latch_overlay.py").read_text(
-        encoding="utf-8"
-    )
-    for token in (
-        "A52_PHASE240_CX_FROZEN_LATCH_V1",
-        "A52_PHASE240_CX_SUPPLIER_GATE_V1",
-        "CXF240 drv-match",
-        "CXF240 sup-in",
-        "CXF240 sup-out",
-        "A52_R240_CXF_CAPACITY",
-    ):
-        if token not in latch:
-            raise RuntimeError(f"Phase 240 latch overlay missing {token}")
-
     compat = ROOT / "240_phase239_cx_frozen_latch_overlay_v2.py"
-    compat_result = subprocess.run(
-        [sys.executable, str(compat), "--self-test"],
-        check=False,
-    )
-    if compat_result.returncode:
-        raise RuntimeError(
-            "Phase 240 post-sanitize/replay-symbol compatibility self-test failed: "
-            f"rc={compat_result.returncode}"
-        )
+    if subprocess.run([sys.executable, str(compat), "--self-test"], check=False).returncode:
+        raise RuntimeError("Phase 240 latch compatibility self-test failed")
 
-    identity = (ROOT / "240_phase239_identity_overlay.py").read_text(
-        encoding="utf-8"
-    )
-    if "phase=240 focus=cx-supplier-gate-latch" not in identity:
-        raise RuntimeError("Phase 240 identity overlay missing runtime identity")
+    for name in ("241_phase240_cx_broad_corridor_latch_overlay.py",
+                 "241_phase240_identity_overlay.py",
+                 "241_phase240_generated_source_audit.py"):
+        result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
+        if result.returncode:
+            raise RuntimeError(f"Phase 241 self-test failed: {name} rc={result.returncode}")
 
-    timing = (ROOT / "238_phase237_retention_replay_timing_repair.py").read_text(
-        encoding="utf-8"
-    )
-    for token in (
-        "locate_generated",
-        'cwd / "gki/common"',
-        'cwd / "workspace/gki-phase199-src"',
-        "TemporaryDirectory",
-    ):
-        if token not in timing:
-            raise RuntimeError(
-                f"Phase 238 replay timing locator regression: missing {token}"
-            )
+    broad = (ROOT / "241_phase240_cx_broad_corridor_latch_overlay.py").read_text(encoding="utf-8")
+    for token in ("A52_R241_POP_CAPACITY 24U", "A52_R241_DRV_CAPACITY 32U",
+                  "A52_R241_PRB_CAPACITY 48U", "A52_R241_SUP_CAPACITY 48U",
+                  "CXF241 create-in", "CXF241 dreg-in", "CXF241 live t=%u"):
+        if token not in broad:
+            raise RuntimeError(f"Phase 241 broad latch overlay missing {token}")
 
-    print(
-        "Phase 240 post-parity wrapper self-test: PASS "
-        "(Phase 239 behavior retained; Phase 240 diagnostics are append-only)",
-        flush=True,
-    )
+    audit = (ROOT / "241_phase240_generated_source_audit.py").read_text(encoding="utf-8")
+    for token in ('"HB tick=%u', 'a52_ackfr_record("CXF241 live t=%u", tick);',
+                  "a52_r241_corridor_replay(tick);", "obsolete Phase240 replay"):
+        if token not in audit:
+            raise RuntimeError(f"Phase 241 generated-source audit missing {token}")
+
+    print("Phase 241 wrapper self-test: PASS (literal order; broad corridor; live-HB structural audit)", flush=True)
     return 0
 
 
@@ -133,15 +113,14 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase240_self_test()
+        return phase241_self_test()
 
-    # A52_PHASE240_POST_PHASE239_LATCH_ORDER_V1
+    # A52_PHASE241_POST_PHASE240_BROAD_CORRIDOR_ORDER_V1
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-
-    print("Phase 240 post-Phase239 supplier-gate diagnostic ordering completed", flush=True)
+    print("Phase 241 post-Phase240 broad CX corridor diagnostic ordering completed", flush=True)
     return 0
 
 

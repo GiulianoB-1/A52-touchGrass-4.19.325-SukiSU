@@ -1,0 +1,191 @@
+name: 241 - A52 GPU CX broad corridor latch
+
+run-name: Build Phase 241 GPU CX broad corridor diagnostic candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase241-cx-broad-corridor-latch-v1
+    paths:
+      - .github/workflows/241-a52-cx-broad-corridor-latch.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_phase226_retention_wrapper_base.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/233_payload.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_platform_include_preflight.py
+      - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/238_phase237_gdsc_parent_diag_repair.py
+      - scripts/238_phase237_cx_journal_extension.py
+      - scripts/238_phase237_cx_driver_walk_extension.py
+      - scripts/238_phase237_controlflow_safety_overlay.py
+      - scripts/238_phase237_retention_replay_timing_repair.py
+      - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase233_fb_msm_audit_repair.py
+      - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+      - scripts/239_phase238_identity_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay_v2.py
+      - scripts/240_phase239_identity_overlay.py
+      - scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+      - scripts/241_phase240_cxf241_postcapacity_repair.py
+      - scripts/241_phase240_identity_overlay.py
+      - scripts/241_phase240_generated_source_audit.py
+      - scripts/241_package_postcapacity_audit.py
+      - scripts/237_package.py
+      - scripts/238_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase241-cx-broad-corridor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 241
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 241 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/239_phase233_fb_msm_audit_repair.py \
+            scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
+            scripts/239_phase238_identity_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay_v2.py \
+            scripts/240_phase239_identity_overlay.py \
+            scripts/241_phase240_cx_broad_corridor_latch_overlay.py \
+            scripts/241_phase240_cxf241_postcapacity_repair.py \
+            scripts/241_phase240_identity_overlay.py \
+            scripts/241_phase240_generated_source_audit.py \
+            scripts/241_package_postcapacity_audit.py \
+            scripts/238_phase237_broad_gpu_supplier_overlay.py \
+            scripts/238_phase237_cx_driver_walk_extension.py \
+            scripts/238_phase237_retention_replay_timing_repair.py \
+            scripts/238_package.py
+          python3 scripts/199_runtime_fix_binary_audit.py --self-test
+          python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
+          python3 scripts/239_phase238_identity_overlay.py --self-test
+          python3 scripts/240_phase239_cx_frozen_latch_overlay_v2.py --self-test
+          python3 scripts/240_phase239_identity_overlay.py --self-test
+          python3 scripts/241_phase240_cx_broad_corridor_latch_overlay.py --self-test
+          python3 scripts/241_phase240_cxf241_postcapacity_repair.py --self-test
+          python3 scripts/241_phase240_identity_overlay.py --self-test
+          python3 scripts/241_phase240_generated_source_audit.py --self-test
+          python3 scripts/241_package_postcapacity_audit.py --self-test
+          python3 scripts/238_phase237_cx_driver_walk_extension.py --self-test
+          python3 scripts/238_phase237_retention_replay_timing_repair.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 241 source scope
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_V1' scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+          grep -Fq 'CXF241 create-in' scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+          grep -Fq 'CXF241 dreg-in' scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+          grep -Fq 'CXF241 live t=%u' scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+          grep -Fq 'A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1' scripts/241_phase240_cxf241_postcapacity_repair.py
+          grep -Fq 'A52_PHASE241_CXF241_SOURCE_CLASSIFICATION_V1' scripts/241_phase240_cxf241_postcapacity_repair.py
+          grep -Fq 'return !strncmp(message, "CXF241 ", 7) ||' scripts/241_phase240_cxf241_postcapacity_repair.py
+          grep -Fq 'CLASSIFY_OLD' scripts/241_phase240_cxf241_postcapacity_repair.py
+          grep -Fq '241_phase240_cxf241_postcapacity_repair.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1' scripts/241_phase240_generated_source_audit.py
+          grep -Fq 'A52_PHASE241_CXF241_SOURCE_CLASSIFICATION_V1' scripts/241_phase240_generated_source_audit.py
+          grep -Fq 'agent/a52-phase241-cx-broad-corridor-latch-v1' scripts/238_package.py
+          grep -Fq 'phase=241 focus=cx-broad-corridor-latch' scripts/241_phase240_identity_overlay.py
+
+      - name: Dispatch inherited builder and package Phase 241
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/238_package.py
+          python3 scripts/241_package_postcapacity_audit.py
+
+      - name: Verify Phase 241 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase241-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/audit/phase241/241_phase240_cxf241_postcapacity_repair.py"
+          for marker in \
+            'BOOT rs=ready phase=241 focus=cx-broad-corridor-latch' \
+            'CXF241 live t=%u' \
+            'CXF241 replay-begin t=%u pop=%u/%u drv=%u/%u prb=%u/%u sup=%u/%u' \
+            'CXF241 %s i=%u %.88s' \
+            'CXF241 stats t=%u pop=%u/%u drv=%u/%u prb=%u/%u sup=%u/%u' \
+            'CXF241 replay-end t=%u' \
+            'CXF241 create-in node=%.64s' \
+            'CXF241 create-out node=%.52s ok=%u dev=%.24s l=%d' \
+            'CXF241 dreg-in r=%.32s bus=%.16s' \
+            'CXF241 dreg-out r=%.32s rc=%d l=%d' \
+            'A52GDSC CX_VDD_PARENT_GET_V1 dev=%s rc=%d' \
+            'CXF240 drvwalk-in r=%.24s bus=%.16s' \
+            'G238 RP plat cx-att=%d stage=%d rc=%d drv=%s' \
+            '3d9106c.qcom,gdsc' \
+            '3d9100c.qcom,gdsc' \
+            '3d00000.qcom,kgsl-3d0'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=240 focus=cx-supplier-gate-latch' "$OUT/compile/Image"
+          ! grep -aFq 'BOOT rs=ready phase=239 focus=gpu-cx-vdd-parent' "$OUT/compile/Image"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit = json.loads(Path('phase241-out/final-audit.json').read_text())
+          assert audit['phase'] == 241
+          assert audit['base_phase'] == 240
+          assert audit['functional_base_phase'] == 239
+          assert audit['hardware_validated'] is False
+          assert audit['phase241_phase239_vdd_parent_fix_retained'] is True
+          assert audit['phase241_phase240_diagnostics_retained'] is True
+          assert audit['phase241_generated_source_reachability_audited'] is True
+          assert audit['phase241_target_of_creation_traced'] is True
+          assert audit['phase241_driver_registration_traced'] is True
+          assert audit['phase241_graphics_behavior_changed'] is False
+          assert audit['phase241_provider_behavior_changed'] is False
+          assert audit['phase241_driver_core_functional_behavior_changed'] is False
+          assert audit['phase241_recorder_transport_changed'] is False
+          assert audit['phase241_cxf241_source_classification_repaired'] is True
+          assert audit['phase241_cxf241_postcapacity_critical'] is True
+          assert audit['phase241_phase240_replay_retention_hole_closed'] is True
+          assert audit['phase241_replay_recursion_guard_retained'] is True
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 241 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase241-CX-BROAD-CORRIDOR-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase241-out
+          if-no-files-found: error
+          retention-days: 30

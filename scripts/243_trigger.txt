@@ -1,0 +1,32 @@
+PHASE 243 HARDWARE VALIDATION - LIVE CX/GX OWN-SUPPLIER CORRIDOR
+
+Flash only the audited Phase 243 package/boot.img.
+Expected runtime identity:
+BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers roots=48 copies=3 crc=crc32c
+
+Boot normally. Leave the phone running for 200-210 seconds, then collect a fresh raw ramoops ZIP.
+
+Highest-value current-boot records all begin with CXF243 and are emitted live in three adjacent logical copies:
+  CXF243 M c=C|G q=0..2 rc=<platform match result>
+  CXF243 R c=C|G q=0..2 ls=<consumer link status>
+  CXF243 L c=C|G q=0..2 n=<supplier index> s=<supplier device> st=<link status> ds=<supplier device-link status> b=<supplier driver bound>
+  CXF243 G c=C|G q=0..2 rc=<device_links_check_suppliers result> ls=<consumer link status>
+  CXF243 P c=C|G q=0..2
+
+Interpretation:
+1. GX M=1 but no CX M: exact CX platform match path is not reached.
+2. CX M=0: exact legacy GDSC driver does not match CX.
+3. CX M=1 but no CX R: match succeeds but attach/really_probe is not reached.
+4. CX R/L plus G=-517: CX itself is supplier-gated; the L records identify the blocking supplier. Compare GX L/G as the success control.
+5. CX G=0 but no P: failure is between supplier gate and provider callback.
+6. CX P present: provider body is reached. Then use retained A52GDSC CX_VDD_PARENT_GET_V1 and provider traces for the first provider-side failure.
+
+Guardrails:
+- Diagnostic only.
+- No device link is added, removed, or bypassed.
+- No match/probe/supplier return value is changed.
+- No driver order/initcall level is changed.
+- Phase 239 vdd_parent behavior is unchanged.
+- Phase 242 sticky latch/snapshot runtime hooks are disabled.
+- No replay and no Phase 243 heartbeat summary.
+- R48/RS48/CRC32C transport is unchanged.

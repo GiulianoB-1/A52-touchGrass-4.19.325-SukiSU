@@ -1,0 +1,178 @@
+name: 243 - A52 GPU CX GDSC own suppliers
+
+run-name: Build Phase 243 GPU CX GDSC own-supplier diagnostic candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase243-cx-gdsc-own-suppliers-v1
+    paths:
+      - .github/workflows/243-a52-cx-gdsc-own-suppliers.yml
+      - scripts/199_runtime_fix_binary_audit.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/227_phase226_retention_wrapper_base.py
+      - scripts/230_phase229_driver_core_wrapper.py
+      - scripts/233_payload.py
+      - scripts/234_repair_phase230_layout.py
+      - scripts/235_phase234_rscc_master_overlay.py
+      - scripts/236_phase235_display_init_overlay.py
+      - scripts/237_phase236_ofpop_probe_overlay.py
+      - scripts/238_phase237_platform_include_preflight.py
+      - scripts/238_phase237_broad_gpu_supplier_overlay.py
+      - scripts/238_phase237_gdsc_parent_diag_repair.py
+      - scripts/238_phase237_cx_journal_extension.py
+      - scripts/238_phase237_cx_driver_walk_extension.py
+      - scripts/238_phase237_controlflow_safety_overlay.py
+      - scripts/238_phase237_retention_replay_timing_repair.py
+      - scripts/238_phase237_c_indent_sanitize.py
+      - scripts/239_phase233_fb_msm_audit_repair.py
+      - scripts/239_phase238_gpu_cx_vdd_parent_overlay.py
+      - scripts/239_phase238_identity_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay.py
+      - scripts/240_phase239_cx_frozen_latch_overlay_v2.py
+      - scripts/240_phase239_identity_overlay.py
+      - scripts/241_phase240_cx_broad_corridor_latch_overlay.py
+      - scripts/241_phase240_cxf241_postcapacity_repair.py
+      - scripts/241_phase240_compile_shape_repair.py
+      - scripts/241_phase240_identity_overlay.py
+      - scripts/241_phase240_generated_source_audit.py
+      - scripts/242_phase241_cx_sticky_state_overlay.py
+      - scripts/242_phase241_identity_overlay.py
+      - scripts/242_phase241_generated_source_audit.py
+      - scripts/243_phase242_cxgx_live_supplier_overlay.py
+      - scripts/243_phase242_identity_overlay.py
+      - scripts/243_phase242_generated_source_audit.py
+      - scripts/243_package.py
+      - scripts/243_trigger.txt
+      - scripts/237_package.py
+      - scripts/242_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase243-cx-gdsc-own-suppliers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 243
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 243 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative patch layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/199_runtime_fix_binary_audit.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/230_phase229_driver_core_wrapper.py \
+            scripts/239_phase238_gpu_cx_vdd_parent_overlay.py \
+            scripts/239_phase238_identity_overlay.py \
+            scripts/240_phase239_cx_frozen_latch_overlay_v2.py \
+            scripts/240_phase239_identity_overlay.py \
+            scripts/241_phase240_cx_broad_corridor_latch_overlay.py \
+            scripts/241_phase240_cxf241_postcapacity_repair.py \
+            scripts/241_phase240_compile_shape_repair.py \
+            scripts/241_phase240_identity_overlay.py \
+            scripts/241_phase240_generated_source_audit.py \
+            scripts/242_phase241_cx_sticky_state_overlay.py \
+            scripts/242_phase241_identity_overlay.py \
+            scripts/242_phase241_generated_source_audit.py \
+            scripts/243_phase242_cxgx_live_supplier_overlay.py \
+            scripts/243_phase242_identity_overlay.py \
+            scripts/243_phase242_generated_source_audit.py \
+            scripts/243_package.py
+          python3 scripts/199_runtime_fix_binary_audit.py --self-test
+          python3 scripts/239_phase238_gpu_cx_vdd_parent_overlay.py --self-test
+          python3 scripts/240_phase239_cx_frozen_latch_overlay_v2.py --self-test
+          python3 scripts/241_phase240_cxf241_postcapacity_repair.py --self-test
+          python3 scripts/241_phase240_compile_shape_repair.py --self-test
+          python3 scripts/242_phase241_cx_sticky_state_overlay.py --self-test
+          python3 scripts/243_phase242_cxgx_live_supplier_overlay.py --self-test
+          python3 scripts/243_phase242_identity_overlay.py --self-test
+          python3 scripts/243_phase242_generated_source_audit.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 243 source scope
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'A52_PHASE243_CXGX_LIVE_SUPPLIER_V1' scripts/243_phase242_cxgx_live_supplier_overlay.py
+          grep -Fq 'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1' scripts/243_phase242_cxgx_live_supplier_overlay.py
+          grep -Fq 'CXF243 M c=%c q=%d rc=%d' scripts/243_phase242_cxgx_live_supplier_overlay.py
+          grep -Fq 'CXF243 L c=%c q=%d n=%d' scripts/243_phase242_cxgx_live_supplier_overlay.py
+          grep -Fq 'phase=243 focus=cx-gdsc-own-suppliers' scripts/243_phase242_identity_overlay.py
+          grep -Fq 'PHASE 243 HARDWARE VALIDATION' scripts/243_trigger.txt
+          grep -Fq 'agent/a52-phase243-cx-gdsc-own-suppliers-v1' scripts/243_package.py
+          grep -Fq '243_phase242_cxgx_live_supplier_overlay.py' scripts/227_phase226_retention_wrapper.py
+          grep -Fq 'PHASE243_IDENTITY_PATH' scripts/199_runtime_fix_binary_audit.py
+
+      - name: Dispatch inherited builder and package Phase 243
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/243_package.py
+
+      - name: Verify Phase 243 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase243-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE243-HARDWARE-TEST.txt"
+          test -s "$OUT/audit/phase243/243_phase242_cxgx_live_supplier_overlay.py"
+          for marker in \
+            'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' \
+            'CXF243 M c=%c q=%d rc=%d' \
+            'CXF243 R c=%c q=%d ls=%d' \
+            'CXF243 L c=%c q=%d n=%d s=%.36s st=%u ds=%d b=%d' \
+            'CXF243 G c=%c q=%d rc=%d ls=%d' \
+            'CXF243 P c=%c q=%d' \
+            'A52GDSC CX_VDD_PARENT_GET_V1 dev=%s rc=%d' \
+            '3d9106c' '3d9100c' 'a52-legacy-gdsc-regulator'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=242 focus=cx-sticky-state' "$OUT/compile/Image"
+          grep -Fq 'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' "$OUT/PHASE243-HARDWARE-TEST.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit=json.loads(Path('phase243-out/final-audit.json').read_text())
+          assert audit['phase']==243
+          assert audit['functional_base_phase']==239
+          assert audit['hardware_validated'] is False
+          assert audit['phase243_phase239_vdd_parent_fix_retained'] is True
+          assert audit['phase243_phase242_sticky_runtime_disabled'] is True
+          assert audit['phase243_live_only'] is True
+          assert audit['phase243_logical_copies_per_boundary']==3
+          assert audit['phase243_graphics_behavior_changed'] is False
+          assert audit['phase243_provider_behavior_changed'] is False
+          assert audit['phase243_driver_core_functional_behavior_changed'] is False
+          assert audit['phase243_recorder_transport_changed'] is False
+          PY
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase 243 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase243-CX-GDSC-OWN-SUPPLIERS-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase243-out
+          if-no-files-found: error
+          retention-days: 30

@@ -55,7 +55,7 @@ def audit(root,label):
     for text,tokens,name in (
         (plat,('A52_PHASE243_CXGX_LIVE_SUPPLIER_V1','CXF243 M c=%c q=%d rc=%d','a52_r243_match3(dev, drv, ret);'),'platform'),
         (dd,('A52_PHASE243_CXGX_LIVE_SUPPLIER_V1','CXF243 R c=%c q=%d ls=%d','CXF243 L c=%c q=%d n=%d s=%.36s st=%u ds=%d b=%d','CXF243 G c=%c q=%d rc=%d ls=%d','device_links_check_suppliers(dev)'),'dd'),
-        (gd,('A52_PHASE243_CXGX_LIVE_SUPPLIER_V1','CXF243 P c=%c q=%d','a52_r243_provider3(pdev, name);','A52GDSC CX_VDD_PARENT_GET_V1'),'gdsc')):
+        (gd,('A52_PHASE243_CXGX_LIVE_SUPPLIER_V1','A52_PHASE243_GDSC_SUPPLIER_HOOK_V1','CXF243 P c=%c q=%d','a52_r243_provider3(pdev);','3d9106c','3d9100c','gdsc->timeout_us = A52_GDSC_TIMEOUT_US;','A52GDSC CX_VDD_PARENT_GET_V1'),'gdsc')):
         for t in tokens:
             if t not in text: raise RuntimeError(f'{label}: {name} missing {t}')
     print('Phase 243 generated-source audit: PASS',flush=True)

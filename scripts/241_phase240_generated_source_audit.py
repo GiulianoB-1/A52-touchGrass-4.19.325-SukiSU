@@ -2,7 +2,8 @@
 """Phase 241 final generated-source reachability and coverage audit.
 
 This complements the Image-string package gate: the surviving HB record,
-Phase241 live proof, and replay call must be in the same generated C function.
+Phase241 live proof, and replay call must be in the same generated C function,
+and CXF241 must be admitted by the actual post-capacity critical classifier.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ DRIVER = Path("drivers/base/driver.c")
 IDENTITY = "BOOT rs=ready phase=241 focus=cx-broad-corridor-latch roots=%u copies=3 crc=crc32c"
 IDENTITY_MARKER = "A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_IDENTITY_V1"
 LATCH_MARKER = "A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_V1"
+RETENTION_MARKER = "A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1"
 OF_MARKER = "A52_PHASE241_OF_GPU_CREATE_TRACE_V1"
 DRIVER_MARKER = "A52_PHASE241_GPU_DRIVER_REGISTER_TRACE_V1"
 
@@ -71,14 +73,21 @@ def require(text: str, tokens: tuple[str, ...], label: str) -> None:
 
 def audit_recorder(text: str, label: str) -> None:
     require(text, (
-        IDENTITY, IDENTITY_MARKER, LATCH_MARKER,
+        IDENTITY, IDENTITY_MARKER, LATCH_MARKER, RETENTION_MARKER,
         "A52_R241_POP_CAPACITY 24U", "A52_R241_DRV_CAPACITY 32U",
         "A52_R241_PRB_CAPACITY 48U", "A52_R241_SUP_CAPACITY 48U",
         'strncmp(fmt, "CXF241", 6)', "a52_r241_corridor_latch(event.message);",
+        'return !strncmp(message, "CXF241 ", 7) ||',
+        'critical = a52_r179_is_critical_message(event.message);',
         'a52_ackfr_record("CXF241 replay-begin', 'a52_r241_replay_bucket("pop"',
         'a52_r241_replay_bucket("drv"', 'a52_r241_replay_bucket("prb"',
         'a52_r241_replay_bucket("sup"', 'a52_ackfr_record("CXF241 stats',
         'a52_ackfr_record("CXF241 replay-end'), label)
+    if text.count('!strncmp(message, "CXF241 ", 7)') != 1:
+        raise RuntimeError(
+            f"{label}: expected exactly one CXF241 critical prefix, found "
+            f"{text.count('!strncmp(message, \"CXF241 \", 7)')}"
+        )
     hb = '"HB tick=%u'
     if text.count(hb) != 1: raise RuntimeError(f"{label}: expected exactly one HB format, found {text.count(hb)}")
     marker = text.index(hb); opening, closing = enclosing_top_level_block(text, marker, label)
@@ -124,7 +133,7 @@ def locate_generated(args: list[str], cwd: Path | None = None) -> Path:
         paths = (root / RECORDER, root / OF_PLATFORM, root / DRIVER)
         if not all(path.is_file() for path in paths): continue
         text = paths[0].read_text(encoding="utf-8")
-        if LATCH_MARKER not in text or IDENTITY_MARKER not in text: continue
+        if LATCH_MARKER not in text or IDENTITY_MARKER not in text or RETENTION_MARKER not in text: continue
         key = root.resolve()
         if key not in seen: seen.add(key); unique.append(root)
     if len(unique) != 1:
@@ -140,7 +149,7 @@ def audit_root(root: Path) -> None:
 
 
 def self_test() -> None:
-    rec = '''/* A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_V1 */\n/* A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_IDENTITY_V1 */\nA52_R241_POP_CAPACITY 24U\nA52_R241_DRV_CAPACITY 32U\nA52_R241_PRB_CAPACITY 48U\nA52_R241_SUP_CAPACITY 48U\nstrncmp(fmt, "CXF241", 6)\na52_r241_corridor_latch(event.message);\na52_ackfr_record("CXF241 replay-begin");\na52_r241_replay_bucket("pop");\na52_r241_replay_bucket("drv");\na52_r241_replay_bucket("prb");\na52_r241_replay_bucket("sup");\na52_ackfr_record("CXF241 stats");\na52_ackfr_record("CXF241 replay-end");\nBOOT rs=ready phase=241 focus=cx-broad-corridor-latch roots=%u copies=3 crc=crc32c\nstatic void heartbeat(void)\n{\n unsigned int tick = 155;\n a52_ackfr_record("HB tick=%u online=%u", tick, 8);\n a52_ackfr_record("CXF241 live t=%u", tick);\n a52_r241_corridor_replay(tick);\n}\n'''
+    rec = '''/* A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_V1 */\n/* A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_IDENTITY_V1 */\n/* A52_PHASE241_CXF241_POSTCAPACITY_CRITICAL_V1 */\nA52_R241_POP_CAPACITY 24U\nA52_R241_DRV_CAPACITY 32U\nA52_R241_PRB_CAPACITY 48U\nA52_R241_SUP_CAPACITY 48U\nstrncmp(fmt, "CXF241", 6)\na52_r241_corridor_latch(event.message);\nreturn !strncmp(message, "CXF241 ", 7) ||\n       !strncmp(message, "BOOT ", 5);\ncritical = a52_r179_is_critical_message(event.message);\na52_ackfr_record("CXF241 replay-begin");\na52_r241_replay_bucket("pop");\na52_r241_replay_bucket("drv");\na52_r241_replay_bucket("prb");\na52_r241_replay_bucket("sup");\na52_ackfr_record("CXF241 stats");\na52_ackfr_record("CXF241 replay-end");\nBOOT rs=ready phase=241 focus=cx-broad-corridor-latch roots=%u copies=3 crc=crc32c\nstatic void heartbeat(void)\n{\n unsigned int tick = 155;\n a52_ackfr_record("HB tick=%u online=%u", tick, 8);\n a52_ackfr_record("CXF241 live t=%u", tick);\n a52_r241_corridor_replay(tick);\n}\n'''
     of = '''/* A52_PHASE241_OF_GPU_CREATE_TRACE_V1 */\nCXF241 create-in\nCXF241 create-out\na52_r241_of_create_return(np, p, 1);\nstrstr(name, "3d9106c"); strstr(name, "3d9100c"); strstr(name, "3d90000"); strstr(name, "3d00000");\n'''
     dr = '''/* A52_PHASE241_GPU_DRIVER_REGISTER_TRACE_V1 */\nCXF241 dreg-in\nCXF241 dreg-out\na52_r241_driver_register_return(drv, 0, 1);\nstrstr(name, "a52-legacy-gdsc"); strstr(name, "kgsl"); strstr(name, "gpu");\n'''
     audit_recorder(rec, "fixture/recorder"); audit_of(of, "fixture/of"); audit_driver(dr, "fixture/driver")
@@ -155,7 +164,7 @@ def self_test() -> None:
 def main() -> int:
     if "--self-test" in sys.argv[1:]: self_test(); return 0
     root = locate_generated(sys.argv[1:]); audit_root(root)
-    print("Phase 241 generated-source audit: PASS (HB/live/replay same function; broad CX corridor present)", flush=True)
+    print("Phase 241 generated-source audit: PASS (HB/live/replay same function; CXF241 post-capacity critical; broad CX corridor present)", flush=True)
     return 0
 
 

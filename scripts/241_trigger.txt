@@ -1,0 +1,83 @@
+PHASE 241 HARDWARE VALIDATION
+
+Flash only the CI-audited Phase 241 package/boot.img after SHA256SUMS and all
+package/final-audit checks pass.
+
+Expected runtime identity:
+  BOOT rs=ready phase=241 focus=cx-broad-corridor-latch
+
+Collect the same frozen raw 1 MiB ramoops evidence bundle after the watchdog
+reboot. Decode it only with the bundled current R48/RS48 transport-fusion
+decoder. Do not use the obsolete recorder-v3 decoder.
+
+The Phase 241 recorder is diagnostic only. It must not be interpreted as a
+binding workaround. It preserves Phase 239 vdd_parent behavior and records the
+failure corridor in four append-only evidence classes.
+
+Highest-value Phase 241 records:
+  CXF241 live t=155
+  CXF241 replay-begin t=155 pop=<kept>/<seen> drv=<kept>/<seen> prb=<kept>/<seen> sup=<kept>/<seen>
+  CXF241 pop i=
+  CXF241 drv i=
+  CXF241 prb i=
+  CXF241 sup i=
+  CXF241 stats t=155
+  CXF241 replay-end t=155
+  CXF241 live t=170
+  CXF241 stats t=170
+  CXF241 replay-end t=170
+
+Source-side records expected inside the frozen buckets include:
+  CXF241 create-in node=...
+  CXF241 create-out node=... ok=... dev=... l=...
+  CXF241 dreg-in r=... bus=...
+  CXF241 dreg-out r=... rc=... l=...
+  CXF240 drvwalk-in
+  CXF240 drv-match
+  CXF240 sup-in
+  CXF240 sup n=
+  CXF240 sup-out
+  CXF240 drv-probe
+  A52GDSC CX_VDD_PARENT_GET_V1
+
+Use GPU GX as the success control whenever the corresponding GX evidence is
+present.
+
+Interpretation, in order:
+- HB tick=155 is present but CXF241 live t=155 is absent:
+    the Phase 241 late diagnostic record did not survive the post-capacity
+    persistence path. Do not infer anything about CX registration from missing
+    bucket replay.
+- CXF241 live t=155 is present but replay-begin is absent:
+    the live heartbeat hook ran but the Phase 241 replay call/entry failed.
+- replay-begin is present with zero population evidence for the target:
+    inspect OF/platform population before driver registration. The key target is
+    3d9106c.qcom,gdsc; compare 3d9100c GX and gpucc creation evidence.
+- create-in exists but create-out reports ok=0:
+    the target platform-device creation path failed before normal registration
+    and probing.
+- create-out reports ok=1 but no a52-legacy-gdsc dreg-in/out appears:
+    the platform device exists but the compatibility provider driver does not
+    reach driver_register() in the captured boot path.
+- dreg-in appears and dreg-out rc is nonzero:
+    driver registration itself fails; use the exact rc and line marker.
+- dreg-out rc=0 but there is no exact CX driver walk/match:
+    registration succeeded but the bus attach/match walk does not reach the
+    3d9106c / a52-legacy-gdsc pair.
+- exact drv-match is positive and sup-out rc=-517:
+    supplier gating blocks really_probe(). Use the preceding frozen supplier
+    records to identify the unresolved supplier/device-link state.
+- sup-out rc=0 but drv-probe/provider records fail:
+    the blocker is later in really_probe()/platform/GDSC probe. Correlate G238,
+    P3P, CXF240 and A52GDSC records.
+- A52GDSC CX_VDD_PARENT_GET_V1 appears:
+    the compatibility provider probe body was reached. Use its exact rc and the
+    subsequent vote/state records to localize the provider path.
+
+Phase 241 success criterion:
+  obtain an unambiguous earliest divergence for gpu_cx_gdsc@3d9106c across OF
+  creation -> driver_register -> driver/bus match -> supplier gate -> provider
+  probe, while the Phase 241 replay itself is proven to survive at tick 155.
+
+Do not infer hardware validation merely from reaching the watchdog. Preserve the
+newest untouched raw ramoops bundle for decoding.

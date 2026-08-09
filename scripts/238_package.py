@@ -34,13 +34,14 @@ def load_phase237_package():
 
 
 def verify_phase241_image(image: Path) -> None:
+    """Binary gate only for strings that survive compilation.
+
+    Structural/source-only Phase241 markers are enforced separately by
+    241_phase240_generated_source_audit.py before compilation.
+    """
     data = image.read_bytes()
     required = (
         b"BOOT rs=ready phase=241 focus=cx-broad-corridor-latch",
-        b"A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_V1",
-        b"A52_PHASE241_CX_BROAD_CORRIDOR_LATCH_IDENTITY_V1",
-        b"A52_PHASE241_OF_GPU_CREATE_TRACE_V1",
-        b"A52_PHASE241_GPU_DRIVER_REGISTER_TRACE_V1",
         b"CXF241 live t=%u",
         b"CXF241 replay-begin t=%u pop=%u/%u drv=%u/%u prb=%u/%u sup=%u/%u",
         b"CXF241 %s i=%u %.88s",

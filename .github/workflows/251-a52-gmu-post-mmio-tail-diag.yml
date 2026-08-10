@@ -95,28 +95,21 @@ jobs:
           test -s "$OUT/audit/phase251/251_phase250_gmu_post_mmio_tail_diag_overlay.py"
           test -s "$OUT/audit/phase251/251_package.py"
 
+          # Keep this binary verification in lockstep with scripts/251_package.py.
+          # Source-only provenance comments and K251 strings from link-pruned paths
+          # are validated in the executable-scope/source audit above, not here.
           for marker in \
             'A52_PHASE250_GPU_SMMU_POWER_CONTRACT_V1' \
             'K250 S regon rc=%d n=%d' \
             'K250 S clkon rc=%d' \
-            'A52_PHASE251_GMU_POST_MMIO_TAIL_DIAG_V1' \
             'K251 G hfiirq rc=%d' \
             'K251 G gmuirq rc=%d' \
             'K251 G irqoff' \
             'K251 B gpu tbl=%d' \
             'K251 B gpu pcl=%u' \
             'K251 B cnoc tbl=%d' \
-            'K251 B cnoc ccl=%u' \
             'K251 G gpubw rc=%d' \
-            'K251 G cnoc rc=%d' \
-            'K251 G rpmh rc=%d' \
-            'K251 R bus rc=%d' \
-            'K251 R gfx rc=%d' \
-            'K251 R cx rc=%d' \
-            'K251 R mx rc=%d' \
-            'K251 R gpuvote rc=%d' \
-            'K251 R gmuvote rc=%d' \
-            'K251 G enabled'; do
+            'K251 G cnoc rc=%d'; do
             grep -aFq "$marker" "$OUT/compile/Image"
           done
 

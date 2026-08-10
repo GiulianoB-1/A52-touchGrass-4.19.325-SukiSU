@@ -1,0 +1,156 @@
+name: 247b - A52 CAMCC dense clk_hws compatibility
+
+run-name: Build Phase 247 CAMCC dense-clk_hws candidate rev2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase247-camcc-dense-hws-v1
+    paths:
+      - .github/workflows/247b-a52-camcc-dense-hws.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/247_phase246_camcc_dense_hws_overlay.py
+      - scripts/247_package.py
+      - scripts/247_design.md
+      - scripts/247_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase247b-camcc-dense-hws-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 247 rev2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 247 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/245_phase243_fwdevlink_permissive_overlay.py \
+            scripts/246_phase245_subsys_initcall_corridor_overlay.py \
+            scripts/247_phase246_camcc_dense_hws_overlay.py \
+            scripts/246_package.py \
+            scripts/247_package.py
+          python3 scripts/245_phase243_fwdevlink_permissive_overlay.py --self-test
+          python3 scripts/246_phase245_subsys_initcall_corridor_overlay.py --self-test
+          python3 scripts/247_phase246_camcc_dense_hws_overlay.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 247 executable scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
+          overlay = Path('scripts/247_phase246_camcc_dense_hws_overlay.py').read_text()
+          package = Path('scripts/247_package.py').read_text()
+          assert '("245_phase243_fwdevlink_permissive_overlay.py"' in wrapper
+          assert '("246_phase245_subsys_initcall_corridor_overlay.py"' in wrapper
+          assert '("247_phase246_camcc_dense_hws_overlay.py"' in wrapper
+          assert wrapper.index('245_phase243_fwdevlink_permissive_overlay.py') < wrapper.index('246_phase245_subsys_initcall_corridor_overlay.py') < wrapper.index('247_phase246_camcc_dense_hws_overlay.py')
+          assert '("244_phase243_gdsc_subsys_initcall_overlay.py",' not in wrapper
+          assert 'A52_PHASE247_CAMCC_DENSE_HWS_V1' in overlay
+          assert 'SPARSE_TOKEN = "[CAM_CC_PLL2_OUT_EARLY] = &cam_cc_pll2_out_early.hw"' in overlay
+          assert 'entries != [DENSE_ENTRY + ","]' in overlay
+          assert 'FW_DEVLINK_FLAGS_PERMISSIVE' in overlay
+          assert 'CXF246 S n=%d f=%ps' in overlay
+          assert 'agent/a52-phase247-camcc-dense-hws-v1' in package
+          assert 'phase247_global_qcom_common_changed' in package
+          assert 'phase247_camcc_pll_configuration_changed' in package
+          PY
+
+      - name: Dispatch inherited builder and package Phase 247
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/247_package.py
+
+      - name: Verify Phase 247 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase247-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE247-DESIGN.md"
+          test -s "$OUT/PHASE247-HARDWARE-TEST.txt"
+          test -s "$OUT/audit/phase247/247_phase246_camcc_dense_hws_overlay.py"
+
+          for marker in \
+            'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' \
+            'CXF243 M c=%c q=%d rc=%d' \
+            'CXF243 G c=%c q=%d rc=%d ls=%d' \
+            'CXF246 V q=%d l=%d' \
+            'CXF246 S n=%d f=%ps' \
+            'CXF246 X q=%d n=%d' \
+            'cam_cc_pll2_out_early' \
+            'A52GDSC driver-register enter' \
+            'A52GDSC driver-register exit rc=%d' \
+            '3d9106c' '3d9100c'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall' "$OUT/compile/Image"
+          ! grep -aFq 'CXF244 V q=%d l=%d' "$OUT/compile/Image"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('phase247-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 247
+          assert audit['base_phase'] == 246
+          assert audit['functional_base_phase'] == 245
+          assert audit['hardware_validated'] is False
+          assert audit['phase247_phase245_fwdevlink_permissive_retained'] is True
+          assert audit['phase247_phase246_subsys_recorder_retained'] is True
+          assert audit['phase247_phase243_cxgx_hooks_retained'] is True
+          assert audit['phase247_phase244_overlay_applied'] is False
+          assert audit['phase247_global_qcom_common_changed'] is False
+          assert audit['phase247_camcc_regulator_gets_restored'] is False
+          assert audit['phase247_camcc_vdd_classes_restored'] is False
+          assert audit['phase247_camcc_pll_configuration_changed'] is False
+          assert audit['phase247_dt_changed'] is False
+          assert audit['phase247_boot_cmdline_changed'] is False
+          assert audit['phase247_recorder_transport_changed'] is False
+          assert audit['phase247_static_root_cause_candidate']['phase247_fix'].startswith('one-element dense clk_hws')
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          inv = repack['invariants']
+          for key in ('board_preserved', 'cmdline_preserved', 'dtb_preserved',
+                      'ramdisk_preserved', 'header_version_preserved',
+                      'partition_size_preserved', 'replacement_kernel_used'):
+              assert inv[key] is True, key
+          assert 'fw_devlink=' not in repack.get('cmdline', '')
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 247 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase247-CAMCC-DENSE-HWS-REV2-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase247-out
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,194 @@
+name: 248 - A52 KGSL GMU IOMMU corridor
+
+run-name: Build Phase 248 KGSL-GMU-IOMMU diagnostic corridor
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase248-kgsl-gmu-iommu-corridor-v1
+    paths:
+      - .github/workflows/248-a52-kgsl-gmu-iommu-corridor.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py
+      - scripts/248_package.py
+      - scripts/248_design.md
+      - scripts/248_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase248-kgsl-gmu-iommu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 248
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 248 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/245_phase243_fwdevlink_permissive_overlay.py \
+            scripts/246_phase245_subsys_initcall_corridor_overlay.py \
+            scripts/247_phase246_camcc_dense_hws_overlay.py \
+            scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py \
+            scripts/247_package.py \
+            scripts/248_package.py
+          python3 scripts/245_phase243_fwdevlink_permissive_overlay.py --self-test
+          python3 scripts/246_phase245_subsys_initcall_corridor_overlay.py --self-test
+          python3 scripts/247_phase246_camcc_dense_hws_overlay.py --self-test
+          python3 scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 248 executable scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
+          overlay = Path('scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py').read_text()
+          package = Path('scripts/248_package.py').read_text()
+
+          p245 = '245_phase243_fwdevlink_permissive_overlay.py'
+          p246 = '246_phase245_subsys_initcall_corridor_overlay.py'
+          p247 = '247_phase246_camcc_dense_hws_overlay.py'
+          p248 = '248_phase247_kgsl_gmu_iommu_corridor_overlay.py'
+          for token in (p245, p246, p247, p248):
+              assert f'(\"{token}\"' in wrapper
+          assert wrapper.index(p245) < wrapper.index(p246) < wrapper.index(p247) < wrapper.index(p248)
+          assert '("244_phase243_gdsc_subsys_initcall_overlay.py",' not in wrapper
+
+          for token in (
+              'A52_PHASE248_KGSL_GMU_IOMMU_CORRIDOR_V1',
+              'A52_PHASE247_CAMCC_DENSE_HWS_V1',
+              'K248 A gmu in',
+              'K248 G ops in t=%d',
+              'K248 M iommu in',
+              'K248 I cb in i=%d',
+              'K248 C att in n=%.12s',
+              'K248 C att rc=%d n=%.12s',
+              'FW_DEVLINK_FLAGS_PERMISSIVE',
+              'CXF246 S n=%d f=%ps',
+          ):
+              assert token in overlay, token
+
+          assert 'agent/a52-phase248-kgsl-gmu-iommu-corridor-v1' in package
+          assert 'phase248_diagnostic_only' in package
+          assert 'phase248_iommu_behavior_changed' in package
+          assert 'phase248_dt_changed' in package
+          assert 'phase248_return_values_changed' in package
+          PY
+
+      - name: Dispatch inherited builder and package Phase 248
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/248_package.py
+
+      - name: Verify Phase 248 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase248-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE248-DESIGN.md"
+          test -s "$OUT/PHASE248-HARDWARE-TEST.txt"
+          test -s "$OUT/audit/phase248/248_phase247_kgsl_gmu_iommu_corridor_overlay.py"
+          test -s "$OUT/audit/phase248/248_package.py"
+
+          for marker in \
+            'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' \
+            'CXF243 G c=%c q=%d rc=%d ls=%d' \
+            'CXF246 S n=%d f=%ps' \
+            'CXF246 X q=%d n=%d' \
+            'cam_cc_pll2_out_early' \
+            'K248 A ef rc=%d' \
+            'K248 A id in' \
+            'K248 A id ok' \
+            'K248 A pwr rc=%d' \
+            'K248 A gmu in' \
+            'K248 A gmu rc=%d' \
+            'K248 A plat in' \
+            'K248 A plat rc=%d' \
+            'K248 G ops in t=%d' \
+            'K248 G ops rc=%d' \
+            'K248 M iommu in' \
+            'K248 M iommu rc=%d' \
+            'K248 I pop in' \
+            'K248 I pop out' \
+            'K248 I cb in i=%d' \
+            'K248 I cb rc=%d i=%d' \
+            'K248 C dom n=%.12s ok=%d' \
+            'K248 C att in n=%.12s' \
+            'K248 C att rc=%d n=%.12s' \
+            'A52GDSC driver-register enter' \
+            'A52GDSC driver-register exit rc=%d' \
+            '3d9106c' '3d9100c'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall' "$OUT/compile/Image"
+          ! grep -aFq 'CXF244 V q=%d l=%d' "$OUT/compile/Image"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase248-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 248
+          assert audit['base_phase'] == 247
+          assert audit['functional_base_phase'] == 247
+          assert audit['hardware_validated'] is False
+          assert audit['phase248_diagnostic_only'] is True
+          assert audit['phase248_phase247_camcc_fix_retained'] is True
+          assert audit['phase248_phase245_fwdevlink_permissive_retained'] is True
+          assert audit['phase248_phase246_subsys_recorder_retained'] is True
+          assert audit['phase248_phase243_cxgx_hooks_retained'] is True
+          assert audit['phase248_phase244_overlay_applied'] is False
+          assert audit['phase248_return_values_changed'] is False
+          assert audit['phase248_probe_order_changed'] is False
+          assert audit['phase248_iommu_behavior_changed'] is False
+          assert audit['phase248_regulator_or_power_behavior_changed'] is False
+          assert audit['phase248_dt_changed'] is False
+          assert audit['phase248_boot_cmdline_changed'] is False
+          assert audit['phase248_recorder_transport_changed'] is False
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          inv = repack['invariants']
+          for key in ('board_preserved', 'cmdline_preserved', 'dtb_preserved',
+                      'ramdisk_preserved', 'header_version_preserved',
+                      'partition_size_preserved', 'replacement_kernel_used'):
+              assert inv[key] is True, key
+          assert 'fw_devlink=' not in repack.get('cmdline', '')
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 248 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase248-KGSL-GMU-IOMMU-CORRIDOR-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase248-out
+          if-no-files-found: error
+          retention-days: 30

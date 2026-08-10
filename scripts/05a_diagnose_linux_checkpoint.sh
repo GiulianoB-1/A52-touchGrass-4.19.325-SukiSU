@@ -24,11 +24,34 @@ if find "$KERNEL_DIR" -type f -name '*.rej' -print -quit | grep -q .; then
 fi
 
 info "Fetching official Linux stable tags $FROM_TAG and $TO_TAG"
-rm -rf "$STABLE_DIR"
-git init -q "$STABLE_DIR"
-git -C "$STABLE_DIR" remote add origin "$LINUX_STABLE_REPO"
-git -C "$STABLE_DIR" fetch --quiet --depth=1000 origin "refs/tags/$TO_TAG:refs/tags/$TO_TAG"
-git -C "$STABLE_DIR" fetch --quiet --depth=1 origin "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"
+
+# Fetch both shallow tips in one transaction. Two consecutive shallow fetches
+# can race Git's .git/shallow bookkeeping on hosted runners and occasionally
+# fail with "shallow file has changed since we read it". Recreate the temporary
+# stable repository for each retry so a failed transport can never contaminate
+# the source used to generate the checkpoint delta.
+fetch_stable_tags() {
+  local attempt
+  for attempt in 1 2 3; do
+    rm -rf "$STABLE_DIR"
+    git init -q "$STABLE_DIR"
+    git -C "$STABLE_DIR" remote add origin "$LINUX_STABLE_REPO"
+
+    if git -C "$STABLE_DIR" fetch --quiet --no-write-fetch-head --depth=1000 origin \
+      "refs/tags/$TO_TAG:refs/tags/$TO_TAG" \
+      "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"; then
+      return 0
+    fi
+
+    printf 'stable_fetch_attempt=%s failed for %s..%s\n' \
+      "$attempt" "$FROM_TAG" "$TO_TAG" >&2
+    sleep "$attempt"
+  done
+
+  return 1
+}
+
+fetch_stable_tags || fail "Unable to fetch stable tags $FROM_TAG and $TO_TAG after 3 clean attempts"
 
 from_sha=$(git -C "$STABLE_DIR" rev-parse "$FROM_TAG^{commit}")
 to_sha=$(git -C "$STABLE_DIR" rev-parse "$TO_TAG^{commit}")

@@ -30,6 +30,13 @@ block = r'''info "Applying observation-only final TouchGrass boot-reference reco
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay.py" "$ROOT"
 
+# Keep only initialization/bind/panel milestones from display. Commit hooks can
+# run every frame after SurfaceFlinger starts and would add useless runtime churn.
+if test -f "$ROOT/techpack/display/msm/sde/sde_kms.c"; then
+  sed -i '/TG_BOOT_REF0("DISP:KMS_PREP");/d; /TG_BOOT_REF0("DISP:KMS_ENABLE");/d' \
+    "$ROOT/techpack/display/msm/sde/sde_kms.c"
+fi
+
 git -C "$ROOT" diff --check
 
 test -s "$ROOT/include/linux/tg_boot_reference.h" || fail "final boot recorder header missing"

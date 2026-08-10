@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase246, then add Phase247 CAMCC compatibility.
+"""Run inherited parity through Phase247, then add Phase248 KGSL/GMU tracing.
 
-Phase247 retains the Phase245 FW_DEVLINK_FLAGS_PERMISSIVE functional state,
-Phase246 subsys-initcall tracing, and all Phase243 CX/GX hooks. Phase244 remains
-skipped. The only Phase247 functional change is conversion of Lagoon CAMCC's
-TouchGrass sparse hwclks representation into the dense clk_hws registration
-list expected by exact GKI 5.10.
+Phase248 retains the Phase245 FW_DEVLINK_FLAGS_PERMISSIVE functional state,
+Phase246 subsys tracing, Phase247 CAMCC dense-clk_hws compatibility fix, and
+all Phase243 CX/GX hooks. Phase244 remains skipped. The only Phase248 change is
+diagnostic K248 recording inside the KGSL -> GMU -> IOMMU probe corridor.
 """
 from __future__ import annotations
 
@@ -42,8 +41,9 @@ OVERLAYS = (
     ("245_phase243_fwdevlink_permissive_overlay.py", "Phase 245 fw_devlink permissive controlled test"),
     ("246_phase245_subsys_initcall_corridor_overlay.py", "Phase 246 subsys initcall corridor"),
     ("247_phase246_camcc_dense_hws_overlay.py", "Phase 247 CAMCC dense clk_hws compatibility"),
+    ("248_phase247_kgsl_gmu_iommu_corridor_overlay.py", "Phase 248 KGSL/GMU/IOMMU diagnostic corridor"),
 )
-EXPECTED_PHASE247_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE248_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -55,27 +55,28 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase247_self_test() -> int:
+def phase248_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE247_ORDER:
-        raise RuntimeError(f"Phase 247 overlay order drifted: {actual!r}")
+    if actual != EXPECTED_PHASE248_ORDER:
+        raise RuntimeError(f"Phase 248 overlay order drifted: {actual!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 247 overlay list contains duplicates")
+        raise RuntimeError("Phase 248 overlay list contains duplicates")
     if any(name.startswith("244_") for name in actual):
-        raise RuntimeError("Phase 247 must not apply the broken Phase244 overlay")
-    if actual[-3:] != (
+        raise RuntimeError("Phase 248 must not apply the broken Phase244 overlay")
+    if actual[-4:] != (
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
         "247_phase246_camcc_dense_hws_overlay.py",
+        "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
     ):
-        raise RuntimeError("Phase245 permissive -> Phase246 recorder -> Phase247 CAMCC order is not final")
+        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 final ordering drifted")
 
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 247 overlay missing: {path}")
+            raise RuntimeError(f"Phase 248 overlay missing: {path}")
         if "gki/common" not in path.read_text(encoding="utf-8"):
-            raise RuntimeError(f"Phase 247 overlay lacks generated-tree locator: {name}")
+            raise RuntimeError(f"Phase 248 overlay lacks generated-tree locator: {name}")
 
     for name in (
         "239_phase238_gpu_cx_vdd_parent_overlay.py",
@@ -85,42 +86,29 @@ def phase247_self_test() -> int:
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
         "247_phase246_camcc_dense_hws_overlay.py",
+        "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
     ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 247 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 248 inherited/new self-test failed: {name} rc={result.returncode}")
 
-    p245 = (ROOT / "245_phase243_fwdevlink_permissive_overlay.py").read_text(encoding="utf-8")
-    if "static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_PERMISSIVE;" not in p245:
-        raise RuntimeError("Phase245 permissive compiled-default patch is missing")
-
-    p246 = (ROOT / "246_phase245_subsys_initcall_corridor_overlay.py").read_text(encoding="utf-8")
+    p248 = (ROOT / "248_phase247_kgsl_gmu_iommu_corridor_overlay.py").read_text(encoding="utf-8")
     for token in (
-        "A52_PHASE246_SUBSYS_INITCALL_CORRIDOR_V1",
-        "do_initcall_level",
-        "char\\s*\\*\\s*command_line",
-        "CXF246 V q=%d l=%d",
-        "CXF246 S n=%d f=%ps",
-        "CXF246 X q=%d n=%d",
-        "FW_DEVLINK_FLAGS_PERMISSIVE",
-    ):
-        if token not in p246:
-            raise RuntimeError(f"Phase246 overlay missing {token}")
-
-    p247 = (ROOT / "247_phase246_camcc_dense_hws_overlay.py").read_text(encoding="utf-8")
-    for token in (
+        "A52_PHASE248_KGSL_GMU_IOMMU_CORRIDOR_V1",
         "A52_PHASE247_CAMCC_DENSE_HWS_V1",
-        "cam_cc_lagoon_hws",
-        "CAM_CC_PLL2_OUT_EARLY",
-        "&cam_cc_pll2_out_early.hw",
+        "K248 A gmu in",
+        "K248 G ops in t=%d",
+        "K248 M iommu in",
+        "K248 I cb in i=%d",
+        "K248 C att in n=%.12s",
         "FW_DEVLINK_FLAGS_PERMISSIVE",
         "CXF246 S n=%d f=%ps",
     ):
-        if token not in p247:
-            raise RuntimeError(f"Phase247 CAMCC overlay missing {token}")
+        if token not in p248:
+            raise RuntimeError(f"Phase248 corridor overlay missing {token}")
 
     print(
-        "Phase 247 wrapper self-test: PASS (Phase245 permissive + Phase246 recorder retained; CAMCC dense clk_hws last)",
+        "Phase 248 wrapper self-test: PASS (Phase247 functional state retained; diagnostic KGSL/GMU/IOMMU corridor last)",
         flush=True,
     )
     return 0
@@ -132,12 +120,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase247_self_test()
+        return phase248_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 247 CAMCC dense-clk_hws compatibility ordering completed", flush=True)
+    print("Phase 248 KGSL/GMU/IOMMU diagnostic corridor ordering completed", flush=True)
     return 0
 
 

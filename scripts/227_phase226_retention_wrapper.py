@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase248, then add Phase249 SMMU/IOMMU tracing.
+"""Run inherited parity through Phase249, then restore the GPU SMMU power contract.
 
-Phase249 retains Phase245 FW_DEVLINK_FLAGS_PERMISSIVE, Phase246 subsys tracing,
+Phase250 retains Phase245 FW_DEVLINK_FLAGS_PERMISSIVE, Phase246 subsys tracing,
 Phase247 CAMCC dense-clk_hws compatibility, Phase248 KGSL/GMU/IOMMU tracing,
-and all Phase243 CX/GX hooks. Phase244 remains skipped. The only Phase249
-change is diagnostic K249 recording inside the GPU arm-smmu probe and
-IOMMU attach group path.
+Phase249 SMMU/IOMMU root diagnostics, and all Phase243 CX/GX hooks. Phase244
+remains skipped. Phase250 is the first corrective GPU phase: it restores the
+DT-declared qcom,regulator-names supply before ARM-SMMU clock enable.
 """
 from __future__ import annotations
 
@@ -44,8 +44,9 @@ OVERLAYS = (
     ("247_phase246_camcc_dense_hws_overlay.py", "Phase 247 CAMCC dense clk_hws compatibility"),
     ("248_phase247_kgsl_gmu_iommu_corridor_overlay.py", "Phase 248 KGSL/GMU/IOMMU diagnostic corridor"),
     ("249_phase248_gpu_smmu_enodev_root_overlay.py", "Phase 249 GPU SMMU / GMU ENODEV root diagnostic"),
+    ("250_phase249_gpu_smmu_power_contract_overlay.py", "Phase 250 GPU SMMU downstream power contract"),
 )
-EXPECTED_PHASE249_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE250_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -57,29 +58,30 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase249_self_test() -> int:
+def phase250_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE249_ORDER:
-        raise RuntimeError(f"Phase 249 overlay order drifted: {actual!r}")
+    if actual != EXPECTED_PHASE250_ORDER:
+        raise RuntimeError(f"Phase 250 overlay order drifted: {actual!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 249 overlay list contains duplicates")
+        raise RuntimeError("Phase 250 overlay list contains duplicates")
     if any(name.startswith("244_") for name in actual):
-        raise RuntimeError("Phase 249 must not apply the broken Phase244 overlay")
-    if actual[-5:] != (
+        raise RuntimeError("Phase 250 must not apply the broken Phase244 overlay")
+    if actual[-6:] != (
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
         "247_phase246_camcc_dense_hws_overlay.py",
         "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
+        "250_phase249_gpu_smmu_power_contract_overlay.py",
     ):
-        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 final ordering drifted")
+        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 -> 250 final ordering drifted")
 
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 249 overlay missing: {path}")
+            raise RuntimeError(f"Phase 250 overlay missing: {path}")
         if "gki/common" not in path.read_text(encoding="utf-8"):
-            raise RuntimeError(f"Phase 249 overlay lacks generated-tree locator: {name}")
+            raise RuntimeError(f"Phase 250 overlay lacks generated-tree locator: {name}")
 
     for name in (
         "239_phase238_gpu_cx_vdd_parent_overlay.py",
@@ -91,28 +93,39 @@ def phase249_self_test() -> int:
         "247_phase246_camcc_dense_hws_overlay.py",
         "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
+        "250_phase249_gpu_smmu_power_contract_overlay.py",
     ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 249 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 250 inherited/new self-test failed: {name} rc={result.returncode}")
 
     p249 = (ROOT / "249_phase248_gpu_smmu_enodev_root_overlay.py").read_text(encoding="utf-8")
     for token in (
         "A52_PHASE249_GPU_SMMU_ENODEV_ROOT_V1",
         "A52_PHASE248_KGSL_GMU_IOMMU_CORRIDOR_V1",
-        "K249 S map in",
-        "K249 S irq rc=%d i=%d",
-        "K249 S reg rc=%d",
+        "K249 S clkon rc=%d",
         "K249 I grp ok=%d",
         "K249 I ret rc=%d s=nogrp",
-        "K249 I ag rc=%d",
         "FW_DEVLINK_FLAGS_PERMISSIVE",
     ):
         if token not in p249:
-            raise RuntimeError(f"Phase249 root overlay missing {token}")
+            raise RuntimeError(f"Phase249 retained root overlay missing {token}")
+
+    p250 = (ROOT / "250_phase249_gpu_smmu_power_contract_overlay.py").read_text(encoding="utf-8")
+    for token in (
+        "A52_PHASE250_GPU_SMMU_POWER_CONTRACT_V1",
+        "qcom,regulator-names",
+        "devm_regulator_bulk_get",
+        "regulator_bulk_enable",
+        "K250 S gdscget rc=%d n=%d",
+        "K250 S regon rc=%d n=%d",
+        "K250 S clkon rc=%d",
+    ):
+        if token not in p250:
+            raise RuntimeError(f"Phase250 corrective overlay missing {token}")
 
     print(
-        "Phase 249 wrapper self-test: PASS (Phase247 functional state retained; SMMU/IOMMU root diagnostic last)",
+        "Phase 250 wrapper self-test: PASS (Phase249 evidence retained; regulator-before-clock correction last)",
         flush=True,
     )
     return 0
@@ -124,12 +137,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase249_self_test()
+        return phase250_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 249 GPU SMMU / GMU ENODEV root diagnostic ordering completed", flush=True)
+    print("Phase 250 GPU SMMU downstream power contract ordering completed", flush=True)
     return 0
 
 

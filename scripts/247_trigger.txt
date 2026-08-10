@@ -1,0 +1,22 @@
+PHASE 247 HARDWARE TEST - CAMCC DENSE CLK_HWS COMPATIBILITY
+
+Candidate status: CI-built only until flashed. Hardware validation required.
+
+Flash:
+  package/boot.img -> the phone's normal BOOT partition
+
+Do not change DTBO/vendor/system or boot cmdline for this test.
+
+Collect a fresh raw R48/RS48 ramoops capture using the same collector procedure as Phase246.
+
+Primary question:
+  Does the current boot advance beyond
+    CXF246 S n=81 f=cam_cc_lagoon_init
+  and produce CXF246 S n=82 or later?
+
+Interpretation:
+- n=82+ appears: the Phase54 sparse TouchGrass hwclks -> GKI clk_hws conversion was a real CAMCC boot blocker.
+- CXF246 X appears: all traced subsys initcalls returned; move the failure boundary forward.
+- n=81 remains last current record: CAMCC still blocks; next compare regulator/VDD and PLL/Fabia semantics before adding broader instrumentation.
+
+Also retain any current A52GDSC/CXF243 records if boot progresses far enough; those determine whether GPU CX GDSC binding is still independently unresolved after CAMCC is cleared.

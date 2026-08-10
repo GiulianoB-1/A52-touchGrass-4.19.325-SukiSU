@@ -1,0 +1,28 @@
+PHASE 248 HARDWARE TEST - KGSL / GMU / IOMMU CORRIDOR
+
+Candidate status: CI-built only until flashed. Hardware validation required.
+
+Flash:
+  package/boot.img -> the phone's normal BOOT partition
+
+Keep DTBO/vendor/system and boot cmdline unchanged.
+Collect a fresh raw R48/RS48 ramoops ZIP with the same collector procedure.
+
+Phase247 success that must remain:
+- CXF246 reaches X / completes subsys level.
+- gpu_cx_gdsc and gpu_gx_gdsc bind successfully.
+
+Primary Phase248 question:
+  On the second KGSL probe after QFPROM is ready, what is the final K248 record?
+
+Key interpretations:
+- K248 A ef rc=-517 on first probe is expected while QFPROM is not ready.
+- Second probe should show K248 A ef rc=0.
+- K248 A gmu in, no K248 G ops in: stop inside gmu_core_probe before implementation dispatch.
+- K248 G ops in, no K248 G ops rc: stop inside gmu_probe.
+- K248 M iommu in, then context-bank markers: narrow to GMU IOMMU setup.
+- K248 C att in with no K248 C att rc: immediate blocker is iommu_attach_device for that named GMU context bank.
+- K248 A gmu rc=0 then K248 A plat in with no K248 A plat rc: blocker is kgsl_device_platform_probe.
+- If K248 A plat rc=0 and later mem/rb/dsp markers appear, move the boundary forward accordingly.
+
+Do not interpret high non-contiguous retained sequences as current-boot continuation.

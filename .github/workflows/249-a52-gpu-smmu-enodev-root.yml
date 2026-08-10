@@ -1,0 +1,191 @@
+name: 249 - A52 GPU SMMU ENODEV root
+
+run-name: Build Phase 249 GPU-SMMU ENODEV root diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase249-kgsl-smmu-enodev-root-v1
+    paths:
+      - .github/workflows/249-a52-gpu-smmu-enodev-root.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/249_phase248_gpu_smmu_enodev_root_overlay.py
+      - scripts/249_package.py
+      - scripts/249_design.md
+      - scripts/249_trigger.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase249-gpu-smmu-enodev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 249
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 249 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/245_phase243_fwdevlink_permissive_overlay.py \
+            scripts/246_phase245_subsys_initcall_corridor_overlay.py \
+            scripts/247_phase246_camcc_dense_hws_overlay.py \
+            scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py \
+            scripts/249_phase248_gpu_smmu_enodev_root_overlay.py \
+            scripts/248_package.py \
+            scripts/249_package.py
+          python3 scripts/245_phase243_fwdevlink_permissive_overlay.py --self-test
+          python3 scripts/246_phase245_subsys_initcall_corridor_overlay.py --self-test
+          python3 scripts/247_phase246_camcc_dense_hws_overlay.py --self-test
+          python3 scripts/248_phase247_kgsl_gmu_iommu_corridor_overlay.py --self-test
+          python3 scripts/249_phase248_gpu_smmu_enodev_root_overlay.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 249 executable scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
+          overlay = Path('scripts/249_phase248_gpu_smmu_enodev_root_overlay.py').read_text()
+          package = Path('scripts/249_package.py').read_text()
+          order = [
+              '245_phase243_fwdevlink_permissive_overlay.py',
+              '246_phase245_subsys_initcall_corridor_overlay.py',
+              '247_phase246_camcc_dense_hws_overlay.py',
+              '248_phase247_kgsl_gmu_iommu_corridor_overlay.py',
+              '249_phase248_gpu_smmu_enodev_root_overlay.py',
+          ]
+          for token in order:
+              assert f'(\"{token}\"' in wrapper, token
+          assert [wrapper.index(x) for x in order] == sorted(wrapper.index(x) for x in order)
+          assert '("244_phase243_gdsc_subsys_initcall_overlay.py",' not in wrapper
+          for token in (
+              'A52_PHASE249_GPU_SMMU_ENODEV_ROOT_V1',
+              'A52_PHASE248_KGSL_GMU_IOMMU_CORRIDOR_V1',
+              'K249 S map in', 'K249 S map rc=%d', 'K249 S irq rc=%d i=%d',
+              'K249 S reg rc=%d', 'K249 S bus rc=%d',
+              'K249 I grp ok=%d', 'K249 I ret rc=%d s=nogrp',
+              'K249 I g id=%d cnt=%d a=%d', 'K249 I ag rc=%d',
+              'FW_DEVLINK_FLAGS_PERMISSIVE',
+          ):
+              assert token in overlay, token
+          assert 'agent/a52-phase249-kgsl-smmu-enodev-root-v1' in package
+          assert 'phase249_diagnostic_only' in package
+          assert 'phase249_gpu_smmu_behavior_changed' in package
+          assert 'phase249_iommu_group_behavior_changed' in package
+          PY
+
+      - name: Dispatch inherited builder and package Phase 249
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/249_package.py
+
+      - name: Verify Phase 249 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase249-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE249-DESIGN.md"
+          test -s "$OUT/PHASE249-HARDWARE-TEST.txt"
+          test -s "$OUT/audit/phase249/249_phase248_gpu_smmu_enodev_root_overlay.py"
+          test -s "$OUT/audit/phase249/249_package.py"
+
+          for marker in \
+            'BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers' \
+            'CXF246 X q=%d n=%d' \
+            'cam_cc_pll2_out_early' \
+            'K248 A gmu in' \
+            'K248 M iommu in' \
+            'K248 C att rc=%d n=%.12s' \
+            'K249 S ent' \
+            'K249 S dt rc=%d' \
+            'K249 S map in' \
+            'K249 S map rc=%d' \
+            'K249 S impl rc=%d' \
+            'K249 S irqs n=%d g=%u c=%u' \
+            'K249 S clkget rc=%d' \
+            'K249 S clkon rc=%d' \
+            'K249 S cfg rc=%d' \
+            'K249 S irq in i=%d n=%d' \
+            'K249 S irq rc=%d i=%d' \
+            'K249 S sys rc=%d' \
+            'K249 S reg rc=%d' \
+            'K249 S bus rc=%d' \
+            'K249 I ent' \
+            'K249 I grp ok=%d' \
+            'K249 I ret rc=%d s=nogrp' \
+            'K249 I g id=%d cnt=%d a=%d' \
+            'K249 I ag rc=%d' \
+            'K249 I ret rc=%d' \
+            '3d40000'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+          ! grep -aFq 'BOOT rs=ready phase=244 focus=gdsc-subsys-initcall' "$OUT/compile/Image"
+          ! grep -aFq 'CXF244 V q=%d l=%d' "$OUT/compile/Image"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('phase249-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 249
+          assert audit['base_phase'] == 248
+          assert audit['functional_base_phase'] == 247
+          assert audit['hardware_validated'] is False
+          assert audit['phase249_diagnostic_only'] is True
+          assert audit['phase249_phase248_corridor_retained'] is True
+          assert audit['phase249_phase247_camcc_fix_retained'] is True
+          assert audit['phase249_phase245_fwdevlink_permissive_retained'] is True
+          assert audit['phase249_phase244_overlay_applied'] is False
+          assert audit['phase249_gpu_smmu_behavior_changed'] is False
+          assert audit['phase249_iommu_group_behavior_changed'] is False
+          assert audit['phase249_return_values_changed'] is False
+          assert audit['phase249_probe_order_changed'] is False
+          assert audit['phase249_dt_changed'] is False
+          assert audit['phase249_regulator_or_power_behavior_changed'] is False
+          assert audit['phase249_boot_cmdline_changed'] is False
+          assert audit['phase249_recorder_transport_changed'] is False
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          inv = repack['invariants']
+          for key in ('board_preserved', 'cmdline_preserved', 'dtb_preserved',
+                      'ramdisk_preserved', 'header_version_preserved',
+                      'partition_size_preserved', 'replacement_kernel_used'):
+              assert inv[key] is True, key
+          assert 'fw_devlink=' not in repack.get('cmdline', '')
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 249 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase249-GPU-SMMU-ENODEV-ROOT-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase249-out
+          if-no-files-found: error
+          retention-days: 30

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase249, then restore the GPU SMMU power contract.
+"""Run inherited parity through Phase250, then add GMU tail diagnostics.
 
-Phase250 retains Phase245 FW_DEVLINK_FLAGS_PERMISSIVE, Phase246 subsys tracing,
-Phase247 CAMCC dense-clk_hws compatibility, Phase248 KGSL/GMU/IOMMU tracing,
-Phase249 SMMU/IOMMU root diagnostics, and all Phase243 CX/GX hooks. Phase244
-remains skipped. Phase250 is the first corrective GPU phase: it restores the
-DT-declared qcom,regulator-names supply before ARM-SMMU clock enable.
+Phase251 retains the Phase250 GPU-SMMU power-contract correction plus Phase245
+FW_DEVLINK_FLAGS_PERMISSIVE, Phase246 subsys tracing, Phase247 CAMCC dense
+clk_hws compatibility, Phase248 KGSL/GMU/IOMMU tracing, Phase249 SMMU/IOMMU
+root diagnostics, and all Phase243 CX/GX hooks. Phase244 remains skipped.
+Phase251 is diagnostic-only around the post-MMIO gmu_probe tail.
 """
 from __future__ import annotations
 
@@ -45,8 +45,9 @@ OVERLAYS = (
     ("248_phase247_kgsl_gmu_iommu_corridor_overlay.py", "Phase 248 KGSL/GMU/IOMMU diagnostic corridor"),
     ("249_phase248_gpu_smmu_enodev_root_overlay.py", "Phase 249 GPU SMMU / GMU ENODEV root diagnostic"),
     ("250_phase249_gpu_smmu_power_contract_overlay.py", "Phase 250 GPU SMMU downstream power contract"),
+    ("251_phase250_gmu_post_mmio_tail_diag_overlay.py", "Phase 251 GMU post-MMIO tail diagnostic"),
 )
-EXPECTED_PHASE250_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE251_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -58,30 +59,31 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase250_self_test() -> int:
+def phase251_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE250_ORDER:
-        raise RuntimeError(f"Phase 250 overlay order drifted: {actual!r}")
+    if actual != EXPECTED_PHASE251_ORDER:
+        raise RuntimeError(f"Phase 251 overlay order drifted: {actual!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 250 overlay list contains duplicates")
+        raise RuntimeError("Phase 251 overlay list contains duplicates")
     if any(name.startswith("244_") for name in actual):
-        raise RuntimeError("Phase 250 must not apply the broken Phase244 overlay")
-    if actual[-6:] != (
+        raise RuntimeError("Phase 251 must not apply the broken Phase244 overlay")
+    if actual[-7:] != (
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
         "247_phase246_camcc_dense_hws_overlay.py",
         "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
         "250_phase249_gpu_smmu_power_contract_overlay.py",
+        "251_phase250_gmu_post_mmio_tail_diag_overlay.py",
     ):
-        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 -> 250 final ordering drifted")
+        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 -> 250 -> 251 final ordering drifted")
 
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 250 overlay missing: {path}")
+            raise RuntimeError(f"Phase 251 overlay missing: {path}")
         if "gki/common" not in path.read_text(encoding="utf-8"):
-            raise RuntimeError(f"Phase 250 overlay lacks generated-tree locator: {name}")
+            raise RuntimeError(f"Phase 251 overlay lacks generated-tree locator: {name}")
 
     for name in (
         "239_phase238_gpu_cx_vdd_parent_overlay.py",
@@ -94,10 +96,11 @@ def phase250_self_test() -> int:
         "248_phase247_kgsl_gmu_iommu_corridor_overlay.py",
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
         "250_phase249_gpu_smmu_power_contract_overlay.py",
+        "251_phase250_gmu_post_mmio_tail_diag_overlay.py",
     ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 250 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 251 inherited/new self-test failed: {name} rc={result.returncode}")
 
     p249 = (ROOT / "249_phase248_gpu_smmu_enodev_root_overlay.py").read_text(encoding="utf-8")
     for token in (
@@ -124,8 +127,26 @@ def phase250_self_test() -> int:
         if token not in p250:
             raise RuntimeError(f"Phase250 corrective overlay missing {token}")
 
+    p251 = (ROOT / "251_phase250_gmu_post_mmio_tail_diag_overlay.py").read_text(encoding="utf-8")
+    for token in (
+        "A52_PHASE251_GMU_POST_MMIO_TAIL_DIAG_V1",
+        "K251 G hfiirq rc=%d",
+        "K251 G gmuirq rc=%d",
+        "K251 B gpu tbl=%d",
+        "K251 B gpu pcl=%u",
+        "K251 B cnoc tbl=%d",
+        "K251 B cnoc ccl=%u",
+        "K251 G gpubw rc=%d",
+        "K251 G cnoc rc=%d",
+        "K251 G rpmh rc=%d",
+        "K251 R bus rc=%d",
+        "K251 R gmuvote rc=%d",
+    ):
+        if token not in p251:
+            raise RuntimeError(f"Phase251 diagnostic overlay missing {token}")
+
     print(
-        "Phase 250 wrapper self-test: PASS (Phase249 evidence retained; regulator-before-clock correction last)",
+        "Phase 251 wrapper self-test: PASS (Phase250 correction retained; GMU tail diagnostics last)",
         flush=True,
     )
     return 0
@@ -137,12 +158,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase250_self_test()
+        return phase251_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 250 GPU SMMU downstream power contract ordering completed", flush=True)
+    print("Phase 251 GMU post-MMIO tail diagnostic ordering completed", flush=True)
     return 0
 
 

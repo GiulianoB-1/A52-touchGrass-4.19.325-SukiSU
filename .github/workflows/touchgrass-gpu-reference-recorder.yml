@@ -1,6 +1,6 @@
 name: TouchGrass GPU reference recorder
 
-run-name: Build TouchGrass 4.19.200 GPU reference recorder
+run-name: Build TouchGrass 4.19.200 ReSukiSU-safe GPU reference recorder
 
 on:
   workflow_dispatch:
@@ -10,8 +10,12 @@ on:
     paths:
       - .github/workflows/touchgrass-gpu-reference-recorder.yml
       - scripts/touchgrass_gpu_reference_overlay.py
+      - scripts/touchgrass_gpu_reference_resukisu_wrapper.py
       - scripts/touchgrass_gpu_reference_design.md
       - scripts/05a_diagnose_linux_checkpoint.sh
+      - scripts/07_patch_resukisu_exec_hook.sh
+      - scripts/08_build_linux_4.19.153_resukisu_safe.sh
+      - scripts/08_build_resukisu_safe_checkpoint.sh
 
 permissions:
   contents: read
@@ -27,6 +31,7 @@ env:
   CCACHE_MAXSIZE: 5G
   TOUCHGRASS_COMMIT: '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
   TOUCHGRASS_CACHE_KEY: 'a52xq-touchgrass-linux-4.19.200-main-v2-Linux-6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  RECORDER_CCACHE_KEY: 'touchgrass-gpu-reference-resukisu-safe-ccache-v1-Linux'
   BOOT_SOURCE_ASSET_ID: '478920392'
   BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
 
@@ -52,12 +57,14 @@ jobs:
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
 
       - name: Restore compiler cache
-        uses: actions/cache@v4
+        id: recorder-ccache
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: touchgrass-gpu-reference-ccache-${{ runner.os }}-${{ github.run_id }}
+          key: ${{ env.RECORDER_CCACHE_KEY }}
           restore-keys: |
-            touchgrass-gpu-reference-ccache-${{ runner.os }}-
+            touchgrass-gpu-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            a52xq-linux-4.19.200-susfs-minimal-ccache-${{ runner.os }}-
             a52xq-linux-4.19.200-ccache-${{ runner.os }}-
 
       - name: Hydrate checksum-locked repack helpers
@@ -65,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          mkdir -p scripts projects/a52-p1-boot-image
+          mkdir -p scripts projects/a52-p1-boot-image artifacts
           fetch_file() {
             local ref="$1"
             local path="$2"
@@ -78,7 +85,7 @@ jobs:
           fetch_file main projects/a52-p1-boot-image/boot-source.lock
           chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
 
-      - name: Restore cached TouchGrass Linux 4.19.200 source
+      - name: Restore cached exact TouchGrass Linux 4.19.200 source
         id: touchgrass-cache
         uses: actions/cache/restore@v4
         with:
@@ -111,93 +118,41 @@ jobs:
           test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
           test -x workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
           test -x workspace/touchgrass-a52xq/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc
-          git -C workspace/touchgrass-a52xq status --short > artifacts/touchgrass-4.19.200-source-status.txt
-          sed -n '1,100p' artifacts/touchgrass-4.19.200-source-status.txt
 
-      - name: Save validated TouchGrass Linux 4.19.200 source cache
+      - name: Save validated plain 4.19.200 source cache
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: ${{ env.TOUCHGRASS_CACHE_KEY }}
 
-      - name: Apply observation-only GPU recorder
+      - name: Prepare exact ReSukiSU safe integration with recorder injection
         run: |
           set -Eeuo pipefail
-          ROOT=workspace/touchgrass-a52xq
-          python3 -m py_compile scripts/touchgrass_gpu_reference_overlay.py
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/touchgrass_gpu_reference_resukisu_wrapper.py \
+            scripts/08_build_linux_4.19.153_resukisu_safe.sh
+          bash -n scripts/08_build_linux_4.19.153_resukisu_safe.sh
 
-          # TouchGrass keeps kgsl_device_platform_probe() in kgsl.c. The recorder
-          # overlay originally used the newer kgsl_device.c filename. A temporary
-          # symlink lets the existing observation-only overlay patch the real
-          # compiled kgsl.c without changing any kernel source semantics.
-          ln -s kgsl.c "$ROOT/drivers/gpu/msm/kgsl_device.c"
-          python3 scripts/touchgrass_gpu_reference_overlay.py "$ROOT"
-          rm "$ROOT/drivers/gpu/msm/kgsl_device.c"
-
-          git -C "$ROOT" diff --check
-
-          test -s "$ROOT/include/linux/tg_gpu_reference.h"
-          test -s "$ROOT/kernel/tg_gpu_reference.c"
-          grep -Fq 'obj-y += tg_gpu_reference.o' "$ROOT/kernel/Makefile"
-          grep -Fq 'SMMU:CEN_POST' "$ROOT/drivers/iommu/arm-smmu.c"
-          grep -Fq 'GMU:ATT_POST' "$ROOT/drivers/gpu/msm/kgsl_gmu.c"
-          grep -Fq 'KGSLI:ATT_POST' "$ROOT/drivers/gpu/msm/kgsl_iommu.c"
-          grep -Fq 'HFI:CMD' "$ROOT/drivers/gpu/msm/kgsl_hfi.c"
-          grep -Fq 'ADRENO:PROBE' "$ROOT/drivers/gpu/msm/adreno.c"
-          grep -Fq 'KGSL:PLAT_PROBE' "$ROOT/drivers/gpu/msm/kgsl.c"
-
-      - name: Resolve and audit reference configuration before compile
+      - name: Integrate ReSukiSU safe profile and build recorder kernel
         run: |
           set -Eeuo pipefail
-          source scripts/common.sh
-          configure_toolchain
-          PRE="$PWD/workspace/touchgrass-gpu-reference-config-audit"
-          rm -rf "$PRE"
-          mkdir -p "$PRE"
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe \
+            2>&1 | tee artifacts/touchgrass-gpu-reference-resukisu-safe-build.log
 
-          make -C "$KERNEL_DIR" O="$PRE" \
-            DTC_EXT="$KERNEL_DIR/tools/dtc" \
-            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
-            KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-            a52xq_defconfig
+      - name: Save compiler cache after successful kernel build
+        if: steps.recorder-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ env.RECORDER_CCACHE_KEY }}
 
-          CFG="$PRE/.config"
-          test -s "$CFG"
-          cp "$CFG" artifacts/touchgrass-gpu-reference-prebuild.config
-
-          failed=0
-          for expected in \
-            CONFIG_ARCH_LAGOON=y \
-            CONFIG_SDM_GCC_LAGOON=y \
-            CONFIG_SDM_GPUCC_LAGOON=y \
-            CONFIG_ARM_SMMU=y \
-            CONFIG_QCOM_KGSL=y \
-            CONFIG_QCOM_KGSL_IOMMU=y \
-            CONFIG_QCOM_GDSC=y \
-            CONFIG_COMMON_CLK_QCOM=y \
-            CONFIG_KSU=y \
-            CONFIG_PROC_FS=y; do
-            symbol="${expected%%=*}"
-            actual="$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$CFG" || true)"
-            printf 'CONFIG_AUDIT expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
-            if test "$actual" != "$expected"; then
-              failed=1
-            fi
-          done
-          test "$failed" -eq 0
-
-      - name: Build reference kernel with original device defconfig
+      - name: Audit exact reference config and embedded recorder markers
         run: |
           set -Eeuo pipefail
-          source scripts/common.sh
-          build_kernel touchgrass-gpu-reference-4.19.200
-
-      - name: Audit compiled configuration and recorder binary
-        run: |
-          set -Eeuo pipefail
-          CFG=artifacts/config-touchgrass-gpu-reference-4.19.200
-          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          CFG=artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
           test -s "$CFG"
           test -s "$IMG"
 
@@ -212,10 +167,24 @@ jobs:
             CONFIG_QCOM_GDSC=y \
             CONFIG_COMMON_CLK_QCOM=y \
             CONFIG_KSU=y \
+            '# CONFIG_KSU_DEBUG is not set' \
+            '# CONFIG_KSU_TOOLKIT_SUPPORT is not set' \
+            CONFIG_KSU_MULTI_MANAGER_SUPPORT=y \
+            '# CONFIG_KSU_TRACEPOINT_HOOK is not set' \
+            CONFIG_KSU_MANUAL_HOOK=y \
+            '# CONFIG_KSU_SUSFS is not set' \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y \
             CONFIG_PROC_FS=y; do
-            symbol="${expected%%=*}"
+            if [[ "$expected" == '# '* ]]; then
+              symbol="${expected#\# }"
+              symbol="${symbol% is not set}"
+            else
+              symbol="${expected%%=*}"
+            fi
             actual="$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$CFG" || true)"
-            printf 'FINAL_CONFIG_AUDIT expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
+            printf 'FINAL_REFERENCE_CONFIG expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
             if test "$actual" != "$expected"; then
               failed=1
             fi
@@ -229,7 +198,8 @@ jobs:
             KGSLI:ATT_POST \
             HFI:CMD \
             ADRENO:PROBE \
-            A6XX:INIT; do
+            A6XX:INIT \
+            KGSL:PLAT_PROBE; do
             printf 'MARKER_AUDIT %s\n' "$marker"
             grep -aFq "$marker" "$IMG"
           done
@@ -255,7 +225,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           OUT=artifacts/touchgrass-gpu-reference-recorder
-          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
           gzip -n -9 -c "$IMG" > "$OUT/Image.gz"
 
           python3 scripts/38_repack_a52_p1_boot.py \
@@ -266,10 +236,13 @@ jobs:
 
           test -s "$OUT/boot.img"
           test "$(stat -c %s "$OUT/boot.img")" = 100663296
-          cp artifacts/config-touchgrass-gpu-reference-4.19.200 "$OUT/final.config"
+          cp artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe "$OUT/final.config"
           cp workspace/touchgrass-a52xq/out/System.map "$OUT/System.map"
           cp scripts/touchgrass_gpu_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_gpu_reference_resukisu_wrapper.py "$OUT/"
           cp scripts/touchgrass_gpu_reference_design.md "$OUT/"
+          cp artifacts/touchgrass-gpu-reference-prebuild.config "$OUT/prebuild.config"
+          cp artifacts/linux-4.19.200-resukisu-safe.txt "$OUT/resukisu-build-report.txt"
 
       - name: Create Windows trace collector
         run: |
@@ -318,19 +291,25 @@ jobs:
             Capture the complete successful TouchGrass GPU initialization path for
             direct comparison against the ACK kernel.
 
-          Baseline:
-            Linux 4.19.200 TouchGrass source reconstructed from the pinned project
-            lineage and repacked into the checksum-locked known-good A52 boot image.
+          Reference profile:
+            Linux 4.19.200 TouchGrass + pinned ReSukiSU v4.1.0 safe integration.
+            This matches the dumped reference policy: CONFIG_KSU=y,
+            CONFIG_KSU_MANUAL_HOOK=y, and CONFIG_KSU_SUSFS disabled.
+
+          Boot packaging:
+            Repacked into the exact checksum-locked 96 MiB boot image whose SHA-256
+            is 41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554.
+            Ramdisk, DTB, command line, header and partition layout are preserved.
 
           Behavior policy:
             Observation only. No DT, SID, clock, regulator, GDSC, IOMMU, KGSL, GMU,
             HFI, Adreno return value, or power-sequencing behavior is intentionally changed.
 
           Hardware test:
-            1. Flash only boot.img using the same method used for the working reference.
-            2. Boot Android normally.
-            3. Confirm the phone remains functional and GPU rendering works.
-            4. Run COLLECT_TOUCHGRASS_GPU_REFERENCE.bat on a connected rooted ADB session.
+            1. Flash only boot.img.
+            2. Leave DTBO, vendor_boot, vendor, system and vbmeta unchanged.
+            3. Boot Android normally and confirm rendering works.
+            4. Run COLLECT_TOUCHGRASS_GPU_REFERENCE.bat with rooted ADB.
             5. Upload the produced TOUCHGRASS_GPU_TRACE_*.zip.
 
           Recorder:

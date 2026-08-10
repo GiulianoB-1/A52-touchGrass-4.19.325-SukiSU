@@ -20,3 +20,5 @@ Interpretation:
 - n=81 remains last current record: CAMCC still blocks; next compare regulator/VDD and PLL/Fabia semantics before adding broader instrumentation.
 
 Also retain any current A52GDSC/CXF243 records if boot progresses far enough; those determine whether GPU CX GDSC binding is still independently unresolved after CAMCC is cleared.
+
+CI trigger note: Phase247 rev2 uses executable self-tests and structured audit gates rather than prose-string assertions.

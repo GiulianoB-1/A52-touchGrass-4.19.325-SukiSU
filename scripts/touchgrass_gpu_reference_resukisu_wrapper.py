@@ -31,6 +31,17 @@ ln -s kgsl.c "$ROOT/drivers/gpu/msm/kgsl_device.c"
 python3 "$PROJECT_DIR/scripts/touchgrass_gpu_reference_overlay.py" "$ROOT"
 rm "$ROOT/drivers/gpu/msm/kgsl_device.c"
 
+# The first hardware run proved that evaluating an optional dynamic recorder
+# name inside arm_smmu_power_on can hand strlcpy() an unsafe early-boot pointer.
+# Suppress the name argument at the macro boundary so dynamic expressions such
+# as dev_name() and __clk_get_name() are not evaluated at all. Fixed event tags
+# and all numeric payloads remain intact, so this changes recorder diagnostics
+# only and does not touch SMMU/GPU resource semantics.
+sed -i 's/tg_gpu_ref_record((_tag), (_name), (_rc)/tg_gpu_ref_record((_tag), NULL, (_rc)/' \
+  "$ROOT/include/linux/tg_gpu_reference.h"
+grep -Fq 'tg_gpu_ref_record((_tag), NULL, (_rc)' "$ROOT/include/linux/tg_gpu_reference.h" || \
+  fail "GPU recorder safe-name suppression missing"
+
 git -C "$ROOT" diff --check
 
 test -s "$ROOT/include/linux/tg_gpu_reference.h" || fail "GPU recorder header missing"

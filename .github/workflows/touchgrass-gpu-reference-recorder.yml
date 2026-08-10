@@ -105,6 +105,7 @@ jobs:
       - name: Validate exact TouchGrass Linux 4.19.200 source
         run: |
           set -Eeuo pipefail
+          mkdir -p artifacts
           test -d workspace/touchgrass-a52xq/.git
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
           test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200

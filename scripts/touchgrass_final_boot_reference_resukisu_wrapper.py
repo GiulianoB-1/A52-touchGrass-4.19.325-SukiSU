@@ -25,11 +25,32 @@ block = r'''info "Applying observation-only final TouchGrass boot-reference reco
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py" "$ROOT"
 
+# Keep the old audit token as an explicit compatibility line, while the first
+# proc header remains the authoritative v2 format marker.
+python3 - "$ROOT/kernel/tg_boot_reference.c" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+needle = 'seq_puts(m, "# touchgrass_final_boot_reference_v2\\n");'
+compat = 'seq_puts(m, "# touchgrass_final_boot_reference_v1 compatibility\\n");'
+if compat not in s:
+    if s.count(needle) != 1:
+        raise SystemExit('final boot recorder v2 proc-header anchor mismatch')
+    s = s.replace(needle, needle + '\n\t' + compat, 1)
+p.write_text(s)
+PY
+
+# Package the exact overlay used by this build under the stable artifact name.
+cp "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py" \
+   "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay.py"
+
 git -C "$ROOT" diff --check
 
 test -s "$ROOT/include/linux/tg_boot_reference.h" || fail "final boot recorder header missing"
 test -s "$ROOT/kernel/tg_boot_reference.c" || fail "final boot recorder implementation missing"
 grep -Fq 'obj-y += tg_boot_reference.o' "$ROOT/kernel/Makefile" || fail "final boot recorder Kbuild hook missing"
+grep -Fq 'touchgrass_final_boot_reference_v2' "$ROOT/kernel/tg_boot_reference.c" || fail "final boot recorder v2 marker missing"
 grep -Fq 'INITCALL:POST' "$ROOT/init/main.c" || fail "initcall result recorder missing"
 grep -Fq 'PROBE:BUS_POST' "$ROOT/drivers/base/dd.c" || fail "bus probe result recorder missing"
 grep -Fq 'PROBE:DRV_POST' "$ROOT/drivers/base/dd.c" || fail "driver probe result recorder missing"

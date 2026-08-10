@@ -11,6 +11,7 @@ on:
       - .github/workflows/touchgrass-gpu-reference-recorder.yml
       - scripts/touchgrass_gpu_reference_overlay.py
       - scripts/touchgrass_gpu_reference_design.md
+      - scripts/05a_diagnose_linux_checkpoint.sh
 
 permissions:
   contents: read

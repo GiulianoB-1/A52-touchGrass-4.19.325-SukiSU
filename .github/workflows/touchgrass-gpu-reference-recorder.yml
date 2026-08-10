@@ -1,0 +1,259 @@
+name: TouchGrass GPU reference recorder
+
+run-name: Build TouchGrass 4.19.200 GPU reference recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-gpu-reference-recorder-v1
+    paths:
+      - .github/workflows/touchgrass-gpu-reference-recorder.yml
+      - scripts/touchgrass_gpu_reference_overlay.py
+      - scripts/touchgrass_gpu_reference_design.md
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: touchgrass-gpu-reference-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  build-reference:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out recorder branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Hydrate checksum-locked repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore exact TouchGrass Linux 4.19.200 source
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          git -C workspace/touchgrass-a52xq status --short
+
+      - name: Apply observation-only GPU recorder
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/touchgrass_gpu_reference_overlay.py
+          python3 scripts/touchgrass_gpu_reference_overlay.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+
+          ROOT=workspace/touchgrass-a52xq
+          test -s "$ROOT/include/linux/tg_gpu_reference.h"
+          test -s "$ROOT/kernel/tg_gpu_reference.c"
+          grep -Fq 'obj-y += tg_gpu_reference.o' "$ROOT/kernel/Makefile"
+          grep -Fq 'SMMU:CEN_POST' "$ROOT/drivers/iommu/arm-smmu.c"
+          grep -Fq 'GMU:ATT_POST' "$ROOT/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'KGSLI:ATT_POST' "$ROOT/drivers/gpu/msm/kgsl_iommu.c"
+          grep -Fq 'HFI:CMD' "$ROOT/drivers/gpu/msm/kgsl_hfi.c"
+          grep -Fq 'ADRENO:PROBE' "$ROOT/drivers/gpu/msm/adreno.c"
+
+      - name: Build reference kernel with original device defconfig
+        run: |
+          set -Eeuo pipefail
+          source scripts/common.sh
+          build_kernel touchgrass-gpu-reference-4.19.200
+
+      - name: Audit reference configuration and recorder binary
+        run: |
+          set -Eeuo pipefail
+          CFG=artifacts/config-touchgrass-gpu-reference-4.19.200
+          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          test -s "$CFG"
+          test -s "$IMG"
+
+          for line in \
+            CONFIG_ARCH_LAGOON=y \
+            CONFIG_SDM_GCC_LAGOON=y \
+            CONFIG_SDM_GPUCC_LAGOON=y \
+            CONFIG_ARM_SMMU=y \
+            CONFIG_QCOM_KGSL=y \
+            CONFIG_QCOM_KGSL_IOMMU=y \
+            CONFIG_QCOM_GDSC=y \
+            CONFIG_COMMON_CLK_QCOM=y \
+            CONFIG_KSU=y \
+            CONFIG_PROC_FS=y; do
+            grep -Fxq "$line" "$CFG"
+          done
+
+          grep -aFq 'touchgrass_gpu_reference_v1' "$IMG"
+          grep -aFq 'SMMU:CEN_POST' "$IMG"
+          grep -aFq 'GMU:ATT_POST' "$IMG"
+          grep -aFq 'KGSLI:ATT_POST' "$IMG"
+          grep -aFq 'HFI:CMD' "$IMG"
+          grep -aFq 'ADRENO:PROBE' "$IMG"
+          grep -aFq 'A6XX:INIT' "$IMG"
+
+      - name: Download exact known-good 96 MiB boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/touchgrass-gpu-reference-recorder
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/touchgrass-gpu-reference-recorder/source-validation.json
+
+      - name: Repack exact boot layout with recorder kernel
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-gpu-reference-recorder
+          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          gzip -n -9 -c "$IMG" > "$OUT/Image.gz"
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+
+          test -s "$OUT/boot.img"
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+          cp artifacts/config-touchgrass-gpu-reference-4.19.200 "$OUT/final.config"
+          cp workspace/touchgrass-a52xq/out/System.map "$OUT/System.map"
+          cp scripts/touchgrass_gpu_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_gpu_reference_design.md "$OUT/"
+
+      - name: Create Windows trace collector
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-gpu-reference-recorder
+          cat > "$OUT/COLLECT_TOUCHGRASS_GPU_REFERENCE.bat" <<'BAT'
+          @echo off
+          setlocal EnableExtensions
+          title TouchGrass GPU Reference Trace Collector
+          where adb >nul 2>&1 || (echo [ERROR] adb.exe not found & pause & exit /b 1)
+          for /f %%A in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%A"
+          set "OUT=TOUCHGRASS_GPU_TRACE_%STAMP%"
+          set "ZIP=%OUT%.zip"
+          mkdir "%OUT%" >nul 2>&1
+          echo [1/5] Checking device...
+          adb wait-for-device
+          adb shell su -c "id -u" > "%OUT%\root-check.txt" 2>&1
+          echo [2/5] Collecting retained GPU reference trace...
+          adb shell su -c "cat /proc/tg_gpu_reference" > "%OUT%\tg_gpu_reference.txt" 2>&1
+          echo [3/5] Collecting identity and late diagnostics...
+          adb shell uname -a > "%OUT%\uname.txt" 2>&1
+          adb shell cat /proc/version > "%OUT%\proc_version.txt" 2>&1
+          adb shell su -c "dmesg" > "%OUT%\dmesg.txt" 2>&1
+          adb exec-out su -c "cat /proc/config.gz" > "%OUT%\config.gz"
+          echo [4/5] Calculating hashes...
+          powershell -NoProfile -Command "Get-ChildItem -LiteralPath '%OUT%' -File | ForEach-Object { $h=(Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLower(); '{0}  {1}' -f $h,$_.Name } | Set-Content -Encoding ASCII -LiteralPath '%OUT%\SHA256SUMS.txt'"
+          echo [5/5] Creating ZIP...
+          powershell -NoProfile -Command "Compress-Archive -LiteralPath '%OUT%' -DestinationPath '%ZIP%' -Force"
+          echo.
+          echo Upload this file to ChatGPT:
+          echo   %CD%\%ZIP%
+          explorer /select,"%CD%\%ZIP%" >nul 2>&1
+          pause
+          endlocal
+          BAT
+          sed -i 's/^          //' "$OUT/COLLECT_TOUCHGRASS_GPU_REFERENCE.bat"
+
+      - name: Final package audit
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-gpu-reference-recorder
+          cat > "$OUT/README_FIRST.txt" <<'EOF'
+          TOUCHGRASS GPU REFERENCE RECORDER V1
+
+          Purpose:
+            Capture the complete successful TouchGrass GPU initialization path for
+            direct comparison against the ACK kernel.
+
+          Baseline:
+            Linux 4.19.200 TouchGrass source reconstructed from the pinned project
+            lineage and repacked into the checksum-locked known-good A52 boot image.
+
+          Behavior policy:
+            Observation only. No DT, SID, clock, regulator, GDSC, IOMMU, KGSL, GMU,
+            HFI, Adreno return value, or power-sequencing behavior is intentionally changed.
+
+          Hardware test:
+            1. Flash only boot.img using the same method used for the working reference.
+            2. Boot Android normally.
+            3. Confirm the phone remains functional and GPU rendering works.
+            4. Run COLLECT_TOUCHGRASS_GPU_REFERENCE.bat on a connected rooted ADB session.
+            5. Upload the produced TOUCHGRASS_GPU_TRACE_*.zip.
+
+          Recorder:
+            /proc/tg_gpu_reference
+            8192 fixed records, earliest records retained permanently until reboot.
+          EOF
+          sed -i 's/^          //' "$OUT/README_FIRST.txt"
+
+          (
+            cd "$OUT"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/COLLECT_TOUCHGRASS_GPU_REFERENCE.bat"
+          test -s "$OUT/README_FIRST.txt"
+
+      - name: Upload hardware-test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-GPU-Reference-Recorder-${{ github.run_number }}
+          path: artifacts/touchgrass-gpu-reference-recorder
+          if-no-files-found: error
+          retention-days: 14

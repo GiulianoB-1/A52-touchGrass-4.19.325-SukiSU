@@ -101,7 +101,8 @@ jobs:
           test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
           test -x workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
           test -x workspace/touchgrass-a52xq/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc
-          git -C workspace/touchgrass-a52xq status --short | head -100
+          git -C workspace/touchgrass-a52xq status --short > artifacts/touchgrass-4.19.200-source-status.txt
+          sed -n '1,100p' artifacts/touchgrass-4.19.200-source-status.txt
 
       - name: Save validated TouchGrass Linux 4.19.200 source cache
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'

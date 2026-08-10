@@ -2,6 +2,7 @@
 """Build/package Phase247 over the Phase246 diagnostic state."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -12,6 +13,14 @@ from pathlib import Path
 BRANCH = "agent/a52-phase247-camcc-dense-hws-v1"
 HERE = Path(__file__).resolve().parent
 PHASE246 = HERE / "246_package.py"
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_phase246():
@@ -54,12 +63,12 @@ def verify_phase247_image(image: Path) -> None:
             raise RuntimeError(f"forbidden Phase244 marker in Phase247 Image: {marker.decode()}")
 
 
-def refresh_sums(base, out: Path) -> None:
+def refresh_sums(out: Path) -> None:
     sums = out / "SHA256SUMS"
     sums.unlink(missing_ok=True)
     files = sorted(path for path in out.rglob("*") if path.is_file())
     sums.write_text(
-        "".join(f"{base.sha256(path)}  ./{path.relative_to(out)}\n" for path in files),
+        "".join(f"{sha256(path)}  ./{path.relative_to(out)}\n" for path in files),
         encoding="utf-8",
     )
 
@@ -173,7 +182,7 @@ def finalize(phase246, inherited: Path) -> Path:
         encoding="utf-8",
     )
 
-    refresh_sums(phase246, out)
+    refresh_sums(out)
     return out
 
 

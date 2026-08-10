@@ -87,11 +87,19 @@ jobs:
       - name: Apply observation-only GPU recorder
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile scripts/touchgrass_gpu_reference_overlay.py
-          python3 scripts/touchgrass_gpu_reference_overlay.py workspace/touchgrass-a52xq
-          git -C workspace/touchgrass-a52xq diff --check
-
           ROOT=workspace/touchgrass-a52xq
+          python3 -m py_compile scripts/touchgrass_gpu_reference_overlay.py
+
+          # TouchGrass keeps kgsl_device_platform_probe() in kgsl.c. The recorder
+          # overlay originally used the newer kgsl_device.c filename. A temporary
+          # symlink lets the existing observation-only overlay patch the real
+          # compiled kgsl.c without changing any kernel source semantics.
+          ln -s kgsl.c "$ROOT/drivers/gpu/msm/kgsl_device.c"
+          python3 scripts/touchgrass_gpu_reference_overlay.py "$ROOT"
+          rm "$ROOT/drivers/gpu/msm/kgsl_device.c"
+
+          git -C "$ROOT" diff --check
+
           test -s "$ROOT/include/linux/tg_gpu_reference.h"
           test -s "$ROOT/kernel/tg_gpu_reference.c"
           grep -Fq 'obj-y += tg_gpu_reference.o' "$ROOT/kernel/Makefile"
@@ -100,6 +108,7 @@ jobs:
           grep -Fq 'KGSLI:ATT_POST' "$ROOT/drivers/gpu/msm/kgsl_iommu.c"
           grep -Fq 'HFI:CMD' "$ROOT/drivers/gpu/msm/kgsl_hfi.c"
           grep -Fq 'ADRENO:PROBE' "$ROOT/drivers/gpu/msm/adreno.c"
+          grep -Fq 'KGSL:PLAT_PROBE' "$ROOT/drivers/gpu/msm/kgsl.c"
 
       - name: Build reference kernel with original device defconfig
         run: |

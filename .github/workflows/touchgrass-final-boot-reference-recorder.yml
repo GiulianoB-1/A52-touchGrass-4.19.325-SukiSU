@@ -1,0 +1,308 @@
+name: TouchGrass final boot reference recorder
+
+run-name: Build TouchGrass 4.19.200 final boot reference recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-final-boot-reference-recorder-v1
+    paths:
+      - .github/workflows/touchgrass-final-boot-reference-recorder.yml
+      - scripts/touchgrass_final_boot_reference_overlay.py
+      - scripts/touchgrass_final_boot_reference_resukisu_wrapper.py
+      - scripts/COLLECT_TOUCHGRASS_FINAL_BOOT_REFERENCE.bat
+      - scripts/touchgrass_gpu_reference_overlay.py
+      - scripts/touchgrass_gpu_reference_resukisu_wrapper.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: touchgrass-final-boot-reference-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  TOUCHGRASS_COMMIT: '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  TOUCHGRASS_CACHE_KEY: 'a52xq-touchgrass-linux-4.19.200-main-v2-Linux-6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  RECORDER_CCACHE_KEY: 'touchgrass-final-boot-reference-resukisu-safe-ccache-v1-Linux'
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  build-reference:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out final recorder branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: recorder-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ${{ env.RECORDER_CCACHE_KEY }}
+          restore-keys: |
+            touchgrass-final-boot-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            touchgrass-gpu-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Hydrate checksum-locked repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image artifacts
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore cached exact TouchGrass Linux 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Reconstruct exact TouchGrass Linux 4.19.200 source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+
+      - name: Validate exact TouchGrass Linux 4.19.200 source
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          test -x workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
+          test -x workspace/touchgrass-a52xq/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc
+
+      - name: Save validated plain 4.19.200 source cache
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Prepare exact ReSukiSU-safe dual-recorder integration
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/touchgrass_final_boot_reference_resukisu_wrapper.py \
+            scripts/08_build_linux_4.19.153_resukisu_safe.sh
+          bash -n scripts/08_build_linux_4.19.153_resukisu_safe.sh
+
+      - name: Integrate ReSukiSU-safe profile and build final reference kernel
+        run: |
+          set -Eeuo pipefail
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe \
+            2>&1 | tee artifacts/touchgrass-final-boot-reference-build.log
+
+      - name: Save compiler cache after successful kernel build
+        if: steps.recorder-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ env.RECORDER_CCACHE_KEY }}
+
+      - name: Audit exact reference config and both embedded recorders
+        run: |
+          set -Eeuo pipefail
+          CFG=artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          test -s "$CFG"
+          test -s "$IMG"
+
+          failed=0
+          for expected in \
+            CONFIG_ARCH_LAGOON=y \
+            CONFIG_SDM_GCC_LAGOON=y \
+            CONFIG_SDM_GPUCC_LAGOON=y \
+            CONFIG_ARM_SMMU=y \
+            CONFIG_QCOM_KGSL=y \
+            CONFIG_QCOM_KGSL_IOMMU=y \
+            CONFIG_QCOM_GDSC=y \
+            CONFIG_COMMON_CLK_QCOM=y \
+            CONFIG_KSU=y \
+            '# CONFIG_KSU_DEBUG is not set' \
+            '# CONFIG_KSU_TOOLKIT_SUPPORT is not set' \
+            CONFIG_KSU_MULTI_MANAGER_SUPPORT=y \
+            '# CONFIG_KSU_TRACEPOINT_HOOK is not set' \
+            CONFIG_KSU_MANUAL_HOOK=y \
+            '# CONFIG_KSU_SUSFS is not set' \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y \
+            CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y \
+            CONFIG_PROC_FS=y; do
+            if [[ "$expected" == '# '* ]]; then
+              symbol="${expected#\# }"
+              symbol="${symbol% is not set}"
+            else
+              symbol="${expected%%=*}"
+            fi
+            actual="$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$CFG" || true)"
+            printf 'FINAL_BOOT_CONFIG expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
+            if test "$actual" != "$expected"; then failed=1; fi
+          done
+          test "$failed" -eq 0
+
+          for marker in \
+            touchgrass_gpu_reference_v1 \
+            SMMU:CEN_POST \
+            GMU:ATT_POST \
+            HFI:CMD \
+            A6XX:INIT \
+            touchgrass_final_boot_reference_v1 \
+            INITCALL:POST \
+            PROBE:BUS_POST \
+            PROBE:DRV_POST \
+            IOMMU:GROUP_ADD \
+            USER:KERNEL_INIT; do
+            printf 'FINAL_BOOT_MARKER %s\n' "$marker"
+            grep -aFq "$marker" "$IMG"
+          done
+
+      - name: Download exact known-good 96 MiB boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/touchgrass-final-boot-reference
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/touchgrass-final-boot-reference/source-validation.json
+
+      - name: Repack exact boot layout with final reference kernel
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-final-boot-reference
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          gzip -n -9 -c "$IMG" > "$OUT/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+          test -s "$OUT/boot.img"
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+          cp artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe "$OUT/final.config"
+          cp workspace/touchgrass-a52xq/out/System.map "$OUT/System.map"
+          cp scripts/touchgrass_gpu_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_gpu_reference_resukisu_wrapper.py "$OUT/"
+          cp scripts/touchgrass_final_boot_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_final_boot_reference_resukisu_wrapper.py "$OUT/"
+          cp scripts/COLLECT_TOUCHGRASS_FINAL_BOOT_REFERENCE.bat "$OUT/"
+          cp artifacts/touchgrass-gpu-reference-prebuild.config "$OUT/prebuild.config"
+          cp artifacts/linux-4.19.200-resukisu-safe.txt "$OUT/resukisu-build-report.txt"
+
+      - name: Final package audit
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-final-boot-reference
+          cat > "$OUT/README_FIRST.txt" <<'EOF'
+          TOUCHGRASS FINAL BOOT REFERENCE RECORDER V1
+
+          Purpose:
+            Capture one known-good reference covering the remaining boot-critical
+            sequence while retaining the already proven GPU reference recorder.
+
+          Reference profile:
+            Exact TouchGrass Linux 4.19.200 + pinned ReSukiSU v4.1.0 safe profile.
+            SUSFS remains disabled, matching the previously dumped working kernel.
+
+          Recorders:
+            /proc/tg_gpu_reference  - proven 8192-entry GPU-specific timeline.
+            /proc/tg_boot_reference - independent 32768-entry boot-critical timeline.
+
+          Final boot recorder coverage:
+            - every kernel initcall start/result
+            - every actual bus/driver probe start/result
+            - generic IOMMU group/attach/domain checkpoints
+            - kernel-to-/init handoff
+            - extra fixed checkpoints for Binder, UFS and Qualcomm display when present
+
+          Safety:
+            Fixed literal tags only. Dynamic names are not dereferenced. The recorder
+            does not alter return values, retries, DT, SIDs, clocks, regulators, GDSCs,
+            IOMMU semantics, probe ordering, sleeps or resource votes.
+
+          Hardware test:
+            1. Flash ONLY boot.img.
+            2. Do not flash DTBO/vendor_boot/vendor/system/vbmeta.
+            3. Boot Android normally and allow the UI to settle.
+            4. Run COLLECT_TOUCHGRASS_FINAL_BOOT_REFERENCE.bat from the PC.
+            5. Upload TOUCHGRASS_FINAL_BOOT_TRACE_*.zip to ChatGPT.
+          EOF
+          sed -i 's/^          //' "$OUT/README_FIRST.txt"
+
+          for f in boot.img final.config System.map \
+                   touchgrass_gpu_reference_overlay.py \
+                   touchgrass_final_boot_reference_overlay.py \
+                   COLLECT_TOUCHGRASS_FINAL_BOOT_REFERENCE.bat README_FIRST.txt; do
+            test -s "$OUT/$f"
+          done
+          grep -Fq 'Flash ONLY boot.img' "$OUT/README_FIRST.txt"
+          grep -Fq '/proc/tg_boot_reference' "$OUT/README_FIRST.txt"
+          grep -Fq '/proc/tg_gpu_reference' "$OUT/README_FIRST.txt"
+          (
+            cd "$OUT"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Upload final hardware-test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Final-Boot-Reference-${{ github.run_number }}
+          path: artifacts/touchgrass-final-boot-reference/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,36 @@
+PHASE 246 HARDWARE VALIDATION - SUBSYS INITCALL CORRIDOR
+
+Flash only the audited Phase246 package/boot.img to the single BOOT partition.
+The Galaxy A52 is non-A/B; no slot switching is involved.
+
+Functional state retained from Phase245:
+  fw_devlink compiled default = FW_DEVLINK_FLAGS_PERMISSIVE
+
+Runtime recorder identity intentionally remains Phase243:
+  BOOT rs=ready phase=243 focus=cx-gdsc-own-suppliers roots=48 copies=3 crc=crc32c
+
+Boot normally. Leave the phone running for about 200-210 seconds if it remains
+responsive; if it watchdog-restarts earlier, collect after the restart. Then use
+the same OrangeFox raw 1MiB R48/RS48 transport-fusion collector.
+
+Highest-value Phase246 records:
+  CXF246 V q=0..2 l=4
+  CXF246 S n=<index> f=<symbol>
+  CXF246 X q=0..2 n=<count>
+
+Interpretation:
+1. No CXF246 V -> level 4 (subsys) was never entered.
+2. CXF246 V exists -> level 4 was entered.
+3. The final CXF246 S names the initcall entered immediately before the stall.
+4. If final S is a52_legacy_gdsc_init, inspect existing markers:
+     A52GDSC driver-register enter
+     A52GDSC driver-register exit rc=<rc>
+     CXF243 M/R/L/G/P
+5. CXF246 X exists -> every subsys initcall returned; target the next initcall level.
+
+Guardrails:
+- Diagnostic only over Phase245 permissive behavior.
+- No initcall skipped, reordered, retried, or return value changed.
+- No DT, GDSC provider logic, KGSL, GPUCC, supplier link, or probe result changed.
+- Phase244 overlay is not applied.
+- R48/RS48/CRC32C transport is unchanged.

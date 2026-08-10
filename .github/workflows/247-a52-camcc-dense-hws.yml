@@ -108,7 +108,7 @@ jobs:
           grep -Fq 'agent/a52-phase247-camcc-dense-hws-v1' scripts/247_package.py
           grep -Fq 'A52_RAW_RAMOOPS_20260810_104624.zip' scripts/247_design.md
           grep -Fq 'no qcom common.c framework patch' scripts/247_design.md
-          grep -Fq 'no CAMCC VDD/regulator/cal_l/PLL behavior change' scripts/247_package.py
+          grep -Fq 'no CAMCC regulator/VDD/cal_l/PLL behavior change' scripts/247_package.py
 
       - name: Dispatch inherited builder and package Phase 247
         env:

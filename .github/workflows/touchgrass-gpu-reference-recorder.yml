@@ -51,6 +51,15 @@ jobs:
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
 
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: touchgrass-gpu-reference-ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            touchgrass-gpu-reference-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
       - name: Hydrate checksum-locked repack helpers
         env:
           GH_TOKEN: ${{ github.token }}
@@ -137,21 +146,27 @@ jobs:
           grep -Fq 'ADRENO:PROBE' "$ROOT/drivers/gpu/msm/adreno.c"
           grep -Fq 'KGSL:PLAT_PROBE' "$ROOT/drivers/gpu/msm/kgsl.c"
 
-      - name: Build reference kernel with original device defconfig
+      - name: Resolve and audit reference configuration before compile
         run: |
           set -Eeuo pipefail
           source scripts/common.sh
-          build_kernel touchgrass-gpu-reference-4.19.200
+          configure_toolchain
+          PRE="$PWD/workspace/touchgrass-gpu-reference-config-audit"
+          rm -rf "$PRE"
+          mkdir -p "$PRE"
 
-      - name: Audit reference configuration and recorder binary
-        run: |
-          set -Eeuo pipefail
-          CFG=artifacts/config-touchgrass-gpu-reference-4.19.200
-          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          make -C "$KERNEL_DIR" O="$PRE" \
+            DTC_EXT="$KERNEL_DIR/tools/dtc" \
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+            a52xq_defconfig
+
+          CFG="$PRE/.config"
           test -s "$CFG"
-          test -s "$IMG"
+          cp "$CFG" artifacts/touchgrass-gpu-reference-prebuild.config
 
-          for line in \
+          failed=0
+          for expected in \
             CONFIG_ARCH_LAGOON=y \
             CONFIG_SDM_GCC_LAGOON=y \
             CONFIG_SDM_GPUCC_LAGOON=y \
@@ -162,16 +177,61 @@ jobs:
             CONFIG_COMMON_CLK_QCOM=y \
             CONFIG_KSU=y \
             CONFIG_PROC_FS=y; do
-            grep -Fxq "$line" "$CFG"
+            symbol="${expected%%=*}"
+            actual="$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$CFG" || true)"
+            printf 'CONFIG_AUDIT expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
+            if test "$actual" != "$expected"; then
+              failed=1
+            fi
           done
+          test "$failed" -eq 0
 
-          grep -aFq 'touchgrass_gpu_reference_v1' "$IMG"
-          grep -aFq 'SMMU:CEN_POST' "$IMG"
-          grep -aFq 'GMU:ATT_POST' "$IMG"
-          grep -aFq 'KGSLI:ATT_POST' "$IMG"
-          grep -aFq 'HFI:CMD' "$IMG"
-          grep -aFq 'ADRENO:PROBE' "$IMG"
-          grep -aFq 'A6XX:INIT' "$IMG"
+      - name: Build reference kernel with original device defconfig
+        run: |
+          set -Eeuo pipefail
+          source scripts/common.sh
+          build_kernel touchgrass-gpu-reference-4.19.200
+
+      - name: Audit compiled configuration and recorder binary
+        run: |
+          set -Eeuo pipefail
+          CFG=artifacts/config-touchgrass-gpu-reference-4.19.200
+          IMG=artifacts/Image-touchgrass-gpu-reference-4.19.200
+          test -s "$CFG"
+          test -s "$IMG"
+
+          failed=0
+          for expected in \
+            CONFIG_ARCH_LAGOON=y \
+            CONFIG_SDM_GCC_LAGOON=y \
+            CONFIG_SDM_GPUCC_LAGOON=y \
+            CONFIG_ARM_SMMU=y \
+            CONFIG_QCOM_KGSL=y \
+            CONFIG_QCOM_KGSL_IOMMU=y \
+            CONFIG_QCOM_GDSC=y \
+            CONFIG_COMMON_CLK_QCOM=y \
+            CONFIG_KSU=y \
+            CONFIG_PROC_FS=y; do
+            symbol="${expected%%=*}"
+            actual="$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$CFG" || true)"
+            printf 'FINAL_CONFIG_AUDIT expected=%s actual=%s\n' "$expected" "${actual:-<absent>}"
+            if test "$actual" != "$expected"; then
+              failed=1
+            fi
+          done
+          test "$failed" -eq 0
+
+          for marker in \
+            touchgrass_gpu_reference_v1 \
+            SMMU:CEN_POST \
+            GMU:ATT_POST \
+            KGSLI:ATT_POST \
+            HFI:CMD \
+            ADRENO:PROBE \
+            A6XX:INIT; do
+            printf 'MARKER_AUDIT %s\n' "$marker"
+            grep -aFq "$marker" "$IMG"
+          done
 
       - name: Download exact known-good 96 MiB boot source
         env:

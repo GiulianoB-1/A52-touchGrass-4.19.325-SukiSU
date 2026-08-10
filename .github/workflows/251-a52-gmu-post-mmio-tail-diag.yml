@@ -1,0 +1,164 @@
+name: 251 - A52 GMU post-MMIO tail diagnostic
+
+run-name: Build Phase 251 GMU post-MMIO tail diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase251-gmu-post-mmio-tail-diag-v1
+    paths:
+      - .github/workflows/251-a52-gmu-post-mmio-tail-diag.yml
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/251_phase250_gmu_post_mmio_tail_diag_overlay.py
+      - scripts/251_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase251-gmu-tail-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 251
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 251 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/251_phase250_gmu_post_mmio_tail_diag_overlay.py \
+            scripts/251_package.py
+          python3 scripts/251_phase250_gmu_post_mmio_tail_diag_overlay.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 251 executable scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
+          overlay = Path('scripts/251_phase250_gmu_post_mmio_tail_diag_overlay.py').read_text()
+          package = Path('scripts/251_package.py').read_text()
+          assert wrapper.index('250_phase249_gpu_smmu_power_contract_overlay.py') < wrapper.index('251_phase250_gmu_post_mmio_tail_diag_overlay.py')
+          for token in (
+              'A52_PHASE251_GMU_POST_MMIO_TAIL_DIAG_V1',
+              'K251 G hfiirq rc=%d',
+              'K251 G gmuirq rc=%d',
+              'K251 B gpu tbl=%d',
+              'K251 B gpu pcl=%u',
+              'K251 B cnoc tbl=%d',
+              'K251 B cnoc ccl=%u',
+              'K251 G gpubw rc=%d',
+              'K251 G cnoc rc=%d',
+              'K251 G rpmh rc=%d',
+              'K251 R bus rc=%d',
+              'K251 R gmuvote rc=%d',
+          ):
+              assert token in overlay, token
+          assert 'agent/a52-phase251-gmu-post-mmio-tail-diag-v1' in package
+          assert 'phase251_diagnostic_only' in package
+          assert 'phase251_return_values_changed' in package
+          PY
+
+      - name: Dispatch inherited builder and package Phase 251
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/251_package.py
+
+      - name: Verify Phase 251 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase251-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/audit/phase251/251_phase250_gmu_post_mmio_tail_diag_overlay.py"
+          test -s "$OUT/audit/phase251/251_package.py"
+
+          for marker in \
+            'A52_PHASE250_GPU_SMMU_POWER_CONTRACT_V1' \
+            'K250 S regon rc=%d n=%d' \
+            'K250 S clkon rc=%d' \
+            'A52_PHASE251_GMU_POST_MMIO_TAIL_DIAG_V1' \
+            'K251 G hfiirq rc=%d' \
+            'K251 G gmuirq rc=%d' \
+            'K251 G irqoff' \
+            'K251 B gpu tbl=%d' \
+            'K251 B gpu pcl=%u' \
+            'K251 B cnoc tbl=%d' \
+            'K251 B cnoc ccl=%u' \
+            'K251 G gpubw rc=%d' \
+            'K251 G cnoc rc=%d' \
+            'K251 G rpmh rc=%d' \
+            'K251 R bus rc=%d' \
+            'K251 R gfx rc=%d' \
+            'K251 R cx rc=%d' \
+            'K251 R mx rc=%d' \
+            'K251 R gpuvote rc=%d' \
+            'K251 R gmuvote rc=%d' \
+            'K251 G enabled'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('phase251-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 251
+          assert audit['base_phase'] == 250
+          assert audit['hardware_validated'] is False
+          assert audit['phase251_diagnostic_only'] is True
+          assert audit['phase251_phase250_correction_retained'] is True
+          for key in (
+              'phase251_gmu_semantics_changed',
+              'phase251_bus_vote_semantics_changed',
+              'phase251_irq_semantics_changed',
+              'phase251_rpmh_semantics_changed',
+              'phase251_dt_changed',
+              'phase251_stream_ids_changed',
+              'phase251_iommu_semantics_changed',
+              'phase251_smmu_power_contract_changed',
+              'phase251_probe_order_changed',
+              'phase251_return_values_changed',
+              'phase251_boot_cmdline_changed',
+          ):
+              assert audit[key] is False, key
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          inv = repack['invariants']
+          for key in ('board_preserved', 'cmdline_preserved', 'dtb_preserved',
+                      'ramdisk_preserved', 'header_version_preserved',
+                      'partition_size_preserved', 'replacement_kernel_used'):
+              assert inv[key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 251 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase251-GMU-POST-MMIO-DIAG-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase251-out
+          if-no-files-found: error
+          retention-days: 30

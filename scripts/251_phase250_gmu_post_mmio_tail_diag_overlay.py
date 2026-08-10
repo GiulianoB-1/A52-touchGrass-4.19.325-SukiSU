@@ -48,7 +48,7 @@ def patch_recorder(text: str, label: str) -> str:
 def patch_gmu(text: str, label: str) -> str:
     if MARKER in text:
         return text
-    if PHASE248 not in text or "K248 M mmio rc=%d" not in text or INCLUDE not in text:
+    if "K248 M mmio rc=%d" not in text or INCLUDE not in text:
         raise RuntimeError(f"{label}: inherited Phase248 GMU corridor missing")
 
     text = one(text,
@@ -166,7 +166,8 @@ def locate(args: list[str]) -> Path:
             continue
         if PHASE250 not in (root / ARM_SMMU).read_text(encoding="utf-8"):
             continue
-        if PHASE248 not in (root / GMU).read_text(encoding="utf-8"):
+        gmu_text = (root / GMU).read_text(encoding="utf-8")
+        if "K248 M mmio rc=%d" not in gmu_text or INCLUDE not in gmu_text:
             continue
         key = root.resolve()
         if key not in seen:

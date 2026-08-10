@@ -76,6 +76,9 @@ HELPERS = f'''\n/* {MARKER}
  * qcom,regulator-names. Keep their lifetime paired with ACK's existing clock
  * lifetime: regulator on before clk_prepare/enable; regulator off after clocks.
  */
+static const char a52_phase250_gpu_smmu_power_contract[] __used =
+\t"{MARKER}";
+
 static int a52_arm_smmu_init_gdscs(struct arm_smmu_device *smmu)
 {{
 \tstruct device *dev = smmu->dev;
@@ -265,6 +268,7 @@ def self_test() -> int:
     h = patch_header(sample_h)
     assert 'a52_gdscs' in h and MARKER in h
     assert 'qcom,regulator-names' in HELPERS
+    assert MARKER in HELPERS
     assert HELPERS.index('regulator_bulk_enable') < HELPERS.index('regulator_bulk_disable')
     print("Phase 250 self-test: PASS (DT regulator -> clock contract; no DT/SID rewrite)")
     return 0

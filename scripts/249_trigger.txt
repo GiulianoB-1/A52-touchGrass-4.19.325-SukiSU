@@ -1,0 +1,16 @@
+Phase249 hardware test
+
+1. Verify package SHA256SUMS.
+2. Flash only package/boot.img to the normal BOOT partition.
+3. Leave DTBO/vendor/system unchanged.
+4. Boot until watchdog/reset or until the device reaches a stable state.
+5. Collect the complete raw 1 MiB ramoops ZIP with the Phase210+ R48/RS48 decoder bundle.
+6. Decode with the bundled decode-a52-phase234-rscc.py / exact R48 RS48 CRC32C transport path. Do not use decode-a52-recorder-v3.py.
+7. Treat only the contiguous current-boot sequence beginning at seq=1 as current evidence; retained high-sequence records are stale unless transport continuity proves otherwise.
+
+Primary K249 interpretation:
+- Find the last `K249 S` record for 3d40000 GPU SMMU. The first negative rc names the internal arm-smmu probe stage producing the current -EBUSY.
+- `K249 I grp ok=0` + `K249 I ret rc=-19 s=nogrp` means gmu_user has no IOMMU group and directly explains Phase248 attach -ENODEV.
+- `K249 I grp ok=1` + `K249 I ag rc=-19` means the group exists and the -ENODEV is deeper in provider/domain attach.
+
+Do not interpret Phase249 as a fix. It is a diagnostic-only isolation candidate.

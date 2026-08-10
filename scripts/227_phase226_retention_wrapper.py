@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase245, then add Phase246 subsys tracing.
+"""Run inherited parity through Phase246, then add Phase247 CAMCC compatibility.
 
-Phase246 retains the Phase245 FW_DEVLINK_FLAGS_PERMISSIVE functional experiment
-and all Phase243 CX/GX hooks.  Phase244 remains skipped.  The only new behavior
-is diagnostic recording at subsys initcall level 4.
+Phase247 retains the Phase245 FW_DEVLINK_FLAGS_PERMISSIVE functional state,
+Phase246 subsys-initcall tracing, and all Phase243 CX/GX hooks. Phase244 remains
+skipped. The only Phase247 functional change is conversion of Lagoon CAMCC's
+TouchGrass sparse hwclks representation into the dense clk_hws registration
+list expected by exact GKI 5.10.
 """
 from __future__ import annotations
 
@@ -37,10 +39,11 @@ OVERLAYS = (
     ("243_phase242_cxgx_live_supplier_overlay.py", "Phase 243 live CX/GX own-supplier corridor"),
     ("243_phase242_identity_overlay.py", "Phase 243 runtime identity"),
     ("243_phase242_generated_source_audit.py", "Phase 243 final generated-source audit"),
-    ("245_phase243_fwdevlink_permissive_overlay.py", "Phase 245 fw_devlink permissive A/B"),
+    ("245_phase243_fwdevlink_permissive_overlay.py", "Phase 245 fw_devlink permissive controlled test"),
     ("246_phase245_subsys_initcall_corridor_overlay.py", "Phase 246 subsys initcall corridor"),
+    ("247_phase246_camcc_dense_hws_overlay.py", "Phase 247 CAMCC dense clk_hws compatibility"),
 )
-EXPECTED_PHASE246_ORDER = tuple(name for name, _ in OVERLAYS)
+EXPECTED_PHASE247_ORDER = tuple(name for name, _ in OVERLAYS)
 
 
 def run_script(path: Path, args: list[str], label: str) -> int:
@@ -52,26 +55,27 @@ def run_script(path: Path, args: list[str], label: str) -> int:
     return result.returncode
 
 
-def phase246_self_test() -> int:
+def phase247_self_test() -> int:
     actual = tuple(name for name, _label in OVERLAYS)
-    if actual != EXPECTED_PHASE246_ORDER:
-        raise RuntimeError(f"Phase 246 overlay order drifted: {actual!r}")
+    if actual != EXPECTED_PHASE247_ORDER:
+        raise RuntimeError(f"Phase 247 overlay order drifted: {actual!r}")
     if len(set(actual)) != len(actual):
-        raise RuntimeError("Phase 246 overlay list contains duplicates")
+        raise RuntimeError("Phase 247 overlay list contains duplicates")
     if any(name.startswith("244_") for name in actual):
-        raise RuntimeError("Phase 246 must not apply the broken Phase244 overlay")
-    if actual[-2:] != (
+        raise RuntimeError("Phase 247 must not apply the broken Phase244 overlay")
+    if actual[-3:] != (
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
+        "247_phase246_camcc_dense_hws_overlay.py",
     ):
-        raise RuntimeError("Phase245 permissive -> Phase246 diagnostic order is not final")
+        raise RuntimeError("Phase245 permissive -> Phase246 recorder -> Phase247 CAMCC order is not final")
 
     for name in actual:
         path = ROOT / name
         if not path.is_file():
-            raise RuntimeError(f"Phase 246 overlay missing: {path}")
+            raise RuntimeError(f"Phase 247 overlay missing: {path}")
         if "gki/common" not in path.read_text(encoding="utf-8"):
-            raise RuntimeError(f"Phase 246 overlay lacks generated-tree locator: {name}")
+            raise RuntimeError(f"Phase 247 overlay lacks generated-tree locator: {name}")
 
     for name in (
         "239_phase238_gpu_cx_vdd_parent_overlay.py",
@@ -80,10 +84,11 @@ def phase246_self_test() -> int:
         "243_phase242_generated_source_audit.py",
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
+        "247_phase246_camcc_dense_hws_overlay.py",
     ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
-            raise RuntimeError(f"Phase 246 inherited/new self-test failed: {name} rc={result.returncode}")
+            raise RuntimeError(f"Phase 247 inherited/new self-test failed: {name} rc={result.returncode}")
 
     p245 = (ROOT / "245_phase243_fwdevlink_permissive_overlay.py").read_text(encoding="utf-8")
     if "static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_PERMISSIVE;" not in p245:
@@ -102,8 +107,20 @@ def phase246_self_test() -> int:
         if token not in p246:
             raise RuntimeError(f"Phase246 overlay missing {token}")
 
+    p247 = (ROOT / "247_phase246_camcc_dense_hws_overlay.py").read_text(encoding="utf-8")
+    for token in (
+        "A52_PHASE247_CAMCC_DENSE_HWS_V1",
+        "cam_cc_lagoon_hws",
+        "CAM_CC_PLL2_OUT_EARLY",
+        "&cam_cc_pll2_out_early.hw",
+        "FW_DEVLINK_FLAGS_PERMISSIVE",
+        "CXF246 S n=%d f=%ps",
+    ):
+        if token not in p247:
+            raise RuntimeError(f"Phase247 CAMCC overlay missing {token}")
+
     print(
-        "Phase 246 wrapper self-test: PASS (Phase245 permissive retained; Phase244 skipped; subsys recorder only)",
+        "Phase 247 wrapper self-test: PASS (Phase245 permissive + Phase246 recorder retained; CAMCC dense clk_hws last)",
         flush=True,
     )
     return 0
@@ -115,12 +132,12 @@ def main() -> int:
     if rc:
         return rc
     if "--self-test" in args:
-        return phase246_self_test()
+        return phase247_self_test()
     for name, label in OVERLAYS:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 246 subsys-initcall corridor ordering completed", flush=True)
+    print("Phase 247 CAMCC dense-clk_hws compatibility ordering completed", flush=True)
     return 0
 
 

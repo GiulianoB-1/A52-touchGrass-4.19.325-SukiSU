@@ -9,7 +9,9 @@ on:
       - agent/a52-phase252-legacy-msm-bus-rpmh-v1
     paths:
       - .github/workflows/252-a52-legacy-msm-bus-rpmh.yml
+      - scripts/218_payload.py
       - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
       - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
       - scripts/252_package.py
 
@@ -40,7 +42,9 @@ jobs:
           python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
           python3 scripts/239_phase233_fb_msm_audit_repair.py
           python3 -m py_compile \
+            scripts/218_payload.py \
             scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
             scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
             scripts/252_package.py
           python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
@@ -55,6 +59,8 @@ jobs:
           wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
           overlay = Path('scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py').read_text()
           package = Path('scripts/252_package.py').read_text()
+          payload = Path('scripts/218_payload.py').read_text()
+          gate = Path('scripts/252_config_retention_gate.py').read_text()
           assert wrapper.index('251_phase250_gmu_post_mmio_tail_diag_overlay.py') < wrapper.index('252_phase251_legacy_msm_bus_rpmh_overlay.py')
           for token in (
               'A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1',
@@ -67,6 +73,9 @@ jobs:
               'K251 B gpu tbl=%d',
           ):
               assert token in overlay, token
+          assert 'scripts/252_config_retention_gate.py' in payload
+          assert 'CONFIG_QCOM_BUS_SCALING' in gate
+          assert 'CONFIG_QCOM_BUS_CONFIG_RPMH' in gate
           assert 'agent/a52-phase252-legacy-msm-bus-rpmh-v1' in package
           PY
 

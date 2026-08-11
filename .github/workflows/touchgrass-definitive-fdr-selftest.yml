@@ -1,0 +1,96 @@
+name: TouchGrass definitive FDR object self-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-definitive-fdr-v1
+    paths:
+      - .github/workflows/touchgrass-definitive-fdr-selftest.yml
+      - scripts/touchgrass_definitive_fdr_integrity_overlay.py
+      - scripts/touchgrass_definitive_fdr_tracepoints_overlay.py
+      - scripts/touchgrass_definitive_fdr_persistence_overlay.py
+      - scripts/touchgrass_definitive_fdr_abi_overlay.py
+
+permissions:
+  contents: read
+
+env:
+  TOUCHGRASS_COMMIT: '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  TOUCHGRASS_CACHE_KEY: 'a52xq-touchgrass-linux-4.19.200-main-v2-Linux-6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+
+jobs:
+  object-selftest:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore exact 4.19.200 source cache
+        id: source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Require exact cached source
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.source-cache.outputs.cache-hit }}" = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          git -C workspace/touchgrass-a52xq reset --hard HEAD
+          git -C workspace/touchgrass-a52xq clean -fdx -e toolchain/
+
+      - name: Apply proven recorder call sites
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/workspace/touchgrass-a52xq"
+          python3 scripts/touchgrass_gpu_reference_overlay.py --kernel "$ROOT" --output artifacts/selftest-gpu
+          python3 scripts/touchgrass_final_boot_reference_overlay_v2.py "$ROOT"
+
+      - name: Apply FDR core and integrity hardening
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/workspace/touchgrass-a52xq"
+          python3 scripts/touchgrass_definitive_fdr_overlay.py "$ROOT"
+          python3 scripts/touchgrass_definitive_fdr_integrity_overlay.py "$ROOT"
+          git -C "$ROOT" diff --check
+          grep -Fq 'u32 checksum;' "$ROOT/kernel/tg_fdr.c"
+          grep -Fq 'tg_fdr_streaming_active' "$ROOT/kernel/tg_fdr.c"
+          grep -Fq 'active_readers=' "$ROOT/kernel/tg_fdr.c"
+
+      - name: Configure exact A52 kernel
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/workspace/touchgrass-a52xq"
+          BUILD="$PWD/workspace/fdr-selftest-out"
+          CLANG="$ROOT/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
+          CROSS="$ROOT/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-"
+          test -x "$CLANG"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CC="$CLANG" CROSS_COMPILE="$CROSS" \
+            CLANG_TRIPLE=aarch64-linux-gnu- CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y CONFIG_DRV_BUILD_IN=Y a52xq_defconfig
+
+      - name: Compile FDR objects
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/workspace/touchgrass-a52xq"
+          BUILD="$PWD/workspace/fdr-selftest-out"
+          CLANG="$ROOT/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
+          CROSS="$ROOT/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-"
+          common=( -C "$ROOT" O="$BUILD" ARCH=arm64 CC="$CLANG" CROSS_COMPILE="$CROSS"
+                   CLANG_TRIPLE=aarch64-linux-gnu- CONFIG_BUILD_ARM64_DT_OVERLAY=y
+                   CONFIG_SECTION_MISMATCH_WARN_ONLY=y CONFIG_DRV_BUILD_IN=Y )
+          make "${common[@]}" -j4 KCFLAGS=-w \
+            kernel/tg_fdr.o kernel/tg_boot_reference.o kernel/tg_gpu_reference.o
+          test -s "$BUILD/kernel/tg_fdr.o"
+          test -s "$BUILD/kernel/tg_boot_reference.o"
+          test -s "$BUILD/kernel/tg_gpu_reference.o"
+
+      - name: Report sizes
+        run: |
+          size workspace/fdr-selftest-out/kernel/tg_fdr.o \
+               workspace/fdr-selftest-out/kernel/tg_boot_reference.o \
+               workspace/fdr-selftest-out/kernel/tg_gpu_reference.o

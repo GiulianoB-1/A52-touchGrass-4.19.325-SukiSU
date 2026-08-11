@@ -1,0 +1,32 @@
+name: 252 - Auto-dispatch Phase252 build
+
+on:
+  push:
+    branches:
+      - agent/a52-phase252-legacy-msm-bus-rpmh-v1
+    paths:
+      - .github/workflows/252-phase252-auto-dispatch.yml
+      - scripts/252_*.py
+      - scripts/227_phase226_retention_wrapper.py
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: a52-phase252-auto-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Dispatch Phase252 build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch Phase 227/252 build workflow at this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 213-a52-ion-transaction-trace.yml --ref "$TARGET_REF"
+          echo "Dispatched 213-a52-ion-transaction-trace.yml at $TARGET_REF"

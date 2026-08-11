@@ -25,6 +25,27 @@ block = r'''info "Applying observation-only final TouchGrass boot-reference reco
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py" "$ROOT"
 
+# The generic overlay inserts after the last include. On Samsung init/main.c the
+# last include is inside CONFIG_KDP, which makes the recorder macros disappear
+# when CONFIG_KDP is disabled. Relocate this one include to a known unconditional
+# top-level anchor before compiling.
+python3 - "$ROOT/init/main.c" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+inc = '#include <linux/tg_boot_reference.h>\n'
+anchor = '#include <linux/types.h>\n'
+count = s.count(inc)
+if count != 1:
+    raise SystemExit(f'init/main.c final recorder include count mismatch: {count}')
+if s.count(anchor) != 1:
+    raise SystemExit('init/main.c unconditional include anchor mismatch')
+s = s.replace(inc, '', 1)
+s = s.replace(anchor, anchor + inc, 1)
+p.write_text(s)
+PY
+
 # Keep the old audit token as an explicit compatibility line, while the first
 # proc header remains the authoritative v2 format marker.
 python3 - "$ROOT/kernel/tg_boot_reference.c" <<'PY'
@@ -56,6 +77,15 @@ grep -Fq 'PROBE:BUS_POST' "$ROOT/drivers/base/dd.c" || fail "bus probe result re
 grep -Fq 'PROBE:DRV_POST' "$ROOT/drivers/base/dd.c" || fail "driver probe result recorder missing"
 grep -Fq 'IOMMU:GROUP_ADD' "$ROOT/drivers/iommu/iommu.c" || fail "generic IOMMU recorder missing"
 grep -Fq 'USER:RUN_INIT' "$ROOT/init/main.c" || fail "userspace handoff recorder missing"
+python3 - "$ROOT/init/main.c" <<'PY'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+inc = '#include <linux/tg_boot_reference.h>\n'
+anchor = '#include <linux/types.h>\n' + inc
+if s.count(inc) != 1 or s.count(anchor) != 1:
+    raise SystemExit('init/main.c final recorder include is not unconditional')
+PY
 
 # Confirm the independent, hardware-proven GPU recorder remains intact.
 grep -Fq 'touchgrass_gpu_reference_v1' "$ROOT/kernel/tg_gpu_reference.c" || fail "GPU reference recorder disappeared"

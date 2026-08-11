@@ -1,0 +1,45 @@
+name: 254 - Exact pinned GKI SMMU source proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase254-smmu-source-proof-v1
+    paths:
+      - .github/workflows/254-smmu-source-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  source-proof:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore exact pinned GKI source cache
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-f960ed27302b1ff8e61e152fc202554d778deccd
+      - name: Extract SMMU implementation proof
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          ROOT=gki/common
+          OUT=smmu-source-proof
+          mkdir -p "$OUT"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-impl.c" "$OUT/"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c" "$OUT/"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/"
+          git -C "$ROOT" rev-parse HEAD > "$OUT/GKI_HEAD.txt"
+          grep -nE 'QCOM_SMMUV2|qcom_smmu_impl_init|qcom_adreno_smmu_impl_init|qcom,adreno-smmu|qcom,smmu-v2|alloc_context_bank|cfg_probe' \
+            "$OUT"/*.c > "$OUT/relevant-lines.txt" || true
+          cat "$OUT/GKI_HEAD.txt"
+          cat "$OUT/relevant-lines.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase254-exact-pinned-GKI-SMMU-source-proof
+          path: smmu-source-proof/
+          if-no-files-found: error
+          retention-days: 7

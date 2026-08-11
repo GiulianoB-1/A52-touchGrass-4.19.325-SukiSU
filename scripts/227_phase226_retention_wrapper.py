@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Run inherited parity through Phase250, then add GMU tail diagnostics.
+"""Run inherited parity through Phase251, then restore legacy MSM-bus RPMh.
 
-Phase251 retains the Phase250 GPU-SMMU power-contract correction plus Phase245
+Phase252 retains the Phase250 GPU-SMMU power-contract correction plus Phase245
 FW_DEVLINK_FLAGS_PERMISSIVE, Phase246 subsys tracing, Phase247 CAMCC dense
 clk_hws compatibility, Phase248 KGSL/GMU/IOMMU tracing, Phase249 SMMU/IOMMU
 root diagnostics, and all Phase243 CX/GX hooks. Phase244 remains skipped.
-Phase251 is diagnostic-only around the post-MMIO gmu_probe tail.
+Phase251 diagnostics remain active. Phase252 restores the hardware-proven
+TouchGrass legacy MSM-bus RPMh client/provider contract required by KGSL/GMU.
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ OVERLAYS = (
     ("249_phase248_gpu_smmu_enodev_root_overlay.py", "Phase 249 GPU SMMU / GMU ENODEV root diagnostic"),
     ("250_phase249_gpu_smmu_power_contract_overlay.py", "Phase 250 GPU SMMU downstream power contract"),
     ("251_phase250_gmu_post_mmio_tail_diag_overlay.py", "Phase 251 GMU post-MMIO tail diagnostic"),
+    ("252_phase251_legacy_msm_bus_rpmh_overlay.py", "Phase 252 legacy MSM-bus RPMh contract"),
 )
 EXPECTED_PHASE251_ORDER = tuple(name for name, _ in OVERLAYS)
 
@@ -67,7 +69,7 @@ def phase251_self_test() -> int:
         raise RuntimeError("Phase 251 overlay list contains duplicates")
     if any(name.startswith("244_") for name in actual):
         raise RuntimeError("Phase 251 must not apply the broken Phase244 overlay")
-    if actual[-7:] != (
+    if actual[-8:] != (
         "245_phase243_fwdevlink_permissive_overlay.py",
         "246_phase245_subsys_initcall_corridor_overlay.py",
         "247_phase246_camcc_dense_hws_overlay.py",
@@ -75,8 +77,9 @@ def phase251_self_test() -> int:
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
         "250_phase249_gpu_smmu_power_contract_overlay.py",
         "251_phase250_gmu_post_mmio_tail_diag_overlay.py",
+        "252_phase251_legacy_msm_bus_rpmh_overlay.py",
     ):
-        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 -> 250 -> 251 final ordering drifted")
+        raise RuntimeError("Phase245 -> 246 -> 247 -> 248 -> 249 -> 250 -> 251 -> 252 final ordering drifted")
 
     for name in actual:
         path = ROOT / name
@@ -97,6 +100,7 @@ def phase251_self_test() -> int:
         "249_phase248_gpu_smmu_enodev_root_overlay.py",
         "250_phase249_gpu_smmu_power_contract_overlay.py",
         "251_phase250_gmu_post_mmio_tail_diag_overlay.py",
+        "252_phase251_legacy_msm_bus_rpmh_overlay.py",
     ):
         result = subprocess.run([sys.executable, str(ROOT / name), "--self-test"], check=False)
         if result.returncode:
@@ -145,8 +149,20 @@ def phase251_self_test() -> int:
         if token not in p251:
             raise RuntimeError(f"Phase251 diagnostic overlay missing {token}")
 
+    p252 = (ROOT / "252_phase251_legacy_msm_bus_rpmh_overlay.py").read_text(encoding="utf-8")
+    for token in (
+        "A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1",
+        "CONFIG_QCOM_BUS_SCALING",
+        "CONFIG_QCOM_BUS_CONFIG_RPMH",
+        "msm_bus_fabric_rpmh.o",
+        "msm_bus_of_rpmh.o",
+        "K251 B gpu tbl=%d",
+    ):
+        if token not in p252:
+            raise RuntimeError(f"Phase252 corrective overlay missing {token}")
+
     print(
-        "Phase 251 wrapper self-test: PASS (Phase250 correction retained; GMU tail diagnostics last)",
+        "Phase 252 wrapper self-test: PASS (Phase251 diagnostics retained; legacy MSM-bus RPMh last)",
         flush=True,
     )
     return 0
@@ -163,7 +179,7 @@ def main() -> int:
         rc = run_script(ROOT / name, args, label)
         if rc:
             return rc
-    print("Phase 251 GMU post-MMIO tail diagnostic ordering completed", flush=True)
+    print("Phase 252 legacy MSM-bus RPMh ordering completed", flush=True)
     return 0
 
 

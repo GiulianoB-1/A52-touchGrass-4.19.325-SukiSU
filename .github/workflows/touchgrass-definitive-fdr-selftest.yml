@@ -47,7 +47,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/workspace/touchgrass-a52xq"
-          python3 scripts/touchgrass_gpu_reference_overlay.py --kernel "$ROOT" --output artifacts/selftest-gpu
+          python3 scripts/touchgrass_gpu_reference_overlay.py "$ROOT"
           python3 scripts/touchgrass_final_boot_reference_overlay_v2.py "$ROOT"
 
       - name: Apply FDR core and integrity hardening

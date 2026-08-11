@@ -3,7 +3,7 @@
 
 Runs after the main 4.19 -> 5.10 API compatibility pass.  It closes two
 compile/runtime traps that are easy to miss in a mechanical port:
-  * timespec64 printf signedness/header ownership; and
+  * timespec64 printf signedness/header ownership in both debug variants; and
   * command-db BCM aux-data endianness/address validity.
 """
 from __future__ import annotations
@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 
 MARKER = "A52_PHASE252_MSM_BUS_GKI510_FORMAT_GUARD_V1"
+DEBUG_TIMEKEEPING_FILES = (
+    "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
+    "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
+)
 
 
 def locate(args: list[str]) -> Path:
@@ -29,14 +33,18 @@ def locate(args: list[str]) -> Path:
     hits: list[Path] = []
     seen: set[Path] = set()
     for root in candidates:
-        dbg = root / "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c"
         fabric = root / "drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c"
-        if not dbg.is_file() or not fabric.is_file():
+        if not fabric.is_file():
             continue
-        dbg_text = dbg.read_text(encoding="utf-8")
+        if any(not (root / relative).is_file() for relative in DEBUG_TIMEKEEPING_FILES):
+            continue
+        if any(
+            "ktime_to_timespec64(ktime_get())"
+            not in (root / relative).read_text(encoding="utf-8")
+            for relative in DEBUG_TIMEKEEPING_FILES
+        ):
+            continue
         fabric_text = fabric.read_text(encoding="utf-8")
-        if "ktime_to_timespec64(ktime_get())" not in dbg_text:
-            continue
         if "aux = cmd_db_read_aux_data(bcmdev->name, &aux_len);" not in fabric_text:
             continue
         key = root.resolve()
@@ -49,37 +57,38 @@ def locate(args: list[str]) -> Path:
 
 
 def patch_debug_timekeeping(root: Path) -> None:
-    path = root / "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c"
-    text = path.read_text(encoding="utf-8")
+    for relative in DEBUG_TIMEKEEPING_FILES:
+        path = root / relative
+        text = path.read_text(encoding="utf-8")
 
-    # Avoid relying on the hrtimer include chain for the 5.10 ktime conversion API.
-    if "#include <linux/ktime.h>\n" not in text:
-        anchor = "#include <linux/hrtimer.h>\n"
-        if text.count(anchor) != 1:
-            raise RuntimeError(f"{path}: hrtimer include anchor drifted")
-        text = text.replace(anchor, anchor + "#include <linux/ktime.h>\n", 1)
+        # Avoid relying on the hrtimer include chain for the 5.10 ktime conversion API.
+        if "#include <linux/ktime.h>\n" not in text:
+            anchor = "#include <linux/hrtimer.h>\n"
+            if text.count(anchor) != 1:
+                raise RuntimeError(f"{path}: hrtimer include anchor drifted")
+            text = text.replace(anchor, anchor + "#include <linux/ktime.h>\n", 1)
 
-    old = '"\\n%lld.%09lu\\n",\n\t\t(long long)ts.tv_sec, ts.tv_nsec);'
-    new = '"\\n%lld.%09ld\\n",\n\t\t(long long)ts.tv_sec, (long)ts.tv_nsec);'
-    count = text.count(old)
-    if count != 3:
-        raise RuntimeError(
-            f"{path}: expected exactly 3 signed-timespec64 format repair sites, found {count}"
-        )
-    text = text.replace(old, new)
-    path.write_text(text, encoding="utf-8")
+        old = '"\\n%lld.%09lu\\n",\n\t\t(long long)ts.tv_sec, ts.tv_nsec);'
+        new = '"\\n%lld.%09ld\\n",\n\t\t(long long)ts.tv_sec, (long)ts.tv_nsec);'
+        count = text.count(old)
+        if count != 3:
+            raise RuntimeError(
+                f"{path}: expected exactly 3 signed-timespec64 format repair sites, found {count}"
+            )
+        text = text.replace(old, new)
+        path.write_text(text, encoding="utf-8")
 
-    final = path.read_text(encoding="utf-8")
-    if final.count("ktime_to_timespec64(ktime_get())") != 3:
-        raise RuntimeError("Phase252 format guard lost timespec64 conversions")
-    if final.count('"\\n%lld.%09ld\\n"') != 3:
-        raise RuntimeError("Phase252 format guard signed timestamp count mismatch")
-    if final.count("(long long)ts.tv_sec, (long)ts.tv_nsec") != 3:
-        raise RuntimeError("Phase252 format guard explicit timestamp cast count mismatch")
-    if "%09lu" in final:
-        raise RuntimeError("Phase252 format guard found stale unsigned tv_nsec format")
-    if final.count("#include <linux/ktime.h>") != 1:
-        raise RuntimeError("Phase252 format guard ktime include count mismatch")
+        final = path.read_text(encoding="utf-8")
+        if final.count("ktime_to_timespec64(ktime_get())") != 3:
+            raise RuntimeError(f"Phase252 format guard lost timespec64 conversions: {relative}")
+        if final.count('"\\n%lld.%09ld\\n"') != 3:
+            raise RuntimeError(f"Phase252 format guard signed timestamp count mismatch: {relative}")
+        if final.count("(long long)ts.tv_sec, (long)ts.tv_nsec") != 3:
+            raise RuntimeError(f"Phase252 format guard explicit timestamp cast count mismatch: {relative}")
+        if "%09lu" in final:
+            raise RuntimeError(f"Phase252 format guard found stale unsigned tv_nsec format: {relative}")
+        if final.count("#include <linux/ktime.h>") != 1:
+            raise RuntimeError(f"Phase252 format guard ktime include count mismatch: {relative}")
 
 
 def patch_cmddb_semantics(root: Path) -> None:
@@ -149,15 +158,21 @@ def patch(root: Path) -> None:
     patch_debug_timekeeping(root)
     patch_cmddb_semantics(root)
     print(
-        f"{MARKER}: signed timespec64 formatting, ktime include, and command-db BCM semantics verified",
+        f"{MARKER}: both debug variants use signed timespec64 formatting/ktime headers; command-db BCM semantics verified",
         flush=True,
     )
 
 
 def self_test() -> None:
+    assert DEBUG_TIMEKEEPING_FILES == (
+        "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
+        "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
+    )
     source = Path(__file__).read_text(encoding="utf-8")
     for token in (
         "gki/common",
+        "msm_bus_dbg.c",
+        "msm_bus_dbg_rpmh.c",
         "ktime_to_timespec64(ktime_get())",
         "%lld.%09ld",
         "(long long)ts.tv_sec, (long)ts.tv_nsec",

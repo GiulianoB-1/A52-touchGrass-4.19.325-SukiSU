@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/touchgrass-final-boot-reference-recorder.yml
       - scripts/touchgrass_final_boot_reference_overlay.py
+      - scripts/touchgrass_final_boot_reference_overlay_v2.py
       - scripts/touchgrass_final_boot_reference_resukisu_wrapper.py
       - scripts/COLLECT_TOUCHGRASS_FINAL_BOOT_REFERENCE.bat
       - scripts/touchgrass_gpu_reference_overlay.py
@@ -138,6 +139,18 @@ jobs:
           set -Eeuo pipefail
           ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe \
             2>&1 | tee artifacts/touchgrass-final-boot-reference-build.log
+
+      - name: Upload build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Final-Boot-Reference-${{ github.run_number }}-FAILURE-EVIDENCE
+          path: |
+            artifacts/touchgrass-final-boot-reference-build.log
+            artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+            artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Save compiler cache after successful kernel build
         if: steps.recorder-ccache.outputs.cache-hit != 'true'

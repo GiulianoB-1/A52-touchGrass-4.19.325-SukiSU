@@ -13,6 +13,8 @@ on:
       - scripts/227_phase226_retention_wrapper.py
       - scripts/252_config_retention_gate.py
       - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
       - scripts/252_package.py
 
 permissions:
@@ -46,8 +48,12 @@ jobs:
             scripts/227_phase226_retention_wrapper.py \
             scripts/252_config_retention_gate.py \
             scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
             scripts/252_package.py
           python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
           python3 scripts/227_phase226_retention_wrapper.py --self-test
           git diff --check
 
@@ -58,10 +64,18 @@ jobs:
           from pathlib import Path
           wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
           overlay = Path('scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py').read_text()
+          compat = Path('scripts/252_msm_bus_510_compat.py').read_text()
+          fmt = Path('scripts/252_msm_bus_510_format_guard.py').read_text()
           package = Path('scripts/252_package.py').read_text()
           payload = Path('scripts/218_payload.py').read_text()
           gate = Path('scripts/252_config_retention_gate.py').read_text()
-          assert wrapper.index('251_phase250_gmu_post_mmio_tail_diag_overlay.py') < wrapper.index('252_phase251_legacy_msm_bus_rpmh_overlay.py')
+
+          p251 = wrapper.index('251_phase250_gmu_post_mmio_tail_diag_overlay.py')
+          p252 = wrapper.index('252_phase251_legacy_msm_bus_rpmh_overlay.py')
+          pcompat = wrapper.index('252_msm_bus_510_compat.py')
+          pfmt = wrapper.index('252_msm_bus_510_format_guard.py')
+          assert p251 < p252 < pcompat < pfmt
+
           for token in (
               'A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1',
               '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7',
@@ -73,9 +87,37 @@ jobs:
               'K251 B gpu tbl=%d',
           ):
               assert token in overlay, token
+
+          for token in (
+              'A52_PHASE252_MSM_BUS_GKI510_COMPAT_V1',
+              'const void *id',
+              'ktime_to_timespec64',
+              'cmd_db_read_aux_data(bcmdev->name, &aux_len)',
+              'IS_ERR(aux)',
+              'PTR_ERR(aux)',
+              'rpmh_invalidate() is void',
+              'cur_fal = pdata->usecase_lat[cur_idx].fal_ns',
+              'BCM_TCS_CMD_* is provided by <soc/qcom/tcs.h>',
+          ):
+              assert token in compat, token
+
+          for token in (
+              'A52_PHASE252_MSM_BUS_GKI510_FORMAT_GUARD_V1',
+              '%lld.%09ld',
+              '(long long)ts.tv_sec, (long)ts.tv_nsec',
+              '#include <linux/ktime.h>',
+              'stale unsigned tv_nsec format',
+          ):
+              assert token in fmt, token
+
           assert 'scripts/252_config_retention_gate.py' in payload
           assert 'CONFIG_QCOM_BUS_SCALING' in gate
           assert 'CONFIG_QCOM_BUS_CONFIG_RPMH' in gate
+          for name in (
+              '252_msm_bus_510_compat.py',
+              '252_msm_bus_510_format_guard.py',
+          ):
+              assert name in package, name
           assert 'agent/a52-phase252-legacy-msm-bus-rpmh-v1' in package
           PY
 
@@ -97,6 +139,9 @@ jobs:
           test -s "$OUT/BUILD-IDENTITY.json"
           test -s "$OUT/SHA256SUMS"
           test -s "$OUT/audit/phase252/252_phase251_legacy_msm_bus_rpmh_overlay.py"
+          test -s "$OUT/audit/phase252/252_msm_bus_510_compat.py"
+          test -s "$OUT/audit/phase252/252_msm_bus_510_format_guard.py"
+          test -s "$OUT/audit/phase252/252_config_retention_gate.py"
           grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$OUT/config/final.config"
           grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$OUT/config/final.config"
           for marker in \
@@ -122,8 +167,11 @@ jobs:
           assert audit['phase252_corrective'] is True
           assert audit['phase252_qcom_bus_scaling_enabled'] is True
           assert audit['phase252_qcom_bus_config_rpmh_enabled'] is True
+          assert audit['phase252_gki510_api_compatibility_applied'] is True
+          assert audit['phase252_gki510_format_guard_applied'] is True
           assert audit['phase252_phase251_diagnostics_retained'] is True
           assert audit['phase252_return_values_forced'] is False
+          assert len(audit['phase252_gki510_adaptations']) >= 6
           repack = json.loads((out / 'package/repack-report.json').read_text())
           for key in ('board_preserved','cmdline_preserved','dtb_preserved','ramdisk_preserved','header_version_preserved','partition_size_preserved','replacement_kernel_used'):
               assert repack['invariants'][key] is True, key
@@ -155,6 +203,32 @@ jobs:
           if test -n "$RUN_ID"; then
             gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed \
               > phase252-failure/inherited-failed.log 2>&1 || true
+            mkdir -p phase252-failure/inner-artifact
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --pattern '*FAILED-DIAGNOSTICS*' \
+              --dir phase252-failure/inner-artifact || true
+
+            COMPILE_LOG=$(find phase252-failure/inner-artifact -type f \
+              -name 'phase217-compile.log' -print -quit)
+            if test -n "$COMPILE_LOG"; then
+              grep -nE 'error:|undefined reference|ld\.lld: error|collect2: error' \
+                "$COMPILE_LOG" > phase252-failure/compiler-errors.txt || true
+              tail -n 300 "$COMPILE_LOG" > phase252-failure/phase217-compile-tail.txt || true
+            fi
+
+            APPLY_LOG=$(find phase252-failure/inner-artifact -type f \
+              -name 'phase217-apply.log' -print -quit)
+            if test -n "$APPLY_LOG"; then
+              grep -nE 'Phase 252|A52_PHASE252|P252|compat|guard|failed|error' \
+                "$APPLY_LOG" > phase252-failure/phase252-apply-summary.txt || true
+              tail -n 220 "$APPLY_LOG" > phase252-failure/phase217-apply-tail.txt || true
+            fi
+
+            CI_FAIL=$(find phase252-failure/inner-artifact -type f \
+              -name 'ci-failure.txt' -print -quit)
+            if test -n "$CI_FAIL"; then
+              cp "$CI_FAIL" phase252-failure/ci-failure.txt
+            fi
           fi
 
       - name: Upload Phase 252 failure diagnostics

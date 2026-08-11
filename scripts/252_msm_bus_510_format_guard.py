@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""Final semantic/header guard for the Phase 252 GKI 5.10 MSM-bus port.
+"""Final semantic/header guard for Phase252, then Phase253/254 SMMU overlays.
 
-Runs after the main 4.19 -> 5.10 API compatibility pass.  It closes two
-compile/runtime traps that are easy to miss in a mechanical port:
-  * timespec64 printf signedness/header ownership in both debug variants; and
-  * command-db BCM aux-data endianness/address validity.
-
-On the Phase253 branch this remains the final Phase252 guard and then dispatches
-the Phase253 KGSL ARM-SMMU domain-contract correction onto the same generated
-gki/common tree.  This keeps every Phase252 correction ordered before the new
-SMMU domain semantics without changing the cumulative wrapper's earlier order.
+Runs after the main 4.19 -> 5.10 API compatibility pass. It preserves the
+Phase252 format/command-db guards, applies the Phase253 KGSL domain contract,
+and on the Phase254 branch immediately applies the TouchGrass
+qcom,iommu-dma="disabled" default-domain contract to the same generated tree.
 """
 from __future__ import annotations
 
@@ -19,6 +14,7 @@ from pathlib import Path
 
 MARKER = "A52_PHASE252_MSM_BUS_GKI510_FORMAT_GUARD_V1"
 PHASE253 = Path(__file__).resolve().parent / "253_phase252_kgsl_smmu_domain_contract_overlay.py"
+PHASE254 = Path(__file__).resolve().parent / "254_phase253_kgsl_disabled_default_domain_contract.py"
 DEBUG_TIMEKEEPING_FILES = (
     "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
     "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
@@ -59,7 +55,9 @@ def locate(args: list[str]) -> Path:
             seen.add(key)
             hits.append(root)
     if len(hits) != 1:
-        raise RuntimeError(f"expected one Phase252 compat-generated gki/common root, found {len(hits)}")
+        raise RuntimeError(
+            f"expected one Phase252 compat-generated gki/common root, found {len(hits)}"
+        )
     return hits[0]
 
 
@@ -157,7 +155,9 @@ def patch_cmddb_semantics(root: Path) -> None:
         "bcmdev->unit_size = aux_data.unit_size;",
     ):
         if stale in final:
-            raise RuntimeError(f"Phase252 command-db semantic guard found stale token {stale!r}")
+            raise RuntimeError(
+                f"Phase252 command-db semantic guard found stale token {stale!r}"
+            )
 
 
 def patch(root: Path) -> None:
@@ -169,12 +169,22 @@ def patch(root: Path) -> None:
     )
 
 
-def run_phase253(args: list[str]) -> int:
+def run_phase253_and_254(args: list[str]) -> int:
     if not PHASE253.is_file():
         raise RuntimeError(f"missing Phase253 overlay: {PHASE253}")
     result = subprocess.run([sys.executable, str(PHASE253), *args], check=False)
     if result.returncode:
-        raise RuntimeError(f"Phase253 KGSL/SMMU domain-contract overlay failed rc={result.returncode}")
+        raise RuntimeError(
+            f"Phase253 KGSL/SMMU domain-contract overlay failed rc={result.returncode}"
+        )
+
+    if not PHASE254.is_file():
+        raise RuntimeError(f"missing Phase254 overlay: {PHASE254}")
+    result = subprocess.run([sys.executable, str(PHASE254), *args], check=False)
+    if result.returncode:
+        raise RuntimeError(
+            f"Phase254 disabled-default-domain overlay failed rc={result.returncode}"
+        )
     return 0
 
 
@@ -200,19 +210,20 @@ def self_test() -> None:
         "Missing bcm address",
         "cmd_db_read_aux_data(bcmdev->name, &aux_len)",
         "253_phase252_kgsl_smmu_domain_contract_overlay.py",
+        "254_phase253_kgsl_disabled_default_domain_contract.py",
     ):
         if token not in source:
-            raise RuntimeError(f"Phase252/253 semantic-guard self-test missing {token!r}")
-    print("Phase 252 MSM-bus GKI 5.10 semantic guard self-test: PASS", flush=True)
+            raise RuntimeError(f"Phase252/253/254 semantic-guard self-test missing {token!r}")
+    print("Phase 252/253/254 cumulative semantic guard self-test: PASS", flush=True)
 
 
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
-        return run_phase253(["--self-test"])
+        return run_phase253_and_254(["--self-test"])
     root = locate(sys.argv[1:])
     patch(root)
-    return run_phase253([str(root)])
+    return run_phase253_and_254([str(root)])
 
 
 if __name__ == "__main__":

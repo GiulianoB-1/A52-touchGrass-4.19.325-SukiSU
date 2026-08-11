@@ -216,8 +216,8 @@ def self_test() -> None:
     assert "drivers/soc/qcom/msm_bus/msm_bus_core.c" in BUS_FILES
     assert "drivers/soc/qcom/msm_bus/msm_bus_of_rpmh.c" in BUS_FILES
     assert "include/linux/msm-bus.h" in HEADER_FILES
-    assert "CONFIG_QCOM_BUS_SCALING" in KCONFIG_BLOCK
-    assert "CONFIG_QCOM_BUS_CONFIG_RPMH" in KCONFIG_BLOCK
+    assert "config QCOM_BUS_SCALING" in KCONFIG_BLOCK
+    assert "config QCOM_BUS_CONFIG_RPMH" in KCONFIG_BLOCK
     print("Phase 252 legacy MSM-bus RPMh overlay self-test: PASS", flush=True)
 
 

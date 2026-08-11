@@ -1,0 +1,255 @@
+name: 253 - A52 KGSL ARM-SMMU domain contract
+
+run-name: Build Phase 253 KGSL ARM-SMMU domain contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase253-kgsl-platform-enodev-corridor-v1
+    paths:
+      - .github/workflows/253-a52-kgsl-smmu-domain-contract.yml
+      - scripts/218_payload.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
+      - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
+      - scripts/252_package.py
+      - scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+      - scripts/253_surfaceflinger_component_audit.md
+      - scripts/253_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase253-kgsl-smmu-domain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 253
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out Phase 253 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and self-test
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/218_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
+            scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
+            scripts/252_package.py \
+            scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py \
+            scripts/253_package.py
+          python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          git diff --check
+
+      - name: Verify Phase 253 executable scope
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wrapper = Path('scripts/227_phase226_retention_wrapper.py').read_text()
+          fmt = Path('scripts/252_msm_bus_510_format_guard.py').read_text()
+          overlay = Path('scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py').read_text()
+          package = Path('scripts/253_package.py').read_text()
+          audit = Path('scripts/253_surfaceflinger_component_audit.md').read_text()
+
+          p251 = wrapper.index('251_phase250_gmu_post_mmio_tail_diag_overlay.py')
+          p252 = wrapper.index('252_phase251_legacy_msm_bus_rpmh_overlay.py')
+          pcompat = wrapper.index('252_msm_bus_510_compat.py')
+          pfmt = wrapper.index('252_msm_bus_510_format_guard.py')
+          assert p251 < p252 < pcompat < pfmt
+
+          assert '253_phase252_kgsl_smmu_domain_contract_overlay.py' in fmt
+          assert 'run_phase253' in fmt
+
+          for token in (
+              'A52_PHASE253_KGSL_SMMU_DOMAIN_CONTRACT_V1',
+              'DOMAIN_ATTR_PROCID',
+              'DOMAIN_ATTR_DYNAMIC',
+              'DOMAIN_ATTR_CONTEXT_BANK',
+              'DOMAIN_ATTR_TTBR0',
+              'DOMAIN_ATTR_CONTEXTIDR',
+              'a52_kgsl_dynamic_domain',
+              'a52_kgsl_init_asid',
+              'idr_alloc_cyclic(&smmu->kgsl_asid_idr',
+              'FIELD_PREP(ARM_SMMU_TTBRn_ASID, cfg->asid)',
+              'arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);',
+              'K253 D init dyn=%d cb=%u asid=%u proc=%u',
+          ):
+              assert token in overlay, token
+
+          for token in (
+              'Phase252 hardware',
+              'DOMAIN_ATTR_PROCID',
+              'dynamic per-process',
+              '/dev/kgsl-3d0',
+              'SurfaceFlinger',
+              'first DRM/SDE atomic commit',
+          ):
+              assert token in audit, token
+
+          assert 'agent/a52-phase253-kgsl-platform-enodev-corridor-v1' in package
+          assert 'phase253-out' in package
+          PY
+
+      - name: Dispatch inherited builder and package Phase 253
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/253_package.py
+
+      - name: Verify Phase 253 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase253-out
+          test -s "$OUT/package/boot.img"
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/config/final.config"
+          test -s "$OUT/final-audit.json"
+          test -s "$OUT/BUILD-IDENTITY.json"
+          test -s "$OUT/SHA256SUMS"
+          test -s "$OUT/PHASE253-SURFACEFLINGER-COMPONENT-AUDIT.md"
+          test -s "$OUT/audit/phase253/253_phase252_kgsl_smmu_domain_contract_overlay.py"
+          test -s "$OUT/audit/phase253/253_surfaceflinger_component_audit.md"
+
+          grep -Fxq 'CONFIG_ARM_SMMU=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$OUT/config/final.config"
+
+          for marker in \
+            'K248 A plat in' \
+            'K248 A plat rc=%d' \
+            'K251 G gpubw rc=%d' \
+            'K251 G cnoc rc=%d' \
+            'K253 D init dyn=%d cb=%u asid=%u proc=%u' \
+            'set DOMAIN_ATTR_PROCID failed: %d' \
+            'get DOMAIN_ATTR_CONTEXT_BANK failed: %d' \
+            'get DOMAIN_ATTR_TTBR0 failed: %d' \
+            'get DOMAIN_ATTR_CONTEXTIDR failed: %d'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('phase253-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 253
+          assert audit['base_phase'] == 252
+          assert audit['hardware_validated'] is False
+          assert audit['phase253_corrective'] is True
+          assert audit['phase253_dynamic_kgsl_domains'] is True
+          assert audit['phase253_unique_dynamic_asids'] is True
+          assert audit['phase253_dynamic_stream_rewrite'] is False
+          assert audit['phase253_fabricated_iommu_groups'] is False
+          assert audit['phase253_forced_attach_success'] is False
+          assert audit['phase253_stream_ids_changed'] is False
+          assert audit['phase253_dt_changed'] is False
+          assert audit['phase253_phase252_msm_bus_retained'] is True
+          assert audit['phase253_phase250_smmu_power_fix_retained'] is True
+          assert audit['phase253_surfaceflinger_static_audit_completed'] is True
+          assert audit['phase253_surfaceflinger_other_deterministic_blockers_found'] is False
+          assert set(audit['phase253_domain_attributes']) == {
+              'DOMAIN_ATTR_PROCID', 'DOMAIN_ATTR_DYNAMIC', 'DOMAIN_ATTR_CONTEXT_BANK',
+              'DOMAIN_ATTR_TTBR0', 'DOMAIN_ATTR_CONTEXTIDR'
+          }
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          for key in ('board_preserved','cmdline_preserved','dtb_preserved','ramdisk_preserved','header_version_preserved','partition_size_preserved','replacement_kernel_used'):
+              assert repack['invariants'][key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Recover failed inherited builder logs
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p phase253-failure
+          gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow 325785868 \
+            --branch agent/a52-phase253-kgsl-platform-enodev-corridor-v1 \
+            --event workflow_dispatch --limit 3 \
+            --json databaseId,status,conclusion,createdAt,url \
+            > phase253-failure/inherited-runs.json
+          RUN_ID=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('phase253-failure/inherited-runs.json')
+          rows=json.loads(p.read_text()) if p.is_file() else []
+          print(rows[0]['databaseId'] if rows else '')
+          PY
+          )
+          if test -n "$RUN_ID"; then
+            gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed \
+              > phase253-failure/inherited-failed.log 2>&1 || true
+            mkdir -p phase253-failure/inner-artifact
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --pattern '*FAILED-DIAGNOSTICS*' \
+              --dir phase253-failure/inner-artifact || true
+
+            COMPILE_LOG=$(find phase253-failure/inner-artifact -type f \
+              -name 'phase217-compile.log' -print -quit)
+            if test -n "$COMPILE_LOG"; then
+              grep -nE 'error:|undefined reference|ld\.lld: error|collect2: error' \
+                "$COMPILE_LOG" > phase253-failure/compiler-errors.txt || true
+              tail -n 320 "$COMPILE_LOG" > phase253-failure/phase217-compile-tail.txt || true
+            fi
+
+            APPLY_LOG=$(find phase253-failure/inner-artifact -type f \
+              -name 'phase217-apply.log' -print -quit)
+            if test -n "$APPLY_LOG"; then
+              grep -nE 'Phase 253|A52_PHASE253|K253|DOMAIN_ATTR|failed|error' \
+                "$APPLY_LOG" > phase253-failure/phase253-apply-summary.txt || true
+              tail -n 260 "$APPLY_LOG" > phase253-failure/phase217-apply-tail.txt || true
+            fi
+
+            CI_FAIL=$(find phase253-failure/inner-artifact -type f \
+              -name 'ci-failure.txt' -print -quit)
+            if test -n "$CI_FAIL"; then
+              cp "$CI_FAIL" phase253-failure/ci-failure.txt
+            fi
+          fi
+
+      - name: Upload Phase 253 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase253-FAILURE-${{ github.run_number }}
+          path: phase253-failure/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Phase 253 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase253-KGSL-SMMU-DOMAIN-CONTRACT-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase253-out
+          if-no-files-found: error
+          retention-days: 30

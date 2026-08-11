@@ -80,10 +80,14 @@ def finalize(inherited: Path) -> Path:
     audit_dir = out / "audit/phase252"
     audit_dir.mkdir(parents=True, exist_ok=True)
     for name in (
+        "218_payload.py",
         "227_phase226_retention_wrapper.py",
         "250_phase249_gpu_smmu_power_contract_overlay.py",
         "251_phase250_gmu_post_mmio_tail_diag_overlay.py",
+        "252_config_retention_gate.py",
         "252_phase251_legacy_msm_bus_rpmh_overlay.py",
+        "252_msm_bus_510_compat.py",
+        "252_msm_bus_510_format_guard.py",
         "251_package.py",
         "252_package.py",
     ):
@@ -96,7 +100,7 @@ def finalize(inherited: Path) -> Path:
         "base_phase": 251,
         "functional_base_phase": 250,
         "hardware_validated": False,
-        "status": "phase252-legacy-msm-bus-rpmh-ci-audited-not-hardware-validated",
+        "status": "phase252-legacy-msm-bus-rpmh-gki510-compat-ci-audited-not-hardware-validated",
         "phase252_corrective": True,
         "phase252_trigger_capture": "A52_RAW_RAMOOPS_20260811_090721(1).zip",
         "phase252_trigger": "K251 B gpu tbl=0 -> K251 G gpubw rc=-19 after HFI and GMU IRQ acquisition succeeds",
@@ -111,6 +115,16 @@ def finalize(inherited: Path) -> Path:
         "phase252_qcom_bus_scaling_enabled": True,
         "phase252_qcom_bus_config_rpmh_enabled": True,
         "phase252_imports_pinned_touchgrass_msm_bus": True,
+        "phase252_gki510_api_compatibility_applied": True,
+        "phase252_gki510_format_guard_applied": True,
+        "phase252_gki510_adaptations": [
+            "bus_find_device match callbacks use const void *",
+            "RPMh invalidate follows the GKI 5.10 void API",
+            "command-db aux data follows pointer+length and ERR_PTR semantics",
+            "BCM TCS command macros come from the GKI 5.10 tcs header",
+            "debug timestamps use timespec64/ktime_to_timespec64 with signed formats",
+            "ALC previous latency vote values are initialized from the previous usecase",
+        ],
         "phase252_generic_interconnect_removed": False,
         "phase252_phase251_diagnostics_retained": True,
         "phase252_phase250_smmu_power_fix_retained": True,
@@ -130,6 +144,7 @@ def finalize(inherited: Path) -> Path:
             "do not leave msm_bus vote APIs as no-op stubs",
             "do not remove generic SM6350 interconnect providers used by other clients",
             "use only the pinned hardware-proven TouchGrass legacy msm_bus sources",
+            "adapt only APIs required by the pinned GKI 5.10 compile contract",
             "retain Phase251 K251 diagnostics for hardware validation",
         ],
     })
@@ -143,7 +158,7 @@ def finalize(inherited: Path) -> Path:
         "run_number": os.environ.get("GITHUB_RUN_NUMBER"),
         "hardware_validated": False,
         "functional_base_phase": 250,
-        "change": "restore pinned TouchGrass legacy MSM-bus RPMh bandwidth contract",
+        "change": "restore pinned TouchGrass legacy MSM-bus RPMh bandwidth contract with GKI 5.10 API compatibility",
     }
     (out / "BUILD-IDENTITY.json").write_text(
         json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -151,9 +166,10 @@ def finalize(inherited: Path) -> Path:
     (out / "README-FIRST.txt").write_text(
         "A52 GKI 5.10 Phase 252 legacy MSM-bus RPMh correction\n\n"
         "HARDWARE TEST: flash package/boot.img to BOOT only after CI succeeds.\n\n"
-        "Phase252 restores the pinned TouchGrass legacy MSM-bus RPMh implementation and "
-        "enables QCOM_BUS_SCALING/QCOM_BUS_CONFIG_RPMH. Phase251 K251 diagnostics remain "
-        "active to verify GPU and CNOC bandwidth clients on hardware.\n",
+        "Phase252 restores the pinned TouchGrass legacy MSM-bus RPMh implementation, "
+        "enables QCOM_BUS_SCALING/QCOM_BUS_CONFIG_RPMH, and applies a fail-closed GKI "
+        "5.10 API compatibility pass. Phase251 K251 diagnostics remain active to verify "
+        "GPU and CNOC bandwidth clients on hardware.\n",
         encoding="utf-8",
     )
     refresh_sums(out)

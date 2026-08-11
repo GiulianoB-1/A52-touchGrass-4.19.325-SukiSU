@@ -1,0 +1,285 @@
+name: Build TouchGrass 4.19.200 definitive FDR v1
+
+run-name: Build TouchGrass 4.19.200 ReSukiSU definitive SD flight recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-definitive-fdr-v1
+    paths:
+      - .github/workflows/touchgrass-definitive-fdr-v1.yml
+      - scripts/touchgrass_definitive_fdr_overlay.py
+      - scripts/touchgrass_definitive_fdr_resukisu_wrapper.py
+      - scripts/generate_touchgrass_fdr_dictionary.py
+      - scripts/decode_touchgrass_fdr.py
+      - scripts/tg_fdr_sd_daemon.sh
+      - scripts/START_TOUCHGRASS_FDR.bat
+      - scripts/STOP_TOUCHGRASS_FDR.bat
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: touchgrass-definitive-fdr-v1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  TOUCHGRASS_COMMIT: '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  TOUCHGRASS_CACHE_KEY: 'a52xq-touchgrass-linux-4.19.200-main-v2-Linux-6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  FDR_CCACHE_KEY: 'touchgrass-definitive-fdr-v1-resukisu-safe-ccache-Linux'
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  build-reference:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out definitive FDR branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Syntax-check new FDR tooling
+        run: |
+          python3 -m py_compile \
+            scripts/touchgrass_definitive_fdr_overlay.py \
+            scripts/touchgrass_definitive_fdr_resukisu_wrapper.py \
+            scripts/generate_touchgrass_fdr_dictionary.py \
+            scripts/decode_touchgrass_fdr.py
+          bash -n scripts/tg_fdr_sd_daemon.sh
+
+      - name: Restore compiler cache
+        id: fdr-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ${{ env.FDR_CCACHE_KEY }}
+          restore-keys: |
+            touchgrass-final-boot-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Hydrate checksum-locked repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image artifacts
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore cached exact TouchGrass Linux 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Reconstruct exact TouchGrass Linux 4.19.200 source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+
+      - name: Validate exact TouchGrass Linux 4.19.200 source
+        run: |
+          set -Eeuo pipefail
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          test -x workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
+          test -x workspace/touchgrass-a52xq/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc
+
+      - name: Save validated plain 4.19.200 source cache
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Prepare ReSukiSU-safe definitive FDR integration
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/touchgrass_definitive_fdr_resukisu_wrapper.py \
+            scripts/08_build_linux_4.19.153_resukisu_safe.sh
+          bash -n scripts/08_build_linux_4.19.153_resukisu_safe.sh
+
+      - name: Build TouchGrass 4.19.200 + ReSukiSU-safe + definitive FDR
+        run: |
+          set -Eeuo pipefail
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe \
+            2>&1 | tee artifacts/touchgrass-definitive-fdr-build.log
+
+      - name: Save compiler cache after successful kernel build
+        if: steps.fdr-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ env.FDR_CCACHE_KEY }}
+
+      - name: Audit exact ReSukiSU-safe FDR build
+        run: |
+          set -Eeuo pipefail
+          CFG=artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          test -s "$CFG"
+          test -s "$IMG"
+          test -s artifacts/touchgrass-fdr-event-dictionary.json
+
+          grep -Fxq 'CONFIG_KSU=y' "$CFG"
+          grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$CFG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CFG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y' "$CFG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y' "$CFG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y' "$CFG"
+          grep -Fxq 'CONFIG_PROC_FS=y' "$CFG"
+
+          for marker in \
+            touchgrass_definitive_fdr_v1 \
+            tg_fdr_stats \
+            TGFDR1 \
+            SMMU:CEN_POST \
+            GMU:ATT_POST \
+            HFI:CMD \
+            INITCALL:POST \
+            PROBE:BUS_POST \
+            IOMMU:GROUP_ADD \
+            USER:KERNEL_INIT; do
+            echo "FDR_IMAGE_MARKER $marker"
+            grep -aFq "$marker" "$IMG"
+          done
+
+      - name: Download exact known-good 96 MiB boot source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/touchgrass-definitive-fdr
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/touchgrass-definitive-fdr/source-validation.json
+
+      - name: Repack exact boot layout with definitive FDR kernel
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-definitive-fdr
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          gzip -n -9 -c "$IMG" > "$OUT/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+          test -s "$OUT/boot.img"
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+          cp artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe "$OUT/final.config"
+          cp workspace/touchgrass-a52xq/out/System.map "$OUT/System.map"
+          cp artifacts/touchgrass-fdr-event-dictionary.json "$OUT/"
+          cp scripts/decode_touchgrass_fdr.py "$OUT/"
+          cp scripts/tg_fdr_sd_daemon.sh "$OUT/"
+          cp scripts/START_TOUCHGRASS_FDR.bat "$OUT/"
+          cp scripts/STOP_TOUCHGRASS_FDR.bat "$OUT/"
+          cp scripts/touchgrass_definitive_fdr_overlay.py "$OUT/"
+          cp scripts/touchgrass_definitive_fdr_resukisu_wrapper.py "$OUT/"
+
+      - name: Final package audit
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-definitive-fdr
+          cat > "$OUT/README_FIRST.txt" <<'EOF'
+          TOUCHGRASS 4.19.200 DEFINITIVE FDR V1
+
+          Base:
+            Exact known-good TouchGrass Linux 4.19.200.
+            ReSukiSU v4.1.0 safe profile is built in for root access.
+            SUSFS is disabled to match the proven working reference.
+
+          Recorder:
+            /dev/tg_fdr       binary chronological stream
+            /proc/tg_fdr_stats bank/session/integrity statistics
+            8 independent 32768-record banks
+            96-byte fixed binary records
+            total preallocated event storage: 24 MiB
+
+          The proven final boot and GPU hook call sites are retained and routed
+          into this common backend. The SD daemon continuously drains /dev/tg_fdr
+          to the physical /mnt/media_rw/<UUID> microSD mount.
+
+          Hardware test:
+            1. Flash ONLY boot.img.
+            2. Boot Android normally.
+            3. Put START_TOUCHGRASS_FDR.bat, STOP_TOUCHGRASS_FDR.bat and
+               tg_fdr_sd_daemon.sh together in your platform-tools folder.
+            4. Run START_TOUCHGRASS_FDR.bat.
+            5. Perform the validation session and add markers as needed.
+            6. Run STOP_TOUCHGRASS_FDR.bat.
+            7. Upload the resulting TOUCHGRASS_FDR_CAPTURE_*.zip.
+          EOF
+          sed -i 's/^          //' "$OUT/README_FIRST.txt"
+
+          for f in boot.img final.config System.map touchgrass-fdr-event-dictionary.json \
+                   decode_touchgrass_fdr.py tg_fdr_sd_daemon.sh \
+                   START_TOUCHGRASS_FDR.bat STOP_TOUCHGRASS_FDR.bat README_FIRST.txt; do
+            test -s "$OUT/$f"
+          done
+          grep -Fq 'ReSukiSU v4.1.0 safe profile is built in' "$OUT/README_FIRST.txt"
+          grep -Fq 'SUSFS is disabled' "$OUT/README_FIRST.txt"
+          (
+            cd "$OUT"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Upload definitive FDR hardware-test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Definitive-FDR-v1-${{ github.run_number }}
+          path: artifacts/touchgrass-definitive-fdr/
+          if-no-files-found: error
+          retention-days: 14

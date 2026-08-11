@@ -28,6 +28,10 @@ RAW_BASE = (
 )
 MARKER = "A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1"
 PHASE251 = "A52_PHASE251_GMU_POST_MMIO_TAIL_DIAG_V1"
+PHASE252_CONFIG_DELTA = frozenset((
+    "CONFIG_QCOM_BUS_SCALING",
+    "CONFIG_QCOM_BUS_CONFIG_RPMH",
+))
 
 BUS_FILES = (
     "drivers/soc/qcom/msm_bus/Makefile",
@@ -64,6 +68,7 @@ HEADER_FILES = (
     "include/linux/msm_bus_rules.h",
     "include/dt-bindings/msm/msm-bus-ids.h",
     "include/dt-bindings/msm/msm-bus-rule-ops.h",
+    "include/trace/events/trace_msm_bus.h",
 )
 
 KCONFIG_BLOCK = f'''\n# {MARKER}\nconfig QCOM_BUS_SCALING\n\tbool "Bus scaling driver"\n\thelp\n\t  Restore the downstream Qualcomm legacy MSM bus client/provider API.\n\nconfig QCOM_BUS_CONFIG_RPMH\n\tbool "RPMH Bus scaling driver"\n\tdepends on QCOM_BUS_SCALING\n\thelp\n\t  Use the downstream RPMh/BCM implementation for legacy MSM bus votes.\n'''
@@ -173,12 +178,62 @@ def set_builtin(config: Path, symbol: str) -> None:
     config.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def parse_config(path: Path) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("CONFIG_") and "=" in line:
+            symbol, value = line.split("=", 1)
+            states[symbol] = value
+        elif line.startswith("# CONFIG_") and line.endswith(" is not set"):
+            states[line[2:-11]] = "n"
+    return states
+
+
+def repair_retention_snapshot(config: Path) -> None:
+    """Teach the inherited byte-retention gate only the exact Phase252 delta."""
+    snapshot = (
+        Path.cwd()
+        / "artifacts/a52xq-graphics-startup-trace/config/before-phase217.config"
+    )
+    if not snapshot.is_file():
+        raise RuntimeError(f"Phase252 retention snapshot missing: {snapshot}")
+
+    before = parse_config(snapshot)
+    after = parse_config(config)
+    changed = {
+        symbol
+        for symbol in set(before) | set(after)
+        if before.get(symbol, "n") != after.get(symbol, "n")
+    }
+    if changed != PHASE252_CONFIG_DELTA:
+        expected = ", ".join(sorted(PHASE252_CONFIG_DELTA))
+        actual = ", ".join(sorted(changed)) or "<none>"
+        raise RuntimeError(
+            "Phase252 retention repair refused config drift; "
+            f"expected exactly [{expected}], got [{actual}]"
+        )
+    for symbol in PHASE252_CONFIG_DELTA:
+        if before.get(symbol, "n") != "n" or after.get(symbol) != "y":
+            raise RuntimeError(
+                f"Phase252 retention state mismatch for {symbol}: "
+                f"before={before.get(symbol, 'n')} after={after.get(symbol, 'n')}"
+            )
+
+    snapshot.write_bytes(config.read_bytes())
+    print(
+        "Phase 252 retention snapshot updated for exact delta: "
+        + ", ".join(sorted(PHASE252_CONFIG_DELTA)),
+        flush=True,
+    )
+
+
 def audit(root: Path, config: Path) -> None:
     kconfig = (root / "drivers/soc/qcom/Kconfig").read_text(encoding="utf-8")
     makefile = (root / "drivers/soc/qcom/Makefile").read_text(encoding="utf-8")
     cfg = config.read_text(encoding="utf-8")
     header = (root / "include/linux/msm-bus.h").read_text(encoding="utf-8")
     busmk = (root / "drivers/soc/qcom/msm_bus/Makefile").read_text(encoding="utf-8")
+    trace_header = root / "include/trace/events/trace_msm_bus.h"
     for token in (
         "config QCOM_BUS_SCALING",
         "config QCOM_BUS_CONFIG_RPMH",
@@ -206,6 +261,8 @@ def audit(root: Path, config: Path) -> None:
     ):
         if token not in busmk:
             raise RuntimeError(f"Phase252 RPMh object closure missing {token}")
+    if not trace_header.is_file() or "TRACE_SYSTEM msm_bus" not in trace_header.read_text(encoding="utf-8"):
+        raise RuntimeError("Phase252 trace_msm_bus.h dependency missing")
     gmu = (root / "drivers/gpu/msm/kgsl_gmu.c").read_text(encoding="utf-8")
     if "K251 B gpu tbl=%d" not in gmu or "K251 G gpubw rc=%d" not in gmu:
         raise RuntimeError("Phase252 lost K251 GMU bandwidth diagnostics")
@@ -216,6 +273,11 @@ def self_test() -> None:
     assert "drivers/soc/qcom/msm_bus/msm_bus_core.c" in BUS_FILES
     assert "drivers/soc/qcom/msm_bus/msm_bus_of_rpmh.c" in BUS_FILES
     assert "include/linux/msm-bus.h" in HEADER_FILES
+    assert "include/trace/events/trace_msm_bus.h" in HEADER_FILES
+    assert PHASE252_CONFIG_DELTA == frozenset((
+        "CONFIG_QCOM_BUS_SCALING",
+        "CONFIG_QCOM_BUS_CONFIG_RPMH",
+    ))
     assert "config QCOM_BUS_SCALING" in KCONFIG_BLOCK
     assert "config QCOM_BUS_CONFIG_RPMH" in KCONFIG_BLOCK
     print("Phase 252 legacy MSM-bus RPMh overlay self-test: PASS", flush=True)
@@ -231,6 +293,7 @@ def main() -> int:
     config = locate_config(root)
     set_builtin(config, "CONFIG_QCOM_BUS_SCALING")
     set_builtin(config, "CONFIG_QCOM_BUS_CONFIG_RPMH")
+    repair_retention_snapshot(config)
     audit(root, config)
     print(f"{MARKER}: pinned TouchGrass legacy MSM-bus RPMh stack applied", flush=True)
     return 0

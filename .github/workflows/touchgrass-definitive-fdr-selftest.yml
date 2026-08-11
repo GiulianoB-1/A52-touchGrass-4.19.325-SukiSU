@@ -47,7 +47,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/workspace/touchgrass-a52xq"
+          ln -s kgsl.c "$ROOT/drivers/gpu/msm/kgsl_device.c"
           python3 scripts/touchgrass_gpu_reference_overlay.py "$ROOT"
+          rm "$ROOT/drivers/gpu/msm/kgsl_device.c"
+          sed -i 's/tg_gpu_ref_record((_tag), (_name), (_rc)/tg_gpu_ref_record((_tag), NULL, (_rc)/' \
+            "$ROOT/include/linux/tg_gpu_reference.h"
+          grep -Fq 'tg_gpu_ref_record((_tag), NULL, (_rc)' "$ROOT/include/linux/tg_gpu_reference.h"
           python3 scripts/touchgrass_final_boot_reference_overlay_v2.py "$ROOT"
 
       - name: Apply FDR core and integrity hardening

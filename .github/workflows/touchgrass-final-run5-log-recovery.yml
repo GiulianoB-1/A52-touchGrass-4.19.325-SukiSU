@@ -1,0 +1,49 @@
+name: TouchGrass final recorder Run 5 log recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-final-boot-reference-recorder-v1
+    paths:
+      - .github/workflows/touchgrass-final-run5-log-recovery.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recover-run5:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Recover Run 5 failure evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_RUN: '31469295988'
+          TARGET_JOB: '93708876878'
+        run: |
+          set -u
+          mkdir -p recovered
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN}" \
+            > recovered/run.json || true
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN}/jobs?filter=latest&per_page=100" \
+            > recovered/jobs.json || true
+          gh run view "${TARGET_RUN}" --repo "${GITHUB_REPOSITORY}" --log-failed \
+            > recovered/run-failed.log 2>&1 || true
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${TARGET_JOB}/logs" \
+            --output recovered/job-${TARGET_JOB}.log 2> recovered/curl-job-log.stderr || true
+          ls -lah recovered
+          wc -c recovered/* || true
+
+      - name: Upload recovered Run 5 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Final-Recorder-Run5-Recovered-Logs
+          path: recovered/
+          if-no-files-found: error
+          retention-days: 7

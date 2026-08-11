@@ -53,8 +53,7 @@ def main(root: Path):
  out:
 \tif (fdr)
 \t\tTG_FDR_TAG(TG_FDR_SUBSYS_ANDROID, "ABI:IOCTL_POST", error, fop_obj,
-\t\t\t   cmd, arg, rdev, (u64)(unsigned long)filp,
-\t\t\t   error < 0 && error != -ENOTTY ? TG_FDR_FLAG_CRITICAL : 0);
+\t\t\t   cmd, arg, rdev, (u64)(unsigned long)filp, 0);
 \treturn error;
 }
 '''

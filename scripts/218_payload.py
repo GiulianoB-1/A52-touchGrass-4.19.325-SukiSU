@@ -104,3 +104,22 @@ if 'cmp ' in '\n'.join(
 if patched_ci.count('scripts/252_config_retention_gate.py') != 1:
     raise SystemExit('Phase 252 semantic retention gate insertion audit failed')
 print('Phase 252 replaced inherited Phase 217 bytewise config cmp with semantic gate')
+
+# Phase 255 diagnostic: expose the exact generated legacy Phase 219 audit
+# before the expensive kernel build. This is temporary and intentionally
+# fail-closed so the follow-up repair can use an exact source anchor.
+target = 'a52-ack510-phase219-postalloc-slab.yml'
+lines = ci_path.read_text(encoding='utf-8').splitlines()
+hits = [i for i, line in enumerate(lines) if target in line]
+if len(hits) != 1:
+    raise SystemExit(
+        f'Phase 255 diagnostic expected exactly one {target} lookup, found {len(hits)}'
+    )
+center = hits[0]
+start = max(0, center - 24)
+end = min(len(lines), center + 25)
+print('===== PHASE255_STALE_PHASE219_AUDIT_CONTEXT_BEGIN =====')
+for lineno in range(start, end):
+    print(f'{lineno + 1:05d}: {lines[lineno]}')
+print('===== PHASE255_STALE_PHASE219_AUDIT_CONTEXT_END =====')
+raise SystemExit('Phase 255 diagnostic stop after exposing stale Phase 219 audit context')

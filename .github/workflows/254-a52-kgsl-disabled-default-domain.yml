@@ -1,0 +1,174 @@
+name: 254 - A52 KGSL disabled default-domain contract
+
+run-name: Build Phase 254 KGSL disabled default-domain contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase254-kgsl-default-domain-contract-v1
+    paths:
+      - .github/workflows/254-a52-kgsl-disabled-default-domain.yml
+      - scripts/218_payload.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
+      - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
+      - scripts/252_package.py
+      - scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+      - scripts/253_package.py
+      - scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+      - scripts/254_package.py
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase254-kgsl-default-domain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 254
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 254 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and run source self-tests
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 -m py_compile \
+            scripts/218_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
+            scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
+            scripts/252_package.py \
+            scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py \
+            scripts/253_package.py \
+            scripts/254_phase253_kgsl_disabled_default_domain_contract.py \
+            scripts/254_package.py
+          python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
+          python3 scripts/254_phase253_kgsl_disabled_default_domain_contract.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+          grep -Fq 'A52_PHASE253_KGSL_SMMU_DOMAIN_CONTRACT_V1' scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+          grep -Fq 'A52_PHASE254_KGSL_DISABLED_DEFAULT_DOMAIN_V1' scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+          grep -Fq 'qcom,iommu-dma' scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+          grep -Fq 'IOMMU_DOMAIN_DMA' scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+          grep -Fq '254_phase253_kgsl_disabled_default_domain_contract.py' scripts/252_msm_bus_510_format_guard.py
+          git diff --check
+
+      - name: Dispatch inherited builder and package Phase 254
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/254_package.py
+
+      - name: Verify compiled Phase 254 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase254-out
+
+          for file in \
+            package/boot.img \
+            compile/Image \
+            config/final.config \
+            final-audit.json \
+            BUILD-IDENTITY.json \
+            SHA256SUMS \
+            audit/phase254/254_phase253_kgsl_disabled_default_domain_contract.py \
+            audit/phase254/254_package.py; do
+            test -s "$OUT/$file"
+          done
+
+          grep -Fxq 'CONFIG_ARM_SMMU=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$OUT/config/final.config"
+
+          for marker in \
+            'K248 A plat in' \
+            'K248 A plat rc=%d' \
+            'K251 G gpubw rc=%d' \
+            'K251 G cnoc rc=%d' \
+            'K253 D init dyn=%d cb=%u asid=%u proc=%u' \
+            'K254 D disabled dev=%s cb=0' \
+            'K254 C pre t=%u d=%d used=%u/%u s2=%u dev=%s' \
+            'K254 C alloc t=%u d=%d rc=%d used=%u/%u' \
+            'K254 A asid t=%u d=%d cb=%u asid=%u rc=%d' \
+            'K254 D ok t=%u d=%d cb=%u asid=%u used=%u'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase254-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 254
+          assert audit['base_phase'] == 253
+          assert audit['phase254_corrective'] is True
+          assert audit['phase254_dt_property'] == 'qcom,iommu-dma=disabled'
+          assert audit['phase254_default_dma_dynamic'] is True
+          assert audit['phase254_default_dma_logical_cb'] == 0
+          assert audit['phase254_default_dma_rewrites_streams'] is False
+          assert audit['phase254_default_dma_owns_context_bitmap'] is False
+          assert audit['phase254_default_dma_requests_context_irq'] is False
+          assert audit['phase254_phase253_domain_contract_retained'] is True
+          assert audit['phase254_phase252_msm_bus_retained'] is True
+          assert audit['phase254_fabricated_iommu_groups'] is False
+          assert audit['phase254_forced_attach_success'] is False
+          assert audit['phase254_stream_ids_changed'] is False
+          assert audit['phase254_dt_changed'] is False
+          assert set(audit['phase254_live_dt_nodes']) == {
+              'gfx3d_user', 'gfx3d_secure', 'gmu_user', 'gmu_kernel'
+          }
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          for key in (
+              'board_preserved', 'cmdline_preserved', 'dtb_preserved',
+              'ramdisk_preserved', 'header_version_preserved',
+              'partition_size_preserved', 'replacement_kernel_used',
+          ):
+              assert repack['invariants'][key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 254 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase254-KGSL-DISABLED-DEFAULT-DOMAIN-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase254-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 254 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase254-FAILURE-${{ github.run_number }}
+          path: |
+            phase254-failure/
+            phase253-failure/
+            phase252-failure/
+          if-no-files-found: warn
+          retention-days: 7

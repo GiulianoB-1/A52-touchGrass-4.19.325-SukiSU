@@ -1,0 +1,199 @@
+name: 255 - A52 post-BOOT_READY visibility
+
+run-name: Build Phase 255 post-BOOT_READY visibility candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase255-postboot-visibility-v1
+    paths:
+      - .github/workflows/255-a52-postboot-visibility.yml
+      - scripts/218_payload.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
+      - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
+      - scripts/252_package.py
+      - scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+      - scripts/253_package.py
+      - scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+      - scripts/254_package.py
+      - scripts/255_phase254_postboot_visibility_overlay.py
+      - scripts/255_package.py
+      - scripts/255_design.md
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase255-postboot-visibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 255
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 255 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and run source self-tests
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+
+          python3 -m py_compile \
+            scripts/218_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
+            scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
+            scripts/252_package.py \
+            scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py \
+            scripts/253_package.py \
+            scripts/254_phase253_kgsl_disabled_default_domain_contract.py \
+            scripts/254_package.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/255_package.py
+
+          python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
+          python3 scripts/254_phase253_kgsl_disabled_default_domain_contract.py --self-test
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+          grep -Fq 'A52_PHASE254_KGSL_DISABLED_DEFAULT_DOMAIN_V1' \
+            scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+          grep -Fq 'A52_PHASE255_POSTBOOT_VISIBILITY_V1' \
+            scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'TRIPOST' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'BOOTPOST' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'USRPOST' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'ODSPOST' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'GFXPOST' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq '255_phase254_postboot_visibility_overlay.py' \
+            scripts/252_msm_bus_510_format_guard.py
+          git diff --check
+
+      - name: Dispatch inherited builder and package Phase 255
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/255_package.py
+
+      - name: Verify compiled Phase 255 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase255-out
+
+          for file in \
+            package/boot.img \
+            compile/Image \
+            config/final.config \
+            final-audit.json \
+            BUILD-IDENTITY.json \
+            SHA256SUMS \
+            audit/phase255/252_msm_bus_510_format_guard.py \
+            audit/phase255/254_phase253_kgsl_disabled_default_domain_contract.py \
+            audit/phase255/255_phase254_postboot_visibility_overlay.py \
+            audit/phase255/254_package.py \
+            audit/phase255/255_package.py \
+            audit/phase255/255_design.md \
+            PHASE255-DESIGN.md; do
+            test -s "$OUT/$file"
+          done
+
+          grep -Fxq 'CONFIG_ARM_SMMU=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$OUT/config/final.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$OUT/config/final.config"
+
+          for marker in \
+            'K254 D disabled dev=%s cb=0' \
+            'K254 D ok t=%u d=%d cb=%u asid=%u used=%u' \
+            'K255VIS' \
+            'TRIPOST 228' \
+            'BOOTPOST ' \
+            'USRPOST 224' \
+            'ODSPOST 226' \
+            'GFXPOST 225'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase255-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+
+          assert audit['phase'] == 255
+          assert audit['base_phase'] == 254
+          assert audit['functional_base_phase'] == 254
+          assert audit['phase255_diagnostic_only'] is True
+          assert audit['phase255_behavior_changed'] is False
+          assert audit['phase255_phase254_functional_state_retained'] is True
+          assert audit['phase255_recorder_transport_changed'] is False
+          assert audit['phase255_rs48_changed'] is False
+          assert audit['phase255_crc32c_changed'] is False
+          assert audit['phase255_dt_changed'] is False
+          assert audit['phase255_probe_order_changed'] is False
+          assert audit['phase255_return_values_changed'] is False
+          assert audit['phase255_gpu_semantics_changed'] is False
+          assert audit['phase255_iommu_semantics_changed'] is False
+          assert audit['phase255_security_decisions_changed'] is False
+          assert set(audit['phase255_restored_prefixes']) == {
+              'BOOTPOST', 'USRPOST', 'ODSPOST', 'GFXPOST', 'TRIPOST'
+          }
+          assert audit['phase255_key_checkpoint'] == 'TRIPOST 228'
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          for key in (
+              'board_preserved',
+              'cmdline_preserved',
+              'dtb_preserved',
+              'ramdisk_preserved',
+              'header_version_preserved',
+              'partition_size_preserved',
+              'replacement_kernel_used',
+          ):
+              assert repack['invariants'][key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 255 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase255-POSTBOOT-VISIBILITY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase255-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 255 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase255-FAILURE-${{ github.run_number }}
+          path: |
+            phase255-failure/
+            phase254-failure/
+            phase253-failure/
+            phase252-failure/
+          if-no-files-found: warn
+          retention-days: 7

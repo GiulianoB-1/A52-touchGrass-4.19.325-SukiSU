@@ -14,6 +14,10 @@ from pathlib import Path
 
 MARKER = "A52_PHASE252_MSM_BUS_GKI510_COMPAT_V1"
 PHASE252 = "A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1"
+DEBUG_TIMEKEEPING_FILES = (
+    "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
+    "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
+)
 
 
 def locate(args: list[str]) -> Path:
@@ -212,28 +216,29 @@ def patch_latency_current_vote(root: Path) -> None:
 
 
 def patch_debug_timekeeping(root: Path) -> None:
-    path = root / "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c"
-    text = path.read_text(encoding="utf-8")
+    for relative in DEBUG_TIMEKEEPING_FILES:
+        path = root / relative
+        text = path.read_text(encoding="utf-8")
 
-    count = text.count("struct timespec ts;")
-    if count != 3:
-        raise RuntimeError(f"{path}: expected 3 legacy timespec declarations, found {count}")
-    text = text.replace("struct timespec ts;", "struct timespec64 ts;")
+        count = text.count("struct timespec ts;")
+        if count != 3:
+            raise RuntimeError(f"{path}: expected 3 legacy timespec declarations, found {count}")
+        text = text.replace("struct timespec ts;", "struct timespec64 ts;")
 
-    count = text.count("ktime_to_timespec(ktime_get())")
-    if count != 3:
-        raise RuntimeError(f"{path}: expected 3 legacy ktime conversions, found {count}")
-    text = text.replace("ktime_to_timespec(ktime_get())", "ktime_to_timespec64(ktime_get())")
+        count = text.count("ktime_to_timespec(ktime_get())")
+        if count != 3:
+            raise RuntimeError(f"{path}: expected 3 legacy ktime conversions, found {count}")
+        text = text.replace("ktime_to_timespec(ktime_get())", "ktime_to_timespec64(ktime_get())")
 
-    old_fmt = """i += scnprintf(buf + i, MAX_BUFF_SIZE - i, \"\\n%ld.%09lu\\n\",
+        old_fmt = """i += scnprintf(buf + i, MAX_BUFF_SIZE - i, \"\\n%ld.%09lu\\n\",
 \t\tts.tv_sec, ts.tv_nsec);"""
-    new_fmt = """i += scnprintf(buf + i, MAX_BUFF_SIZE - i, \"\\n%lld.%09lu\\n\",
+        new_fmt = """i += scnprintf(buf + i, MAX_BUFF_SIZE - i, \"\\n%lld.%09lu\\n\",
 \t\t(long long)ts.tv_sec, ts.tv_nsec);"""
-    count = text.count(old_fmt)
-    if count != 3:
-        raise RuntimeError(f"{path}: expected 3 legacy timespec format sites, found {count}")
-    text = text.replace(old_fmt, new_fmt)
-    path.write_text(text, encoding="utf-8")
+        count = text.count(old_fmt)
+        if count != 3:
+            raise RuntimeError(f"{path}: expected 3 legacy timespec format sites, found {count}")
+        text = text.replace(old_fmt, new_fmt)
+        path.write_text(text, encoding="utf-8")
 
 
 def audit(root: Path) -> None:
@@ -279,11 +284,12 @@ def audit(root: Path) -> None:
         if token not in arb:
             raise RuntimeError(f"Phase252 arb compatibility audit missing {token!r}")
 
-    dbg = (bus / "msm_bus_dbg_rpmh.c").read_text(encoding="utf-8")
-    if dbg.count("struct timespec64 ts;") != 3 or dbg.count("ktime_to_timespec64(ktime_get())") != 3:
-        raise RuntimeError("Phase252 debug timekeeping conversion count mismatch")
-    if dbg.count("(long long)ts.tv_sec") != 3:
-        raise RuntimeError("Phase252 timespec64 printf conversion count mismatch")
+    for relative in DEBUG_TIMEKEEPING_FILES:
+        dbg = (root / relative).read_text(encoding="utf-8")
+        if dbg.count("struct timespec64 ts;") != 3 or dbg.count("ktime_to_timespec64(ktime_get())") != 3:
+            raise RuntimeError(f"Phase252 debug timekeeping conversion count mismatch: {relative}")
+        if dbg.count("(long long)ts.tv_sec") != 3:
+            raise RuntimeError(f"Phase252 timespec64 printf conversion count mismatch: {relative}")
 
     print(f"{MARKER}: all known TouchGrass-4.19 -> GKI-5.10 MSM-bus API hazards cleared", flush=True)
 
@@ -291,9 +297,15 @@ def audit(root: Path) -> None:
 def self_test() -> None:
     assert "gki/common" in locate.__code__.co_consts
     assert PHASE252 == "A52_PHASE252_LEGACY_MSM_BUS_RPMH_V1"
+    assert DEBUG_TIMEKEEPING_FILES == (
+        "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
+        "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
+    )
     # Validate the key semantic choices directly, so workflow preflight catches edits.
     source = Path(__file__).read_text(encoding="utf-8")
     for token in (
+        "msm_bus_dbg.c",
+        "msm_bus_dbg_rpmh.c",
         "const void *id",
         "ktime_to_timespec64",
         "cmd_db_read_aux_data(bcmdev->name, &aux_len)",

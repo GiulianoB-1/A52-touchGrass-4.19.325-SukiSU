@@ -65,3 +65,42 @@ if repaired.count(repair_token) != 2:
 if repaired.count("'#include <linux/a52_ack_secure_flight_recorder.h>'") != 2:
     raise SystemExit('Phase 226 recorder-header source audit verification failed')
 print('Phase 226 recorder header includes repaired for ioctl and socket')
+
+# Phase 252 deliberately enables the legacy Qualcomm bus client/provider
+# contract.  The inherited Phase 217 shell script still performs a final
+# byte-for-byte cmp of its saved config against final.config after all wrapper
+# overlays have run.  Replace exactly that stale gate after the Phase 218/226
+# payload has finished materializing and editing 217_ci.sh.  The replacement
+# remains fail-closed and delegates to the Phase 252 semantic validator.
+ci_path = S / '217_ci.sh'
+ci_text = ci_path.read_text(encoding='utf-8')
+ci_lines = ci_text.splitlines()
+cmp_lines = [
+    index for index, line in enumerate(ci_lines)
+    if line.strip().startswith('cmp ')
+    and 'before-phase217.config' in line
+    and 'final.config' in line
+]
+if len(cmp_lines) != 1:
+    raise SystemExit(
+        'Phase 252 expected exactly one inherited Phase 217 config cmp, '
+        f'found {len(cmp_lines)}'
+    )
+index = cmp_lines[0]
+indent = ci_lines[index][:len(ci_lines[index]) - len(ci_lines[index].lstrip())]
+ci_lines[index] = (
+    indent
+    + 'python3 scripts/252_config_retention_gate.py '
+      'artifacts/a52xq-graphics-startup-trace/config/before-phase217.config '
+      'artifacts/a52xq-graphics-startup-trace/config/final.config'
+)
+ci_path.write_text('\n'.join(ci_lines) + '\n', encoding='utf-8')
+patched_ci = ci_path.read_text(encoding='utf-8')
+if 'cmp ' in '\n'.join(
+    line for line in patched_ci.splitlines()
+    if 'before-phase217.config' in line and 'final.config' in line
+):
+    raise SystemExit('Phase 252 stale config cmp survived replacement')
+if patched_ci.count('scripts/252_config_retention_gate.py') != 1:
+    raise SystemExit('Phase 252 semantic retention gate insertion audit failed')
+print('Phase 252 replaced inherited Phase 217 bytewise config cmp with semantic gate')

@@ -25,25 +25,85 @@ block = r'''info "Applying observation-only final TouchGrass boot-reference reco
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_final_boot_reference_overlay_v2.py" "$ROOT"
 
-# The generic overlay inserts after the last include. On Samsung init/main.c the
-# last include is inside CONFIG_KDP, which makes the recorder macros disappear
-# when CONFIG_KDP is disabled. Relocate this one include to a known unconditional
-# top-level anchor before compiling.
-python3 - "$ROOT/init/main.c" <<'PY'
+# The v2 overlay originally inserted its header after the textual last #include.
+# Several Samsung sources end their include section inside CONFIG_* guards, so
+# that can hide TG_BOOT_REF/TG_BOOT_REF0 from the actual build. Normalize every
+# recorder-touched source to one include at preprocessor depth zero.
+python3 - "$ROOT" <<'PY'
 from pathlib import Path
+import re
 import sys
-p = Path(sys.argv[1])
-s = p.read_text()
-inc = '#include <linux/tg_boot_reference.h>\n'
-anchor = '#include <linux/types.h>\n'
-count = s.count(inc)
-if count != 1:
-    raise SystemExit(f'init/main.c final recorder include count mismatch: {count}')
-if s.count(anchor) != 1:
-    raise SystemExit('init/main.c unconditional include anchor mismatch')
-s = s.replace(inc, '', 1)
-s = s.replace(anchor, anchor + inc, 1)
-p.write_text(s)
+
+root = Path(sys.argv[1])
+inc = '#include <linux/tg_boot_reference.h>'
+targets = (
+    'init/main.c',
+    'drivers/base/dd.c',
+    'drivers/iommu/iommu.c',
+    'drivers/android/binder.c',
+    'drivers/scsi/ufs/ufshcd.c',
+    'drivers/scsi/ufs/ufs-qcom.c',
+    'init/do_mounts.c',
+    'techpack/display/msm/msm_drv.c',
+    'techpack/display/msm/dsi/dsi_display.c',
+    'techpack/display/msm/dsi/dsi_panel.c',
+    'techpack/display/msm/sde/sde_kms.c',
+)
+
+if_re = re.compile(r'^#\s*(?:if|ifdef|ifndef)\b')
+endif_re = re.compile(r'^#\s*endif\b')
+include_re = re.compile(r'^#\s*include\b')
+
+
+def include_depth(text: str) -> int:
+    depth = 0
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped == inc:
+            return depth
+        if if_re.match(stripped):
+            depth += 1
+        elif endif_re.match(stripped):
+            depth -= 1
+            if depth < 0:
+                raise SystemExit('preprocessor nesting underflow while auditing recorder include')
+    raise SystemExit('recorder include disappeared during audit')
+
+
+def insert_before_first_top_level_include(text: str, label: str) -> str:
+    lines = text.splitlines(keepends=True)
+    depth = 0
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if depth == 0 and include_re.match(stripped):
+            lines.insert(i, inc + '\n')
+            return ''.join(lines)
+        if if_re.match(stripped):
+            depth += 1
+        elif endif_re.match(stripped):
+            depth -= 1
+            if depth < 0:
+                raise SystemExit(f'{label}: preprocessor nesting underflow')
+    raise SystemExit(f'{label}: no unconditional include anchor found')
+
+
+for rel in targets:
+    p = root / rel
+    if not p.is_file():
+        continue
+    s = p.read_text()
+    uses_recorder = 'TG_BOOT_REF(' in s or 'TG_BOOT_REF0(' in s
+    if not uses_recorder:
+        continue
+    count = s.count(inc)
+    if count != 1:
+        raise SystemExit(f'{rel}: final recorder include count mismatch: {count}')
+    s = s.replace(inc, '', 1)
+    s = insert_before_first_top_level_include(s, rel)
+    if s.count(inc) != 1 or include_depth(s) != 0:
+        raise SystemExit(f'{rel}: final recorder include is not unconditional')
+    p.write_text(s)
+    print(f'FINAL_RECORDER_INCLUDE_OK {rel}')
 PY
 
 # Keep the old audit token as an explicit compatibility line, while the first
@@ -77,15 +137,6 @@ grep -Fq 'PROBE:BUS_POST' "$ROOT/drivers/base/dd.c" || fail "bus probe result re
 grep -Fq 'PROBE:DRV_POST' "$ROOT/drivers/base/dd.c" || fail "driver probe result recorder missing"
 grep -Fq 'IOMMU:GROUP_ADD' "$ROOT/drivers/iommu/iommu.c" || fail "generic IOMMU recorder missing"
 grep -Fq 'USER:RUN_INIT' "$ROOT/init/main.c" || fail "userspace handoff recorder missing"
-python3 - "$ROOT/init/main.c" <<'PY'
-from pathlib import Path
-import sys
-s = Path(sys.argv[1]).read_text()
-inc = '#include <linux/tg_boot_reference.h>\n'
-anchor = '#include <linux/types.h>\n' + inc
-if s.count(inc) != 1 or s.count(anchor) != 1:
-    raise SystemExit('init/main.c final recorder include is not unconditional')
-PY
 
 # Confirm the independent, hardware-proven GPU recorder remains intact.
 grep -Fq 'touchgrass_gpu_reference_v1' "$ROOT/kernel/tg_gpu_reference.c" || fail "GPU reference recorder disappeared"

@@ -18,6 +18,11 @@ DEBUG_TIMEKEEPING_FILES = (
     "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
     "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
 )
+BCM_TCS_MACROS = (
+    "BCM_TCS_CMD_VOTE_MASK",
+    "BCM_TCS_CMD_VOTE_Y_MASK",
+    "BCM_TCS_CMD",
+)
 
 
 def locate(args: list[str]) -> Path:
@@ -59,6 +64,11 @@ def replace_exact(path: Path, old: str, new: str, expected: int = 1) -> None:
             f"{path}: expected {expected} copies of compatibility anchor, found {count}: {old[:80]!r}"
         )
     path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def macro_define_pattern(macro: str) -> re.Pattern[str]:
+    """Match one exact C #define name followed by whitespace or '(' safely."""
+    return re.compile(rf"(?m)^#define {re.escape(macro)}(?:\s|\()")
 
 
 def patch_bus_find_callbacks(root: Path) -> None:
@@ -271,8 +281,8 @@ def audit(root: Path) -> None:
     ):
         if token not in fabric:
             raise RuntimeError(f"Phase252 fabric compatibility audit missing {token!r}")
-    for macro in ("BCM_TCS_CMD_VOTE_MASK", "BCM_TCS_CMD_VOTE_Y_MASK", "BCM_TCS_CMD"):
-        if re.search(rf"(?m)^#define {macro}(?:\\s|\\()", fabric):
+    for macro in BCM_TCS_MACROS:
+        if macro_define_pattern(macro).search(fabric):
             raise RuntimeError(f"Phase252 fabric still redefines 5.10 tcs.h macro {macro}")
 
     arb = (bus / "msm_bus_arb_rpmh.c").read_text(encoding="utf-8")
@@ -301,6 +311,23 @@ def self_test() -> None:
         "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
         "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
     )
+    assert BCM_TCS_MACROS == (
+        "BCM_TCS_CMD_VOTE_MASK",
+        "BCM_TCS_CMD_VOTE_Y_MASK",
+        "BCM_TCS_CMD",
+    )
+
+    # Execute the exact regex path used by the real-tree audit. This prevents a
+    # malformed audit regex from passing preflight and wasting a full build run.
+    for macro in BCM_TCS_MACROS:
+        pattern = macro_define_pattern(macro)
+        if not pattern.search(f"#define {macro} 1"):
+            raise RuntimeError(f"Phase252 macro audit self-test missed object-like define {macro}")
+        if not pattern.search(f"#define {macro}(x) (x)"):
+            raise RuntimeError(f"Phase252 macro audit self-test missed function-like define {macro}")
+        if pattern.search(f"#define {macro}_OTHER 1"):
+            raise RuntimeError(f"Phase252 macro audit self-test false-positive for {macro}")
+
     # Validate the key semantic choices directly, so workflow preflight catches edits.
     source = Path(__file__).read_text(encoding="utf-8")
     for token in (
@@ -314,6 +341,8 @@ def self_test() -> None:
         "rpmh_invalidate() is void",
         "cur_fal = pdata->usecase_lat[cur_idx].fal_ns",
         "BCM_TCS_CMD_* is provided by <soc/qcom/tcs.h>",
+        "macro_define_pattern",
+        "re.escape(macro)",
     ):
         if token not in source:
             raise RuntimeError(f"Phase252 GKI5.10 self-test missing {token!r}")

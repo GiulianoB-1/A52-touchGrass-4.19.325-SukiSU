@@ -5,13 +5,20 @@ Runs after the main 4.19 -> 5.10 API compatibility pass.  It closes two
 compile/runtime traps that are easy to miss in a mechanical port:
   * timespec64 printf signedness/header ownership in both debug variants; and
   * command-db BCM aux-data endianness/address validity.
+
+On the Phase253 branch this remains the final Phase252 guard and then dispatches
+the Phase253 KGSL ARM-SMMU domain-contract correction onto the same generated
+gki/common tree.  This keeps every Phase252 correction ordered before the new
+SMMU domain semantics without changing the cumulative wrapper's earlier order.
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
 MARKER = "A52_PHASE252_MSM_BUS_GKI510_FORMAT_GUARD_V1"
+PHASE253 = Path(__file__).resolve().parent / "253_phase252_kgsl_smmu_domain_contract_overlay.py"
 DEBUG_TIMEKEEPING_FILES = (
     "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
     "drivers/soc/qcom/msm_bus/msm_bus_dbg_rpmh.c",
@@ -61,7 +68,6 @@ def patch_debug_timekeeping(root: Path) -> None:
         path = root / relative
         text = path.read_text(encoding="utf-8")
 
-        # Avoid relying on the hrtimer include chain for the 5.10 ktime conversion API.
         if "#include <linux/ktime.h>\n" not in text:
             anchor = "#include <linux/hrtimer.h>\n"
             if text.count(anchor) != 1:
@@ -163,6 +169,15 @@ def patch(root: Path) -> None:
     )
 
 
+def run_phase253(args: list[str]) -> int:
+    if not PHASE253.is_file():
+        raise RuntimeError(f"missing Phase253 overlay: {PHASE253}")
+    result = subprocess.run([sys.executable, str(PHASE253), *args], check=False)
+    if result.returncode:
+        raise RuntimeError(f"Phase253 KGSL/SMMU domain-contract overlay failed rc={result.returncode}")
+    return 0
+
+
 def self_test() -> None:
     assert DEBUG_TIMEKEEPING_FILES == (
         "drivers/soc/qcom/msm_bus/msm_bus_dbg.c",
@@ -184,18 +199,20 @@ def self_test() -> None:
         "le32_to_cpu(aux_data.unit_size)",
         "Missing bcm address",
         "cmd_db_read_aux_data(bcmdev->name, &aux_len)",
+        "253_phase252_kgsl_smmu_domain_contract_overlay.py",
     ):
         if token not in source:
-            raise RuntimeError(f"Phase252 semantic-guard self-test missing {token!r}")
+            raise RuntimeError(f"Phase252/253 semantic-guard self-test missing {token!r}")
     print("Phase 252 MSM-bus GKI 5.10 semantic guard self-test: PASS", flush=True)
 
 
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
-        return 0
-    patch(locate(sys.argv[1:]))
-    return 0
+        return run_phase253(["--self-test"])
+    root = locate(sys.argv[1:])
+    patch(root)
+    return run_phase253([str(root)])
 
 
 if __name__ == "__main__":

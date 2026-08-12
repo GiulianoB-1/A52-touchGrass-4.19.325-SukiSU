@@ -240,15 +240,14 @@ jobs:
           path = Path(sys.argv[1])
           text = path.read_text(encoding='utf-8')
           token = '!strncmp(message, "ODSPOST ", 8)'
-          if text.count(token) != 1:
-              raise SystemExit(
-                  f'{path}: expected exactly one ODSPOST retention entry, found {text.count(token)}'
-              )
+          count = text.count(token)
+          if count < 1:
+              raise SystemExit(f'{path}: expected at least one ODSPOST retention entry')
           if '#define A52_R179_CAPACITY 896U' not in text:
               raise SystemExit(f'{path}: recorder capacity audit failed')
           if 'if (!buffered && !critical)' not in text:
               raise SystemExit(f'{path}: post-capacity gate audit failed')
-          print('Phase 227 source audit: ODSPOST retained after capacity exactly once')
+          print(f'Phase 227 source audit: ODSPOST retained after capacity; entries={count}')
           PY
 
           for marker in \

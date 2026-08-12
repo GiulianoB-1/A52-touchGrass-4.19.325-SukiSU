@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Fast-workflow trigger revision 2: syscall-boundary repair is now in its path filter.
 TARGET = Path(__file__).resolve().with_name(
     "257_phase256_kgsl_publication_pipeline_overlay.py"
 )

@@ -141,14 +141,14 @@ jobs:
           for path in (
               root / 'package/boot.img',
               root / 'compile/Image',
-              root / 'config/before-phase217.config',
+              root / 'config/before-phase216.config',
               root / 'stage/phase209-splash-takeover-trace.patch',
           ):
               assert path.is_file() and path.stat().st_size > 0, path
           image = (root / 'compile/Image').read_bytes()
           assert b'F256 da n=%.16s M=%u m=%u' in image
           assert b'F257 ' not in image
-          print('Phase227 seed identity and required source-boundary files: PASS')
+          print('Phase227 seed identity and true pre-217 source-boundary files: PASS')
           PY
 
       - name: Reconstruct Phase 206 source without compiling
@@ -188,9 +188,11 @@ jobs:
           python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
           python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
 
-          # The cumulative Phase217+ wrapper audits this exact pre-217 config.
+          # The Phase227 artifact's before-phase217.config was intentionally
+          # refreshed by later retention repairs and equals its final config.
+          # before-phase216.config is the untouched true pre-217 boundary.
           mkdir -p artifacts/a52xq-graphics-startup-trace/config
-          cp /tmp/phase227-seed/config/before-phase217.config \
+          cp /tmp/phase227-seed/config/before-phase216.config \
             artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
 
           grep -Fq 'IONPOST 216' "$ROOT/drivers/a52_secure/qseecom.c"

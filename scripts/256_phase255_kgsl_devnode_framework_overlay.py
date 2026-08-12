@@ -45,6 +45,7 @@ DEVFREQ_FILES = (
     "drivers/devfreq/governor_msm_adreno_tz.c",
     "drivers/devfreq/governor_bw_vbif.c",
     "drivers/devfreq/governor_gpubw_mon.c",
+    "include/linux/msm_adreno_devfreq.h",
 )
 
 DEVFREQ_KCONFIG = f'''\n# {MARKER}\nconfig DEVFREQ_GOV_QCOM_ADRENO_TZ\n\ttristate "Qualcomm Technologies Inc Adreno Trustzone"\n\tdepends on QCOM_KGSL\n\thelp\n\t  TouchGrass-compatible TrustZone governor for Adreno GPU devfreq.\n\nconfig DEVFREQ_GOV_QCOM_GPUBW_MON\n\ttristate "GPU BW voting governor"\n\tdepends on DEVFREQ_GOV_QCOM_ADRENO_TZ\n\thelp\n\t  TouchGrass-compatible GPU bandwidth voting governor.\n'''
@@ -401,6 +402,14 @@ def audit(root: Path, config: Path) -> None:
         if token not in kgsl_mk:
             raise RuntimeError(f"Phase256 KGSL Kbuild audit missing {token}")
 
+    devfreq_header = root / "include/linux/msm_adreno_devfreq.h"
+    if not devfreq_header.is_file():
+        raise RuntimeError("Phase256 missing staged include/linux/msm_adreno_devfreq.h")
+    header_text = devfreq_header.read_text(encoding="utf-8")
+    for token in ("struct devfreq_msm_adreno_tz_data", "struct msm_adreno_extended_profile", "struct msm_busmon_extended_profile"):
+        if token not in header_text:
+            raise RuntimeError(f"Phase256 Adreno devfreq header missing {token!r}")
+
     checks = {
         "drivers/a52_secure/a52_ack_secure_flight_recorder.c": (MARKER, 'strncmp(fmt, "F256", 4)', '!strncmp(message, "F256 ", 5)'),
         "drivers/base/core.c": ("A52_PHASE256_KGSL_DEVNODE_UEVENT_V1", "F256 da", "F256 ue"),
@@ -428,12 +437,14 @@ def self_test() -> None:
     assert any(x.endswith("governor_msm_adreno_tz.c") for x in DEVFREQ_FILES)
     assert any(x.endswith("governor_bw_vbif.c") for x in DEVFREQ_FILES)
     assert any(x.endswith("governor_gpubw_mon.c") for x in DEVFREQ_FILES)
+    assert any(x == "include/linux/msm_adreno_devfreq.h" for x in DEVFREQ_FILES)
     source = Path(__file__).read_text(encoding="utf-8")
     for token in (
         "CONFIG_TMPFS_XATTR",
         "CONFIG_TMPFS_POSIX_ACL",
         "CONFIG_QCOM_KGSL_IOMMU",
         "msm-adreno-tz",
+        "msm_adreno_devfreq.h",
         "F256 da",
         "F256 ue",
         "F256 rn",

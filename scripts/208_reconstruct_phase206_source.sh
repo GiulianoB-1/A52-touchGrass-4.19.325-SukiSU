@@ -8,6 +8,17 @@ LOG="$PWD/artifacts/a52xq-secure-vmid/logs/source-reconstruction.log"
 mkdir -p "$(dirname "$LOG")" "$PWD/workspace"
 test -d "$BASE/stage"
 
+# The historical Phase199 source-only helper consumes these pinned artifact
+# identities. Legacy callers already export them; the Phase257 one-compile
+# rebuild intentionally skips the old parent workflow, so provide the exact
+# proven defaults only when a caller has not supplied them.
+: "${SOURCE_ARTIFACT_ID:=8681171875}"
+: "${SOURCE_ARTIFACT_SHA256:=c9f6b0041abd5c9305d05534b1afcdf5ebee6de607ad08784721e364a2bf4c11}"
+: "${PHASE198_ARTIFACT_ID:=8819127383}"
+: "${PHASE198_ARTIFACT_SHA256:=99ff045d09811d43106612ef2682216a7d29dfaa7825e2360bef403e31a41eb6}"
+export SOURCE_ARTIFACT_ID SOURCE_ARTIFACT_SHA256
+export PHASE198_ARTIFACT_ID PHASE198_ARTIFACT_SHA256
+
 # Reuse the fully audited Phase 198 reconstruction and Phase 199 patching, but
 # stop before the first kernel compile. Every later phase is checked against
 # the exact source snapshot packaged by the successful Phase 206 workflow.

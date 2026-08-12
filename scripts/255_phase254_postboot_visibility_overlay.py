@@ -14,7 +14,8 @@ post-boot prefixes already compiled by earlier phases:
   TRIPOST  - Phase 228 cumulative vold/ODS/SurfaceFlinger/KGSL checkpoint
 
 On the Phase256 branch this script then chains the Phase256 KGSL devnode /
-framework overlay after the Phase255 visibility state has been materialized.
+framework overlay and its pinned devfreq dependency closure after the Phase255
+visibility state has been materialized.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from pathlib import Path
 RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 MARKER = "A52_PHASE255_POSTBOOT_VISIBILITY_V1"
 PHASE256 = Path(__file__).resolve().parent / "256_phase255_kgsl_devnode_framework_overlay.py"
+PHASE256_CLOSURE = Path(__file__).resolve().parent / "256_devfreq_import_closure.py"
 
 FORMAT_ANCHOR = 'if (strncmp(fmt, "K254", 4) &&\n'
 FORMAT_REPLACEMENT = """if (strncmp(fmt, "K255VIS", 7) &&
@@ -162,11 +164,15 @@ def locate(args: list[str], cwd: Path | None = None) -> Path:
 
 
 def run_phase256(args: list[str]) -> int:
-    if not PHASE256.is_file():
-        raise RuntimeError(f"missing Phase256 overlay: {PHASE256}")
-    result = subprocess.run([sys.executable, str(PHASE256), *args], check=False)
-    if result.returncode:
-        raise RuntimeError(f"Phase256 KGSL devnode/framework overlay failed rc={result.returncode}")
+    for stage, label in (
+        (PHASE256, "KGSL devnode/framework overlay"),
+        (PHASE256_CLOSURE, "devfreq import closure"),
+    ):
+        if not stage.is_file():
+            raise RuntimeError(f"missing Phase256 {label}: {stage}")
+        result = subprocess.run([sys.executable, str(stage), *args], check=False)
+        if result.returncode:
+            raise RuntimeError(f"Phase256 {label} failed rc={result.returncode}")
     return 0
 
 
@@ -189,8 +195,11 @@ void a52_ackfr_record(const char *fmt, ...)
     if patch_text(patched, "idempotence") != patched:
         raise AssertionError("Phase255 patch is not idempotent")
     validate(patched, "fixture-final")
-    if "256_phase255_kgsl_devnode_framework_overlay.py" not in Path(__file__).read_text(encoding="utf-8"):
+    source = Path(__file__).read_text(encoding="utf-8")
+    if "256_phase255_kgsl_devnode_framework_overlay.py" not in source:
         raise AssertionError("Phase256 chain missing")
+    if "256_devfreq_import_closure.py" not in source:
+        raise AssertionError("Phase256 devfreq closure chain missing")
     print("Phase 255 post-BOOT_READY visibility overlay self-test: PASS", flush=True)
 
 

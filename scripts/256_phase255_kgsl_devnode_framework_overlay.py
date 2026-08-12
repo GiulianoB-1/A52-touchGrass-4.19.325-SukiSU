@@ -156,7 +156,6 @@ def set_config(config: Path, symbol: str, value: str) -> None:
 
 
 def patch_gpu_kconfig(root: Path) -> None:
-    parent = root / "drivers/gpu/Kconfig"
     msm = root / "drivers/gpu/msm/Kconfig"
     if not msm.is_file():
         msm.parent.mkdir(parents=True, exist_ok=True)
@@ -166,16 +165,46 @@ def patch_gpu_kconfig(root: Path) -> None:
         if token not in msm_text:
             raise RuntimeError(f"Phase256 KGSL Kconfig missing {token}")
 
-    text = parent.read_text(encoding="utf-8")
     source = 'source "drivers/gpu/msm/Kconfig"'
-    if source not in text:
+    gpu_parent = root / "drivers/gpu/Kconfig"
+    if gpu_parent.is_file():
+        text = gpu_parent.read_text(encoding="utf-8")
+        if source not in text:
+            matches = list(re.finditer(r"(?m)^endmenu\s*$", text))
+            if matches:
+                pos = matches[-1].start()
+                text = text[:pos] + f"\n# {MARKER}\n{source}\n\n" + text[pos:]
+            else:
+                text = text.rstrip() + f"\n\n# {MARKER}\n{source}\n"
+            gpu_parent.write_text(text, encoding="utf-8")
+        return
+
+    drivers_parent = root / "drivers/Kconfig"
+    if not drivers_parent.is_file():
+        raise RuntimeError(
+            "Phase256 missing Kconfig parent: neither drivers/gpu/Kconfig nor drivers/Kconfig exists"
+        )
+
+    text = drivers_parent.read_text(encoding="utf-8")
+    if source in text:
+        return
+
+    anchors = (
+        'source "drivers/gpu/drm/Kconfig"',
+        'source "drivers/gpu/vga/Kconfig"',
+    )
+    for anchor in anchors:
+        if anchor in text:
+            text = text.replace(anchor, anchor + f"\n# {MARKER}\n" + source, 1)
+            break
+    else:
         matches = list(re.finditer(r"(?m)^endmenu\s*$", text))
         if matches:
             pos = matches[-1].start()
             text = text[:pos] + f"\n# {MARKER}\n{source}\n\n" + text[pos:]
         else:
             text = text.rstrip() + f"\n\n# {MARKER}\n{source}\n"
-        parent.write_text(text, encoding="utf-8")
+    drivers_parent.write_text(text, encoding="utf-8")
 
 
 def patch_kgsl_makefile(root: Path) -> None:

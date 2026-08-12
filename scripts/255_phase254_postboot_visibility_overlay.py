@@ -13,16 +13,18 @@ post-boot prefixes already compiled by earlier phases:
   GFXPOST  - late KGSL userspace/open state
   TRIPOST  - Phase 228 cumulative vold/ODS/SurfaceFlinger/KGSL checkpoint
 
-No return value, ordering, probe result, DT property, GPU state, IOMMU mapping,
-security decision, userspace payload, or timing policy is modified.
+On the Phase256 branch this script then chains the Phase256 KGSL devnode /
+framework overlay after the Phase255 visibility state has been materialized.
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
 RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 MARKER = "A52_PHASE255_POSTBOOT_VISIBILITY_V1"
+PHASE256 = Path(__file__).resolve().parent / "256_phase255_kgsl_devnode_framework_overlay.py"
 
 FORMAT_ANCHOR = 'if (strncmp(fmt, "K254", 4) &&\n'
 FORMAT_REPLACEMENT = """if (strncmp(fmt, "K255VIS", 7) &&
@@ -159,6 +161,15 @@ def locate(args: list[str], cwd: Path | None = None) -> Path:
     return hits[0]
 
 
+def run_phase256(args: list[str]) -> int:
+    if not PHASE256.is_file():
+        raise RuntimeError(f"missing Phase256 overlay: {PHASE256}")
+    result = subprocess.run([sys.executable, str(PHASE256), *args], check=False)
+    if result.returncode:
+        raise RuntimeError(f"Phase256 KGSL devnode/framework overlay failed rc={result.returncode}")
+    return 0
+
+
 def self_test() -> None:
     fixture = """static bool a52_r179_is_critical_message(const char *message)
 {
@@ -178,13 +189,15 @@ void a52_ackfr_record(const char *fmt, ...)
     if patch_text(patched, "idempotence") != patched:
         raise AssertionError("Phase255 patch is not idempotent")
     validate(patched, "fixture-final")
+    if "256_phase255_kgsl_devnode_framework_overlay.py" not in Path(__file__).read_text(encoding="utf-8"):
+        raise AssertionError("Phase256 chain missing")
     print("Phase 255 post-BOOT_READY visibility overlay self-test: PASS", flush=True)
 
 
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
-        return 0
+        return run_phase256(["--self-test"])
 
     root = locate(sys.argv[1:])
     path = root / RECORDER
@@ -195,7 +208,7 @@ def main() -> int:
         "admission and post-capacity retention",
         flush=True,
     )
-    return 0
+    return run_phase256([str(root)])
 
 
 if __name__ == "__main__":

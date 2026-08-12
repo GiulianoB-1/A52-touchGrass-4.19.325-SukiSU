@@ -10,6 +10,8 @@ on:
     paths:
       - .github/workflows/257-fast-a52-kgsl-publication-rebuild.yml
       - scripts/208_reconstruct_phase206_source.sh
+      - scripts/257_namei_510_patcher_repair.py
+      - scripts/257_phase256_kgsl_publication_pipeline_overlay.py
 
 permissions:
   contents: read
@@ -59,6 +61,11 @@ jobs:
           python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
           python3 scripts/239_phase233_fb_msm_audit_repair.py
 
+          # Phase257's original namei recorder assumed a newer struct filename
+          # do_mknodat() shape. Repair it for the pinned Android 5.10 syscall
+          # boundary before self-test or application.
+          python3 scripts/257_namei_510_patcher_repair.py
+
           python3 -m py_compile \
             scripts/208_apply_secure_vmid.py \
             scripts/210_apply_first_atomic_rs48.py \
@@ -73,6 +80,7 @@ jobs:
             scripts/227_phase226_retention_wrapper_base.py \
             scripts/255_phase254_postboot_visibility_overlay.py \
             scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_namei_510_patcher_repair.py \
             scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
             scripts/38_repack_a52_p1_boot.py
 
@@ -80,6 +88,8 @@ jobs:
           python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
           grep -Fq 'A52_PHASE257_COMMITTED_CHILD_BUILD_CHAIN_V1' \
             scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq 'A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1' \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py
 
       - name: Prepare runner
         run: |
@@ -206,7 +216,8 @@ jobs:
           ROOT=gki/common
           grep -Fq 'A52_PHASE257_KGSL_PUBLICATION_CORE_V1' "$ROOT/drivers/base/core.c"
           grep -Fq 'A52_PHASE257_KGSL_LATE_REEMIT_V1' "$ROOT/fs/open.c"
-          grep -Fq 'A52_PHASE257_KGSL_MKNOD_UNLINK_V1' "$ROOT/fs/namei.c"
+          grep -Fq 'A52_PHASE257_KGSL_NODE_SYSCALL_V1' "$ROOT/fs/namei.c"
+          grep -Fq 'A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1' "$ROOT/fs/namei.c"
           grep -Fq 'F257 s5' "$ROOT/drivers/base/core.c"
 
       - name: Resolve final config and compile once
@@ -273,6 +284,7 @@ jobs:
             --report phase257-fast-out/package/repack-report.json
 
           cp scripts/257_phase256_kgsl_publication_pipeline_overlay.py phase257-fast-out/audit/
+          cp scripts/257_namei_510_patcher_repair.py phase257-fast-out/audit/
           cp scripts/255_phase254_postboot_visibility_overlay.py phase257-fast-out/audit/
           cp scripts/257_design.md phase257-fast-out/PHASE257-DESIGN.md
 
@@ -291,6 +303,7 @@ jobs:
               'functional_base_phase': 256,
               'historical_intermediate_kernel_compiles_skipped': [213, 214, 215, 216, 217],
               'final_kernel_compile_count': 1,
+              'phase257_namei_anchor': 'android-5.10-syscall-boundary',
           }
           (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
           (out / 'README-FIRST.txt').write_text(

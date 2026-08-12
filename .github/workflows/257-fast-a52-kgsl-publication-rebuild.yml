@@ -218,7 +218,7 @@ jobs:
           grep -Fq 'A52_PHASE257_KGSL_LATE_REEMIT_V1' "$ROOT/fs/open.c"
           grep -Fq 'A52_PHASE257_KGSL_NODE_SYSCALL_V1' "$ROOT/fs/namei.c"
           grep -Fq 'A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1' "$ROOT/fs/namei.c"
-          grep -Fq 'F257 s5' "$ROOT/drivers/base/core.c"
+          grep -Fq 'F257 s5' "$ROOT/fs/namei.c"
 
       - name: Resolve final config and compile once
         run: |

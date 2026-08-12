@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Phase257 fast rebuild trigger: generated Phase218 positional-root compatibility.
 ROOT="$PWD/gki/common"
 BUILD="$PWD/workspace/gki-phase199-out"
 BASE="$PWD/artifacts/a52xq-smmu-display-contracts"

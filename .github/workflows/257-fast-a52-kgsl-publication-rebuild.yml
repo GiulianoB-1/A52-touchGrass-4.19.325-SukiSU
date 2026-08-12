@@ -9,6 +9,7 @@ on:
       - agent/a52-phase257-kgsl-publication-pipeline-v1
     paths:
       - .github/workflows/257-fast-a52-kgsl-publication-rebuild.yml
+      - scripts/208_reconstruct_phase206_source.sh
 
 permissions:
   contents: read

@@ -14,7 +14,7 @@ BRANCH = "agent/a52-phase257-kgsl-publication-pipeline-v1"
 HERE = Path(__file__).resolve().parent
 PHASE256_PACKAGE = HERE / "256_package.py"
 PHASE255_OVERLAY = HERE / "255_phase254_postboot_visibility_overlay.py"
-CHAIN_MARKER = "A52_PHASE257_CHAIN_FROM_PHASE255_V1"
+CHAIN_MARKER = "A52_PHASE257_COMMITTED_CHILD_BUILD_CHAIN_V1"
 
 
 def sha256(path: Path) -> str:
@@ -25,32 +25,19 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def install_chain_hook() -> None:
-    """Make the ephemeral CI copy of Phase255 chain Phase257 after Phase256 closure."""
+def verify_committed_chain() -> None:
+    """Require the Phase257 hook to exist in the committed child-visible chain."""
     text = PHASE255_OVERLAY.read_text(encoding="utf-8")
-    if CHAIN_MARKER in text:
-        return
-
-    constant = 'PHASE256_CLOSURE = Path(__file__).resolve().parent / "256_devfreq_import_closure.py"\n'
-    if text.count(constant) != 1:
-        raise RuntimeError("Phase257 chain: Phase256 closure constant anchor drifted")
-    text = text.replace(
-        constant,
-        constant
-        + f'# {CHAIN_MARKER}\n'
-        + 'PHASE257 = Path(__file__).resolve().parent / "257_phase256_kgsl_publication_pipeline_overlay.py"\n',
-        1,
+    required = (
+        CHAIN_MARKER,
+        'PHASE257 = Path(__file__).resolve().parent / "257_phase256_kgsl_publication_pipeline_overlay.py"',
+        'stages.append((PHASE257, "Phase257 KGSL publication-pipeline recorder"))',
     )
-
-    pair = '        (PHASE256_CLOSURE, "devfreq import closure"),\n'
-    if text.count(pair) != 1:
-        raise RuntimeError("Phase257 chain: run_phase256 tuple anchor drifted")
-    text = text.replace(
-        pair,
-        pair + '        (PHASE257, "Phase257 KGSL publication pipeline recorder"),\n',
-        1,
-    )
-    PHASE255_OVERLAY.write_text(text, encoding="utf-8")
+    for token in required:
+        if token not in text:
+            raise RuntimeError(
+                f"Phase257 committed build chain missing {token!r}; refusing parent-only injection"
+            )
 
 
 def load_phase256():
@@ -118,6 +105,7 @@ def finalize(inherited: Path) -> Path:
     audit_dir = out / "audit/phase257"
     audit_dir.mkdir(parents=True, exist_ok=True)
     for name in (
+        "255_phase254_postboot_visibility_overlay.py",
         "256_phase255_kgsl_devnode_framework_overlay.py",
         "256_package.py",
         "257_phase256_kgsl_publication_pipeline_overlay.py",
@@ -138,6 +126,7 @@ def finalize(inherited: Path) -> Path:
         "phase257_diagnostic_only": True,
         "phase257_behavior_changed": False,
         "phase257_recorder_prefix": "F257",
+        "phase257_committed_child_build_chain": True,
         "phase257_initial_kobj_add_retained": True,
         "phase257_sysfs_uevent_store_traced": True,
         "phase257_kobject_synth_uevent_traced": True,
@@ -190,7 +179,7 @@ def finalize(inherited: Path) -> Path:
 
 
 def main() -> int:
-    install_chain_hook()
+    verify_committed_chain()
     phase256 = load_phase256()
     rc = phase256.main()
     if rc:

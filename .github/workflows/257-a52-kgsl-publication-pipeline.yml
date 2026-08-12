@@ -1,0 +1,223 @@
+name: 257 - A52 KGSL publication pipeline
+
+run-name: Build Phase 257 KGSL publication-pipeline recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase257-kgsl-publication-pipeline-v1
+    paths:
+      - .github/workflows/257-a52-kgsl-publication-pipeline.yml
+      - .github/workflows/256-a52-kgsl-devnode-framework.yml
+      - .github/workflows/255-a52-postboot-visibility.yml
+      - .github/workflows/213-a52-ion-transaction-trace.yml
+      - scripts/218_payload.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
+      - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
+      - scripts/252_package.py
+      - scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+      - scripts/253_package.py
+      - scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+      - scripts/254_package.py
+      - scripts/255_phase254_postboot_visibility_overlay.py
+      - scripts/255_package.py
+      - scripts/256_phase255_kgsl_devnode_framework_overlay.py
+      - scripts/256_devfreq_import_closure.py
+      - scripts/256_package.py
+      - scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+      - scripts/257_package.py
+      - scripts/257_design.md
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase257-kgsl-publication-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 257
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 257 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and run source self-tests
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+
+          python3 -m py_compile \
+            scripts/218_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
+            scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
+            scripts/252_package.py \
+            scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py \
+            scripts/253_package.py \
+            scripts/254_phase253_kgsl_disabled_default_domain_contract.py \
+            scripts/254_package.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/255_package.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/256_devfreq_import_closure.py \
+            scripts/256_package.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/257_package.py
+
+          python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
+          python3 scripts/254_phase253_kgsl_disabled_default_domain_contract.py --self-test
+          python3 scripts/256_phase255_kgsl_devnode_framework_overlay.py --self-test
+          python3 scripts/256_devfreq_import_closure.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+          grep -Fq 'A52_PHASE257_KGSL_PUBLICATION_PIPELINE_V1' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'A52_PHASE257_KGSL_NODE_SYSCALL_V1' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'F257 mk' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'F257 ul' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'F257 s5' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'do_mknodat' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'do_unlinkat' scripts/257_phase256_kgsl_publication_pipeline_overlay.py
+          grep -Fq 'phase257_mknod_syscall_traced' scripts/257_package.py
+          grep -Fq 'phase257_unlink_syscall_traced' scripts/257_package.py
+          git diff --check
+
+      - name: Dispatch inherited builder and package Phase 257
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/257_package.py
+
+      - name: Verify compiled Phase 257 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase257-out
+
+          for file in \
+            package/boot.img \
+            compile/Image \
+            config/final.config \
+            final-audit.json \
+            BUILD-IDENTITY.json \
+            SHA256SUMS \
+            audit/phase257/256_phase255_kgsl_devnode_framework_overlay.py \
+            audit/phase257/256_package.py \
+            audit/phase257/257_phase256_kgsl_publication_pipeline_overlay.py \
+            audit/phase257/257_package.py \
+            audit/phase257/257_design.md \
+            PHASE257-DESIGN.md; do
+            test -s "$OUT/$file"
+          done
+
+          for cfg in \
+            'CONFIG_TMPFS_POSIX_ACL=y' \
+            'CONFIG_TMPFS_XATTR=y' \
+            'CONFIG_QCOM_KGSL=y' \
+            'CONFIG_QCOM_KGSL_IOMMU=y'; do
+            grep -Fxq "$cfg" "$OUT/config/final.config"
+          done
+          ! grep -Fxq 'CONFIG_DEVTMPFS=y' "$OUT/config/final.config"
+          ! grep -Fxq 'CONFIG_UEVENT_HELPER=y' "$OUT/config/final.config"
+
+          for marker in \
+            'GFXPOST 225' \
+            'F256 da n=%.16s M=%u m=%u' \
+            'F256 ue n=%.16s rc=%d' \
+            'F257 add n=%u M=%u m=%u s=%d' \
+            'F257 wr n=%u a=%.4s p=%d g=%d M=%u m=%u s=%d' \
+            'F257 wrx n=%u rc=%d dn=%d mc=%d' \
+            'F257 md r=%d dn=%.31s M=%u m=%u' \
+            'F257 mk n=%u rc=%d p=%d g=%d mo=%o M=%u m=%u c=%.15s' \
+            'F257 ul n=%u rc=%d p=%d g=%d c=%.15s' \
+            'F257 s1 n=%u o=%d ac=%d ar=%d M=%d m=%d s=%d at=%llu' \
+            'F257 s2 wc=%d wr=%d a=%d p=%d g=%d M=%d m=%d s=%d ft=%llu' \
+            'F257 s3 mc=%d mr=%d dn=%d c=%.15s d=%.31s lt=%llu' \
+            'F257 s4 kc=%d kr=%d p=%d g=%d mo=%o M=%u m=%u kt=%llu' \
+            'F257 s5 uc=%d ur=%d p=%d g=%d kc=%.15s uc=%.15s ut=%llu'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase257-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 257
+          assert audit['base_phase'] == 256
+          assert audit['hardware_validated'] is False
+          assert audit['phase257_diagnostic_only'] is True
+          assert audit['phase257_behavior_changed'] is False
+          assert audit['phase257_initial_kobj_add_retained'] is True
+          assert audit['phase257_sysfs_uevent_store_traced'] is True
+          assert audit['phase257_kobject_synth_uevent_traced'] is True
+          assert audit['phase257_generic_devname_traced'] is True
+          assert audit['phase257_mknod_syscall_traced'] is True
+          assert audit['phase257_unlink_syscall_traced'] is True
+          assert audit['phase257_late_open_reemit'] is True
+          assert audit['phase257_manual_mknod'] is False
+          assert audit['phase257_devtmpfs_enabled'] is False
+          assert audit['phase257_uevent_helper_enabled'] is False
+          assert audit['phase257_selinux_weakened'] is False
+          assert audit['phase257_dt_changed'] is False
+          assert audit['phase257_ramdisk_changed'] is False
+          assert audit['phase257_ueventd_rules_changed'] is False
+          assert audit['phase257_return_values_changed'] is False
+          assert audit['phase257_major_minor_changed'] is False
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          for key in (
+              'board_preserved', 'cmdline_preserved', 'dtb_preserved',
+              'ramdisk_preserved', 'header_version_preserved',
+              'partition_size_preserved', 'replacement_kernel_used',
+          ):
+              assert repack['invariants'][key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 257 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase257-KGSL-PUBLICATION-PIPELINE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase257-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 257 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase257-FAILURE-${{ github.run_number }}
+          path: |
+            phase257-failure/
+            phase256-failure/
+            phase255-failure/
+            phase254-failure/
+            phase253-failure/
+            phase252-failure/
+          if-no-files-found: warn
+          retention-days: 7

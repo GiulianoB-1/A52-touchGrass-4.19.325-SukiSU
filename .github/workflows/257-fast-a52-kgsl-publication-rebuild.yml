@@ -1,0 +1,329 @@
+name: 257 fast - A52 KGSL publication one-compile rebuild
+
+run-name: Fast rebuild Phase 257 from proven Phase 227 source boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase257-kgsl-publication-pipeline-v1
+    paths:
+      - .github/workflows/257-fast-a52-kgsl-publication-rebuild.yml
+
+permissions:
+  contents: read
+  actions: read
+
+# Intentionally share the legacy Phase227 concurrency group. Starting this
+# one-compile path cancels any redundant historical 213->227 child rebuild on
+# the same branch.
+concurrency:
+  group: a52-phase227-odspost-retention-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE227_SEED_RUN_ID: '31644392197'
+
+jobs:
+  fast-rebuild:
+    name: Reconstruct once and compile Phase 257
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out corrected Phase 257 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare cumulative scripts
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py \
+             scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py \
+             scripts/218_phase217_wrapper_phase226.py
+
+          # Materialize/repair the modern cumulative wrappers exactly as the
+          # fully-gated Phase256 workflow does.
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+
+          python3 -m py_compile \
+            scripts/208_apply_secure_vmid.py \
+            scripts/210_apply_first_atomic_rs48.py \
+            scripts/211_apply_drm_client_trace.py \
+            scripts/212_apply_graphics_startup_trace.py \
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/38_repack_a52_p1_boot.py
+
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          grep -Fq 'A52_PHASE257_COMMITTED_CHILD_BUILD_CHAIN_V1' \
+            scripts/255_phase254_postboot_visibility_overlay.py
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download proven Phase 227 seed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/phase227-seed')
+          ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
+          assert ident['phase'] == 227, ident
+          assert str(ident['run_id']) == '31644392197', ident
+          for path in (
+              root / 'package/boot.img',
+              root / 'compile/Image',
+              root / 'config/before-phase217.config',
+              root / 'stage/phase209-splash-takeover-trace.patch',
+          ):
+              assert path.is_file() and path.stat().st_size > 0, path
+          image = (root / 'compile/Image').read_bytes()
+          assert b'F256 da n=%.16s M=%u m=%u' in image
+          assert b'F257 ' not in image
+          print('Phase227 seed identity and required source-boundary files: PASS')
+          PY
+
+      - name: Reconstruct Phase 206 source without compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+
+          test -f gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          test -f workspace/gki-phase199-out/.config
+
+      - name: Replay only Phase 208 through 216 source mutations
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+
+          # Phase208 wrapper's original command has no CLI root argument and
+          # locates the reconstructed GKI tree itself.
+          python3 scripts/208_apply_secure_vmid.py
+
+          git -C "$ROOT" apply --check \
+            /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          git -C "$ROOT" apply \
+            /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+
+          # The cumulative Phase217+ wrapper audits this exact pre-217 config.
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase217.config \
+            artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+
+          grep -Fq 'IONPOST 216' "$ROOT/drivers/a52_secure/qseecom.c"
+          grep -Fq 'DRMPOST 212' "$ROOT/fs/open.c"
+
+      - name: Apply cumulative Phase 217 through corrected Phase 257
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/227_phase226_retention_wrapper.py gki/common
+
+          ROOT=gki/common
+          grep -Fq 'A52_PHASE257_KGSL_PUBLICATION_CORE_V1' "$ROOT/drivers/base/core.c"
+          grep -Fq 'A52_PHASE257_KGSL_LATE_REEMIT_V1' "$ROOT/fs/open.c"
+          grep -Fq 'A52_PHASE257_KGSL_MKNOD_UNLINK_V1' "$ROOT/fs/namei.c"
+          grep -Fq 'F257 s5' "$ROOT/drivers/base/core.c"
+
+      - name: Resolve final config and compile once
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" Image
+
+          test -s "$OUT/arch/arm64/boot/Image"
+
+      - name: Verify Phase 257 compiled markers
+        run: |
+          set -Eeuo pipefail
+          IMAGE=workspace/gki-phase199-out/arch/arm64/boot/Image
+          CFG=workspace/gki-phase199-out/.config
+
+          for marker in \
+            'GFXPOST 225' \
+            'F256 da n=%.16s M=%u m=%u' \
+            'F257 add n=%u M=%u m=%u s=%d' \
+            'F257 wr n=%u a=%.4s p=%d g=%d M=%u m=%u s=%d' \
+            'F257 md r=%d dn=%.31s M=%u m=%u' \
+            'F257 mk n=%u rc=%d p=%d g=%d mo=%o M=%u m=%u c=%.15s' \
+            'F257 ul n=%u rc=%d p=%d g=%d c=%.15s' \
+            'F257 s1 n=%u o=%d ac=%d ar=%d M=%d m=%d s=%d at=%llu' \
+            'F257 s2 wc=%d wr=%d a=%d p=%d g=%d M=%d m=%d s=%d ft=%llu' \
+            'F257 s3 mc=%d mr=%d dn=%d c=%.15s d=%.31s lt=%llu' \
+            'F257 s4 kc=%d kr=%d p=%d g=%d mo=%o M=%u m=%u kt=%llu' \
+            'F257 s5 uc=%d ur=%d p=%d g=%d kc=%.15s uc=%.15s ut=%llu'; do
+            grep -aFq "$marker" "$IMAGE"
+          done
+
+          grep -Fxq 'CONFIG_TMPFS_POSIX_ACL=y' "$CFG"
+          grep -Fxq 'CONFIG_TMPFS_XATTR=y' "$CFG"
+          grep -Fxq 'CONFIG_QCOM_KGSL=y' "$CFG"
+          grep -Fxq 'CONFIG_QCOM_KGSL_IOMMU=y' "$CFG"
+          ! grep -Fxq 'CONFIG_DEVTMPFS=y' "$CFG"
+          ! grep -Fxq 'CONFIG_UEVENT_HELPER=y' "$CFG"
+
+      - name: Repack proven boot image with Phase 257 kernel only
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase257-fast-out
+          mkdir -p phase257-fast-out/compile phase257-fast-out/config phase257-fast-out/package phase257-fast-out/audit
+
+          cp workspace/gki-phase199-out/arch/arm64/boot/Image phase257-fast-out/compile/Image
+          cp workspace/gki-phase199-out/.config phase257-fast-out/config/final.config
+          gzip -n -c phase257-fast-out/compile/Image > phase257-fast-out/package/Image.gz
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source /tmp/phase227-seed/package/boot.img \
+            --kernel phase257-fast-out/package/Image.gz \
+            --output phase257-fast-out/package/boot.img \
+            --report phase257-fast-out/package/repack-report.json
+
+          cp scripts/257_phase256_kgsl_publication_pipeline_overlay.py phase257-fast-out/audit/
+          cp scripts/255_phase254_postboot_visibility_overlay.py phase257-fast-out/audit/
+          cp scripts/257_design.md phase257-fast-out/PHASE257-DESIGN.md
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out = Path('phase257-fast-out')
+          identity = {
+              'phase': 257,
+              'build_path': 'one-compile-fast-rebuild',
+              'git_sha': os.environ.get('GITHUB_SHA'),
+              'run_id': os.environ.get('GITHUB_RUN_ID'),
+              'phase227_seed_artifact_id': 9160764832,
+              'phase227_seed_run_id': 31644392197,
+              'hardware_validated': False,
+              'functional_base_phase': 256,
+              'historical_intermediate_kernel_compiles_skipped': [213, 214, 215, 216, 217],
+              'final_kernel_compile_count': 1,
+          }
+          (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
+          (out / 'README-FIRST.txt').write_text(
+              'A52 GKI 5.10 Phase 257 fast one-compile KGSL publication recorder\n\n'
+              'NOT HARDWARE VALIDATED. Built by reconstructing the proven source boundary, '
+              'replaying source-only phases, applying cumulative Phase257, and compiling once.\n'
+          )
+          files = sorted(p for p in out.rglob('*') if p.is_file())
+          lines = []
+          for p in files:
+              h = hashlib.sha256(p.read_bytes()).hexdigest()
+              lines.append(f'{h}  ./{p.relative_to(out)}\n')
+          (out / 'SHA256SUMS').write_text(''.join(lines))
+          PY
+
+          (cd phase257-fast-out && sha256sum -c SHA256SUMS)
+          test -s phase257-fast-out/package/boot.img
+
+      - name: Upload fast Phase 257 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase257-FAST-ONE-COMPILE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase257-fast-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload fast-path diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase257-FAST-FAILURE-${{ github.run_number }}
+          path: |
+            workspace/gki-phase199-out/.config
+            artifacts/a52xq-graphics-startup-trace/
+            phase257-fast-out/
+          if-no-files-found: warn
+          retention-days: 7

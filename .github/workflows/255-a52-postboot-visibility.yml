@@ -9,6 +9,7 @@ on:
       - agent/a52-phase255-postboot-visibility-v1
     paths:
       - .github/workflows/255-a52-postboot-visibility.yml
+      - .github/workflows/213-a52-ion-transaction-trace.yml
       - scripts/218_payload.py
       - scripts/227_phase226_retention_wrapper.py
       - scripts/252_config_retention_gate.py

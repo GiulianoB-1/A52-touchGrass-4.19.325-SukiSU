@@ -22,43 +22,58 @@ exec(compile(raw, 'scripts/226_payload_driver.py', 'exec'), {'__name__': '__main
 # forms without changing the selected root or any kernel behavior.
 wrapper_path = S / '218_phase217_wrapper.py'
 wrapper_text = wrapper_path.read_text(encoding='utf-8')
-compat_marker = 'A52_PHASE257_POSITIONAL_ROOT_COMPAT_V1'
+compat_marker = 'A52_PHASE257_POSITIONAL_ROOT_COMPAT_V2'
 if compat_marker not in wrapper_text:
-    root_anchor = 'parser.add_argument("--root", type=Path, required=True)'
-    if root_anchor not in wrapper_text:
-        root_anchor = "parser.add_argument('--root', type=Path, required=True)"
-    if wrapper_text.count(root_anchor) != 1:
+    lines = wrapper_text.splitlines()
+    root_indexes = [
+        index for index, line in enumerate(lines)
+        if '.add_argument(' in line and '--root' in line
+    ]
+    if len(root_indexes) != 1:
+        rendered = [lines[index].strip() for index in root_indexes]
         raise SystemExit(
-            'Phase257 expected exactly one Phase218 --root argparse anchor, '
-            f'found {wrapper_text.count(root_anchor)}'
+            'Phase257 expected one generated Phase218 root argument, '
+            f'found {len(root_indexes)}: {rendered}'
         )
-    root_replacement = (
-        '# A52_PHASE257_POSITIONAL_ROOT_COMPAT_V1\n'
-        '    parser.add_argument("root_pos", nargs="?", type=Path)\n'
-        '    parser.add_argument("--root", dest="root", type=Path)'
-    )
-    wrapper_text = wrapper_text.replace(root_anchor, root_replacement, 1)
+    root_index = root_indexes[0]
+    root_line = lines[root_index]
+    indent = root_line[:len(root_line) - len(root_line.lstrip())]
+    parser_expr = root_line.strip().split('.add_argument(', 1)[0]
+    lines[root_index:root_index + 1] = [
+        indent + f'# {compat_marker}',
+        indent + f'{parser_expr}.add_argument("root_pos", nargs="?", type=Path)',
+        indent + f'{parser_expr}.add_argument("--root", dest="root", type=Path)',
+    ]
 
-    parse_anchor = 'args = parser.parse_args()'
-    if wrapper_text.count(parse_anchor) != 1:
+    parse_indexes = [
+        index for index, line in enumerate(lines)
+        if '.parse_args(' in line and '=' in line
+    ]
+    if len(parse_indexes) != 1:
+        rendered = [lines[index].strip() for index in parse_indexes]
         raise SystemExit(
-            'Phase257 expected exactly one Phase218 parse_args anchor, '
-            f'found {wrapper_text.count(parse_anchor)}'
+            'Phase257 expected one generated Phase218 parse_args assignment, '
+            f'found {len(parse_indexes)}: {rendered}'
         )
-    parse_replacement = (
-        'args = parser.parse_args()\n'
-        '    if args.root is None:\n'
-        '        args.root = args.root_pos\n'
-        '    if args.root is None:\n'
-        '        parser.error("the following arguments are required: --root or root_pos")'
-    )
-    wrapper_text = wrapper_text.replace(parse_anchor, parse_replacement, 1)
+    parse_index = parse_indexes[0]
+    parse_line = lines[parse_index]
+    parse_indent = parse_line[:len(parse_line) - len(parse_line.lstrip())]
+    args_expr = parse_line.split('=', 1)[0].strip()
+    parse_rhs = parse_line.split('=', 1)[1].strip()
+    parse_parser = parse_rhs.split('.parse_args(', 1)[0]
+    lines[parse_index + 1:parse_index + 1] = [
+        parse_indent + f'if {args_expr}.root is None:',
+        parse_indent + f'    {args_expr}.root = {args_expr}.root_pos',
+        parse_indent + f'if {args_expr}.root is None:',
+        parse_indent + f'    {parse_parser}.error("the following arguments are required: --root or root_pos")',
+    ]
+    wrapper_text = '\n'.join(lines) + '\n'
     wrapper_path.write_text(wrapper_text, encoding='utf-8')
 
 wrapper_check = wrapper_path.read_text(encoding='utf-8')
 if compat_marker not in wrapper_check:
     raise SystemExit('Phase257 positional-root compatibility marker missing')
-if 'args.root = args.root_pos' not in wrapper_check:
+if '.root_pos' not in wrapper_check:
     raise SystemExit('Phase257 positional-root compatibility assignment missing')
 print('Phase 257 Phase218 wrapper accepts --root and positional root')
 

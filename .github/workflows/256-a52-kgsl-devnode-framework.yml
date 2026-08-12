@@ -1,0 +1,199 @@
+name: 256 - A52 KGSL devnode and framework milestones
+
+run-name: Build Phase 256 KGSL devnode/framework candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase256-kgsl-devnode-framework-v1
+    paths:
+      - .github/workflows/256-a52-kgsl-devnode-framework.yml
+      - .github/workflows/255-a52-postboot-visibility.yml
+      - .github/workflows/213-a52-ion-transaction-trace.yml
+      - scripts/218_payload.py
+      - scripts/227_phase226_retention_wrapper.py
+      - scripts/252_config_retention_gate.py
+      - scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py
+      - scripts/252_msm_bus_510_compat.py
+      - scripts/252_msm_bus_510_format_guard.py
+      - scripts/252_package.py
+      - scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py
+      - scripts/253_package.py
+      - scripts/254_phase253_kgsl_disabled_default_domain_contract.py
+      - scripts/254_package.py
+      - scripts/255_phase254_postboot_visibility_overlay.py
+      - scripts/255_package.py
+      - scripts/256_phase255_kgsl_devnode_framework_overlay.py
+      - scripts/256_package.py
+      - scripts/256_design.md
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: a52-phase256-kgsl-devnode-framework-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    name: Build and package Phase 256
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out Phase 256 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore cumulative layout and run source self-tests
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+
+          python3 -m py_compile \
+            scripts/218_payload.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/252_config_retention_gate.py \
+            scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py \
+            scripts/252_msm_bus_510_compat.py \
+            scripts/252_msm_bus_510_format_guard.py \
+            scripts/252_package.py \
+            scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py \
+            scripts/253_package.py \
+            scripts/254_phase253_kgsl_disabled_default_domain_contract.py \
+            scripts/254_package.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/255_package.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/256_package.py
+
+          python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_compat.py --self-test
+          python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
+          python3 scripts/254_phase253_kgsl_disabled_default_domain_contract.py --self-test
+          python3 scripts/256_phase255_kgsl_devnode_framework_overlay.py --self-test
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/252_msm_bus_510_format_guard.py --self-test
+          python3 scripts/227_phase226_retention_wrapper.py --self-test
+
+          grep -Fq 'A52_PHASE256_KGSL_DEVNODE_FRAMEWORK_V1' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'CONFIG_TMPFS_XATTR' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'CONFIG_TMPFS_POSIX_ACL' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'CONFIG_QCOM_KGSL_IOMMU' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'F256 rn' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'system_server' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'com.android.syste' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'com.sec.android.a' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq '256_phase255_kgsl_devnode_framework_overlay.py' scripts/255_phase254_postboot_visibility_overlay.py
+          git diff --check
+
+      - name: Dispatch inherited builder and package Phase 256
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/256_package.py
+
+      - name: Verify compiled Phase 256 candidate
+        run: |
+          set -Eeuo pipefail
+          OUT=phase256-out
+
+          for file in \
+            package/boot.img \
+            compile/Image \
+            config/final.config \
+            final-audit.json \
+            BUILD-IDENTITY.json \
+            SHA256SUMS \
+            audit/phase256/255_phase254_postboot_visibility_overlay.py \
+            audit/phase256/256_phase255_kgsl_devnode_framework_overlay.py \
+            audit/phase256/255_package.py \
+            audit/phase256/256_package.py \
+            audit/phase256/256_design.md \
+            PHASE256-DESIGN.md; do
+            test -s "$OUT/$file"
+          done
+
+          for cfg in \
+            'CONFIG_TMPFS_POSIX_ACL=y' \
+            'CONFIG_TMPFS_XATTR=y' \
+            'CONFIG_QCOM_KGSL=y' \
+            'CONFIG_QCOM_KGSL_IOMMU=y' \
+            'CONFIG_DEVFREQ_GOV_QCOM_ADRENO_TZ=y' \
+            'CONFIG_DEVFREQ_GOV_QCOM_GPUBW_MON=y' \
+            'CONFIG_QCOM_ADRENO_DEFAULT_GOVERNOR="msm-adreno-tz"'; do
+            grep -Fxq "$cfg" "$OUT/config/final.config"
+          done
+          ! grep -Fxq 'CONFIG_DEVTMPFS=y' "$OUT/config/final.config"
+          ! grep -Fxq 'CONFIG_UEVENT_HELPER=y' "$OUT/config/final.config"
+
+          for marker in \
+            'K254 D disabled dev=%s cb=0' \
+            'TRIPOST 228' \
+            'GFXPOST 225' \
+            'F256 da n=%.16s M=%u m=%u' \
+            'F256 ue n=%.16s rc=%d' \
+            'F256 rn p=%d e=%d n=%.16s' \
+            'F256 ex p=%d n=%.16s c=%ld'; do
+            grep -aFq "$marker" "$OUT/compile/Image"
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('phase256-out')
+          audit = json.loads((out / 'final-audit.json').read_text())
+          assert audit['phase'] == 256
+          assert audit['base_phase'] == 255
+          assert audit['hardware_validated'] is False
+          assert audit['phase256_behavior_changed'] is True
+          assert audit['phase256_manual_mknod'] is False
+          assert audit['phase256_devtmpfs_enabled'] is False
+          assert audit['phase256_uevent_helper_enabled'] is False
+          assert audit['phase256_selinux_weakened'] is False
+          assert audit['phase256_dt_changed'] is False
+          assert audit['phase256_ramdisk_changed'] is False
+          assert audit['phase256_recorder_prefix'] == 'F256'
+
+          repack = json.loads((out / 'package/repack-report.json').read_text())
+          for key in (
+              'board_preserved', 'cmdline_preserved', 'dtb_preserved',
+              'ramdisk_preserved', 'header_version_preserved',
+              'partition_size_preserved', 'replacement_kernel_used',
+          ):
+              assert repack['invariants'][key] is True, key
+          PY
+
+          (cd "$OUT" && sha256sum -c SHA256SUMS)
+          sha256sum "$OUT/package/boot.img"
+
+      - name: Upload Phase 256 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase256-KGSL-DEVNODE-FRAMEWORK-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase256-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 256 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase256-FAILURE-${{ github.run_number }}
+          path: |
+            phase256-failure/
+            phase255-failure/
+            phase254-failure/
+            phase253-failure/
+            phase252-failure/
+          if-no-files-found: warn
+          retention-days: 7

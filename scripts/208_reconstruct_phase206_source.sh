@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Phase257 fast rebuild trigger v2: structural Phase218 root compatibility.
+# Phase257 fast rebuild trigger v3: exact Phase213 patcher parity.
 ROOT="$PWD/gki/common"
 BUILD="$PWD/workspace/gki-phase199-out"
 BASE="$PWD/artifacts/a52xq-smmu-display-contracts"
@@ -81,3 +81,30 @@ python3 scripts/206_apply_smmu_display_contracts.py --root "$ROOT"
 python3 scripts/206_apply_smmu_display_contracts.py --root "$ROOT"
 git -C "$ROOT" diff --check
 printf '%s\n' 'Phase 206 source-only reconstruction: staged for exact comparison'
+
+# The proven Phase227 child repairs this generated Phase213 patcher before the
+# 213 source mutation. Mirror that exact repair here so the one-compile replay
+# reaches the same pre-Phase218 ion.c hash. Be idempotent for legacy callers
+# that already performed the repair earlier in their workflow.
+python3 - <<'PY'
+from pathlib import Path
+path = Path('scripts/213_apply_ion_transaction_trace.py')
+text = path.read_text(encoding='utf-8')
+old = r'pr_warn_once("%s: ioctl validate failed\n", __func__);'
+new = r'pr_warn_once("%s: ioctl validate failed\\n", __func__);'
+old_count = text.count(old)
+new_count = text.count(new)
+if old_count == 1 and new_count == 0:
+    path.write_text(text.replace(old, new, 1), encoding='utf-8')
+elif old_count == 0 and new_count == 1:
+    pass
+else:
+    raise SystemExit(
+        f'Phase213 escape repair expected pristine or repaired state; '
+        f'old={old_count} new={new_count}'
+    )
+repaired = path.read_text(encoding='utf-8')
+if repaired.count(new) != 1 or old in repaired:
+    raise SystemExit('Phase213 C-string escape repair verification failed')
+print('Phase 213 C-string newline escape parity repaired')
+PY

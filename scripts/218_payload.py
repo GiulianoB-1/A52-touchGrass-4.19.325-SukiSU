@@ -104,34 +104,3 @@ if 'cmp ' in '\n'.join(
 if patched_ci.count('scripts/252_config_retention_gate.py') != 1:
     raise SystemExit('Phase 252 semantic retention gate insertion audit failed')
 print('Phase 252 replaced inherited Phase 217 bytewise config cmp with semantic gate')
-
-# Phase 255 diagnostic: locate which generated helper owns the stale Phase 219
-# workflow lookup. Exclude this source file itself, then stop before any build.
-target = 'a52-ack510-phase219-postalloc-slab.yml'
-matches = []
-for candidate in sorted(S.rglob('*')):
-    if not candidate.is_file() or candidate.name == '218_payload.py':
-        continue
-    if candidate.suffix not in ('.py', '.sh', '.yml', '.yaml', '.txt'):
-        continue
-    try:
-        candidate_lines = candidate.read_text(encoding='utf-8').splitlines()
-    except UnicodeDecodeError:
-        continue
-    for index, line in enumerate(candidate_lines):
-        if target in line:
-            matches.append((candidate, candidate_lines, index))
-if len(matches) != 1:
-    names = ', '.join(str(item[0]) for item in matches) or '<none>'
-    raise SystemExit(
-        f'Phase 255 diagnostic expected exactly one generated {target} lookup, '
-        f'found {len(matches)} in {names}'
-    )
-candidate, candidate_lines, center = matches[0]
-start = max(0, center - 30)
-end = min(len(candidate_lines), center + 31)
-print(f'===== PHASE255_STALE_PHASE219_OWNER {candidate} =====')
-for lineno in range(start, end):
-    print(f'{lineno + 1:05d}: {candidate_lines[lineno]}')
-print('===== PHASE255_STALE_PHASE219_OWNER_END =====')
-raise SystemExit('Phase 255 diagnostic stop after locating stale Phase 219 audit owner')

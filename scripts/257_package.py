@@ -47,7 +47,7 @@ def install_chain_hook() -> None:
         raise RuntimeError("Phase257 chain: run_phase256 tuple anchor drifted")
     text = text.replace(
         pair,
-        pair + '        (PHASE257, "Phase257 KGSL publication/coldboot recorder"),\n',
+        pair + '        (PHASE257, "Phase257 KGSL publication pipeline recorder"),\n',
         1,
     )
     PHASE255_OVERLAY.write_text(text, encoding="utf-8")
@@ -73,9 +73,13 @@ def verify_candidate(out: Path) -> None:
         b"F257 wr n=%u a=%.4s p=%d g=%d M=%u m=%u s=%d",
         b"F257 wrx n=%u rc=%d dn=%d mc=%d",
         b"F257 md r=%d dn=%.31s M=%u m=%u",
+        b"F257 mk n=%u rc=%d p=%d g=%d mo=%o M=%u m=%u c=%.15s",
+        b"F257 ul n=%u rc=%d p=%d g=%d c=%.15s",
         b"F257 s1 n=%u o=%d ac=%d ar=%d M=%d m=%d s=%d at=%llu",
         b"F257 s2 wc=%d wr=%d a=%d p=%d g=%d M=%d m=%d s=%d ft=%llu",
         b"F257 s3 mc=%d mr=%d dn=%d c=%.15s d=%.31s lt=%llu",
+        b"F257 s4 kc=%d kr=%d p=%d g=%d mo=%o M=%u m=%u kt=%llu",
+        b"F257 s5 uc=%d ur=%d p=%d g=%d kc=%.15s uc=%.15s ut=%llu",
     )
     for marker in markers:
         if marker not in image:
@@ -138,6 +142,8 @@ def finalize(inherited: Path) -> Path:
         "phase257_sysfs_uevent_store_traced": True,
         "phase257_kobject_synth_uevent_traced": True,
         "phase257_generic_devname_traced": True,
+        "phase257_mknod_syscall_traced": True,
+        "phase257_unlink_syscall_traced": True,
         "phase257_late_open_reemit": True,
         "phase257_manual_mknod": False,
         "phase257_devtmpfs_enabled": False,
@@ -148,10 +154,9 @@ def finalize(inherited: Path) -> Path:
         "phase257_ueventd_rules_changed": False,
         "phase257_return_values_changed": False,
         "phase257_major_minor_changed": False,
-        "phase257_mknod_syscall_traced": False,
         "phase257_goal": (
-            "determine whether ueventd coldboot reaches the already-created kgsl-3d0 "
-            "device and whether generic kernel uevent metadata contains DEVNAME"
+            "record the full kgsl-3d0 publication path from device_add and ueventd coldboot "
+            "through userspace mknod result, possible unlink, and the later ENOENT open"
         ),
     })
     audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -164,19 +169,20 @@ def finalize(inherited: Path) -> Path:
         "run_number": os.environ.get("GITHUB_RUN_NUMBER"),
         "hardware_validated": False,
         "functional_base_phase": 256,
-        "change": "diagnostic-only KGSL initial-publication and ueventd coldboot replay recorder",
+        "change": "diagnostic-only full KGSL userspace publication-pipeline recorder",
     }
     (out / "BUILD-IDENTITY.json").write_text(
         json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (out / "README-FIRST.txt").write_text(
-        "A52 GKI 5.10 Phase 257 KGSL publication/coldboot recorder\n\n"
+        "A52 GKI 5.10 Phase 257 KGSL publication-pipeline recorder\n\n"
         "NOT HARDWARE VALIDATED. Flash package/boot.img to BOOT only after CI succeeds.\n\n"
-        "Phase257 preserves Phase256 behavior and records the exact kernel side of the "
-        "kgsl-3d0 publication boundary: initial KOBJ_ADD, sysfs uevent coldboot writes, "
-        "kobject_synth_uevent return, generic DEVNAME generation and late retained "
-        "snapshots during /dev/kgsl-3d0 open failures. It does not create the node or "
-        "change devtmpfs, SELinux, DT, ramdisk, ueventd rules, return values or devt.\n",
+        "Phase257 preserves Phase256 behavior and records initial KOBJ_ADD, sysfs uevent "
+        "coldboot writes, kobject_synth_uevent return, generic DEVNAME generation, "
+        "mknod/mknodat attempts and results, unlink/unlinkat removal attempts, and retained "
+        "snapshots during /dev/kgsl-3d0 open failures. It does not create the node, change "
+        "devtmpfs, weaken SELinux, alter DT/ramdisk/ueventd rules, force return values, or "
+        "change the KGSL major/minor.\n",
         encoding="utf-8",
     )
     refresh_sums(out)

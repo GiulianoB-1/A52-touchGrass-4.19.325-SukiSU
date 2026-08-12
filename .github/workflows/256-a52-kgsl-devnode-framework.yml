@@ -25,6 +25,7 @@ on:
       - scripts/255_phase254_postboot_visibility_overlay.py
       - scripts/255_package.py
       - scripts/256_phase255_kgsl_devnode_framework_overlay.py
+      - scripts/256_devfreq_import_closure.py
       - scripts/256_package.py
       - scripts/256_design.md
 
@@ -71,6 +72,7 @@ jobs:
             scripts/255_phase254_postboot_visibility_overlay.py \
             scripts/255_package.py \
             scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/256_devfreq_import_closure.py \
             scripts/256_package.py
 
           python3 scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py --self-test
@@ -78,11 +80,17 @@ jobs:
           python3 scripts/253_phase252_kgsl_smmu_domain_contract_overlay.py --self-test
           python3 scripts/254_phase253_kgsl_disabled_default_domain_contract.py --self-test
           python3 scripts/256_phase255_kgsl_devnode_framework_overlay.py --self-test
+          python3 scripts/256_devfreq_import_closure.py --self-test
           python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
           python3 scripts/252_msm_bus_510_format_guard.py --self-test
           python3 scripts/227_phase226_retention_wrapper.py --self-test
 
           grep -Fq 'A52_PHASE256_KGSL_DEVNODE_FRAMEWORK_V1' scripts/256_phase255_kgsl_devnode_framework_overlay.py
+          grep -Fq 'A52_PHASE256_DEVFREQ_IMPORT_CLOSURE_V2' scripts/256_devfreq_import_closure.py
+          grep -Fq 'A52_PHASE256_SECURE_BUFFER_DECL_COMPAT_V1' scripts/256_devfreq_import_closure.py
+          grep -Fq 'A52_PHASE256_ADRENO_TZ_GKI510_COMPAT_V1' scripts/256_devfreq_import_closure.py
+          grep -Fq 'kfree_sensitive' scripts/256_devfreq_import_closure.py
+          grep -Fq 'DEVFREQ_GOV_UPDATE_INTERVAL' scripts/256_devfreq_import_closure.py
           grep -Fq 'CONFIG_TMPFS_XATTR' scripts/256_phase255_kgsl_devnode_framework_overlay.py
           grep -Fq 'CONFIG_TMPFS_POSIX_ACL' scripts/256_phase255_kgsl_devnode_framework_overlay.py
           grep -Fq 'CONFIG_QCOM_KGSL_IOMMU' scripts/256_phase255_kgsl_devnode_framework_overlay.py
@@ -91,6 +99,7 @@ jobs:
           grep -Fq 'com.android.syste' scripts/256_phase255_kgsl_devnode_framework_overlay.py
           grep -Fq 'com.sec.android.a' scripts/256_phase255_kgsl_devnode_framework_overlay.py
           grep -Fq '256_phase255_kgsl_devnode_framework_overlay.py' scripts/255_phase254_postboot_visibility_overlay.py
+          grep -Fq '256_devfreq_import_closure.py' scripts/255_phase254_postboot_visibility_overlay.py
           git diff --check
 
       - name: Dispatch inherited builder and package Phase 256
@@ -114,6 +123,7 @@ jobs:
             SHA256SUMS \
             audit/phase256/255_phase254_postboot_visibility_overlay.py \
             audit/phase256/256_phase255_kgsl_devnode_framework_overlay.py \
+            audit/phase256/256_devfreq_import_closure.py \
             audit/phase256/255_package.py \
             audit/phase256/256_package.py \
             audit/phase256/256_design.md \
@@ -133,6 +143,7 @@ jobs:
           done
           ! grep -Fxq 'CONFIG_DEVTMPFS=y' "$OUT/config/final.config"
           ! grep -Fxq 'CONFIG_UEVENT_HELPER=y' "$OUT/config/final.config"
+          ! grep -Fxq 'CONFIG_QCOM_SECURE_BUFFER=y' "$OUT/config/final.config"
 
           for marker in \
             'K254 D disabled dev=%s cb=0' \
@@ -162,6 +173,14 @@ jobs:
           assert audit['phase256_dt_changed'] is False
           assert audit['phase256_ramdisk_changed'] is False
           assert audit['phase256_recorder_prefix'] == 'F256'
+          assert audit['phase256_secure_buffer_reimplementation'] is False
+          assert audit['phase256_secure_buffer_config_enabled'] is False
+          assert audit['phase256_devfreq_gki510_compat'] == [
+              'dmac_flush_range->__flush_dcache_area',
+              'kzfree->kfree_sensitive',
+              'DEVFREQ_GOV_INTERVAL->DEVFREQ_GOV_UPDATE_INTERVAL',
+              'secure_buffer declarations-only compatibility',
+          ]
 
           repack = json.loads((out / 'package/repack-report.json').read_text())
           for key in (

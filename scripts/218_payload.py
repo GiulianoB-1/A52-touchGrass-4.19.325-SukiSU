@@ -16,6 +16,52 @@ if hashlib.sha256(raw).hexdigest() != 'e4b2ec578d8f1ce8a2d140abc374a0f21abb895f8
     raise SystemExit('Phase 226 driver raw sha256 mismatch')
 exec(compile(raw, 'scripts/226_payload_driver.py', 'exec'), {'__name__': '__main__'})
 
+# The historical cumulative chain normally calls the generated Phase218
+# wrapper with --root. The Phase257 one-compile path enters the same chain via
+# the current Phase227 wrapper and forwards a positional root. Accept both
+# forms without changing the selected root or any kernel behavior.
+wrapper_path = S / '218_phase217_wrapper.py'
+wrapper_text = wrapper_path.read_text(encoding='utf-8')
+compat_marker = 'A52_PHASE257_POSITIONAL_ROOT_COMPAT_V1'
+if compat_marker not in wrapper_text:
+    root_anchor = 'parser.add_argument("--root", type=Path, required=True)'
+    if root_anchor not in wrapper_text:
+        root_anchor = "parser.add_argument('--root', type=Path, required=True)"
+    if wrapper_text.count(root_anchor) != 1:
+        raise SystemExit(
+            'Phase257 expected exactly one Phase218 --root argparse anchor, '
+            f'found {wrapper_text.count(root_anchor)}'
+        )
+    root_replacement = (
+        '# A52_PHASE257_POSITIONAL_ROOT_COMPAT_V1\n'
+        '    parser.add_argument("root_pos", nargs="?", type=Path)\n'
+        '    parser.add_argument("--root", dest="root", type=Path)'
+    )
+    wrapper_text = wrapper_text.replace(root_anchor, root_replacement, 1)
+
+    parse_anchor = 'args = parser.parse_args()'
+    if wrapper_text.count(parse_anchor) != 1:
+        raise SystemExit(
+            'Phase257 expected exactly one Phase218 parse_args anchor, '
+            f'found {wrapper_text.count(parse_anchor)}'
+        )
+    parse_replacement = (
+        'args = parser.parse_args()\n'
+        '    if args.root is None:\n'
+        '        args.root = args.root_pos\n'
+        '    if args.root is None:\n'
+        '        parser.error("the following arguments are required: --root or root_pos")'
+    )
+    wrapper_text = wrapper_text.replace(parse_anchor, parse_replacement, 1)
+    wrapper_path.write_text(wrapper_text, encoding='utf-8')
+
+wrapper_check = wrapper_path.read_text(encoding='utf-8')
+if compat_marker not in wrapper_check:
+    raise SystemExit('Phase257 positional-root compatibility marker missing')
+if 'args.root = args.root_pos' not in wrapper_check:
+    raise SystemExit('Phase257 positional-root compatibility assignment missing')
+print('Phase 257 Phase218 wrapper accepts --root and positional root')
+
 # The Phase 226 ioctl and connect trace points use the exported recorder API.
 # Add its existing public header to both translation units through the patcher,
 # then require the include during the patcher's own source verification.

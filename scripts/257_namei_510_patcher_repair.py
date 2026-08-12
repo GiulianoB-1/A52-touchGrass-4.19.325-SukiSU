@@ -12,7 +12,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Fast-workflow trigger revision 2: syscall-boundary repair is now in its path filter.
 TARGET = Path(__file__).resolve().with_name(
     "257_phase256_kgsl_publication_pipeline_overlay.py"
 )
@@ -109,7 +108,7 @@ void a52_r257_kgsl_node_snapshot(void)
         raise RuntimeError("Phase257 namei instrumentation block end not found")
     end += len(end_token)
 
-    replacement = r'''    # Android 5.10 keeps the userspace pathname at the syscall boundary.
+    replacement = r"""    # Android 5.10 keeps the userspace pathname at the syscall boundary.
     # Instrument there so even pre-dentry failures are retained. The older
     # struct-filename path remains as a fixture/backport fallback.
     if "SYSCALL_DEFINE4(mknodat" in text and "SYSCALL_DEFINE3(mknod" in text:
@@ -195,7 +194,7 @@ void a52_r257_kgsl_node_snapshot(void)
         fn = fn.replace(tail, unlink_event, 1)
         text = text[:start] + fn + text[end:]
     path.write_text(text, encoding="utf-8")
-'''
+"""
 
     text = text[:start] + replacement + text[end:]
     validate(text)

@@ -60,7 +60,11 @@ def verify_candidate(out: Path) -> None:
     for token in required:
         if token not in config:
             raise RuntimeError(f"Phase256 final config missing {token}")
-    for forbidden in ("CONFIG_DEVTMPFS=y", "CONFIG_UEVENT_HELPER=y"):
+    for forbidden in (
+        "CONFIG_DEVTMPFS=y",
+        "CONFIG_UEVENT_HELPER=y",
+        "CONFIG_QCOM_SECURE_BUFFER=y",
+    ):
         if forbidden in config:
             raise RuntimeError(f"Phase256 forbidden config enabled: {forbidden}")
 
@@ -86,6 +90,7 @@ def finalize(inherited: Path) -> Path:
     for name in (
         "255_phase254_postboot_visibility_overlay.py",
         "256_phase255_kgsl_devnode_framework_overlay.py",
+        "256_devfreq_import_closure.py",
         "255_package.py",
         "256_package.py",
         "256_design.md",
@@ -110,6 +115,14 @@ def finalize(inherited: Path) -> Path:
             "CONFIG_DEVFREQ_GOV_QCOM_GPUBW_MON=y",
             'CONFIG_QCOM_ADRENO_DEFAULT_GOVERNOR="msm-adreno-tz"',
         ],
+        "phase256_devfreq_gki510_compat": [
+            "dmac_flush_range->__flush_dcache_area",
+            "kzfree->kfree_sensitive",
+            "DEVFREQ_GOV_INTERVAL->DEVFREQ_GOV_UPDATE_INTERVAL",
+            "secure_buffer declarations-only compatibility",
+        ],
+        "phase256_secure_buffer_reimplementation": False,
+        "phase256_secure_buffer_config_enabled": False,
         "phase256_framework_milestones": [
             "zygote", "zygote64", "system_server", "SystemUI",
             "com.sec.android.app.launcher", "bootanimation", "surfaceflinger",
@@ -142,6 +155,8 @@ def finalize(inherited: Path) -> Path:
         "NOT HARDWARE VALIDATED. Phase256 aligns /dev tmpfs metadata support with the "
         "TouchGrass golden reference, restores the KGSL/Adreno devfreq Kconfig contract, "
         "and retains F256 milestones through zygote/system_server/SystemUI/launcher. "
+        "The imported TouchGrass devfreq sources receive only mechanical Android 5.10 "
+        "API compatibility, reusing the existing A52 SCM/QTEE/secure-buffer implementations. "
         "It does not manually create kgsl-3d0 or weaken SELinux.\n",
         encoding="utf-8",
     )

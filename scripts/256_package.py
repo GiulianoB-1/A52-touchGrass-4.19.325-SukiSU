@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build/package Phase256 over the Phase255 visibility baseline."""
+"""Build/package Phase256 with the audited Android 5.10 devfreq compatibility closure."""
 from __future__ import annotations
 
 import hashlib

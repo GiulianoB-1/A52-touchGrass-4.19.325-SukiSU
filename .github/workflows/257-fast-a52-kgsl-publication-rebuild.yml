@@ -173,9 +173,7 @@ jobs:
           set -Eeuo pipefail
           ROOT=gki/common
 
-          # Phase208 wrapper's original command has no CLI root argument and
-          # locates the reconstructed GKI tree itself.
-          python3 scripts/208_apply_secure_vmid.py
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
 
           git -C "$ROOT" apply --check \
             /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch

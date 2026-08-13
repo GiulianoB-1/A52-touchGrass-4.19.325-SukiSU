@@ -1,6 +1,6 @@
 name: 257 diagnostic - extract failed compile log
 
-run-name: Extract Phase 257 compile failure from job 94294815158
+run-name: Extract Phase 257 compile failure from job 94370607188
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
       - name: Download exact failed job log
         env:
           GH_TOKEN: ${{ github.token }}
-          JOB_ID: '94294815158'
+          JOB_ID: '94370607188'
         run: |
           set -Eeuo pipefail
           mkdir -p phase257-compile-diagnostic
@@ -30,11 +30,11 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${JOB_ID}/logs" \
-            -o phase257-compile-diagnostic/job-94294815158.log
+            -o phase257-compile-diagnostic/job-94370607188.log
 
           python3 - <<'PY'
           from pathlib import Path
-          src = Path('phase257-compile-diagnostic/job-94294815158.log')
+          src = Path('phase257-compile-diagnostic/job-94370607188.log')
           text = src.read_text(errors='replace')
           lines = text.splitlines()
           needles = ('error:', 'fatal error:', 'undefined reference', 'FAILED:', 'make[', 'Error ')
@@ -53,7 +53,7 @@ jobs:
       - name: Upload exact compile diagnostic
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase257-COMPILE-LOG-94294815158
+          name: A52XQ-Phase257-COMPILE-LOG-94370607188
           path: phase257-compile-diagnostic/
           if-no-files-found: error
           retention-days: 7

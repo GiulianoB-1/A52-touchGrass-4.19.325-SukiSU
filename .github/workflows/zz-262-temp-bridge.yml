@@ -1,4 +1,4 @@
-name: Temporary Phase262 dispatch bridge
+name: Temporary Phase263 dispatch bridge
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
   dispatch:
     runs-on: ubuntu-22.04
     steps:
-      - name: Dispatch Phase262 A/B builder
+      - name: Dispatch Phase263 provider parity builder
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -22,4 +22,4 @@ jobs:
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase262 build dispatched"
+          echo "Phase263 build dispatched"

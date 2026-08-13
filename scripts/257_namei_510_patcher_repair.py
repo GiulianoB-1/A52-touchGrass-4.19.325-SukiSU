@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Repair Phase257 namei instrumentation for the pinned Android 5.10 shape.
+"""Repair Phase257 instrumentation for the pinned Android 5.10 shape.
 
 The original Phase257 overlay assumed do_mknodat() owns a struct filename and
 putname() lifecycle. The pinned android12-5.10 tree instead keeps the userspace
 pathname at the syscall boundary. Instrument the syscall wrappers so the
 recorder sees the final return code even when pathname resolution fails before
-a dentry exists. No syscall return value or kernel behavior is changed.
+a dentry exists.
+
+The first real Phase257 compile also proved two generator defects: namei.c was
+given a private header that does not exist in the generated tree, and the
+Phase257 core state was emitted below dev_uevent() even though dev_uevent()
+uses that state. This repair removes the missing-header dependency by emitting
+the recorder prototype directly and moves the core state anchor above
+dev_uevent(). No syscall return value or kernel behavior is changed.
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ TARGET = Path(__file__).resolve().with_name(
     "257_phase256_kgsl_publication_pipeline_overlay.py"
 )
 MARKER = "A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1"
+COMPILE_MARKER = "A52_PHASE257_CONCRETE_COMPILE_REPAIR_V1"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -25,8 +33,45 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def repair_compile_failures(text: str) -> str:
+    if COMPILE_MARKER in text:
+        return text
+
+    core_anchor_old = r'''state_anchor = "static ssize_t uevent_store(struct device *dev, struct device_attribute *attr,\n"'''
+    core_anchor_new = r'''state_anchor = "static int dev_uevent("'''
+    text = replace_once(
+        text,
+        core_anchor_old,
+        core_anchor_new,
+        "core state declaration order",
+    )
+
+    forensic_header = '        "#include <linux/a52_ack_forensic.h>",\n'
+    text = replace_once(
+        text,
+        forensic_header,
+        "",
+        "missing namei forensic header",
+    )
+
+    state_old = "    state = '''/* A52_PHASE257_KGSL_NODE_SYSCALL_V1 */\n"
+    state_new = (
+        "    state = '''/* A52_PHASE257_KGSL_NODE_SYSCALL_V1 */\n"
+        f"/* {COMPILE_MARKER} */\n"
+        "extern void a52_ackfr_record(const char *fmt, ...);\n"
+    )
+    text = replace_once(
+        text,
+        state_old,
+        state_new,
+        "namei recorder declaration",
+    )
+    return text
+
+
 def repair(text: str) -> str:
     if MARKER in text:
+        text = repair_compile_failures(text)
         validate(text)
         return text
 
@@ -197,6 +242,7 @@ void a52_r257_kgsl_node_snapshot(void)
 """
 
     text = text[:start] + replacement + text[end:]
+    text = repair_compile_failures(text)
     validate(text)
     return text
 
@@ -204,7 +250,10 @@ void a52_r257_kgsl_node_snapshot(void)
 def validate(text: str) -> None:
     required = (
         MARKER,
+        COMPILE_MARKER,
         '"#include <linux/uaccess.h>"',
+        'state_anchor = "static int dev_uevent("',
+        "extern void a52_ackfr_record(const char *fmt, ...);",
         "static bool a52_r257_is_kgsl_name(const char *name)",
         "static void a52_r257_kgsl_user_node_event",
         "strncpy_from_user(path, name, sizeof(path) - 1)",
@@ -217,6 +266,8 @@ def validate(text: str) -> None:
     for token in required:
         if token not in text:
             raise RuntimeError(f"repaired Phase257 overlay missing {token!r}")
+    if '"#include <linux/a52_ack_forensic.h>"' in text:
+        raise RuntimeError("repaired Phase257 overlay still references missing forensic header")
     compile(text, str(TARGET), "exec")
 
 
@@ -224,7 +275,10 @@ def main() -> int:
     text = TARGET.read_text(encoding="utf-8")
     repaired = repair(text)
     TARGET.write_text(repaired, encoding="utf-8")
-    print(f"{MARKER}: Phase257 namei recorder moved to syscall boundary", flush=True)
+    print(
+        f"{MARKER}: Android 5.10 syscall recorder + concrete compile repairs applied",
+        flush=True,
+    )
     return 0
 
 
@@ -232,5 +286,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:
-        print(f"Phase257 Android 5.10 namei repair failed: {exc}", file=sys.stderr)
+        print(f"Phase257 Android 5.10 repair failed: {exc}", file=sys.stderr)
         raise

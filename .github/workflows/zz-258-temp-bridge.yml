@@ -1,5 +1,5 @@
-# registered trigger
-name: TEMP 258 bridge - materialize and dispatch A/B
+# registered trigger v2
+name: TEMP 258 bridge - source route and dispatch A/B
 
 on:
   push:
@@ -22,25 +22,42 @@ jobs:
           ref: agent/a52-phase258-no-namei-ab-v1
           fetch-depth: 0
 
-      - name: Materialize Phase258 A/B build path
+      - name: Route cumulative Phase255 chain to Phase258 overlay
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 scripts/258_materialize_ab_build.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/255_phase254_postboot_visibility_overlay.py')
+          t = p.read_text(encoding='utf-8')
+          old = 'PHASE257 = Path(__file__).resolve().parent / "257_phase256_kgsl_publication_pipeline_overlay.py"'
+          new = 'PHASE257 = Path(__file__).resolve().parent / "258_phase257_no_namei_ab.py"'
+          if new not in t:
+              if t.count(old) != 1:
+                  raise SystemExit(f'Phase255 route anchor count {t.count(old)}')
+              t = t.replace(old, new, 1)
+              p.write_text(t, encoding='utf-8')
+          compile(Path('scripts/258_phase257_no_namei_ab.py').read_text(encoding='utf-8'),
+                  'scripts/258_phase257_no_namei_ab.py', 'exec')
+          print('Phase255 now routes to Phase258 A/B overlay')
+          PY
           git diff --check
 
-      - name: Commit materialized Phase258 build path
+      - name: Commit source-only Phase258 route
         shell: bash
         run: |
           set -Eeuo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/255_phase254_postboot_visibility_overlay.py \
-                  .github/workflows/257-fast-a52-kgsl-publication-rebuild.yml
-          git commit -m 'Materialize Phase 258 no-namei A/B build path'
-          git push origin HEAD:agent/a52-phase258-no-namei-ab-v1
+          if git diff --quiet -- scripts/255_phase254_postboot_visibility_overlay.py; then
+            echo 'Phase255 route already committed'
+          else
+            git add scripts/255_phase254_postboot_visibility_overlay.py
+            git commit -m 'Route Phase 258 A/B through cumulative builder'
+            git push origin HEAD:agent/a52-phase258-no-namei-ab-v1
+          fi
 
-      - name: Dispatch registered fast workflow on Phase258 branch
+      - name: Dispatch registered Phase257 fast workflow on Phase258 ref
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,4 +70,4 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/257-fast-a52-kgsl-publication-rebuild.yml/dispatches" \
             -d '{"ref":"agent/a52-phase258-no-namei-ab-v1"}'
-          echo 'Phase258 A/B compile dispatched'
+          echo 'Phase258 A/B compile dispatched through registered fast workflow'

@@ -14,6 +14,7 @@ PHASE261 = HERE / "261_kgsl_open_rootcause.py"
 REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
 PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
 PHASE261_OBSERVE_ONLY = "A52_PHASE261_QCOM_WDT_OBSERVE_ONLY_V1"
+PHASE262_MARKER = "A52_PHASE262_FW_LOADER_FALLBACK_AB_V1"
 
 
 def load_target():
@@ -132,11 +133,65 @@ def phase261_observe_only(source: str) -> str:
     return f"/* {PHASE261_OBSERVE_ONLY}: no functional watchdog changes */\n" + source
 
 
+def phase262_enable_fw_fallback(config: str) -> str:
+    required = (
+        "CONFIG_FW_LOADER=y",
+        "CONFIG_FW_LOADER_USER_HELPER=y",
+        "CONFIG_SCSI=y",
+        "CONFIG_CHR_DEV_SG=y",
+        "CONFIG_QCOM_KGSL=y",
+        "CONFIG_QCOM_KGSL_IOMMU=y",
+    )
+    for line in required:
+        if line not in config.splitlines():
+            raise RuntimeError(f"Phase262 prerequisite missing: {line}")
+    enabled = "CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y"
+    disabled = "# CONFIG_FW_LOADER_USER_HELPER_FALLBACK is not set"
+    if enabled in config.splitlines():
+        return config
+    if config.splitlines().count(disabled) != 1:
+        raise RuntimeError("Phase262 fallback config anchor drifted")
+    out = config.replace(disabled, enabled, 1)
+    before = [line for line in config.splitlines() if line != disabled]
+    after = [line for line in out.splitlines() if line != enabled]
+    if before != after:
+        raise RuntimeError("Phase262 changed more than the fallback config bit")
+    return out
+
+
+def phase262_apply(root: Path) -> None:
+    cfg = root.parent.parent / "workspace/gki-phase199-out/.config"
+    if not cfg.is_file():
+        raise RuntimeError(f"Phase262 config missing: {cfg}")
+    before = cfg.read_text(encoding="utf-8")
+    after = phase262_enable_fw_fallback(before)
+    cfg.write_text(after, encoding="utf-8")
+    if "CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y" not in after.splitlines():
+        raise RuntimeError("Phase262 fallback bit did not apply")
+    print(f"{PHASE262_MARKER}: CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y", flush=True)
+
+
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         m.self_test()
         p260.self_test()
         p261.self_test()
+        sample = "\n".join((
+            "CONFIG_FW_LOADER=y",
+            "CONFIG_FW_LOADER_USER_HELPER=y",
+            "# CONFIG_FW_LOADER_USER_HELPER_FALLBACK is not set",
+            "CONFIG_SCSI=y",
+            "CONFIG_CHR_DEV_SG=y",
+            "CONFIG_QCOM_KGSL=y",
+            "CONFIG_QCOM_KGSL_IOMMU=y",
+            "CONFIG_A52_PHASE262_SENTINEL=y",
+            "",
+        ))
+        changed = phase262_enable_fw_fallback(sample)
+        assert "CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y" in changed
+        assert "CONFIG_A52_PHASE262_SENTINEL=y" in changed
+        assert changed.count("CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y") == 1
+        print("Phase 262 firmware-loader fallback A/B self-test: PASS", flush=True)
         return 0
     root = m.p257.locate(sys.argv[1:])
     rc = m.main()
@@ -146,6 +201,7 @@ def main() -> int:
     p261.WDT = PHASE261_OBSERVE_ONLY
     p261.watchdog = phase261_observe_only
     p261.apply(root)
+    phase262_apply(root)
     return 0
 
 

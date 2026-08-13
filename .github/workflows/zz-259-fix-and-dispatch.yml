@@ -20,117 +20,21 @@ jobs:
           ref: agent/a52-phase259-kgsl-node-lifetime-v1
           fetch-depth: 0
 
-      - name: Repair Phase259 tracer only
+      - name: Materialize corrected Phase259 tracer
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('scripts/259_kgsl_node_lifetime_trace.py')
-          s = p.read_text()
-
-          def one(old, new, label):
-              global s
-              n = s.count(old)
-              if n != 1:
-                  raise SystemExit(f'{label}: expected 1 occurrence, got {n}')
-              s = s.replace(old, new, 1)
-
-          # Give every new helper a Phase259-specific trace prefix so it cannot
-          # collide with older experimental helpers.
-          names = {
-              'a52_r259_is_kgsl_dentry': 'a52_r259_trace_kgsl_dentry_match',
-              'a52_r259_current_mnt_ns': 'a52_r259_trace_nsproxy_id',
-              'a52_r259_mknod_begin': 'a52_r259_trace_kgsl_mknod_begin',
-              'a52_r259_mknod_end': 'a52_r259_trace_kgsl_mknod_end',
-              'a52_r259_unlink_begin': 'a52_r259_trace_kgsl_unlink_begin',
-              'a52_r259_unlink_end': 'a52_r259_trace_kgsl_unlink_end',
-              'a52_r259_rename_begin': 'a52_r259_trace_kgsl_rename_begin',
-              'a52_r259_rename_end': 'a52_r259_trace_kgsl_rename_end',
-              'a52_r259_kgsl_vfs_snapshot': 'a52_r259_trace_kgsl_vfs_snapshot',
-              'a52_r259_kgsl_open_mount_snapshot': 'a52_r259_trace_kgsl_open_mount_snapshot',
-          }
-          for old, new in names.items():
-              if old not in s:
-                  raise SystemExit(f'missing helper token {old}')
-              s = s.replace(old, new)
-
-          one(
-              ' * no userspace pathname is copied or dereferenced by this instrumentation.\n */',
-              ' * no userspace pathname is copied or dereferenced by this instrumentation.\n * Namespace identity is the opaque nsproxy pointer; dev_t values are logged raw.\n */',
-              'state comment')
-
-          one(
-              'static int a52_r259_mk_major;\nstatic int a52_r259_mk_minor;\nstatic unsigned int a52_r259_mk_sb_major;\nstatic unsigned int a52_r259_mk_sb_minor;',
-              'static unsigned long a52_r259_mk_dev;\nstatic unsigned long a52_r259_mk_sbdev;',
-              'raw dev state')
-
-          one(
-              '\\treturn (unsigned long)(current->nsproxy ? current->nsproxy->mnt_ns : NULL);',
-              '\\treturn (unsigned long)current->nsproxy;',
-              'opaque nsproxy identity')
-
-          one(
-              '\\tWRITE_ONCE(a52_r259_mk_major, MAJOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_minor, MINOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_major, MAJOR(dir->i_sb->s_dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_minor, MINOR(dir->i_sb->s_dev));',
-              '\\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);\n\\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);',
-              'mknod begin raw dev state')
-
-          one(
-              '\\ta52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o M=%u m=%u sM=%u sm=%u",\n\\t\\tn, current->pid, current->comm, mode, MAJOR(dev), MINOR(dev),\n\\t\\tMAJOR(dir->i_sb->s_dev), MINOR(dir->i_sb->s_dev));',
-              '\\ta52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o dev=%lx sb=%lx ns=%lx",\n\\t\\tn, current->pid, current->comm, mode, (unsigned long)dev,\n\\t\\t(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());',
-              'mknod begin raw log')
-
-          one(
-              '\\tWRITE_ONCE(a52_r259_mk_major, MAJOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_minor, MINOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_major, MAJOR(dir->i_sb->s_dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_minor, MINOR(dir->i_sb->s_dev));',
-              '\\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);\n\\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);',
-              'mknod end raw dev state')
-
-          one(
-              '\\ta52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s M=%u m=%u ino=%lu ns=%lx",\n\\t\\trc, current->pid, current->comm, MAJOR(dev), MINOR(dev),\n\\t\\tdir->i_ino, a52_r259_trace_nsproxy_id());',
-              '\\ta52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s dev=%lx sb=%lx ino=%lu ns=%lx",\n\\t\\trc, current->pid, current->comm, (unsigned long)dev,\n\\t\\t(unsigned long)dir->i_sb->s_dev, dir->i_ino,\n\\t\\ta52_r259_trace_nsproxy_id());',
-              'mknod end raw log')
-
-          one(
-              '\\ta52_ackfr_record("F259 v1 kc=%d kr=%d M=%d m=%d sM=%u sm=%u ino=%lu",\n\\t\\tatomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),\n\\t\\tREAD_ONCE(a52_r259_mk_major), READ_ONCE(a52_r259_mk_minor),\n\\t\\tREAD_ONCE(a52_r259_mk_sb_major), READ_ONCE(a52_r259_mk_sb_minor),\n\\t\\tREAD_ONCE(a52_r259_mk_dir_ino));',
-              '\\ta52_ackfr_record("F259 v1 kc=%d kr=%d dev=%lx sb=%lx ino=%lu",\n\\t\\tatomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),\n\\t\\tREAD_ONCE(a52_r259_mk_dev), READ_ONCE(a52_r259_mk_sbdev),\n\\t\\tREAD_ONCE(a52_r259_mk_dir_ino));',
-              'snapshot raw log')
-
-          one(
-              '\\tunsigned int sb_major = 0;\n\\tunsigned int sb_minor = 0;\n\\tunsigned long dev_ino = 0;\n\\tunsigned long ns = (unsigned long)(current->nsproxy ?\n\\t\\tcurrent->nsproxy->mnt_ns : NULL);',
-              '\\tunsigned long sbdev = 0;\n\\tunsigned long dev_ino = 0;\n\\tunsigned long ns = (unsigned long)current->nsproxy;\n\\tstruct inode *node_inode = NULL;',
-              'open helper state')
-
-          one(
-              '\\t\\tsb_major = MAJOR(dev_path.dentry->d_sb->s_dev);\n\\t\\tsb_minor = MINOR(dev_path.dentry->d_sb->s_dev);',
-              '\\t\\tsbdev = (unsigned long)dev_path.dentry->d_sb->s_dev;',
-              'open helper raw sb')
-
-          one(
-              '\\ta52_ackfr_record("F259 op o=%d dr=%d nr=%d sM=%u sm=%u ino=%lu ns=%lx",\n\\t\\topen_rc, dev_rc, node_rc, sb_major, sb_minor, dev_ino, ns);',
-              '\\ta52_ackfr_record("F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx",\n\\t\\topen_rc, dev_rc, node_rc, sbdev, dev_ino, ns);',
-              'open helper raw snapshot')
-
-          one(
-              '\\tif (!node_rc) {\n\\t\\tstruct inode *inode = d_inode(node_path.dentry);\n\\t\\ta52_ackfr_record("F259 on mo=%o M=%u m=%u ino=%lu sM=%u sm=%u",\n\\t\\t\\tinode ? inode->i_mode : 0,\n\\t\\t\\tinode ? MAJOR(inode->i_rdev) : 0,\n\\t\\t\\tinode ? MINOR(inode->i_rdev) : 0,\n\\t\\t\\tinode ? inode->i_ino : 0,\n\\t\\t\\tMAJOR(node_path.dentry->d_sb->s_dev),\n\\t\\t\\tMINOR(node_path.dentry->d_sb->s_dev));',
-              '\\tif (!node_rc) {\n\\t\\tnode_inode = d_inode(node_path.dentry);\n\\t\\ta52_ackfr_record("F259 on mo=%o rdev=%lx ino=%lu sb=%lx",\n\\t\\t\\tnode_inode ? node_inode->i_mode : 0,\n\\t\\t\\tnode_inode ? (unsigned long)node_inode->i_rdev : 0UL,\n\\t\\t\\tnode_inode ? node_inode->i_ino : 0,\n\\t\\t\\t(unsigned long)node_path.dentry->d_sb->s_dev);',
-              'open helper raw node')
-
-          # Fail closed if either compile-risk pattern survives in generated C.
-          guard = '''    if "a52_r257_kgsl_node_snapshot" in openc:\n        raise RuntimeError("Phase259 reintroduced removed Phase257 node snapshot")\n'''
-          if s.count(guard) != 1:
-              raise SystemExit('verify guard anchor drifted')
-          s = s.replace(guard, guard + '''    for forbidden in ("->mnt_ns", "MAJOR(", "MINOR("):\n        if forbidden in namei or forbidden in openc:\n            raise RuntimeError(f"Phase259 reintroduced compile-risk diagnostic pattern: {forbidden}")\n''', 1)
-
-          # The source overlay itself may contain the guard strings above, but
-          # the emitted kernel C must not contain them. Python syntax must pass.
-          p.write_text(s)
-          compile(p.read_text(), str(p), 'exec')
-          print('Phase259 tracer repair: PASS')
-          PY
-
+          cat > /tmp/phase259.py.gz.b64 <<'B64'
+          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
+          B64
+          sed -i 's/^[[:space:]]*//' /tmp/phase259.py.gz.b64
+          base64 -d /tmp/phase259.py.gz.b64 | gzip -d > scripts/259_kgsl_node_lifetime_trace.py
+          python3 -m py_compile scripts/259_kgsl_node_lifetime_trace.py
+          test "$(sha256sum scripts/259_kgsl_node_lifetime_trace.py | awk '{print $1}')" = "217c3c543be1aae2efe1dc9bd99a5c6fbdaac5c5f741a3cb93c9aa0a23652c21"
+          grep -q 'return (unsigned long)current->nsproxy;' scripts/259_kgsl_node_lifetime_trace.py
+          grep -q 'F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx' scripts/259_kgsl_node_lifetime_trace.py
+          grep -q 'F259 on mo=%o rdev=%lx ino=%lu sb=%lx' scripts/259_kgsl_node_lifetime_trace.py
+          echo 'Phase259 corrected tracer materialized and verified'
           git diff --check
-          git diff -- scripts/259_kgsl_node_lifetime_trace.py
-          python3 scripts/259_kgsl_node_lifetime_trace.py --self-test
 
       - name: Commit corrected tracer
         shell: bash
@@ -146,6 +50,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
-            --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Dispatched Phase259 corrected fast build"
+          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml --ref agent/a52-phase259-kgsl-node-lifetime-v1
+          echo 'Dispatched corrected Phase259 fast build'

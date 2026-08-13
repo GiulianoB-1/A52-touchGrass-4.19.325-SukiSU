@@ -1,4 +1,4 @@
-name: Phase259 one-shot tracer compile repair
+name: Phase259 finalize raw C whitespace
 
 on:
   push:
@@ -18,41 +18,67 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/a52-phase259-kgsl-node-lifetime-v1
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Materialize clean corrected Phase259 tracer
+      - name: Convert raw C template tab escapes to whitespace
         shell: bash
         run: |
           set -euo pipefail
-          git show HEAD^:.github/workflows/zz-259-fix-and-dispatch.yml \
-            | sed -n "/cat > \/tmp\/phase259.py.gz.b64 <<'B64'/,/^[[:space:]]*B64$/p" \
-            | sed '1d;$d;s/^[[:space:]]*//' > /tmp/phase259.py.gz.b64
-          test -s /tmp/phase259.py.gz.b64
-          base64 -d /tmp/phase259.py.gz.b64 | gzip -d > scripts/259_kgsl_node_lifetime_trace.py
-          sed -i 's/[[:blank:]]\+$//' scripts/259_kgsl_node_lifetime_trace.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('scripts/259_kgsl_node_lifetime_trace.py')
+          s = p.read_text()
+          literal_tab_escape = "\\t"
+          actual_tab = "\t"
+          total = 0
+
+          for name in ('STATE_BLOCK', 'OPEN_HELPER'):
+              marker = name + " = r'''"
+              start = s.index(marker)
+              end = s.index("\n'''", start)
+              block = s[start:end]
+              count = block.count(literal_tab_escape)
+              if count == 0:
+                  raise SystemExit(f'{name}: expected literal tab escapes, found none')
+              fixed = block.replace(literal_tab_escape, actual_tab)
+              if literal_tab_escape in fixed:
+                  raise SystemExit(f'{name}: literal tab escape survived')
+              s = s[:start] + fixed + s[end:]
+              total += count
+
+          if total < 20:
+              raise SystemExit(f'Phase259: unexpectedly low tab-fix count {total}')
+
+          p.write_text(s)
+          compile(s, str(p), 'exec')
+          print(f'Converted {total} raw-C literal tab escapes to real tabs')
+          PY
+
           python3 -m py_compile scripts/259_kgsl_node_lifetime_trace.py
-          test "$(sha256sum scripts/259_kgsl_node_lifetime_trace.py | awk '{print $1}')" = "e3d1cd80977014cceb4fbefcbe3c73c335d1b6da4971fe562406c9b942c35cb4"
+          python3 scripts/259_kgsl_node_lifetime_trace.py --self-test
+          git diff --check
           grep -q 'return (unsigned long)current->nsproxy;' scripts/259_kgsl_node_lifetime_trace.py
-          grep -q 'F259 mkb n=%u p=%d c=%.15s mo=%o dev=%lx sb=%lx ns=%lx' scripts/259_kgsl_node_lifetime_trace.py
           grep -q 'F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx' scripts/259_kgsl_node_lifetime_trace.py
           grep -q 'F259 on mo=%o rdev=%lx ino=%lu sb=%lx' scripts/259_kgsl_node_lifetime_trace.py
-          ! grep -q 'current->nsproxy->mnt_ns' scripts/259_kgsl_node_lifetime_trace.py
-          git diff --check
-          echo 'Phase259 corrected tracer materialized and verified'
+          echo "Corrected tracer sha256=$(sha256sum scripts/259_kgsl_node_lifetime_trace.py | awk '{print $1}')"
 
-      - name: Commit corrected tracer
+      - name: Commit source fix and remove one-shot workflow
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add scripts/259_kgsl_node_lifetime_trace.py
-          git commit -m "phase259: fix node lifetime tracer compile"
+          git rm .github/workflows/zz-259-fix-and-dispatch.yml
+          git commit -m "phase259: fix raw C template whitespace"
           git push origin HEAD:agent/a52-phase259-kgsl-node-lifetime-v1
 
-      - name: Dispatch corrected fast build
+      - name: Dispatch superseding fast build
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo 'Corrected Phase259 fast build dispatched'
+          echo 'Superseding corrected Phase259 build dispatched'

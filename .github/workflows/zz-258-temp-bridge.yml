@@ -1,3 +1,4 @@
+# registered trigger
 name: TEMP 258 bridge - materialize and dispatch A/B
 
 on:

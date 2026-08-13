@@ -12,8 +12,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TARGET = HERE / "259_kgsl_node_lifetime_trace.py"
-REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V1"
-PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V1"
+REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
+PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
 
 
 def load_target():
@@ -31,36 +31,50 @@ _orig_verify = m.verify
 
 
 def strip_time_dependency(state: str) -> str:
-    state = re.sub(r"\nstatic u64 a52_r259_(?:mk|ul|rn)_ns_time;", "", state)
-    state = re.sub(
-        r"\n\\tWRITE_ONCE\(a52_r259_(?:mk|ul|rn)_ns_time, ktime_get_ns\(\)\);",
-        "",
-        state,
+    """Remove only Phase259's diagnostic timestamps, independent of whitespace."""
+    state = state.replace(
+        'F259 v2 kns=%lx kt=%llu uc=%d ur=%d uns=%lx ut=%llu',
+        'F259 v2 kns=%lx uc=%d ur=%d uns=%lx',
+        1,
     )
-    old_v2 = r'''\ta52_ackfr_record("F259 v2 kns=%lx kt=%llu uc=%d ur=%d uns=%lx ut=%llu",
-\t\tREAD_ONCE(a52_r259_mk_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_mk_ns_time) / 1000000ULL),
-\t\tatomic_read(&a52_r259_ul_count), READ_ONCE(a52_r259_ul_rc),
-\t\tREAD_ONCE(a52_r259_ul_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_ul_ns_time) / 1000000ULL));'''
-    new_v2 = r'''\ta52_ackfr_record("F259 v2 kns=%lx uc=%d ur=%d uns=%lx",
-\t\tREAD_ONCE(a52_r259_mk_ns),
-\t\tatomic_read(&a52_r259_ul_count), READ_ONCE(a52_r259_ul_rc),
-\t\tREAD_ONCE(a52_r259_ul_ns));'''
-    old_v3 = r'''\ta52_ackfr_record("F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx rt=%llu",
-\t\tatomic_read(&a52_r259_rn_count), READ_ONCE(a52_r259_rn_rc),
-\t\tREAD_ONCE(a52_r259_rn_old), READ_ONCE(a52_r259_rn_new),
-\t\tREAD_ONCE(a52_r259_rn_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_rn_ns_time) / 1000000ULL));'''
-    new_v3 = r'''\ta52_ackfr_record("F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx",
-\t\tatomic_read(&a52_r259_rn_count), READ_ONCE(a52_r259_rn_rc),
-\t\tREAD_ONCE(a52_r259_rn_old), READ_ONCE(a52_r259_rn_new),
-\t\tREAD_ONCE(a52_r259_rn_ns));'''
-    if old_v2 not in state or old_v3 not in state:
-        raise RuntimeError("Phase259 time snapshot anchors drifted")
-    state = state.replace(old_v2, new_v2, 1).replace(old_v3, new_v3, 1)
+    state = state.replace(
+        'F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx rt=%llu',
+        'F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx',
+        1,
+    )
+
+    # The final timestamp is also the final argument, so first turn the
+    # preceding namespace argument into the call terminator. This is written
+    # whitespace-agnostically because STATE_BLOCK may contain literal tabs.
+    state, ul_n = re.subn(
+        r'(?m)^(\s*READ_ONCE\(a52_r259_ul_ns\)),\s*\n\s*'
+        r'\(unsigned long long\)\(READ_ONCE\(a52_r259_ul_ns_time\) / 1000000ULL\)\);',
+        r'\1);',
+        state,
+        count=1,
+    )
+    state, rn_n = re.subn(
+        r'(?m)^(\s*READ_ONCE\(a52_r259_rn_ns\)),\s*\n\s*'
+        r'\(unsigned long long\)\(READ_ONCE\(a52_r259_rn_ns_time\) / 1000000ULL\)\);',
+        r'\1);',
+        state,
+        count=1,
+    )
+    if ul_n != 1 or rn_n != 1:
+        raise RuntimeError(
+            f"Phase259 final time-argument anchors drifted: ul={ul_n} rn={rn_n}"
+        )
+
+    # Every remaining line mentioning *_ns_time is either its declaration, a
+    # WRITE_ONCE timestamp update, or the non-final mk timestamp argument.
+    state = "".join(
+        line for line in state.splitlines(keepends=True) if "_ns_time" not in line
+    )
+
     if "ktime_get_ns" in state or "_ns_time" in state:
         raise RuntimeError("Phase259 time dependency survived repair")
+    if "kt=%llu" in state or "ut=%llu" in state or "rt=%llu" in state:
+        raise RuntimeError("Phase259 time format survived repair")
     return state
 
 
@@ -110,7 +124,7 @@ def repaired_verify(root: Path) -> None:
     _orig_verify(root)
     namei = (root / "fs/namei.c").read_text(encoding="utf-8")
     openc = (root / "fs/open.c").read_text(encoding="utf-8")
-    for forbidden in ("->mnt_ns", "MAJOR(", "MINOR(", "ktime_get_ns"):
+    for forbidden in ("->mnt_ns", "MAJOR(", "MINOR(", "ktime_get_ns", "_ns_time"):
         if forbidden in namei or forbidden in openc:
             raise RuntimeError(f"Phase259 compile repair failed: {forbidden}")
     first_use = min(

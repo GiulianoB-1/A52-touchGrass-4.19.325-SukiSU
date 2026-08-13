@@ -6,6 +6,7 @@ on:
       - agent/a52-phase259-kgsl-node-lifetime-v1
     paths:
       - .github/workflows/259-dispatch-bridge.yml
+      - scripts/259_compile_repair.py
 
 permissions:
   contents: read

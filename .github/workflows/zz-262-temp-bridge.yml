@@ -1,0 +1,25 @@
+name: Temporary Phase262 dispatch bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zz-262-temp-bridge.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch Phase262 A/B builder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref agent/a52-phase259-kgsl-node-lifetime-v1
+          echo "Phase262 build dispatched"

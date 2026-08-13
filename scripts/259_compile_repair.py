@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Compile-only repair shim for the Phase259 target-only KGSL trace.
+"""Compile-only repair shim for Phase259 plus the Phase260 spectrum overlay.
 
 Keeps the Phase258/259 experiment semantics intact while repairing generated-C
-ordering and removing an unnecessary timekeeping dependency.
+ordering and removing an unnecessary timekeeping dependency. After the repaired
+Phase259 source verifies, Phase260 adds the bounded VFS-to-KGSL fd/fops bridge
+and audits the inherited K248/K249 GPU/MMU corridor.
 """
 from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TARGET = HERE / "259_kgsl_node_lifetime_trace.py"
+PHASE260 = HERE / "260_kgsl_suspicion_spectrum.py"
 REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
 PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
 
@@ -25,7 +29,17 @@ def load_target():
     return mod
 
 
+def load_phase260():
+    spec = importlib.util.spec_from_file_location("a52_phase260_spectrum", PHASE260)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load Phase260 overlay: {PHASE260}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 m = load_target()
+p260 = load_phase260()
 _orig_patch_namei = m.patch_namei
 _orig_verify = m.verify
 
@@ -43,9 +57,6 @@ def strip_time_dependency(state: str) -> str:
         1,
     )
 
-    # The final timestamp is also the final argument, so first turn the
-    # preceding namespace argument into the call terminator. This is written
-    # whitespace-agnostically because STATE_BLOCK may contain literal tabs.
     state, ul_n = re.subn(
         r'(?m)^(\s*READ_ONCE\(a52_r259_ul_ns\)),\s*\n\s*'
         r'\(unsigned long long\)\(READ_ONCE\(a52_r259_ul_ns_time\) / 1000000ULL\)\);',
@@ -65,8 +76,6 @@ def strip_time_dependency(state: str) -> str:
             f"Phase259 final time-argument anchors drifted: ul={ul_n} rn={rn_n}"
         )
 
-    # Every remaining line mentioning *_ns_time is either its declaration, a
-    # WRITE_ONCE timestamp update, or the non-final mk timestamp argument.
     state = "".join(
         line for line in state.splitlines(keepends=True) if "_ns_time" not in line
     )
@@ -95,9 +104,6 @@ def repaired_patch_namei(path: Path) -> None:
     if missing:
         raise RuntimeError("Phase259 VFS anchors missing: " + ", ".join(missing))
 
-    # Put definitions before every instrumented function, then let the original
-    # Phase259 hooker add only its function-local calls. A placeholder prevents
-    # its idempotence guard from returning early.
     state = m.STATE_BLOCK.replace(m.NAMEI_MARKER, PLACEHOLDER, 1)
     insert = min(positions.values())
     path.write_text(text[:insert] + state + text[insert:], encoding="utf-8")
@@ -142,5 +148,19 @@ def repaired_verify(root: Path) -> None:
 m.verify = repaired_verify
 
 
+def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        m.self_test()
+        p260.self_test()
+        return 0
+
+    root = m.p257.locate(sys.argv[1:])
+    rc = m.main()
+    if rc:
+        return rc
+    p260.apply(root)
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(m.main())
+    raise SystemExit(main())

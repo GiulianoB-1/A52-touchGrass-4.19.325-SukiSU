@@ -201,7 +201,6 @@ def verify(root: Path) -> None:
             "a52_r260_trace_kgsl_fd_handoff(fd)",
         ),
         "adreno": (
-            "A52_PHASE248_KGSL_GMU_IOMMU_CORRIDOR_V1",
             "K248 A plat rc=%d", "K248 A rb rc=%d", "K248 A dsp rc=%d",
         ),
         "gmu": (

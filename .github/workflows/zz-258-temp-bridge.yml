@@ -1,0 +1,55 @@
+name: TEMP 258 bridge - materialize and dispatch A/B
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/zz-258-temp-bridge.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bridge:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out Phase258 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase258-no-namei-ab-v1
+          fetch-depth: 0
+
+      - name: Materialize Phase258 A/B build path
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/258_materialize_ab_build.py
+          git diff --check
+
+      - name: Commit materialized Phase258 build path
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/255_phase254_postboot_visibility_overlay.py \
+                  .github/workflows/257-fast-a52-kgsl-publication-rebuild.yml
+          git commit -m 'Materialize Phase 258 no-namei A/B build path'
+          git push origin HEAD:agent/a52-phase258-no-namei-ab-v1
+
+      - name: Dispatch registered fast workflow on Phase258 branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail-with-body -sS -L \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/257-fast-a52-kgsl-publication-rebuild.yml/dispatches" \
+            -d '{"ref":"agent/a52-phase258-no-namei-ab-v1"}'
+          echo 'Phase258 A/B compile dispatched'

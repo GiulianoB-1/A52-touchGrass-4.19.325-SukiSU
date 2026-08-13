@@ -1,0 +1,62 @@
+name: 257 one-shot repair - nested NUL escape
+
+on:
+  push:
+    branches:
+      - agent/a52-phase257-kgsl-publication-pipeline-v1
+    paths:
+      - .github/workflows/257-self-fix-nul-escape.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out Phase 257 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase257-kgsl-publication-pipeline-v1
+          fetch-depth: 0
+
+      - name: Repair nested Python to C NUL escaping
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/257_namei_510_patcher_repair.py')
+          text = path.read_text(encoding='utf-8')
+          old = "    user_helper = '''/* A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1 */\n"
+          new = "    user_helper = r'''/* A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1 */\n"
+          count = text.count(old)
+          if count == 1:
+              text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+          elif new in text:
+              print('Phase 257 raw-string NUL repair already present')
+          else:
+              raise SystemExit(f'expected one user_helper anchor, found {count}')
+
+          compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          print('Phase 257 nested NUL escape repair validated')
+          PY
+
+          git diff --check
+          git diff -- scripts/257_namei_510_patcher_repair.py
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if git diff --quiet -- scripts/257_namei_510_patcher_repair.py; then
+            echo 'No repair commit required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/257_namei_510_patcher_repair.py
+          git commit -m 'Fix Phase 257 nested NUL escaping'
+          git push origin HEAD:agent/a52-phase257-kgsl-publication-pipeline-v1

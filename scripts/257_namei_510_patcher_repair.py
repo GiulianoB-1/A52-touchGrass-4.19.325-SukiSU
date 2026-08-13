@@ -116,7 +116,7 @@ static void a52_r257_kgsl_node_event(int op, const char *name,
 
     user_anchor = '''void a52_r257_kgsl_node_snapshot(void)
 '''
-    user_helper = '''/* A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1 */
+    user_helper = r'''/* A52_PHASE257_NAMEI_ANDROID510_SYSCALL_REPAIR_V1 */
 static void a52_r257_kgsl_user_node_event(int op, const char __user *name,
 \t\tint rc, umode_t mode, dev_t dev)
 {

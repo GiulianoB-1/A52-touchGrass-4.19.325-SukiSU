@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile-only repair shim for Phase259 plus the Phase260/261 overlays."""
+"""Compile-only repair shim for Phase259 plus Phase260-263 overlays."""
 from __future__ import annotations
 
 import importlib.util
@@ -11,42 +11,42 @@ HERE = Path(__file__).resolve().parent
 TARGET = HERE / "259_kgsl_node_lifetime_trace.py"
 PHASE260 = HERE / "260_kgsl_suspicion_spectrum.py"
 PHASE261 = HERE / "261_kgsl_open_rootcause.py"
+PHASE263 = HERE / "263_a615_zap_pil_parity.py"
 REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
 PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
 PHASE261_OBSERVE_ONLY = "A52_PHASE261_QCOM_WDT_OBSERVE_ONLY_V1"
 PHASE262_MARKER = "A52_PHASE262_FW_LOADER_FALLBACK_AB_V1"
 
 
-def load_target():
-    spec = importlib.util.spec_from_file_location("a52_phase259_repaired", TARGET)
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load Phase259 target: {TARGET}")
+        raise RuntimeError(f"cannot load overlay: {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def load_target():
+    return load_module("a52_phase259_repaired", TARGET)
 
 
 def load_phase260():
-    spec = importlib.util.spec_from_file_location("a52_phase260_spectrum", PHASE260)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load Phase260 overlay: {PHASE260}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module("a52_phase260_spectrum", PHASE260)
 
 
 def load_phase261():
-    spec = importlib.util.spec_from_file_location("a52_phase261_rootcause", PHASE261)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load Phase261 overlay: {PHASE261}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module("a52_phase261_rootcause", PHASE261)
+
+
+def load_phase263():
+    return load_module("a52_phase263_a615_zap_pil", PHASE263)
 
 
 m = load_target()
 p260 = load_phase260()
 p261 = load_phase261()
+p263 = load_phase263()
 _orig_patch_namei = m.patch_namei
 _orig_verify = m.verify
 
@@ -176,6 +176,7 @@ def main() -> int:
         m.self_test()
         p260.self_test()
         p261.self_test()
+        p263.self_test()
         sample = "\n".join((
             "CONFIG_FW_LOADER=y",
             "CONFIG_FW_LOADER_USER_HELPER=y",
@@ -202,6 +203,7 @@ def main() -> int:
     p261.watchdog = phase261_observe_only
     p261.apply(root)
     phase262_apply(root)
+    p263.apply(root)
     return 0
 
 

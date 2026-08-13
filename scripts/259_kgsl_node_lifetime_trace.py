@@ -118,130 +118,130 @@ static u64 a52_r259_rn_ns_time;
 
 static bool a52_r259_trace_kgsl_dentry_match(const struct dentry *dentry)
 {
-\treturn dentry && dentry->d_name.len == 8 &&
-\t\t!memcmp(dentry->d_name.name, "kgsl-3d0", 8);
+	return dentry && dentry->d_name.len == 8 &&
+		!memcmp(dentry->d_name.name, "kgsl-3d0", 8);
 }
 
 static unsigned long a52_r259_trace_nsproxy_id(void)
 {
-\treturn (unsigned long)current->nsproxy;
+	return (unsigned long)current->nsproxy;
 }
 
 static void a52_r259_trace_kgsl_mknod_begin(struct inode *dir,
-\t\tstruct dentry *dentry, umode_t mode, dev_t dev)
+		struct dentry *dentry, umode_t mode, dev_t dev)
 {
-\tunsigned int n;
+	unsigned int n;
 
-\tif (!a52_r259_trace_kgsl_dentry_match(dentry))
-\t\treturn;
-\tn = atomic_inc_return(&a52_r259_mk_count);
-\tWRITE_ONCE(a52_r259_mk_rc, -EINPROGRESS);
-\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);
-\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);
-\tWRITE_ONCE(a52_r259_mk_dir_ino, dir->i_ino);
-\tWRITE_ONCE(a52_r259_mk_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_mk_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o dev=%lx sb=%lx ns=%lx",
-\t\tn, current->pid, current->comm, mode, (unsigned long)dev,
-\t\t(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());
+	if (!a52_r259_trace_kgsl_dentry_match(dentry))
+		return;
+	n = atomic_inc_return(&a52_r259_mk_count);
+	WRITE_ONCE(a52_r259_mk_rc, -EINPROGRESS);
+	WRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);
+	WRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);
+	WRITE_ONCE(a52_r259_mk_dir_ino, dir->i_ino);
+	WRITE_ONCE(a52_r259_mk_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_mk_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o dev=%lx sb=%lx ns=%lx",
+		n, current->pid, current->comm, mode, (unsigned long)dev,
+		(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());
 }
 
 static void a52_r259_trace_kgsl_mknod_end(struct inode *dir,
-\t\tstruct dentry *dentry, int rc, dev_t dev)
+		struct dentry *dentry, int rc, dev_t dev)
 {
-\tif (!a52_r259_trace_kgsl_dentry_match(dentry))
-\t\treturn;
-\tWRITE_ONCE(a52_r259_mk_rc, rc);
-\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);
-\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);
-\tWRITE_ONCE(a52_r259_mk_dir_ino, dir->i_ino);
-\tWRITE_ONCE(a52_r259_mk_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_mk_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s dev=%lx sb=%lx ino=%lu ns=%lx",
-\t\trc, current->pid, current->comm, (unsigned long)dev,
-\t\t(unsigned long)dir->i_sb->s_dev, dir->i_ino,
-\t\ta52_r259_trace_nsproxy_id());
+	if (!a52_r259_trace_kgsl_dentry_match(dentry))
+		return;
+	WRITE_ONCE(a52_r259_mk_rc, rc);
+	WRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);
+	WRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);
+	WRITE_ONCE(a52_r259_mk_dir_ino, dir->i_ino);
+	WRITE_ONCE(a52_r259_mk_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_mk_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s dev=%lx sb=%lx ino=%lu ns=%lx",
+		rc, current->pid, current->comm, (unsigned long)dev,
+		(unsigned long)dir->i_sb->s_dev, dir->i_ino,
+		a52_r259_trace_nsproxy_id());
 }
 
 static void a52_r259_trace_kgsl_unlink_begin(struct inode *dir,
-\t\tstruct dentry *dentry, int initial_rc)
+		struct dentry *dentry, int initial_rc)
 {
-\tunsigned int n;
+	unsigned int n;
 
-\tif (!a52_r259_trace_kgsl_dentry_match(dentry))
-\t\treturn;
-\tn = atomic_inc_return(&a52_r259_ul_count);
-\tWRITE_ONCE(a52_r259_ul_rc, initial_rc ? initial_rc : -EINPROGRESS);
-\tWRITE_ONCE(a52_r259_ul_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_ul_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 ulb n=%u e=%d p=%d c=%.15s ino=%lu sb=%lx ns=%lx",
-\t\tn, initial_rc, current->pid, current->comm, dir->i_ino,
-\t\t(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());
+	if (!a52_r259_trace_kgsl_dentry_match(dentry))
+		return;
+	n = atomic_inc_return(&a52_r259_ul_count);
+	WRITE_ONCE(a52_r259_ul_rc, initial_rc ? initial_rc : -EINPROGRESS);
+	WRITE_ONCE(a52_r259_ul_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_ul_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 ulb n=%u e=%d p=%d c=%.15s ino=%lu sb=%lx ns=%lx",
+		n, initial_rc, current->pid, current->comm, dir->i_ino,
+		(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());
 }
 
 static void a52_r259_trace_kgsl_unlink_end(struct dentry *dentry, int rc)
 {
-\tif (!a52_r259_trace_kgsl_dentry_match(dentry))
-\t\treturn;
-\tWRITE_ONCE(a52_r259_ul_rc, rc);
-\tWRITE_ONCE(a52_r259_ul_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_ul_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 ulx rc=%d p=%d c=%.15s ns=%lx",
-\t\trc, current->pid, current->comm, a52_r259_trace_nsproxy_id());
+	if (!a52_r259_trace_kgsl_dentry_match(dentry))
+		return;
+	WRITE_ONCE(a52_r259_ul_rc, rc);
+	WRITE_ONCE(a52_r259_ul_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_ul_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 ulx rc=%d p=%d c=%.15s ns=%lx",
+		rc, current->pid, current->comm, a52_r259_trace_nsproxy_id());
 }
 
 static void a52_r259_trace_kgsl_rename_begin(struct dentry *old_dentry,
-\t\tstruct dentry *new_dentry)
+		struct dentry *new_dentry)
 {
-\tint old_hit = a52_r259_trace_kgsl_dentry_match(old_dentry) ? 1 : 0;
-\tint new_hit = a52_r259_trace_kgsl_dentry_match(new_dentry) ? 1 : 0;
-\tunsigned int n;
+	int old_hit = a52_r259_trace_kgsl_dentry_match(old_dentry) ? 1 : 0;
+	int new_hit = a52_r259_trace_kgsl_dentry_match(new_dentry) ? 1 : 0;
+	unsigned int n;
 
-\tif (!old_hit && !new_hit)
-\t\treturn;
-\tn = atomic_inc_return(&a52_r259_rn_count);
-\tWRITE_ONCE(a52_r259_rn_rc, -EINPROGRESS);
-\tWRITE_ONCE(a52_r259_rn_old, old_hit);
-\tWRITE_ONCE(a52_r259_rn_new, new_hit);
-\tWRITE_ONCE(a52_r259_rn_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_rn_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 rnb n=%u o=%d d=%d p=%d c=%.15s ns=%lx",
-\t\tn, old_hit, new_hit, current->pid, current->comm,
-\t\ta52_r259_trace_nsproxy_id());
+	if (!old_hit && !new_hit)
+		return;
+	n = atomic_inc_return(&a52_r259_rn_count);
+	WRITE_ONCE(a52_r259_rn_rc, -EINPROGRESS);
+	WRITE_ONCE(a52_r259_rn_old, old_hit);
+	WRITE_ONCE(a52_r259_rn_new, new_hit);
+	WRITE_ONCE(a52_r259_rn_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_rn_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 rnb n=%u o=%d d=%d p=%d c=%.15s ns=%lx",
+		n, old_hit, new_hit, current->pid, current->comm,
+		a52_r259_trace_nsproxy_id());
 }
 
 static void a52_r259_trace_kgsl_rename_end(struct dentry *old_dentry,
-\t\tstruct dentry *new_dentry, int rc)
+		struct dentry *new_dentry, int rc)
 {
-\tif (!a52_r259_trace_kgsl_dentry_match(old_dentry) &&
-\t    !a52_r259_trace_kgsl_dentry_match(new_dentry))
-\t\treturn;
-\tWRITE_ONCE(a52_r259_rn_rc, rc);
-\tWRITE_ONCE(a52_r259_rn_ns, a52_r259_trace_nsproxy_id());
-\tWRITE_ONCE(a52_r259_rn_ns_time, ktime_get_ns());
-\ta52_ackfr_record("F259 rnx rc=%d o=%d d=%d p=%d c=%.15s ns=%lx",
-\t\trc, a52_r259_trace_kgsl_dentry_match(old_dentry) ? 1 : 0,
-\t\ta52_r259_trace_kgsl_dentry_match(new_dentry) ? 1 : 0,
-\t\tcurrent->pid, current->comm, a52_r259_trace_nsproxy_id());
+	if (!a52_r259_trace_kgsl_dentry_match(old_dentry) &&
+	    !a52_r259_trace_kgsl_dentry_match(new_dentry))
+		return;
+	WRITE_ONCE(a52_r259_rn_rc, rc);
+	WRITE_ONCE(a52_r259_rn_ns, a52_r259_trace_nsproxy_id());
+	WRITE_ONCE(a52_r259_rn_ns_time, ktime_get_ns());
+	a52_ackfr_record("F259 rnx rc=%d o=%d d=%d p=%d c=%.15s ns=%lx",
+		rc, a52_r259_trace_kgsl_dentry_match(old_dentry) ? 1 : 0,
+		a52_r259_trace_kgsl_dentry_match(new_dentry) ? 1 : 0,
+		current->pid, current->comm, a52_r259_trace_nsproxy_id());
 }
 
 void a52_r259_trace_kgsl_vfs_snapshot(void)
 {
-\ta52_ackfr_record("F259 v1 kc=%d kr=%d dev=%lx sb=%lx ino=%lu",
-\t\tatomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),
-\t\tREAD_ONCE(a52_r259_mk_dev), READ_ONCE(a52_r259_mk_sbdev),
-\t\tREAD_ONCE(a52_r259_mk_dir_ino));
-\ta52_ackfr_record("F259 v2 kns=%lx kt=%llu uc=%d ur=%d uns=%lx ut=%llu",
-\t\tREAD_ONCE(a52_r259_mk_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_mk_ns_time) / 1000000ULL),
-\t\tatomic_read(&a52_r259_ul_count), READ_ONCE(a52_r259_ul_rc),
-\t\tREAD_ONCE(a52_r259_ul_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_ul_ns_time) / 1000000ULL));
-\ta52_ackfr_record("F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx rt=%llu",
-\t\tatomic_read(&a52_r259_rn_count), READ_ONCE(a52_r259_rn_rc),
-\t\tREAD_ONCE(a52_r259_rn_old), READ_ONCE(a52_r259_rn_new),
-\t\tREAD_ONCE(a52_r259_rn_ns),
-\t\t(unsigned long long)(READ_ONCE(a52_r259_rn_ns_time) / 1000000ULL));
+	a52_ackfr_record("F259 v1 kc=%d kr=%d dev=%lx sb=%lx ino=%lu",
+		atomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),
+		READ_ONCE(a52_r259_mk_dev), READ_ONCE(a52_r259_mk_sbdev),
+		READ_ONCE(a52_r259_mk_dir_ino));
+	a52_ackfr_record("F259 v2 kns=%lx kt=%llu uc=%d ur=%d uns=%lx ut=%llu",
+		READ_ONCE(a52_r259_mk_ns),
+		(unsigned long long)(READ_ONCE(a52_r259_mk_ns_time) / 1000000ULL),
+		atomic_read(&a52_r259_ul_count), READ_ONCE(a52_r259_ul_rc),
+		READ_ONCE(a52_r259_ul_ns),
+		(unsigned long long)(READ_ONCE(a52_r259_ul_ns_time) / 1000000ULL));
+	a52_ackfr_record("F259 v3 rc=%d rr=%d ro=%d rn=%d rns=%lx rt=%llu",
+		atomic_read(&a52_r259_rn_count), READ_ONCE(a52_r259_rn_rc),
+		READ_ONCE(a52_r259_rn_old), READ_ONCE(a52_r259_rn_new),
+		READ_ONCE(a52_r259_rn_ns),
+		(unsigned long long)(READ_ONCE(a52_r259_rn_ns_time) / 1000000ULL));
 }
 
 '''
@@ -337,35 +337,35 @@ extern void a52_r259_trace_kgsl_vfs_snapshot(void);
 
 static void a52_r259_trace_kgsl_open_mount_snapshot(int open_rc)
 {
-\tstruct path dev_path;
-\tstruct path node_path;
-\tint dev_rc;
-\tint node_rc;
-\tunsigned long sbdev = 0;
-\tunsigned long dev_ino = 0;
-\tunsigned long ns = (unsigned long)current->nsproxy;
-\tstruct inode *node_inode = NULL;
+	struct path dev_path;
+	struct path node_path;
+	int dev_rc;
+	int node_rc;
+	unsigned long sbdev = 0;
+	unsigned long dev_ino = 0;
+	unsigned long ns = (unsigned long)current->nsproxy;
+	struct inode *node_inode = NULL;
 
-\tdev_rc = kern_path("/dev", LOOKUP_FOLLOW, &dev_path);
-\tif (!dev_rc) {
-\t\tsbdev = (unsigned long)dev_path.dentry->d_sb->s_dev;
-\t\tif (d_inode(dev_path.dentry))
-\t\t\tdev_ino = d_inode(dev_path.dentry)->i_ino;
-\t}
-\tnode_rc = kern_path("/dev/kgsl-3d0", LOOKUP_FOLLOW, &node_path);
-\ta52_ackfr_record("F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx",
-\t\topen_rc, dev_rc, node_rc, sbdev, dev_ino, ns);
-\tif (!node_rc) {
-\t\tnode_inode = d_inode(node_path.dentry);
-\t\ta52_ackfr_record("F259 on mo=%o rdev=%lx ino=%lu sb=%lx",
-\t\t\tnode_inode ? node_inode->i_mode : 0,
-\t\t\tnode_inode ? (unsigned long)node_inode->i_rdev : 0UL,
-\t\t\tnode_inode ? node_inode->i_ino : 0,
-\t\t\t(unsigned long)node_path.dentry->d_sb->s_dev);
-\t\tpath_put(&node_path);
-\t}
-\tif (!dev_rc)
-\t\tpath_put(&dev_path);
+	dev_rc = kern_path("/dev", LOOKUP_FOLLOW, &dev_path);
+	if (!dev_rc) {
+		sbdev = (unsigned long)dev_path.dentry->d_sb->s_dev;
+		if (d_inode(dev_path.dentry))
+			dev_ino = d_inode(dev_path.dentry)->i_ino;
+	}
+	node_rc = kern_path("/dev/kgsl-3d0", LOOKUP_FOLLOW, &node_path);
+	a52_ackfr_record("F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx",
+		open_rc, dev_rc, node_rc, sbdev, dev_ino, ns);
+	if (!node_rc) {
+		node_inode = d_inode(node_path.dentry);
+		a52_ackfr_record("F259 on mo=%o rdev=%lx ino=%lu sb=%lx",
+			node_inode ? node_inode->i_mode : 0,
+			node_inode ? (unsigned long)node_inode->i_rdev : 0UL,
+			node_inode ? node_inode->i_ino : 0,
+			(unsigned long)node_path.dentry->d_sb->s_dev);
+		path_put(&node_path);
+	}
+	if (!dev_rc)
+		path_put(&dev_path);
 }
 
 '''

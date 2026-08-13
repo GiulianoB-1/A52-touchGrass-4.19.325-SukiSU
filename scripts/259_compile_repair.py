@@ -13,6 +13,7 @@ PHASE260 = HERE / "260_kgsl_suspicion_spectrum.py"
 PHASE261 = HERE / "261_kgsl_open_rootcause.py"
 REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
 PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
+PHASE261_OBSERVE_ONLY = "A52_PHASE261_QCOM_WDT_OBSERVE_ONLY_V1"
 
 
 def load_target():
@@ -125,6 +126,12 @@ def repaired_verify(root: Path) -> None:
 m.verify = repaired_verify
 
 
+def phase261_observe_only(source: str) -> str:
+    if PHASE261_OBSERVE_ONLY in source:
+        return source
+    return f"/* {PHASE261_OBSERVE_ONLY}: no functional watchdog changes */\n" + source
+
+
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         m.self_test()
@@ -136,6 +143,8 @@ def main() -> int:
     if rc:
         return rc
     p260.apply(root)
+    p261.WDT = PHASE261_OBSERVE_ONLY
+    p261.watchdog = phase261_observe_only
     p261.apply(root)
     return 0
 

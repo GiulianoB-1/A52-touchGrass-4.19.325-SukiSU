@@ -29,7 +29,7 @@ RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 MARKER = "A52_PHASE255_POSTBOOT_VISIBILITY_V1"
 PHASE256 = Path(__file__).resolve().parent / "256_phase255_kgsl_devnode_framework_overlay.py"
 PHASE256_CLOSURE = Path(__file__).resolve().parent / "256_devfreq_import_closure.py"
-PHASE257 = Path(__file__).resolve().parent / "257_phase256_kgsl_publication_pipeline_overlay.py"
+PHASE257 = Path(__file__).resolve().parent / "258_phase257_no_namei_ab.py"
 PHASE257_CHAIN_MARKER = "A52_PHASE257_COMMITTED_CHILD_BUILD_CHAIN_V1"
 
 FORMAT_ANCHOR = 'if (strncmp(fmt, "K254", 4) &&\n'

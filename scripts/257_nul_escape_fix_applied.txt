@@ -1,0 +1,4 @@
+Phase 257 Run 12 compile repair marker.
+
+The nested Python generator now preserves the C NUL character literal as \\0 until generated fs/namei.c is written.
+Repair commit: a0cb17c24d1852a21e8fed0f264823f636bc2d1d

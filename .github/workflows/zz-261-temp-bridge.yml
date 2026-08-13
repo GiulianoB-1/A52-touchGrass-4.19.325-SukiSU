@@ -1,0 +1,25 @@
+name: Temporary Phase261 dispatch bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zz-261-temp-bridge.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch Phase261 fast builder on Phase259 branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref agent/a52-phase259-kgsl-node-lifetime-v1
+          echo "Phase261 fast build dispatched"

@@ -1,0 +1,59 @@
+name: 257 diagnostic - extract failed compile log
+
+run-name: Extract Phase 257 compile failure from job 94294815158
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase257-kgsl-publication-pipeline-v1
+    paths:
+      - .github/workflows/257-extract-failed-compile-log.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download exact failed job log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: '94294815158'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p phase257-compile-diagnostic
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${JOB_ID}/logs" \
+            -o phase257-compile-diagnostic/job-94294815158.log
+
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('phase257-compile-diagnostic/job-94294815158.log')
+          text = src.read_text(errors='replace')
+          lines = text.splitlines()
+          needles = ('error:', 'fatal error:', 'undefined reference', 'FAILED:', 'make[', 'Error ')
+          hits = []
+          for i, line in enumerate(lines):
+              if any(n in line for n in needles):
+                  lo = max(0, i - 4)
+                  hi = min(len(lines), i + 8)
+                  hits.append('\n'.join(lines[lo:hi]))
+          out = '\n\n===== MATCH =====\n\n'.join(hits[:40])
+          Path('phase257-compile-diagnostic/compiler-errors.txt').write_text(out + ('\n' if out else 'NO MATCHING ERROR LINES FOUND\n'))
+          print('=== compiler error extraction ===')
+          print(out[:20000] if out else 'NO MATCHING ERROR LINES FOUND')
+          PY
+
+      - name: Upload exact compile diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase257-COMPILE-LOG-94294815158
+          path: phase257-compile-diagnostic/
+          if-no-files-found: error
+          retention-days: 7

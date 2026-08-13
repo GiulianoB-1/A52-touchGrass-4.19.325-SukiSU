@@ -1,0 +1,151 @@
+name: Phase259 one-shot tracer compile repair
+
+on:
+  push:
+    branches:
+      - agent/a52-phase259-kgsl-node-lifetime-v1
+    paths:
+      - .github/workflows/zz-259-fix-and-dispatch.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase259-kgsl-node-lifetime-v1
+          fetch-depth: 0
+
+      - name: Repair Phase259 tracer only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('scripts/259_kgsl_node_lifetime_trace.py')
+          s = p.read_text()
+
+          def one(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, got {n}')
+              s = s.replace(old, new, 1)
+
+          # Give every new helper a Phase259-specific trace prefix so it cannot
+          # collide with older experimental helpers.
+          names = {
+              'a52_r259_is_kgsl_dentry': 'a52_r259_trace_kgsl_dentry_match',
+              'a52_r259_current_mnt_ns': 'a52_r259_trace_nsproxy_id',
+              'a52_r259_mknod_begin': 'a52_r259_trace_kgsl_mknod_begin',
+              'a52_r259_mknod_end': 'a52_r259_trace_kgsl_mknod_end',
+              'a52_r259_unlink_begin': 'a52_r259_trace_kgsl_unlink_begin',
+              'a52_r259_unlink_end': 'a52_r259_trace_kgsl_unlink_end',
+              'a52_r259_rename_begin': 'a52_r259_trace_kgsl_rename_begin',
+              'a52_r259_rename_end': 'a52_r259_trace_kgsl_rename_end',
+              'a52_r259_kgsl_vfs_snapshot': 'a52_r259_trace_kgsl_vfs_snapshot',
+              'a52_r259_kgsl_open_mount_snapshot': 'a52_r259_trace_kgsl_open_mount_snapshot',
+          }
+          for old, new in names.items():
+              if old not in s:
+                  raise SystemExit(f'missing helper token {old}')
+              s = s.replace(old, new)
+
+          one(
+              ' * no userspace pathname is copied or dereferenced by this instrumentation.\n */',
+              ' * no userspace pathname is copied or dereferenced by this instrumentation.\n * Namespace identity is the opaque nsproxy pointer; dev_t values are logged raw.\n */',
+              'state comment')
+
+          one(
+              'static int a52_r259_mk_major;\nstatic int a52_r259_mk_minor;\nstatic unsigned int a52_r259_mk_sb_major;\nstatic unsigned int a52_r259_mk_sb_minor;',
+              'static unsigned long a52_r259_mk_dev;\nstatic unsigned long a52_r259_mk_sbdev;',
+              'raw dev state')
+
+          one(
+              '\\treturn (unsigned long)(current->nsproxy ? current->nsproxy->mnt_ns : NULL);',
+              '\\treturn (unsigned long)current->nsproxy;',
+              'opaque nsproxy identity')
+
+          one(
+              '\\tWRITE_ONCE(a52_r259_mk_major, MAJOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_minor, MINOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_major, MAJOR(dir->i_sb->s_dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_minor, MINOR(dir->i_sb->s_dev));',
+              '\\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);\n\\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);',
+              'mknod begin raw dev state')
+
+          one(
+              '\\ta52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o M=%u m=%u sM=%u sm=%u",\n\\t\\tn, current->pid, current->comm, mode, MAJOR(dev), MINOR(dev),\n\\t\\tMAJOR(dir->i_sb->s_dev), MINOR(dir->i_sb->s_dev));',
+              '\\ta52_ackfr_record("F259 mkb n=%u p=%d c=%.15s mo=%o dev=%lx sb=%lx ns=%lx",\n\\t\\tn, current->pid, current->comm, mode, (unsigned long)dev,\n\\t\\t(unsigned long)dir->i_sb->s_dev, a52_r259_trace_nsproxy_id());',
+              'mknod begin raw log')
+
+          one(
+              '\\tWRITE_ONCE(a52_r259_mk_major, MAJOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_minor, MINOR(dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_major, MAJOR(dir->i_sb->s_dev));\n\\tWRITE_ONCE(a52_r259_mk_sb_minor, MINOR(dir->i_sb->s_dev));',
+              '\\tWRITE_ONCE(a52_r259_mk_dev, (unsigned long)dev);\n\\tWRITE_ONCE(a52_r259_mk_sbdev, (unsigned long)dir->i_sb->s_dev);',
+              'mknod end raw dev state')
+
+          one(
+              '\\ta52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s M=%u m=%u ino=%lu ns=%lx",\n\\t\\trc, current->pid, current->comm, MAJOR(dev), MINOR(dev),\n\\t\\tdir->i_ino, a52_r259_trace_nsproxy_id());',
+              '\\ta52_ackfr_record("F259 mkx rc=%d p=%d c=%.15s dev=%lx sb=%lx ino=%lu ns=%lx",\n\\t\\trc, current->pid, current->comm, (unsigned long)dev,\n\\t\\t(unsigned long)dir->i_sb->s_dev, dir->i_ino,\n\\t\\ta52_r259_trace_nsproxy_id());',
+              'mknod end raw log')
+
+          one(
+              '\\ta52_ackfr_record("F259 v1 kc=%d kr=%d M=%d m=%d sM=%u sm=%u ino=%lu",\n\\t\\tatomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),\n\\t\\tREAD_ONCE(a52_r259_mk_major), READ_ONCE(a52_r259_mk_minor),\n\\t\\tREAD_ONCE(a52_r259_mk_sb_major), READ_ONCE(a52_r259_mk_sb_minor),\n\\t\\tREAD_ONCE(a52_r259_mk_dir_ino));',
+              '\\ta52_ackfr_record("F259 v1 kc=%d kr=%d dev=%lx sb=%lx ino=%lu",\n\\t\\tatomic_read(&a52_r259_mk_count), READ_ONCE(a52_r259_mk_rc),\n\\t\\tREAD_ONCE(a52_r259_mk_dev), READ_ONCE(a52_r259_mk_sbdev),\n\\t\\tREAD_ONCE(a52_r259_mk_dir_ino));',
+              'snapshot raw log')
+
+          one(
+              '\\tunsigned int sb_major = 0;\n\\tunsigned int sb_minor = 0;\n\\tunsigned long dev_ino = 0;\n\\tunsigned long ns = (unsigned long)(current->nsproxy ?\n\\t\\tcurrent->nsproxy->mnt_ns : NULL);',
+              '\\tunsigned long sbdev = 0;\n\\tunsigned long dev_ino = 0;\n\\tunsigned long ns = (unsigned long)current->nsproxy;\n\\tstruct inode *node_inode = NULL;',
+              'open helper state')
+
+          one(
+              '\\t\\tsb_major = MAJOR(dev_path.dentry->d_sb->s_dev);\n\\t\\tsb_minor = MINOR(dev_path.dentry->d_sb->s_dev);',
+              '\\t\\tsbdev = (unsigned long)dev_path.dentry->d_sb->s_dev;',
+              'open helper raw sb')
+
+          one(
+              '\\ta52_ackfr_record("F259 op o=%d dr=%d nr=%d sM=%u sm=%u ino=%lu ns=%lx",\n\\t\\topen_rc, dev_rc, node_rc, sb_major, sb_minor, dev_ino, ns);',
+              '\\ta52_ackfr_record("F259 op o=%d dr=%d nr=%d sb=%lx ino=%lu ns=%lx",\n\\t\\topen_rc, dev_rc, node_rc, sbdev, dev_ino, ns);',
+              'open helper raw snapshot')
+
+          one(
+              '\\tif (!node_rc) {\n\\t\\tstruct inode *inode = d_inode(node_path.dentry);\n\\t\\ta52_ackfr_record("F259 on mo=%o M=%u m=%u ino=%lu sM=%u sm=%u",\n\\t\\t\\tinode ? inode->i_mode : 0,\n\\t\\t\\tinode ? MAJOR(inode->i_rdev) : 0,\n\\t\\t\\tinode ? MINOR(inode->i_rdev) : 0,\n\\t\\t\\tinode ? inode->i_ino : 0,\n\\t\\t\\tMAJOR(node_path.dentry->d_sb->s_dev),\n\\t\\t\\tMINOR(node_path.dentry->d_sb->s_dev));',
+              '\\tif (!node_rc) {\n\\t\\tnode_inode = d_inode(node_path.dentry);\n\\t\\ta52_ackfr_record("F259 on mo=%o rdev=%lx ino=%lu sb=%lx",\n\\t\\t\\tnode_inode ? node_inode->i_mode : 0,\n\\t\\t\\tnode_inode ? (unsigned long)node_inode->i_rdev : 0UL,\n\\t\\t\\tnode_inode ? node_inode->i_ino : 0,\n\\t\\t\\t(unsigned long)node_path.dentry->d_sb->s_dev);',
+              'open helper raw node')
+
+          # Fail closed if either compile-risk pattern survives in generated C.
+          guard = '''    if "a52_r257_kgsl_node_snapshot" in openc:\n        raise RuntimeError("Phase259 reintroduced removed Phase257 node snapshot")\n'''
+          if s.count(guard) != 1:
+              raise SystemExit('verify guard anchor drifted')
+          s = s.replace(guard, guard + '''    for forbidden in ("->mnt_ns", "MAJOR(", "MINOR("):\n        if forbidden in namei or forbidden in openc:\n            raise RuntimeError(f"Phase259 reintroduced compile-risk diagnostic pattern: {forbidden}")\n''', 1)
+
+          # The source overlay itself may contain the guard strings above, but
+          # the emitted kernel C must not contain them. Python syntax must pass.
+          p.write_text(s)
+          compile(p.read_text(), str(p), 'exec')
+          print('Phase259 tracer repair: PASS')
+          PY
+
+          git diff --check
+          git diff -- scripts/259_kgsl_node_lifetime_trace.py
+          python3 scripts/259_kgsl_node_lifetime_trace.py --self-test
+
+      - name: Commit corrected tracer
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/259_kgsl_node_lifetime_trace.py
+          git commit -m "phase259: fix node lifetime tracer compile"
+          git push origin HEAD:agent/a52-phase259-kgsl-node-lifetime-v1
+
+      - name: Dispatch corrected fast build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
+            --ref agent/a52-phase259-kgsl-node-lifetime-v1
+          echo "Dispatched Phase259 corrected fast build"

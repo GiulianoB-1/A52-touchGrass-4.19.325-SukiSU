@@ -11,17 +11,24 @@ Phase258 therefore inserts one inert __used const-char sentinel block in namei.c
 containing those strings. It has no callsite, no state, no syscall hook, and no
 runtime side effect; it exists only to satisfy the already-proven CI audit.
 
+The one-compile rerun path starts from a pre-Phase221 config snapshot, so this
+A/B also explicitly restores the already hardware-proven Phase221
+CONFIG_CHR_DEV_SG=y setting before the final olddefconfig/compile. This is not a
+new Phase258 behavior change; it repairs build-path parity with native Phase256.
+
 No KGSL, GPU, IOMMU, devtmpfs, SELinux, ramdisk, ueventd, major/minor, or return
 value semantics are changed.
 """
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BASE = HERE / "257_phase256_kgsl_publication_pipeline_overlay.py"
+SG_RESTORE = HERE / "258_restore_phase221_sg_config.py"
 AB_MARKER = "A52_PHASE258_NO_NAMEI_AB_V1"
 CI_SENTINEL = "A52_PHASE258_NAMEI_INERT_CI_SENTINELS_V1"
 
@@ -45,8 +52,6 @@ def patch_namei_inert_audit(path: Path) -> None:
     if CI_SENTINEL in text:
         return
 
-    # Fail closed if any executable Phase257 node instrumentation is already
-    # present. Phase258 may only add inert data strings to the pre-257 namei.
     for token in (
         "a52_r257_kgsl_node_event",
         "a52_r257_kgsl_node_snapshot",
@@ -162,8 +167,6 @@ def verify(root: Path) -> None:
         "a52_r257_unlink_count",
         "ktime_get_ns()",
     ):
-        # ktime_get_ns() can legitimately exist elsewhere in namei.c on some
-        # trees, so only enforce it within the sentinel neighborhood below.
         if forbidden != "ktime_get_ns()" and forbidden in namei:
             raise RuntimeError(f"Phase258 verification fs/namei.c: live token {forbidden!r}")
     sentinel_pos = namei.index(CI_SENTINEL)
@@ -201,12 +204,26 @@ def self_test() -> None:
     )
 
 
+def restore_phase221_sg_config() -> None:
+    if not SG_RESTORE.is_file():
+        raise RuntimeError(f"missing Phase221 SG restore helper: {SG_RESTORE}")
+    config = Path.cwd() / "workspace/gki-phase199-out/.config"
+    subprocess.run(
+        [sys.executable, str(SG_RESTORE), str(config)],
+        check=True,
+    )
+    text = config.read_text(encoding="utf-8")
+    if "CONFIG_CHR_DEV_SG=y\n" not in text:
+        raise RuntimeError("Phase258 fast-path parity failed: CONFIG_CHR_DEV_SG=y absent")
+
+
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         self_test()
         return 0
 
     root = p257.locate(sys.argv[1:])
+    restore_phase221_sg_config()
     p257.patch_recorder(root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c")
     p257.patch_core(root / "drivers/base/core.c")
     patch_namei_inert_audit(root / "fs/namei.c")
@@ -215,7 +232,8 @@ def main() -> int:
 
     print(
         f"{AB_MARKER}: Phase257 publication tracing retained; "
-        "live Phase257 namei mknod/unlink instrumentation removed",
+        "live Phase257 namei mknod/unlink instrumentation removed; "
+        "Phase221 CONFIG_CHR_DEV_SG=y restored",
         flush=True,
     )
     return 0

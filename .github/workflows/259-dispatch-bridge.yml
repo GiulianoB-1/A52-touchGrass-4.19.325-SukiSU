@@ -1,0 +1,28 @@
+name: 259 dispatch bridge
+
+on:
+  push:
+    branches:
+      - agent/a52-phase259-kgsl-node-lifetime-v1
+    paths:
+      - .github/workflows/259-dispatch-bridge.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-phase259:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch fast rebuild at Phase259 head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          curl -fL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/257-fast-a52-kgsl-publication-rebuild.yml/dispatches" \
+            -d '{"ref":"agent/a52-phase259-kgsl-node-lifetime-v1"}'

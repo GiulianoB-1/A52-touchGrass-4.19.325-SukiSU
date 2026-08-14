@@ -1,0 +1,168 @@
+name: Phase263 provider-only smoke compile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zz-263-provider-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+
+jobs:
+  provider-smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out Phase263 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/a52-phase259-kgsl-node-lifetime-v1
+
+      - name: Prepare cumulative scripts
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py scripts/218_phase217_wrapper_phase226.py
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 scripts/257_namei_510_patcher_repair.py
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download Phase227 seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+
+      - name: Reconstruct through Phase263
+        run: |
+          set -Eeuo pipefail
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+
+          ROOT=gki/common
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
+          git -C "$ROOT" apply /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase216.config artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+          python3 scripts/227_phase226_retention_wrapper.py "$ROOT"
+
+      - name: Compile only Phase263 provider closure
+        id: provider
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+          mkdir -p phase263-provider-smoke
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          set +e
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" drivers/a52_pil/ \
+            2>&1 | tee phase263-provider-smoke/provider-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          log = Path('phase263-provider-smoke/provider-build.log').read_text(errors='replace')
+          lines = log.splitlines()
+          pat = re.compile(r'(fatal error:|\berror:|undefined reference|No such file or directory|ld\.lld: error:)', re.I)
+          hits = [i for i, line in enumerate(lines) if pat.search(line)]
+          if hits:
+              i = hits[0]
+              text = '\n'.join(lines[max(0, i-35):min(len(lines), i+100)]) + '\n'
+          else:
+              text = 'NO PROVIDER ERROR TOKEN FOUND\n' + '\n'.join(lines[-250:]) + '\n'
+          Path('phase263-provider-smoke/first-errors.txt').write_text(text)
+          print(text)
+          PY
+
+          exit "$status"
+
+      - name: Upload provider smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHASE263-PROVIDER-SMOKE-${{ github.run_number }}
+          path: phase263-provider-smoke/
+          if-no-files-found: warn
+          retention-days: 7

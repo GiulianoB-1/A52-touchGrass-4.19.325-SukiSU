@@ -95,6 +95,8 @@ jobs:
           unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
 
       - name: Reconstruct through Phase263
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           test -d workspace/touchgrass-a52xq/.git

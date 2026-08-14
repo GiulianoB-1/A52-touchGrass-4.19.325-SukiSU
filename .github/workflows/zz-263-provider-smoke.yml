@@ -170,3 +170,5 @@ jobs:
           path: phase263-provider-smoke/
           if-no-files-found: warn
           retention-days: 7
+
+# Smoke nonce: 20260814-elf-verifier-r4

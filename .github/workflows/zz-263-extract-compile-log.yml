@@ -1,0 +1,63 @@
+name: Phase263 compile-log extractor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zz-263-extract-compile-log.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Extract failed Phase263 compiler log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN: '31790022194'
+          FAILED_JOB: '94734600499'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p phase263-diagnostics
+          gh run view "$FAILED_RUN" \
+            --repo "$GITHUB_REPOSITORY" \
+            --job "$FAILED_JOB" \
+            --log > phase263-diagnostics/job.log
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          src = Path('phase263-diagnostics/job.log')
+          text = src.read_text(errors='replace')
+          patterns = (
+              r'fatal error:',
+              r'\berror:',
+              r'undefined reference',
+              r'ld\.lld: error',
+              r'collect2: error',
+          )
+          lines = text.splitlines()
+          hits = []
+          for i, line in enumerate(lines):
+              if any(re.search(p, line, re.I) for p in patterns):
+                  lo = max(0, i - 4)
+                  hi = min(len(lines), i + 8)
+                  hits.append('\n'.join(lines[lo:hi]))
+          Path('phase263-diagnostics/errors.txt').write_text(
+              ('\n\n===== ERROR CONTEXT =====\n\n'.join(hits) if hits else 'NO ERROR PATTERN FOUND\n'),
+              encoding='utf-8',
+          )
+          print(Path('phase263-diagnostics/errors.txt').read_text())
+          PY
+
+      - name: Upload Phase263 compiler diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: Phase263-compiler-diagnostics
+          path: phase263-diagnostics/
+          if-no-files-found: error
+          retention-days: 7

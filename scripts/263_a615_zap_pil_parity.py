@@ -7,10 +7,10 @@ headers, but the matching legacy PIL/subsystem provider objects were never
 staged into the GKI build. This overlay imports only the provider closure
 needed by qcom,pil-tz-generic and enables the three matching Golden symbols.
 
-Phase262 briefly carried a direct-SCM A615 ZAP loader experiment. Phase263
-supersedes that experiment with the Golden PIL/SSR provider path, so the stale
-direct helper must be removed before compile rather than hidden with an
-unused-function annotation.
+A prior cumulative experiment carried a direct-SCM A615 ZAP loader. Phase263
+supersedes that experiment with the Golden PIL/SSR provider path, so stale
+static declarations and the stale static definition must be removed before
+compile rather than hidden with an unused-function annotation.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def set_config(path: Path, symbol: str) -> None:
 
 
 def c_identifier_positions(source: str, name: str) -> list[int]:
-    """Return identifier occurrences in live C text, ignoring comments/strings."""
+    """Return identifier occurrences in C text, ignoring comments and literals."""
     positions: list[int] = []
     i = 0
     mode = "normal"
@@ -149,36 +149,20 @@ def c_identifier_positions(source: str, name: str) -> list[int]:
     return positions
 
 
-def strip_named_c_function(source: str, name: str) -> str:
-    """Remove exactly one stale static C definition, ignoring textual mentions."""
-    raw_hits = source.count(name)
-    code_hits = c_identifier_positions(source, name)
-    if not code_hits:
-        return source
-    if len(code_hits) != 1:
-        raise RuntimeError(
-            f"Phase263 refuses to remove {name}: expected one live C identifier, "
-            f"found {len(code_hits)} live / {raw_hits} textual occurrences"
-        )
+def skip_ws(source: str, pos: int) -> int:
+    while pos < len(source) and source[pos].isspace():
+        pos += 1
+    return pos
 
-    name_pos = code_hits[0]
-    line_start = source.rfind("\n", 0, name_pos) + 1
-    prefix = source[line_start:name_pos]
-    if "static" not in prefix.split():
-        raise RuntimeError(f"Phase263 {name} live occurrence is not a static function definition")
 
-    brace = source.find("{", name_pos)
-    if brace < 0:
-        raise RuntimeError(f"Phase263 {name} definition opening brace missing")
-    semicolon = source.find(";", name_pos, brace)
-    if semicolon >= 0:
-        raise RuntimeError(f"Phase263 {name} looks like a declaration/call, not a definition")
-
+def scan_balanced_c(source: str, start: int, opener: str, closer: str) -> int:
+    """Return the offset after one balanced C delimiter region."""
+    if start >= len(source) or source[start] != opener:
+        raise RuntimeError(f"Phase263 internal parser expected {opener!r} at {start}")
     depth = 0
-    i = brace
+    i = start
     mode = "normal"
     escaped = False
-    end = -1
     while i < len(source):
         ch = source[i]
         nxt = source[i + 1] if i + 1 < len(source) else ""
@@ -215,26 +199,86 @@ def strip_named_c_function(source: str, name: str) -> str:
                 mode = "string"
             elif ch == "'":
                 mode = "char"
-            elif ch == "{":
+            elif ch == opener:
                 depth += 1
-            elif ch == "}":
+            elif ch == closer:
                 depth -= 1
                 if depth == 0:
-                    end = i + 1
-                    break
+                    return i + 1
         i += 1
+    raise RuntimeError(f"Phase263 unbalanced {opener}{closer} while parsing stale SCM helper")
 
-    if end < 0:
-        raise RuntimeError(f"Phase263 {name} definition closing brace missing")
 
-    while end < len(source) and source[end] in " \t":
-        end += 1
-    if end < len(source) and source[end] == "\n":
-        end += 1
-    if end < len(source) and source[end] == "\n":
-        end += 1
+def stale_static_span(source: str, name: str, name_pos: int) -> tuple[str, int, int]:
+    """Classify one live identifier as a static prototype or static definition."""
+    line_start = source.rfind("\n", 0, name_pos) + 1
+    line_end = source.find("\n", name_pos)
+    if line_end < 0:
+        line_end = len(source)
+    prefix = source[line_start:name_pos]
+    line_no = source.count("\n", 0, name_pos) + 1
+    if "static" not in prefix.split():
+        context = source[line_start:line_end].strip()
+        raise RuntimeError(
+            f"Phase263 refuses to remove live {name} use at line {line_no}: {context!r}"
+        )
 
-    out = source[:line_start] + source[end:]
+    pos = skip_ws(source, name_pos + len(name))
+    if pos >= len(source) or source[pos] != "(":
+        context = source[line_start:line_end].strip()
+        raise RuntimeError(
+            f"Phase263 {name} at line {line_no} is not a function declaration/definition: {context!r}"
+        )
+    params_end = scan_balanced_c(source, pos, "(", ")")
+    suffix = skip_ws(source, params_end)
+    if suffix >= len(source):
+        raise RuntimeError(f"Phase263 {name} at line {line_no} ends unexpectedly")
+
+    if source[suffix] == ";":
+        end = suffix + 1
+        while end < len(source) and source[end] in " \t":
+            end += 1
+        if end < len(source) and source[end] == "\n":
+            end += 1
+        return "prototype", line_start, end
+
+    if source[suffix] == "{":
+        end = scan_balanced_c(source, suffix, "{", "}")
+        while end < len(source) and source[end] in " \t":
+            end += 1
+        if end < len(source) and source[end] == "\n":
+            end += 1
+        if end < len(source) and source[end] == "\n":
+            end += 1
+        return "definition", line_start, end
+
+    context = source[line_start:line_end].strip()
+    raise RuntimeError(
+        f"Phase263 refuses unexpected {name} construct at line {line_no}: {context!r}"
+    )
+
+
+def strip_named_static_function_contract(source: str, name: str) -> str:
+    """Remove stale static prototypes plus exactly one stale static definition."""
+    raw_hits = source.count(name)
+    code_hits = c_identifier_positions(source, name)
+    if not code_hits:
+        return source
+
+    spans = [stale_static_span(source, name, pos) for pos in code_hits]
+    definitions = [span for span in spans if span[0] == "definition"]
+    prototypes = [span for span in spans if span[0] == "prototype"]
+    if len(definitions) != 1:
+        raise RuntimeError(
+            f"Phase263 refuses to remove {name}: expected exactly one static definition, "
+            f"found definitions={len(definitions)} prototypes={len(prototypes)} "
+            f"live={len(code_hits)} textual={raw_hits}"
+        )
+
+    out = source
+    for _kind, start, end in sorted(spans, key=lambda span: span[1], reverse=True):
+        out = out[:start] + out[end:]
+
     survivors = c_identifier_positions(out, name)
     if survivors:
         raise RuntimeError(
@@ -248,14 +292,15 @@ def remove_superseded_direct_scm(root: Path) -> None:
     if not path.is_file():
         raise RuntimeError(f"Phase263 adreno source missing: {path}")
     before = path.read_text(encoding="utf-8")
-    if not c_identifier_positions(before, STALE_SCM_HELPER):
+    live_before = c_identifier_positions(before, STALE_SCM_HELPER)
+    if not live_before:
         print(f"Phase263: {STALE_SCM_HELPER} already absent from live C", flush=True)
         return
-    after = strip_named_c_function(before, STALE_SCM_HELPER)
+    after = strip_named_static_function_contract(before, STALE_SCM_HELPER)
     path.write_text(after, encoding="utf-8")
     print(
-        f"Phase263: removed superseded Phase262 helper {STALE_SCM_HELPER} "
-        f"(textual mentions before={before.count(STALE_SCM_HELPER)})",
+        f"Phase263: removed superseded direct-SCM contract {STALE_SCM_HELPER} "
+        f"(live before={len(live_before)}, textual before={before.count(STALE_SCM_HELPER)})",
         flush=True,
     )
 
@@ -272,22 +317,22 @@ def self_test() -> None:
         "CONFIG_MSM_PIL_SSR_GENERIC=y",
     )
 
-    sample = '''static int a52_a615_zap_scm_load(void *p)\n{\n\tif (p) {\n\t\tpr_info("a52_a615_zap_scm_load brace } in string");\n\t}\n\treturn 0;\n}\n\n/* a52_a615_zap_scm_load was experimental */\nstatic int keep_me(void)\n{\n\treturn 1;\n}\n'''
-    assert sample.count(STALE_SCM_HELPER) == 3
-    assert len(c_identifier_positions(sample, STALE_SCM_HELPER)) == 1
-    stripped = strip_named_c_function(sample, STALE_SCM_HELPER)
+    sample = '''static int a52_a615_zap_scm_load(void *p);\n\nstatic int a52_a615_zap_scm_load(void *p)\n{\n\tif (p) {\n\t\tpr_info("a52_a615_zap_scm_load brace } in string");\n\t}\n\treturn 0;\n}\n\n/* a52_a615_zap_scm_load was experimental */\nstatic int keep_me(void)\n{\n\treturn 1;\n}\n'''
+    assert sample.count(STALE_SCM_HELPER) == 4
+    assert len(c_identifier_positions(sample, STALE_SCM_HELPER)) == 2
+    stripped = strip_named_static_function_contract(sample, STALE_SCM_HELPER)
     assert len(c_identifier_positions(stripped, STALE_SCM_HELPER)) == 0
     assert "a52_a615_zap_scm_load was experimental" in stripped
     assert "static int keep_me(void)" in stripped
-    assert strip_named_c_function(stripped, STALE_SCM_HELPER) == stripped
+    assert strip_named_static_function_contract(stripped, STALE_SCM_HELPER) == stripped
 
     live_call = sample + '''\nstatic int bad_reference(void)\n{\n\treturn a52_a615_zap_scm_load(NULL);\n}\n'''
     try:
-        strip_named_c_function(live_call, STALE_SCM_HELPER)
+        strip_named_static_function_contract(live_call, STALE_SCM_HELPER)
     except RuntimeError:
         pass
     else:
-        raise AssertionError("Phase263 live stale helper reference guard did not fail closed")
+        raise AssertionError("Phase263 executable stale helper reference guard did not fail closed")
 
     print("Phase 263 A615 ZAP PIL provider parity self-test: PASS", flush=True)
 
@@ -307,9 +352,6 @@ def apply(root: Path) -> None:
     if missing:
         raise RuntimeError("Phase263 TouchGrass source closure missing: " + ", ".join(missing))
 
-    # Phase263 replaces the experimental direct-SCM ZAP path with the Golden
-    # subsystem/PIL provider. Do this before compile so -Werror cannot stop on
-    # the now-unused Phase262 helper.
     remove_superseded_direct_scm(root)
 
     dst = root / "drivers/a52_pil"
@@ -337,7 +379,6 @@ def apply(root: Path) -> None:
     for line in CONFIGS:
         set_config(cfg, line[len("CONFIG_"):].split("=", 1)[0])
 
-    # Fail closed on the actual secure-ZAP contract we intend to restore.
     tz = (dst / "subsys-pil-tz.c").read_text(encoding="utf-8")
     sr = (dst / "subsystem_restart.c").read_text(encoding="utf-8")
     pl = (dst / "peripheral-loader.c").read_text(encoding="utf-8")

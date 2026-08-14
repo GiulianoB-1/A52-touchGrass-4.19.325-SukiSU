@@ -14,12 +14,12 @@ jobs:
   dispatch:
     runs-on: ubuntu-22.04
     steps:
-      - name: Dispatch Phase263 provider parity builder
+      - name: Dispatch Phase263 A615 ZAP PIL parity builder
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
+          gh workflow run 263-a52-a615-zap-pil-parity-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 GKI 5.10 compatibility build dispatched: 8c12a6a295a49b936257dab6f15ab963fb1a4260"
+          echo "Phase263 A615 ZAP PIL/SSR parity build dispatched from branch head b47fb57ff1c0603184a7d06abf487835a5d3680b"

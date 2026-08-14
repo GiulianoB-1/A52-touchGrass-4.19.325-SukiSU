@@ -1,0 +1,62 @@
+name: Phase263 extract failed compiler diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zz-263-extract-94716137324.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Extract first compiler diagnostics from failed Phase263 run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN_ID: '31784128103'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p phase263-log-diagnostics
+
+          # gh returns non-zero for a failed run; preserve the log regardless.
+          gh run view "$FAILED_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --log-failed > phase263-log-diagnostics/failed-step.log 2>&1 || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          src = Path('phase263-log-diagnostics/failed-step.log')
+          out = Path('phase263-log-diagnostics/first-errors.txt')
+          text = src.read_text(errors='replace') if src.exists() else ''
+          lines = text.splitlines()
+          pat = re.compile(r'(fatal error:|\berror:|undefined reference|No such file or directory|ld\.lld: error:)', re.I)
+          hits = [i for i, line in enumerate(lines) if pat.search(line)]
+          if not hits:
+              rendered = 'NO ERROR TOKEN FOUND\n\n' + '\n'.join(lines[-250:]) + '\n'
+          else:
+              first = hits[0]
+              lo = max(0, first - 35)
+              hi = min(len(lines), first + 90)
+              rendered = (
+                  f'FIRST_ERROR_LINE_INDEX={first + 1}\n'
+                  f'TOTAL_MATCHES={len(hits)}\n\n' +
+                  '\n'.join(lines[lo:hi]) + '\n'
+              )
+          out.write_text(rendered)
+          print(rendered)
+          PY
+
+      - name: Upload concise Phase263 compiler diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHASE263-FIRST-COMPILER-ERROR-94716137324
+          path: phase263-log-diagnostics/
+          if-no-files-found: error
+          retention-days: 7

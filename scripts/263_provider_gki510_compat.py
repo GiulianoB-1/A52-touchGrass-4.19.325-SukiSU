@@ -127,7 +127,7 @@ def patch_ramdump(path: Path) -> None:
         "DMA_ATTR_SKIP_ZEROING",
         "dma_remap(rd_dev->dev->parent",
         "dma_unremap(rd_dev->dev->parent",
-        "elf_str_table(ehdr)",
+        "char *strtab = elf_str_table(ehdr);",
     )
     for token in forbidden:
         if token in text:

@@ -22,4 +22,4 @@ jobs:
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 repaired build dispatched: acdd34bfb5b28f2625abeb23961eb35337e409d7"
+          echo "Phase263 C-aware repair dispatched: 5004955e8d6b7f60c60277aaf259d39ea4a70c27"

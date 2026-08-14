@@ -78,28 +78,101 @@ def set_config(path: Path, symbol: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def c_identifier_positions(source: str, name: str) -> list[int]:
+    """Return identifier occurrences in live C text, ignoring comments/strings."""
+    positions: list[int] = []
+    i = 0
+    mode = "normal"
+    escaped = False
+    while i < len(source):
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < len(source) else ""
+
+        if mode == "line_comment":
+            if ch == "\n":
+                mode = "normal"
+            i += 1
+            continue
+        if mode == "block_comment":
+            if ch == "*" and nxt == "/":
+                mode = "normal"
+                i += 2
+            else:
+                i += 1
+            continue
+        if mode == "string":
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                mode = "normal"
+            i += 1
+            continue
+        if mode == "char":
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                mode = "normal"
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            mode = "line_comment"
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            mode = "block_comment"
+            i += 2
+            continue
+        if ch == '"':
+            mode = "string"
+            escaped = False
+            i += 1
+            continue
+        if ch == "'":
+            mode = "char"
+            escaped = False
+            i += 1
+            continue
+        if ch == "_" or ch.isalpha():
+            start = i
+            i += 1
+            while i < len(source) and (source[i] == "_" or source[i].isalnum()):
+                i += 1
+            if source[start:i] == name:
+                positions.append(start)
+            continue
+        i += 1
+    return positions
+
+
 def strip_named_c_function(source: str, name: str) -> str:
-    """Remove one stale static C function definition, with brace-aware parsing."""
-    hits = source.count(name)
-    if hits == 0:
+    """Remove exactly one stale static C definition, ignoring textual mentions."""
+    raw_hits = source.count(name)
+    code_hits = c_identifier_positions(source, name)
+    if not code_hits:
         return source
-    if hits != 1:
+    if len(code_hits) != 1:
         raise RuntimeError(
-            f"Phase263 refuses to remove {name}: expected one stale definition, found {hits} references"
+            f"Phase263 refuses to remove {name}: expected one live C identifier, "
+            f"found {len(code_hits)} live / {raw_hits} textual occurrences"
         )
 
-    name_pos = source.find(name)
+    name_pos = code_hits[0]
     line_start = source.rfind("\n", 0, name_pos) + 1
     prefix = source[line_start:name_pos]
-    if "static" not in prefix:
-        raise RuntimeError(f"Phase263 {name} occurrence is not a static function definition")
+    if "static" not in prefix.split():
+        raise RuntimeError(f"Phase263 {name} live occurrence is not a static function definition")
 
     brace = source.find("{", name_pos)
     if brace < 0:
         raise RuntimeError(f"Phase263 {name} definition opening brace missing")
     semicolon = source.find(";", name_pos, brace)
     if semicolon >= 0:
-        raise RuntimeError(f"Phase263 {name} looks like a declaration, not a definition")
+        raise RuntimeError(f"Phase263 {name} looks like a declaration/call, not a definition")
 
     depth = 0
     i = brace
@@ -162,8 +235,11 @@ def strip_named_c_function(source: str, name: str) -> str:
         end += 1
 
     out = source[:line_start] + source[end:]
-    if name in out:
-        raise RuntimeError(f"Phase263 stale helper survived removal: {name}")
+    survivors = c_identifier_positions(out, name)
+    if survivors:
+        raise RuntimeError(
+            f"Phase263 live stale helper reference survived removal: {name} count={len(survivors)}"
+        )
     return out
 
 
@@ -172,12 +248,16 @@ def remove_superseded_direct_scm(root: Path) -> None:
     if not path.is_file():
         raise RuntimeError(f"Phase263 adreno source missing: {path}")
     before = path.read_text(encoding="utf-8")
-    if STALE_SCM_HELPER not in before:
-        print(f"Phase263: {STALE_SCM_HELPER} already absent", flush=True)
+    if not c_identifier_positions(before, STALE_SCM_HELPER):
+        print(f"Phase263: {STALE_SCM_HELPER} already absent from live C", flush=True)
         return
     after = strip_named_c_function(before, STALE_SCM_HELPER)
     path.write_text(after, encoding="utf-8")
-    print(f"Phase263: removed superseded Phase262 helper {STALE_SCM_HELPER}", flush=True)
+    print(
+        f"Phase263: removed superseded Phase262 helper {STALE_SCM_HELPER} "
+        f"(textual mentions before={before.count(STALE_SCM_HELPER)})",
+        flush=True,
+    )
 
 
 def self_test() -> None:
@@ -192,17 +272,22 @@ def self_test() -> None:
         "CONFIG_MSM_PIL_SSR_GENERIC=y",
     )
 
-    sample = '''static int a52_a615_zap_scm_load(void *p)\n{\n\tif (p) {\n\t\tpr_info("brace } in string");\n\t}\n\treturn 0;\n}\n\nstatic int keep_me(void)\n{\n\treturn 1;\n}\n'''
+    sample = '''static int a52_a615_zap_scm_load(void *p)\n{\n\tif (p) {\n\t\tpr_info("a52_a615_zap_scm_load brace } in string");\n\t}\n\treturn 0;\n}\n\n/* a52_a615_zap_scm_load was experimental */\nstatic int keep_me(void)\n{\n\treturn 1;\n}\n'''
+    assert sample.count(STALE_SCM_HELPER) == 3
+    assert len(c_identifier_positions(sample, STALE_SCM_HELPER)) == 1
     stripped = strip_named_c_function(sample, STALE_SCM_HELPER)
-    assert STALE_SCM_HELPER not in stripped
+    assert len(c_identifier_positions(stripped, STALE_SCM_HELPER)) == 0
+    assert "a52_a615_zap_scm_load was experimental" in stripped
     assert "static int keep_me(void)" in stripped
     assert strip_named_c_function(stripped, STALE_SCM_HELPER) == stripped
+
+    live_call = sample + '''\nstatic int bad_reference(void)\n{\n\treturn a52_a615_zap_scm_load(NULL);\n}\n'''
     try:
-        strip_named_c_function(sample + "\n/* a52_a615_zap_scm_load */\n", STALE_SCM_HELPER)
+        strip_named_c_function(live_call, STALE_SCM_HELPER)
     except RuntimeError:
         pass
     else:
-        raise AssertionError("Phase263 stale helper reference guard did not fail closed")
+        raise AssertionError("Phase263 live stale helper reference guard did not fail closed")
 
     print("Phase 263 A615 ZAP PIL provider parity self-test: PASS", flush=True)
 
@@ -270,8 +355,11 @@ def apply(root: Path) -> None:
             raise RuntimeError(f"Phase263 config did not apply: {line}")
 
     adreno = (root / "drivers/gpu/msm/adreno_a6xx.c").read_text(encoding="utf-8")
-    if STALE_SCM_HELPER in adreno:
-        raise RuntimeError("Phase263 superseded direct-SCM helper survived final verification")
+    survivors = c_identifier_positions(adreno, STALE_SCM_HELPER)
+    if survivors:
+        raise RuntimeError(
+            f"Phase263 superseded direct-SCM helper survived final verification: {len(survivors)} live references"
+        )
 
     print(f"{MARKER}: Golden A615 ZAP PIL/SSR provider staged", flush=True)
 

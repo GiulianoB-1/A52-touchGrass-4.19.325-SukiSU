@@ -1,0 +1,241 @@
+name: 264 - A52 FastRPC PDR parity compile gate
+
+run-name: Phase 264 - Golden FastRPC and PDR vendor ABI on Phase263
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase264-peripheral-parity-v1
+    paths:
+      - scripts/264_fastrpc_pdr_parity.py
+      - .github/workflows/264-a52-fastrpc-pdr-parity.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase264-fastrpc-pdr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE227_SEED_RUN_ID: '31644392197'
+
+jobs:
+  compile-gate:
+    name: Reconstruct Phase263 plus FastRPC/PDR and compile
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out Phase264 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare cumulative scripts
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py scripts/218_phase217_wrapper_phase226.py
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 scripts/257_namei_510_patcher_repair.py
+
+          python3 -m py_compile \
+            scripts/208_apply_secure_vmid.py \
+            scripts/210_apply_first_atomic_rs48.py \
+            scripts/211_apply_drm_client_trace.py \
+            scripts/212_apply_graphics_startup_trace.py \
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_namei_510_patcher_repair.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/259_compile_repair.py \
+            scripts/263_a615_zap_pil_parity.py \
+            scripts/263_a615_zap_pil_parity_base.py \
+            scripts/264_fastrpc_pdr_parity.py
+
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/263_a615_zap_pil_parity.py --self-test
+          python3 scripts/264_fastrpc_pdr_parity.py --self-test
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download proven Phase227 seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/phase227-seed')
+          ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
+          assert ident['phase'] == 227
+          assert str(ident['run_id']) == '31644392197'
+          assert (root / 'package/boot.img').is_file()
+          assert (root / 'config/before-phase216.config').is_file()
+          PY
+
+      - name: Reconstruct Phase206 source without compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+          test -f workspace/gki-phase199-out/.config
+
+      - name: Replay Phase208 through Phase216
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
+          git -C "$ROOT" apply --check /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          git -C "$ROOT" apply /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase216.config artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+
+      - name: Apply cumulative Phase217 through Phase264
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/227_phase226_retention_wrapper.py gki/common
+          python3 scripts/264_fastrpc_pdr_parity.py gki/common
+
+          ROOT=gki/common
+          grep -Fq 'A52_PHASE263_SSR_GKI510_API_V2' "$ROOT/drivers/a52_pil/subsystem_restart.c"
+          grep -Fq 'A52_PHASE264_FASTRPC_PDR_PARITY_V1' "$ROOT/drivers/a52_fastrpc/Makefile"
+          grep -Fq 'DEVICE_NAME      "adsprpc-smd"' "$ROOT/drivers/a52_fastrpc/adsprpc_shared.h"
+          grep -Fq 'AF_QIPCRTR' "$ROOT/drivers/a52_fastrpc/services/service-locator.c"
+
+      - name: Resolve config and compile Phase264
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          grep -Fxq 'CONFIG_MSM_ADSPRPC=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_A52_SERVICE_REGISTRY=y' "$OUT/.config"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" Image 2>&1 | tee phase264-build.log
+
+          test -s "$OUT/arch/arm64/boot/Image"
+          strings "$OUT/arch/arm64/boot/Image" | grep -Fq 'adsprpc-smd'
+
+      - name: Package Phase264 compile evidence
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase264-out
+          mkdir -p phase264-out/compile phase264-out/config phase264-out/audit
+          cp workspace/gki-phase199-out/arch/arm64/boot/Image phase264-out/compile/Image
+          cp workspace/gki-phase199-out/.config phase264-out/config/final.config
+          cp phase264-build.log phase264-out/compile/build.log
+          cp scripts/264_fastrpc_pdr_parity.py phase264-out/audit/
+          cp -a gki/common/drivers/a52_fastrpc phase264-out/audit/
+          printf '%s\n' \
+            'Phase264 FastRPC/PDR compile gate.' \
+            'NOT HARDWARE VALIDATED.' \
+            'Requires later audio/sensors/camera/modem producer layers.' \
+            > phase264-out/README-FIRST.txt
+
+      - name: Upload Phase264 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase264-FASTRPC-PDR-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase264-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase264 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase264-FAILURE-${{ github.run_number }}
+          path: |
+            workspace/gki-phase199-out/.config
+            phase264-build.log
+            gki/common/drivers/a52_fastrpc/
+          if-no-files-found: warn
+          retention-days: 7

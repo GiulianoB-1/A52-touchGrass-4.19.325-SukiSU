@@ -16,6 +16,14 @@ REPAIR_MARKER = "A52_PHASE259_COMPILE_REPAIR_V2"
 PLACEHOLDER = "A52_PHASE259_KERNEL_DENTRY_VFS_REPAIR_PLACEHOLDER_V2"
 PHASE261_OBSERVE_ONLY = "A52_PHASE261_QCOM_WDT_OBSERVE_ONLY_V1"
 PHASE262_MARKER = "A52_PHASE262_FW_LOADER_FALLBACK_AB_V1"
+PHASE263_SCM_STATE_MARKER = "A52_PHASE263_ORPHANED_DIRECT_SCM_STATE_REMOVED_V1"
+PHASE263_STALE_SCM_STATE = (
+    ("a52_a615_zap_mem", "static void *a52_a615_zap_mem;"),
+    ("a52_a615_zap_phys", "static dma_addr_t a52_a615_zap_phys;"),
+    ("a52_a615_zap_size", "static size_t a52_a615_zap_size;"),
+    ("a52_a615_zap_reloc", "static phys_addr_t a52_a615_zap_reloc;"),
+    ("a52_a615_zap_ready", "static bool a52_a615_zap_ready;"),
+)
 
 
 def load_module(name: str, path: Path):
@@ -171,6 +179,44 @@ def phase262_apply(root: Path) -> None:
     print(f"{PHASE262_MARKER}: CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y", flush=True)
 
 
+def phase263_strip_orphaned_scm_state(root: Path) -> None:
+    path = root / "drivers/gpu/msm/adreno_a6xx.c"
+    if not path.is_file():
+        raise RuntimeError(f"Phase263 adreno source missing while stripping SCM state: {path}")
+    source = path.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    present = [decl for _name, decl in PHASE263_STALE_SCM_STATE if decl in lines]
+    if not present:
+        return
+    if len(present) != len(PHASE263_STALE_SCM_STATE):
+        raise RuntimeError(
+            "Phase263 stale direct-SCM state is only partially present: " + ", ".join(present)
+        )
+
+    for name, decl in PHASE263_STALE_SCM_STATE:
+        live = p263.c_identifier_positions(source, name)
+        if len(live) != 1:
+            raise RuntimeError(
+                f"Phase263 refuses to remove {name}: expected declaration-only live count 1, "
+                f"found {len(live)}"
+            )
+        if lines.count(decl) != 1:
+            raise RuntimeError(
+                f"Phase263 refuses to remove {name}: exact declaration count={lines.count(decl)}"
+            )
+
+    for name, decl in PHASE263_STALE_SCM_STATE:
+        source = source.replace(decl + "\n", "", 1)
+        if p263.c_identifier_positions(source, name):
+            raise RuntimeError(f"Phase263 stale direct-SCM state survived removal: {name}")
+
+    path.write_text(source, encoding="utf-8")
+    print(
+        f"{PHASE263_SCM_STATE_MARKER}: removed {len(PHASE263_STALE_SCM_STATE)} orphaned globals",
+        flush=True,
+    )
+
+
 def main() -> int:
     if "--self-test" in sys.argv[1:]:
         m.self_test()
@@ -204,6 +250,7 @@ def main() -> int:
     p261.apply(root)
     phase262_apply(root)
     p263.apply(root)
+    phase263_strip_orphaned_scm_state(root)
     return 0
 
 

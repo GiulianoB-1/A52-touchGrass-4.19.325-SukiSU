@@ -22,4 +22,4 @@ jobs:
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 stale-contract repair dispatched: 4ef20c587efa9d7f9ae0311c5e0e3fe29c97f71a"
+          echo "Phase263 Golden ZAP restore dispatched: 97b7fe731348bb5ad3ae96029e4fc9380b55dda5"

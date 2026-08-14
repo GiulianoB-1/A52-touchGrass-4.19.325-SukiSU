@@ -22,4 +22,4 @@ jobs:
           gh workflow run 263-a52-a615-zap-pil-parity-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 A615 ZAP PIL/SSR parity build dispatched from branch head b47fb57ff1c0603184a7d06abf487835a5d3680b"
+          echo "Phase263 A615 ZAP PIL/SSR parity build dispatched from branch head d26cbf71b723551a99e86b241db71fa72062ac75"

@@ -22,4 +22,4 @@ jobs:
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 repaired workflow dispatched: fa24d5e270f587b06b7fb12728c6589188fa7d43"
+          echo "Phase263 GKI 5.10 compatibility build dispatched: 8c12a6a295a49b936257dab6f15ab963fb1a4260"

@@ -43,6 +43,7 @@ jobs:
           python3 scripts/257_namei_510_patcher_repair.py
           python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
           python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/263_provider_gki510_compat.py --self-test
 
       - name: Prepare runner
         run: |
@@ -94,7 +95,7 @@ jobs:
             -o /tmp/phase227-seed.zip
           unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
 
-      - name: Reconstruct through Phase263
+      - name: Reconstruct through Phase263 and apply GKI compatibility
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -119,6 +120,7 @@ jobs:
           mkdir -p artifacts/a52xq-graphics-startup-trace/config
           cp /tmp/phase227-seed/config/before-phase216.config artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
           python3 scripts/227_phase226_retention_wrapper.py "$ROOT"
+          python3 scripts/263_provider_gki510_compat.py "$ROOT"
 
       - name: Compile only Phase263 provider closure
         id: provider

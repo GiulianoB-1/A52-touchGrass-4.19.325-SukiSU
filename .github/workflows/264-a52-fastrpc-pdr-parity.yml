@@ -9,6 +9,7 @@ on:
       - agent/a52-phase264-peripheral-parity-v1
     paths:
       - scripts/264_fastrpc_pdr_parity.py
+      - scripts/264b_fastrpc_gki510_compat.py
       - .github/workflows/264-a52-fastrpc-pdr-parity.yml
 
 permissions:
@@ -70,12 +71,14 @@ jobs:
             scripts/259_compile_repair.py \
             scripts/263_a615_zap_pil_parity.py \
             scripts/263_a615_zap_pil_parity_base.py \
-            scripts/264_fastrpc_pdr_parity.py
+            scripts/264_fastrpc_pdr_parity.py \
+            scripts/264b_fastrpc_gki510_compat.py
 
           python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
           python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
           python3 scripts/263_a615_zap_pil_parity.py --self-test
           python3 scripts/264_fastrpc_pdr_parity.py --self-test
+          python3 scripts/264b_fastrpc_gki510_compat.py --self-test
 
       - name: Prepare runner
         run: |
@@ -173,12 +176,14 @@ jobs:
           set -Eeuo pipefail
           python3 scripts/227_phase226_retention_wrapper.py gki/common
           python3 scripts/264_fastrpc_pdr_parity.py gki/common
+          python3 scripts/264b_fastrpc_gki510_compat.py gki/common
 
           ROOT=gki/common
           grep -Fq 'A52_PHASE263_SSR_GKI510_API_V2' "$ROOT/drivers/a52_pil/subsystem_restart.c"
           grep -Fq 'A52_PHASE264_FASTRPC_PDR_PARITY_V1' "$ROOT/drivers/a52_fastrpc/Makefile"
           grep -Fq 'DEVICE_NAME      "adsprpc-smd"' "$ROOT/drivers/a52_fastrpc/adsprpc_shared.h"
           grep -Fq 'AF_QIPCRTR' "$ROOT/drivers/a52_fastrpc/services/service-locator.c"
+          grep -Fq 'Linux-syscall-note' "$ROOT/include/uapi/linux/msm_ion.h"
 
       - name: Resolve config and compile Phase264
         run: |
@@ -212,6 +217,7 @@ jobs:
           cp workspace/gki-phase199-out/.config phase264-out/config/final.config
           cp phase264-build.log phase264-out/compile/build.log
           cp scripts/264_fastrpc_pdr_parity.py phase264-out/audit/
+          cp scripts/264b_fastrpc_gki510_compat.py phase264-out/audit/
           cp -a gki/common/drivers/a52_fastrpc phase264-out/audit/
           printf '%s\n' \
             'Phase264 FastRPC/PDR compile gate.' \

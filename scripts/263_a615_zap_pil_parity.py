@@ -9,6 +9,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BASE = HERE / "263_a615_zap_pil_parity_base.py"
 COMPAT_MARKER = "A52_PHASE263_PIL_GKI510_COMPAT_V1"
+SSR_API_MARKER = "A52_PHASE263_SSR_GKI510_API_V2"
 
 
 def _load_base():
@@ -71,14 +72,51 @@ static inline char *a52_elf_str_table_compat(struct elfhdr *hdr)
 def _patch_subsystem_restart(root: Path) -> None:
     path = root / "drivers/a52_pil/subsystem_restart.c"
     text = path.read_text(encoding="utf-8")
-    marker = f"/* {COMPAT_MARKER}: forced-include pr_fmt reset */"
-    if marker in text:
-        return
-    anchor = '#define pr_fmt(fmt) "subsys-restart: %s(): " fmt, __func__\n'
-    if text.count(anchor) != 1:
-        raise RuntimeError(f"Phase263 subsystem_restart pr_fmt anchor drifted: {text.count(anchor)}")
-    replacement = marker + "\n#undef pr_fmt\n" + anchor
-    path.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+
+    pr_marker = f"/* {COMPAT_MARKER}: forced-include pr_fmt reset */"
+    if pr_marker not in text:
+        anchor = '#define pr_fmt(fmt) "subsys-restart: %s(): " fmt, __func__\n'
+        if text.count(anchor) != 1:
+            raise RuntimeError(
+                f"Phase263 subsystem_restart pr_fmt anchor drifted: {text.count(anchor)}"
+            )
+        text = text.replace(anchor, pr_marker + "\n#undef pr_fmt\n" + anchor, 1)
+
+    api_marker = f"/* {SSR_API_MARKER}: Android 4.19 SSR APIs adapted to GKI 5.10 */"
+    if api_marker not in text:
+        time_include = "#include <linux/time.h>\n"
+        if text.count(time_include) != 1:
+            raise RuntimeError(
+                f"Phase263 subsystem_restart time include drifted: {text.count(time_include)}"
+            )
+        text = text.replace(
+            time_include,
+            time_include + "#include <linux/timekeeping.h>\n" + api_marker + "\n",
+            1,
+        )
+
+        if text.count("struct timeval") != 2:
+            raise RuntimeError(
+                f"Phase263 subsystem_restart timeval shape drifted: {text.count('struct timeval')}"
+            )
+        text = text.replace("struct timeval", "struct timespec64")
+
+        old_now = "do_gettimeofday(&r_log->time);"
+        if text.count(old_now) != 1:
+            raise RuntimeError(
+                f"Phase263 subsystem_restart do_gettimeofday shape drifted: {text.count(old_now)}"
+            )
+        text = text.replace(old_now, "ktime_get_real_ts64(&r_log->time);", 1)
+
+        old_match = "static int __find_subsys_device(struct device *dev, void *data)"
+        new_match = "static int __find_subsys_device(struct device *dev, const void *data)"
+        if text.count(old_match) != 1:
+            raise RuntimeError(
+                f"Phase263 subsystem_restart bus callback shape drifted: {text.count(old_match)}"
+            )
+        text = text.replace(old_match, new_match, 1)
+
+    path.write_text(text, encoding="utf-8")
 
 
 def _stage_trace_header(root: Path) -> None:
@@ -113,8 +151,20 @@ def _verify_compat(root: Path) -> None:
     restart = (root / "drivers/a52_pil/subsystem_restart.c").read_text(encoding="utf-8")
     ramdump = (root / "drivers/a52_pil/ramdump.c").read_text(encoding="utf-8")
     trace = (root / "include/trace/events/trace_msm_pil_event.h").read_text(encoding="utf-8")
-    if "#undef pr_fmt" not in restart or COMPAT_MARKER not in restart:
-        raise RuntimeError("Phase263 pr_fmt compatibility guard missing")
+    for token in (
+        "#undef pr_fmt",
+        COMPAT_MARKER,
+        SSR_API_MARKER,
+        "#include <linux/timekeeping.h>",
+        "struct timespec64 time;",
+        "struct timespec64 *time_first = NULL, *curr_time;",
+        "ktime_get_real_ts64(&r_log->time);",
+        "static int __find_subsys_device(struct device *dev, const void *data)",
+    ):
+        if token not in restart:
+            raise RuntimeError(f"Phase263 subsystem_restart 5.10 compatibility token missing: {token}")
+    if "struct timeval" in restart or "do_gettimeofday" in restart:
+        raise RuntimeError("Phase263 legacy timeval/do_gettimeofday API survived compatibility pass")
     if "#include <../drivers/a52_pil/peripheral-loader.h>" not in trace:
         raise RuntimeError("Phase263 PIL trace header was not retargeted to staged provider")
     for token in (
@@ -135,6 +185,7 @@ def self_test() -> None:
     assert "memremap((resource_size_t)dma_handle, size, MEMREMAP_WB)" in RAMDUMP_COMPAT
     assert "memunmap(remapped_addr)" in RAMDUMP_COMPAT
     assert "a52_elf_str_table_compat" in RAMDUMP_COMPAT
+    assert SSR_API_MARKER.endswith("_V2")
     print("Phase 263 PIL/SSR GKI 5.10 compatibility self-test: PASS", flush=True)
 
 
@@ -145,6 +196,7 @@ def apply(root: Path) -> None:
     _patch_ramdump(root)
     _verify_compat(root)
     print(f"{COMPAT_MARKER}: legacy PIL/SSR provider adapted to GKI 5.10", flush=True)
+    print(f"{SSR_API_MARKER}: legacy SSR time/device APIs adapted to GKI 5.10", flush=True)
 
 
 def main() -> int:

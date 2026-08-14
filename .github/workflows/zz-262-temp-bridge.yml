@@ -22,4 +22,4 @@ jobs:
           gh workflow run 257-fast-a52-kgsl-publication-rebuild.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref agent/a52-phase259-kgsl-node-lifetime-v1
-          echo "Phase263 orphaned SCM-state repair dispatched: e06942da0af80ec3275ef8dadd33c1eec7b8724e"
+          echo "Phase263 repaired workflow dispatched: fa24d5e270f587b06b7fb12728c6589188fa7d43"

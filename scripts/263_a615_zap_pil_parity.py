@@ -10,6 +10,7 @@ HERE = Path(__file__).resolve().parent
 BASE = HERE / "263_a615_zap_pil_parity_base.py"
 COMPAT_MARKER = "A52_PHASE263_PIL_GKI510_COMPAT_V1"
 SSR_API_MARKER = "A52_PHASE263_SSR_GKI510_API_V2"
+PIL_API_MARKER = "A52_PHASE263_PERIPHERAL_LOADER_GKI510_API_V3"
 
 
 def _load_base():
@@ -69,6 +70,34 @@ static inline char *a52_elf_str_table_compat(struct elfhdr *hdr)
 '''
 
 
+PERIPHERAL_LOADER_COMPAT = r'''/* A52_PHASE263_PERIPHERAL_LOADER_GKI510_API_V3 */
+#ifndef DMA_ATTR_SKIP_ZEROING
+#define DMA_ATTR_SKIP_ZEROING 0UL
+#endif
+
+static inline void *a52_pil_dma_remap_compat(struct device *dev,
+		void *cpu_addr, dma_addr_t dma_handle, size_t size,
+		unsigned long attrs)
+{
+	(void)dev;
+	(void)cpu_addr;
+	(void)attrs;
+	return memremap((resource_size_t)dma_handle, size, MEMREMAP_WB);
+}
+
+static inline void a52_pil_dma_unremap_compat(struct device *dev,
+		void *remapped_addr, size_t size)
+{
+	(void)dev;
+	(void)size;
+	memunmap(remapped_addr);
+}
+
+#define dma_remap a52_pil_dma_remap_compat
+#define dma_unremap a52_pil_dma_unremap_compat
+'''
+
+
 def _patch_subsystem_restart(root: Path) -> None:
     path = root / "drivers/a52_pil/subsystem_restart.c"
     text = path.read_text(encoding="utf-8")
@@ -119,6 +148,46 @@ def _patch_subsystem_restart(root: Path) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _patch_peripheral_loader(root: Path) -> None:
+    path = root / "drivers/a52_pil/peripheral-loader.c"
+    text = path.read_text(encoding="utf-8")
+    marker = f"/* {PIL_API_MARKER} */"
+    if marker in text:
+        return
+
+    dma_include = "#include <linux/dma-mapping.h>\n"
+    if text.count(dma_include) != 1:
+        raise RuntimeError(
+            f"Phase263 peripheral-loader DMA include drifted: {text.count(dma_include)}"
+        )
+    text = text.replace(
+        dma_include,
+        dma_include + "\n" + PERIPHERAL_LOADER_COMPAT + "\n",
+        1,
+    )
+
+    old_count = "\t\t\t*ss_valid_seg_cnt--;"
+    new_count = "\t\t\t(*ss_valid_seg_cnt)--;"
+    if text.count(old_count) != 1:
+        raise RuntimeError(
+            f"Phase263 peripheral-loader valid-segment decrement drifted: {text.count(old_count)}"
+        )
+    text = text.replace(old_count, new_count, 1)
+
+    old_overlap = "memblock_overlaps_memory(phdr->p_paddr, phdr->p_memsz)"
+    new_overlap = (
+        "memblock_overlaps_region(&memblock.memory, phdr->p_paddr, "
+        "phdr->p_memsz)"
+    )
+    if text.count(old_overlap) != 1:
+        raise RuntimeError(
+            f"Phase263 peripheral-loader memblock overlap drifted: {text.count(old_overlap)}"
+        )
+    text = text.replace(old_overlap, new_overlap, 1)
+
+    path.write_text(text, encoding="utf-8")
+
+
 def _stage_trace_header(root: Path) -> None:
     ws = root.parent.parent
     src = ws / "workspace/touchgrass-a52xq/include/trace/events/trace_msm_pil_event.h"
@@ -149,6 +218,7 @@ def _patch_ramdump(root: Path) -> None:
 
 def _verify_compat(root: Path) -> None:
     restart = (root / "drivers/a52_pil/subsystem_restart.c").read_text(encoding="utf-8")
+    loader = (root / "drivers/a52_pil/peripheral-loader.c").read_text(encoding="utf-8")
     ramdump = (root / "drivers/a52_pil/ramdump.c").read_text(encoding="utf-8")
     trace = (root / "include/trace/events/trace_msm_pil_event.h").read_text(encoding="utf-8")
     for token in (
@@ -165,6 +235,25 @@ def _verify_compat(root: Path) -> None:
             raise RuntimeError(f"Phase263 subsystem_restart 5.10 compatibility token missing: {token}")
     if "struct timeval" in restart or "do_gettimeofday" in restart:
         raise RuntimeError("Phase263 legacy timeval/do_gettimeofday API survived compatibility pass")
+
+    for token in (
+        PIL_API_MARKER,
+        "#define DMA_ATTR_SKIP_ZEROING 0UL",
+        "a52_pil_dma_remap_compat",
+        "memremap((resource_size_t)dma_handle, size, MEMREMAP_WB)",
+        "a52_pil_dma_unremap_compat",
+        "(*ss_valid_seg_cnt)--;",
+        "memblock_overlaps_region(&memblock.memory, phdr->p_paddr, phdr->p_memsz)",
+    ):
+        if token not in loader:
+            raise RuntimeError(f"Phase263 peripheral-loader 5.10 compatibility token missing: {token}")
+    for legacy in (
+        "*ss_valid_seg_cnt--;",
+        "memblock_overlaps_memory(phdr->p_paddr, phdr->p_memsz)",
+    ):
+        if legacy in loader:
+            raise RuntimeError(f"Phase263 peripheral-loader legacy API survived compatibility pass: {legacy}")
+
     if "#include <../drivers/a52_pil/peripheral-loader.h>" not in trace:
         raise RuntimeError("Phase263 PIL trace header was not retargeted to staged provider")
     for token in (
@@ -185,18 +274,24 @@ def self_test() -> None:
     assert "memremap((resource_size_t)dma_handle, size, MEMREMAP_WB)" in RAMDUMP_COMPAT
     assert "memunmap(remapped_addr)" in RAMDUMP_COMPAT
     assert "a52_elf_str_table_compat" in RAMDUMP_COMPAT
+    assert "DMA_ATTR_SKIP_ZEROING 0UL" in PERIPHERAL_LOADER_COMPAT
+    assert "a52_pil_dma_remap_compat" in PERIPHERAL_LOADER_COMPAT
+    assert "memunmap(remapped_addr)" in PERIPHERAL_LOADER_COMPAT
     assert SSR_API_MARKER.endswith("_V2")
+    assert PIL_API_MARKER.endswith("_V3")
     print("Phase 263 PIL/SSR GKI 5.10 compatibility self-test: PASS", flush=True)
 
 
 def apply(root: Path) -> None:
     _base_apply(root)
     _patch_subsystem_restart(root)
+    _patch_peripheral_loader(root)
     _stage_trace_header(root)
     _patch_ramdump(root)
     _verify_compat(root)
     print(f"{COMPAT_MARKER}: legacy PIL/SSR provider adapted to GKI 5.10", flush=True)
     print(f"{SSR_API_MARKER}: legacy SSR time/device APIs adapted to GKI 5.10", flush=True)
+    print(f"{PIL_API_MARKER}: legacy peripheral-loader APIs adapted to GKI 5.10", flush=True)
 
 
 def main() -> int:

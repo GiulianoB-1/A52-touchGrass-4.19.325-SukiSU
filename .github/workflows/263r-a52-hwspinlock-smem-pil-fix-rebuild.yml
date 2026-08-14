@@ -1,0 +1,362 @@
+name: 263R - A52 HWSPINLOCK SMEM PIL repair one-compile rebuild
+
+run-name: Phase 263R - Qualcomm HWSPINLOCK -> SMEM -> PIL repair from exact Phase263 boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase263r-hwspinlock-smem-pil-fix-v1
+    paths:
+      - scripts/263r_hwspinlock_smem_pil_fix.py
+      - scripts/263_a615_zap_pil_parity.py
+      - scripts/263_a615_zap_pil_parity_base.py
+      - .github/workflows/263r-a52-hwspinlock-smem-pil-fix-rebuild.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase263r-hwspinlock-smem-pil-fix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE227_SEED_RUN_ID: '31644392197'
+
+jobs:
+  fast-rebuild:
+    name: Reconstruct once and compile Phase 263R
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out Phase 263R branch
+        uses: actions/checkout@v4
+
+      - name: Prepare cumulative scripts
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py \
+             scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py \
+             scripts/218_phase217_wrapper_phase226.py
+
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 scripts/257_namei_510_patcher_repair.py
+
+          python3 -m py_compile \
+            scripts/208_apply_secure_vmid.py \
+            scripts/210_apply_first_atomic_rs48.py \
+            scripts/211_apply_drm_client_trace.py \
+            scripts/212_apply_graphics_startup_trace.py \
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_namei_510_patcher_repair.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/259_compile_repair.py \
+            scripts/263_a615_zap_pil_parity.py \
+            scripts/263_a615_zap_pil_parity_base.py \
+            scripts/263r_hwspinlock_smem_pil_fix.py \
+            scripts/38_repack_a52_p1_boot.py
+
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/263_a615_zap_pil_parity.py --self-test
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py --self-test
+
+          grep -Fq 'A52_PHASE263_SSR_GKI510_API_V2' scripts/263_a615_zap_pil_parity.py
+          grep -Fq 'A52_PHASE263R_HWSPINLOCK_SMEM_PIL_FIX_V1' scripts/263r_hwspinlock_smem_pil_fix.py
+          grep -Fq 'A52_PHASE263R_MINIDUMP_ERRPTR_GUARD_V1' scripts/263r_hwspinlock_smem_pil_fix.py
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download proven Phase 227 seed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/phase227-seed')
+          ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
+          assert ident['phase'] == 227, ident
+          assert str(ident['run_id']) == '31644392197', ident
+          for path in (
+              root / 'package/boot.img',
+              root / 'compile/Image',
+              root / 'config/before-phase216.config',
+              root / 'stage/phase209-splash-takeover-trace.patch',
+          ):
+              assert path.is_file() and path.stat().st_size > 0, path
+          image = (root / 'compile/Image').read_bytes()
+          assert b'F256 da n=%.16s M=%u m=%u' in image
+          assert b'F257 ' not in image
+          print('Phase227 seed identity and true pre-217 source-boundary files: PASS')
+          PY
+
+      - name: Reconstruct Phase 206 source without compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+
+          test -f gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          test -f workspace/gki-phase199-out/.config
+
+      - name: Replay only Phase 208 through 216 source mutations
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
+
+          git -C "$ROOT" apply --check \
+            /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          git -C "$ROOT" apply \
+            /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase216.config \
+            artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+
+          grep -Fq 'IONPOST 216' "$ROOT/drivers/a52_secure/qseecom.c"
+          grep -Fq 'DRMPOST 212' "$ROOT/fs/open.c"
+
+      - name: Apply cumulative Phase 217 through Phase 263R
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/227_phase226_retention_wrapper.py gki/common
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py gki/common
+
+          ROOT=gki/common
+          CFG=workspace/gki-phase199-out/.config
+
+          grep -Fq 'A52_PHASE263_SSR_GKI510_API_V2' "$ROOT/drivers/a52_pil/subsystem_restart.c"
+          grep -Fq 'A52_PHASE263R_GOLDEN_PIL_INIT_ORDER_V1' "$ROOT/drivers/a52_pil/Makefile"
+          grep -Fq 'A52_PHASE263R_MINIDUMP_ERRPTR_GUARD_V1' "$ROOT/drivers/a52_pil/peripheral-loader.c"
+          grep -Fq 'if (!IS_ERR_OR_NULL(g_md_toc) && g_md_toc->md_toc_init == true)' \
+            "$ROOT/drivers/a52_pil/peripheral-loader.c"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$CFG"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          mk = Path('gki/common/drivers/a52_pil/Makefile').read_text()
+          expected = ('obj-y += subsys-pil-tz.o peripheral-loader.o subsystem_notif.o '
+                      'subsystem_restart.o ramdump.o microdump_collector.o')
+          assert expected in mk, mk
+          assert 'obj-y += subsystem_notif.o subsystem_restart.o ramdump.o microdump_collector.o peripheral-loader.o subsys-pil-tz.o' not in mk
+          src = Path('gki/common/drivers/a52_pil/peripheral-loader.c').read_text()
+          assert 'g_md_toc = NULL;' in src
+          assert 'if (PTR_ERR(g_md_toc) == -EPROBE_DEFER)' not in src
+          print('Phase263R source/config repair audit: PASS')
+          PY
+
+      - name: Resolve final config and compile once
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          grep -Fxq 'CONFIG_HWSPINLOCK=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$OUT/.config"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" Image
+
+          test -s "$OUT/arch/arm64/boot/Image"
+
+      - name: Verify Phase 263R compiled closure
+        run: |
+          set -Eeuo pipefail
+          IMAGE=workspace/gki-phase199-out/arch/arm64/boot/Image
+          CFG=workspace/gki-phase199-out/.config
+
+          grep -Fxq 'CONFIG_HWSPINLOCK=y' "$CFG"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$CFG"
+          grep -Fxq 'CONFIG_QCOM_SMEM=y' "$CFG"
+          grep -Fxq 'CONFIG_MSM_PIL=y' "$CFG"
+          grep -Fxq 'CONFIG_MSM_PIL_SSR_GENERIC=y' "$CFG"
+          grep -Fxq 'CONFIG_MSM_SUBSYSTEM_RESTART=y' "$CFG"
+
+          # Built-in provider and Phase263R hardening must survive into Image.
+          grep -aFq 'qcom,tcsr-mutex' "$IMAGE"
+          grep -aFq 'Minidump: SMEM ToC unavailable rc=%d; continuing without minidump' "$IMAGE"
+
+          # Preserve the proven graphics/publication markers from the Phase263 base.
+          for marker in \
+            'GFXPOST 225' \
+            'F256 da n=%.16s M=%u m=%u' \
+            'F257 add n=%u M=%u m=%u s=%d' \
+            'F257 s5 uc=%d ur=%d p=%d g=%d kc=%.15s uc=%.15s ut=%llu'; do
+            grep -aFq "$marker" "$IMAGE"
+          done
+
+      - name: Repack proven boot image with Phase 263R kernel
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase263r-fast-out
+          mkdir -p phase263r-fast-out/compile phase263r-fast-out/config \
+            phase263r-fast-out/package phase263r-fast-out/audit
+
+          cp workspace/gki-phase199-out/arch/arm64/boot/Image phase263r-fast-out/compile/Image
+          cp workspace/gki-phase199-out/.config phase263r-fast-out/config/final.config
+          gzip -n -c phase263r-fast-out/compile/Image > phase263r-fast-out/package/Image.gz
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source /tmp/phase227-seed/package/boot.img \
+            --kernel phase263r-fast-out/package/Image.gz \
+            --output phase263r-fast-out/package/boot.img \
+            --report phase263r-fast-out/package/repack-report.json
+
+          cp scripts/263_a615_zap_pil_parity.py phase263r-fast-out/audit/
+          cp scripts/263_a615_zap_pil_parity_base.py phase263r-fast-out/audit/
+          cp scripts/263r_hwspinlock_smem_pil_fix.py phase263r-fast-out/audit/
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out = Path('phase263r-fast-out')
+          identity = {
+              'phase': '263R',
+              'build_path': 'one-compile-fast-rebuild',
+              'git_sha': os.environ.get('GITHUB_SHA'),
+              'run_id': os.environ.get('GITHUB_RUN_ID'),
+              'phase263_base_sha': 'd26cbf71b723551a99e86b241db71fa72062ac75',
+              'phase227_seed_artifact_id': 9160764832,
+              'phase227_seed_run_id': 31644392197,
+              'hardware_validated': False,
+              'final_kernel_compile_count': 1,
+              'root_cause': 'missing CONFIG_HWSPINLOCK_QCOM caused qcom-smem probe defer before PIL',
+              'repair': [
+                  'CONFIG_HWSPINLOCK_QCOM=y',
+                  'Golden-relative pil_tz_init before microdump_init order',
+                  'g_md_toc ERR_PTR lifetime guard',
+              ],
+          }
+          (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
+          (out / 'README-FIRST.txt').write_text(
+              'A52 GKI 5.10 Phase 263R HWSPINLOCK/SMEM/PIL corrective candidate\n\n'
+              'NOT HARDWARE VALIDATED.\n\n'
+              'Golden FDR comparison found Phase263 missing CONFIG_HWSPINLOCK_QCOM, '
+              'with qcom-smem directly recorded returning -EPROBE_DEFER. Phase263R '
+              'enables the Qualcomm HWSPINLOCK provider, restores Golden-relative '
+              'PIL-TZ/microdump device-init ordering, and prevents g_md_toc from '
+              'retaining an ERR_PTR on SMEM lookup failure.\n'
+          )
+          files = sorted(p for p in out.rglob('*') if p.is_file())
+          lines = []
+          for p in files:
+              h = hashlib.sha256(p.read_bytes()).hexdigest()
+              lines.append(f'{h}  ./{p.relative_to(out)}\n')
+          (out / 'SHA256SUMS').write_text(''.join(lines))
+          PY
+
+          (cd phase263r-fast-out && sha256sum -c SHA256SUMS)
+          test -s phase263r-fast-out/package/boot.img
+
+      - name: Upload Phase 263R candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase263R-HWSPINLOCK-SMEM-PIL-FIX-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase263r-fast-out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 263R diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase263R-FAILURE-${{ github.run_number }}
+          path: |
+            workspace/gki-phase199-out/.config
+            artifacts/a52xq-graphics-startup-trace/
+            phase263r-fast-out/
+          if-no-files-found: warn
+          retention-days: 7

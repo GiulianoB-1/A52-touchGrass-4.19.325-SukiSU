@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Phase263: restore Golden TouchGrass A615 ZAP PIL/SSR provider parity.
 
-The downstream KGSL A615 path calls subsystem_get("a615_zap") from
-A6xx ringbuffer start. The port already carries the TouchGrass compatibility
-headers, but the matching legacy PIL/subsystem provider objects were never
-staged into the GKI build. This overlay imports only the provider closure
-needed by qcom,pil-tz-generic and enables the three matching Golden symbols.
+The downstream KGSL A615 path loads the secure ZAP shader through
+subsystem_get(a6xx_core->zap_name). The port already carries the TouchGrass
+compatibility headers, but the matching legacy PIL/subsystem provider objects
+were never staged into the GKI build.
 
-A prior cumulative experiment carried a direct-SCM A615 ZAP loader. Phase263
-supersedes that experiment with the Golden PIL/SSR provider path, so stale
-static declarations and the stale static definition must be removed before
-compile rather than hidden with an unused-function annotation.
+A prior cumulative experiment replaced the Golden a6xx_zap_load() control flow
+with a direct-SCM helper. Phase263 restores the pinned TouchGrass function
+verbatim at that boundary, removes the obsolete direct-SCM helper contract,
+and stages only the legacy PIL/SSR provider closure needed by
+qcom,pil-tz-generic.
 """
 from __future__ import annotations
 
@@ -20,6 +20,27 @@ from pathlib import Path
 
 MARKER = "A52_PHASE263_A615_ZAP_PIL_PARITY_V1"
 STALE_SCM_HELPER = "a52_a615_zap_scm_load"
+GOLDEN_ZAP_SIGNATURE = "static int a6xx_zap_load(struct adreno_device *adreno_dev)"
+GOLDEN_ZAP_FUNCTION = '''static int a6xx_zap_load(struct adreno_device *adreno_dev)
+{
+\tconst struct adreno_a6xx_core *a6xx_core = to_a6xx_core(adreno_dev);
+\tvoid *zap;
+\tint ret = 0;
+
+\t/* Load the zap shader firmware through PIL if its available */
+\tif (a6xx_core->zap_name && !adreno_dev->zap_loaded) {
+\t\tzap = subsystem_get(a6xx_core->zap_name);
+
+\t\t/* Return error if the zap shader cannot be loaded */
+\t\tif (IS_ERR_OR_NULL(zap)) {
+\t\t\tret = (zap == NULL) ? -ENODEV : PTR_ERR(zap);
+\t\t\tzap = NULL;
+\t\t} else
+\t\t\tadreno_dev->zap_loaded = 1;
+\t}
+
+\treturn ret;
+}'''
 CONFIGS = (
     "CONFIG_MSM_SUBSYSTEM_RESTART=y",
     "CONFIG_MSM_PIL=y",
@@ -206,7 +227,41 @@ def scan_balanced_c(source: str, start: int, opener: str, closer: str) -> int:
                 if depth == 0:
                     return i + 1
         i += 1
-    raise RuntimeError(f"Phase263 unbalanced {opener}{closer} while parsing stale SCM helper")
+    raise RuntimeError(f"Phase263 unbalanced {opener}{closer} while parsing C source")
+
+
+def ensure_include(source: str, include: str) -> str:
+    rendered = include + "\n"
+    if rendered in source or include in source.splitlines():
+        return source
+    lines = source.splitlines(keepends=True)
+    include_rows = [i for i, line in enumerate(lines) if line.startswith("#include ")]
+    if not include_rows:
+        raise RuntimeError(f"Phase263 cannot place required include: {include}")
+    insert_at = include_rows[-1] + 1
+    lines.insert(insert_at, rendered)
+    return "".join(lines)
+
+
+def replace_golden_zap_function(source: str) -> str:
+    """Restore the pinned TouchGrass a6xx_zap_load() implementation exactly."""
+    count = source.count(GOLDEN_ZAP_SIGNATURE)
+    if count != 1:
+        raise RuntimeError(
+            f"Phase263 expected one {GOLDEN_ZAP_SIGNATURE!r}, found {count}"
+        )
+    start = source.find(GOLDEN_ZAP_SIGNATURE)
+    body = skip_ws(source, start + len(GOLDEN_ZAP_SIGNATURE))
+    if body >= len(source) or source[body] != "{":
+        raise RuntimeError("Phase263 a6xx_zap_load opening brace drifted")
+    end = scan_balanced_c(source, body, "{", "}")
+    out = source[:start] + GOLDEN_ZAP_FUNCTION + source[end:]
+    out = ensure_include(out, "#include <soc/qcom/subsystem_restart.h>")
+    if out.count("zap = subsystem_get(a6xx_core->zap_name);") != 1:
+        raise RuntimeError("Phase263 Golden a6xx_zap_load subsystem_get contract missing/duplicated")
+    if out.count("adreno_dev->zap_loaded = 1;") < 1:
+        raise RuntimeError("Phase263 Golden a6xx_zap_load zap_loaded contract missing")
+    return out
 
 
 def stale_static_span(source: str, name: str, name_pos: int) -> tuple[str, int, int]:
@@ -287,20 +342,24 @@ def strip_named_static_function_contract(source: str, name: str) -> str:
     return out
 
 
-def remove_superseded_direct_scm(root: Path) -> None:
+def restore_golden_zap_control_flow(root: Path) -> None:
     path = root / "drivers/gpu/msm/adreno_a6xx.c"
     if not path.is_file():
         raise RuntimeError(f"Phase263 adreno source missing: {path}")
     before = path.read_text(encoding="utf-8")
-    live_before = c_identifier_positions(before, STALE_SCM_HELPER)
-    if not live_before:
-        print(f"Phase263: {STALE_SCM_HELPER} already absent from live C", flush=True)
-        return
-    after = strip_named_static_function_contract(before, STALE_SCM_HELPER)
+    direct_hits = c_identifier_positions(before, STALE_SCM_HELPER)
+
+    restored = replace_golden_zap_function(before)
+    after = strip_named_static_function_contract(restored, STALE_SCM_HELPER)
+
+    if c_identifier_positions(after, STALE_SCM_HELPER):
+        raise RuntimeError("Phase263 direct-SCM helper survived Golden control-flow restoration")
+    if "zap = subsystem_get(a6xx_core->zap_name);" not in after:
+        raise RuntimeError("Phase263 Golden subsystem_get call missing after direct-SCM cleanup")
     path.write_text(after, encoding="utf-8")
     print(
-        f"Phase263: removed superseded direct-SCM contract {STALE_SCM_HELPER} "
-        f"(live before={len(live_before)}, textual before={before.count(STALE_SCM_HELPER)})",
+        f"Phase263: restored Golden a6xx_zap_load PIL/SSR path; removed "
+        f"{len(direct_hits)} live direct-SCM helper occurrences",
         flush=True,
     )
 
@@ -334,6 +393,15 @@ def self_test() -> None:
     else:
         raise AssertionError("Phase263 executable stale helper reference guard did not fail closed")
 
+    direct_source = '''#include <linux/firmware.h>\n#include \"adreno.h\"\n\nstatic int a52_a615_zap_scm_load(struct adreno_device *adreno_dev, const char *name)\n{\n\treturn -ENODEV;\n}\n\nstatic int a6xx_zap_load(struct adreno_device *adreno_dev)\n{\n\tconst struct adreno_a6xx_core *a6xx_core = to_a6xx_core(adreno_dev);\n\tint ret = 0;\n\n\tif (a6xx_core->zap_name && !adreno_dev->zap_loaded)\n\t\tret = a52_a615_zap_scm_load(adreno_dev, a6xx_core->zap_name);\n\n\treturn ret;\n}\n'''
+    restored = replace_golden_zap_function(direct_source)
+    assert "zap = subsystem_get(a6xx_core->zap_name);" in restored
+    assert "#include <soc/qcom/subsystem_restart.h>" in restored
+    assert len(c_identifier_positions(restored, STALE_SCM_HELPER)) == 1
+    cleaned = strip_named_static_function_contract(restored, STALE_SCM_HELPER)
+    assert not c_identifier_positions(cleaned, STALE_SCM_HELPER)
+    assert cleaned.count("zap = subsystem_get(a6xx_core->zap_name);") == 1
+
     print("Phase 263 A615 ZAP PIL provider parity self-test: PASS", flush=True)
 
 
@@ -352,7 +420,7 @@ def apply(root: Path) -> None:
     if missing:
         raise RuntimeError("Phase263 TouchGrass source closure missing: " + ", ".join(missing))
 
-    remove_superseded_direct_scm(root)
+    restore_golden_zap_control_flow(root)
 
     dst = root / "drivers/a52_pil"
     dst.mkdir(parents=True, exist_ok=True)
@@ -396,11 +464,10 @@ def apply(root: Path) -> None:
             raise RuntimeError(f"Phase263 config did not apply: {line}")
 
     adreno = (root / "drivers/gpu/msm/adreno_a6xx.c").read_text(encoding="utf-8")
-    survivors = c_identifier_positions(adreno, STALE_SCM_HELPER)
-    if survivors:
-        raise RuntimeError(
-            f"Phase263 superseded direct-SCM helper survived final verification: {len(survivors)} live references"
-        )
+    if c_identifier_positions(adreno, STALE_SCM_HELPER):
+        raise RuntimeError("Phase263 superseded direct-SCM helper survived final verification")
+    if adreno.count("zap = subsystem_get(a6xx_core->zap_name);") != 1:
+        raise RuntimeError("Phase263 Golden a6xx_zap_load final contract missing/duplicated")
 
     print(f"{MARKER}: Golden A615 ZAP PIL/SSR provider staged", flush=True)
 

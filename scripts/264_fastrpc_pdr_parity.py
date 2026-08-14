@@ -39,7 +39,7 @@ SERVICE_FILES = (
 HEADER_CANDIDATES = (
     "include/linux/ipc_logging.h",
     "include/linux/msm_dma_iommu_mapping.h",
-    "include/linux/msm_ion.h",
+    "include/uapi/linux/msm_ion.h",
     "include/soc/qcom/secure_buffer.h",
     "include/soc/qcom/service-locator.h",
     "include/soc/qcom/service-notifier.h",
@@ -105,6 +105,7 @@ def self_test() -> None:
     assert "adsprpc.c" in FASTRPC_FILES
     assert "service-locator.c" in SERVICE_FILES
     assert "service-notifier.c" in SERVICE_FILES
+    assert "include/uapi/linux/msm_ion.h" in HEADER_CANDIDATES
     assert "include/trace/events/fastrpc.h" in HEADER_CANDIDATES
     assert CONFIGS == ("MSM_ADSPRPC", "A52_SERVICE_REGISTRY")
     print("Phase 264 FastRPC/PDR staging self-test: PASS", flush=True)

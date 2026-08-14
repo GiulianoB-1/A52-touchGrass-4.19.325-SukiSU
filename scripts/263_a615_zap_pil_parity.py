@@ -2,10 +2,15 @@
 """Phase263: restore Golden TouchGrass A615 ZAP PIL/SSR provider parity.
 
 The downstream KGSL A615 path calls subsystem_get("a615_zap") from
-A6xx ringbuffer start.  The port already carries the TouchGrass compatibility
+A6xx ringbuffer start. The port already carries the TouchGrass compatibility
 headers, but the matching legacy PIL/subsystem provider objects were never
-staged into the GKI build.  This overlay imports only the provider closure
+staged into the GKI build. This overlay imports only the provider closure
 needed by qcom,pil-tz-generic and enables the three matching Golden symbols.
+
+Phase262 briefly carried a direct-SCM A615 ZAP loader experiment. Phase263
+supersedes that experiment with the Golden PIL/SSR provider path, so the stale
+direct helper must be removed before compile rather than hidden with an
+unused-function annotation.
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ import sys
 from pathlib import Path
 
 MARKER = "A52_PHASE263_A615_ZAP_PIL_PARITY_V1"
+STALE_SCM_HELPER = "a52_a615_zap_scm_load"
 CONFIGS = (
     "CONFIG_MSM_SUBSYSTEM_RESTART=y",
     "CONFIG_MSM_PIL=y",
@@ -72,6 +78,108 @@ def set_config(path: Path, symbol: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def strip_named_c_function(source: str, name: str) -> str:
+    """Remove one stale static C function definition, with brace-aware parsing."""
+    hits = source.count(name)
+    if hits == 0:
+        return source
+    if hits != 1:
+        raise RuntimeError(
+            f"Phase263 refuses to remove {name}: expected one stale definition, found {hits} references"
+        )
+
+    name_pos = source.find(name)
+    line_start = source.rfind("\n", 0, name_pos) + 1
+    prefix = source[line_start:name_pos]
+    if "static" not in prefix:
+        raise RuntimeError(f"Phase263 {name} occurrence is not a static function definition")
+
+    brace = source.find("{", name_pos)
+    if brace < 0:
+        raise RuntimeError(f"Phase263 {name} definition opening brace missing")
+    semicolon = source.find(";", name_pos, brace)
+    if semicolon >= 0:
+        raise RuntimeError(f"Phase263 {name} looks like a declaration, not a definition")
+
+    depth = 0
+    i = brace
+    mode = "normal"
+    escaped = False
+    end = -1
+    while i < len(source):
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < len(source) else ""
+
+        if mode == "line_comment":
+            if ch == "\n":
+                mode = "normal"
+        elif mode == "block_comment":
+            if ch == "*" and nxt == "/":
+                mode = "normal"
+                i += 1
+        elif mode == "string":
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                mode = "normal"
+        elif mode == "char":
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                mode = "normal"
+        else:
+            if ch == "/" and nxt == "/":
+                mode = "line_comment"
+                i += 1
+            elif ch == "/" and nxt == "*":
+                mode = "block_comment"
+                i += 1
+            elif ch == '"':
+                mode = "string"
+            elif ch == "'":
+                mode = "char"
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        i += 1
+
+    if end < 0:
+        raise RuntimeError(f"Phase263 {name} definition closing brace missing")
+
+    while end < len(source) and source[end] in " \t":
+        end += 1
+    if end < len(source) and source[end] == "\n":
+        end += 1
+    if end < len(source) and source[end] == "\n":
+        end += 1
+
+    out = source[:line_start] + source[end:]
+    if name in out:
+        raise RuntimeError(f"Phase263 stale helper survived removal: {name}")
+    return out
+
+
+def remove_superseded_direct_scm(root: Path) -> None:
+    path = root / "drivers/gpu/msm/adreno_a6xx.c"
+    if not path.is_file():
+        raise RuntimeError(f"Phase263 adreno source missing: {path}")
+    before = path.read_text(encoding="utf-8")
+    if STALE_SCM_HELPER not in before:
+        print(f"Phase263: {STALE_SCM_HELPER} already absent", flush=True)
+        return
+    after = strip_named_c_function(before, STALE_SCM_HELPER)
+    path.write_text(after, encoding="utf-8")
+    print(f"Phase263: removed superseded Phase262 helper {STALE_SCM_HELPER}", flush=True)
+
+
 def self_test() -> None:
     assert len(SOURCES) == len(set(SOURCES))
     assert len(OBJECTS) == len(set(OBJECTS))
@@ -83,6 +191,19 @@ def self_test() -> None:
         "CONFIG_MSM_PIL=y",
         "CONFIG_MSM_PIL_SSR_GENERIC=y",
     )
+
+    sample = '''static int a52_a615_zap_scm_load(void *p)\n{\n\tif (p) {\n\t\tpr_info("brace } in string");\n\t}\n\treturn 0;\n}\n\nstatic int keep_me(void)\n{\n\treturn 1;\n}\n'''
+    stripped = strip_named_c_function(sample, STALE_SCM_HELPER)
+    assert STALE_SCM_HELPER not in stripped
+    assert "static int keep_me(void)" in stripped
+    assert strip_named_c_function(stripped, STALE_SCM_HELPER) == stripped
+    try:
+        strip_named_c_function(sample + "\n/* a52_a615_zap_scm_load */\n", STALE_SCM_HELPER)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Phase263 stale helper reference guard did not fail closed")
+
     print("Phase 263 A615 ZAP PIL provider parity self-test: PASS", flush=True)
 
 
@@ -100,6 +221,11 @@ def apply(root: Path) -> None:
     missing = [name for name in SOURCES if not (tg / name).is_file()]
     if missing:
         raise RuntimeError("Phase263 TouchGrass source closure missing: " + ", ".join(missing))
+
+    # Phase263 replaces the experimental direct-SCM ZAP path with the Golden
+    # subsystem/PIL provider. Do this before compile so -Werror cannot stop on
+    # the now-unused Phase262 helper.
+    remove_superseded_direct_scm(root)
 
     dst = root / "drivers/a52_pil"
     dst.mkdir(parents=True, exist_ok=True)
@@ -142,6 +268,10 @@ def apply(root: Path) -> None:
     for line in CONFIGS:
         if line not in final:
             raise RuntimeError(f"Phase263 config did not apply: {line}")
+
+    adreno = (root / "drivers/gpu/msm/adreno_a6xx.c").read_text(encoding="utf-8")
+    if STALE_SCM_HELPER in adreno:
+        raise RuntimeError("Phase263 superseded direct-SCM helper survived final verification")
 
     print(f"{MARKER}: Golden A615 ZAP PIL/SSR provider staged", flush=True)
 

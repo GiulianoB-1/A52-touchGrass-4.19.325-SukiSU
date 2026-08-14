@@ -15,15 +15,20 @@ jobs:
   extract:
     runs-on: ubuntu-22.04
     steps:
-      - name: Extract first compiler diagnostics from failed Phase263 run
+      - name: Watch rebuild and extract first compiler diagnostics
         env:
           GH_TOKEN: ${{ github.token }}
-          FAILED_RUN_ID: '31784128103'
+          FAILED_RUN_ID: '31787638237'
         run: |
           set -Eeuo pipefail
           mkdir -p phase263-log-diagnostics
 
-          # gh returns non-zero for a failed run; preserve the log regardless.
+          # Stay attached to this exact rebuild. A failed kernel build is an
+          # expected diagnostic condition here, so do not fail the extractor.
+          gh run watch "$FAILED_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --exit-status || true
+
           gh run view "$FAILED_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --log-failed > phase263-log-diagnostics/failed-step.log 2>&1 || true
@@ -56,7 +61,7 @@ jobs:
       - name: Upload concise Phase263 compiler diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: PHASE263-FIRST-COMPILER-ERROR-94716137324
+          name: PHASE263-FIRST-COMPILER-ERROR-31787638237
           path: phase263-log-diagnostics/
           if-no-files-found: error
           retention-days: 7

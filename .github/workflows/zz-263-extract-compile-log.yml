@@ -17,8 +17,8 @@ jobs:
       - name: Extract failed Phase263 compiler log
         env:
           GH_TOKEN: ${{ github.token }}
-          FAILED_RUN: '31790022194'
-          FAILED_JOB: '94734600499'
+          FAILED_RUN: '31797332447'
+          FAILED_JOB: '94757192082'
         run: |
           set -Eeuo pipefail
           mkdir -p phase263-diagnostics

@@ -2,8 +2,8 @@
 """Phase 267: diagnostic-only direct pre-DRM boundary.
 
 Retains Phase266 functional semantics and adds one dedicated, low-volume P267
-recorder class. Phase267S also re-admits the already-compiled low-volume DISP
-lifecycle scopes and KMSPOST milestones so the pre-P267 SDE/DRM bring-up boundary
+recorder class. Phase267S also re-admits only the already-compiled DISP lifecycle scope formats and KMSPOST
+milestones so the pre-P267 SDE/DRM bring-up boundary
 can be observed without adding or changing any display call sites. P267 remains
 the dedicated direct boundary class.
 
@@ -40,7 +40,8 @@ ADMIT_V3 = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: admit only P267 diagnost
 ADMIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: direct boundary diagnostics. */\n'
              '/* A52_PHASE267S_DISPLAY_LIFECYCLE_ADMISSION_V1: reuse existing low-volume scopes. */\n'
              'if (strncmp(fmt, "P267", 4) &&\n'
-             '    strncmp(fmt, "DISP", 4) &&\n'
+             '    strcmp(fmt, "%s enter fn=%s") &&\n'
+             '    strcmp(fmt, "%s exit fn=%s us=%llu") &&\n'
              '    strncmp(fmt, "KMSPOST", 7) &&\n'
              '    strncmp(fmt, "F261", 4) &&\n')
 
@@ -183,7 +184,8 @@ def validate_recorder(text: str, label: str) -> None:
         '!strncmp(message, "P267 ", 5)',
         'strncmp(fmt, "P267", 4)',
         ADMISSION_MARKER,
-        'strncmp(fmt, "DISP", 4)',
+        'strcmp(fmt, "%s enter fn=%s")',
+        'strcmp(fmt, "%s exit fn=%s us=%llu")',
         'strncmp(fmt, "KMSPOST", 7)',
         '!strncmp(message, "F261 ", 5)',
         'strncmp(fmt, "F261", 4)',
@@ -288,7 +290,8 @@ def self_test() -> None:
     rec_v3 = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' + CRIT_NEW + ADMIT_V3)
     rec_v3s = patch_recorder(rec_v3, "fixture/rec-v3-upgrade")
     assert ADMISSION_MARKER in rec_v3s
-    assert 'strncmp(fmt, "DISP", 4)' in rec_v3s
+    assert 'strcmp(fmt, "%s enter fn=%s")' in rec_v3s
+    assert 'strcmp(fmt, "%s exit fn=%s us=%llu")' in rec_v3s
     assert 'strncmp(fmt, "KMSPOST", 7)' in rec_v3s
 
     with tempfile.TemporaryDirectory() as td:

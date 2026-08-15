@@ -194,10 +194,12 @@ def validate_sde(text: str, label: str) -> None:
     ):
         if token not in text:
             raise RuntimeError(f"{label}: missing {token}")
-    if text.index('P267 bus-enter') > text.index('sde_power_data_bus_set_quota(&priv->phandle, i,'):
-        raise RuntimeError(f"{label}: bus-enter not before quota loop")
-    if text.index('P267 bus-exit') < text.index('sde_power_data_bus_set_quota(&priv->phandle, i,'):
-        raise RuntimeError(f"{label}: bus-exit not after quota loop")
+    if SDE_BUS_NEW not in text:
+        raise RuntimeError(f"{label}: exact instrumented data-bus block is not contiguous")
+    if SDE_DRMOBJ_NEW not in text:
+        raise RuntimeError(f"{label}: exact instrumented DRM-object block is not contiguous")
+    if SDE_BLOCKS_NEW not in text:
+        raise RuntimeError(f"{label}: exact instrumented KMS-block call is not contiguous")
 
 
 def validate_drm(text: str, label: str) -> None:
@@ -212,6 +214,10 @@ def validate_drm(text: str, label: str) -> None:
     ):
         if token not in text:
             raise RuntimeError(f"{label}: missing {token}")
+    if DRM_SYSFS_NEW not in text:
+        raise RuntimeError(f"{label}: exact instrumented minor-allocation block is not contiguous")
+    if DRM_NODE_ADD_NEW not in text:
+        raise RuntimeError(f"{label}: exact instrumented minor-publication block is not contiguous")
 
 
 def candidate_roots(args: list[str], cwd: Path) -> list[Path]:
@@ -257,8 +263,7 @@ def locate(args: list[str], cwd: Path | None = None) -> Path:
 
 
 def self_test() -> None:
-    rec = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' +
-           CRIT_OLD + ADMIT_OLD)
+    rec = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' + CRIT_OLD + ADMIT_OLD)
     sde = SDE_BUS_OLD + SDE_DRMOBJ_OLD + SDE_BLOCKS_OLD
     drm = DRM_SYSFS_OLD + DRM_NODE_ADD_OLD
     rec2 = patch_recorder(rec, "fixture/rec")

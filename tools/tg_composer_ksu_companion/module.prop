@@ -1,0 +1,7 @@
+id=tg_composer_reference
+name=TG Composer Reference Recorder
+version=1.0
+versionCode=1
+author=GiulianoB-1 / OpenAI
+summary=Passive and tracefs-assisted Composer/DRM reference recorder for A52 TouchGrass/GKI comparison
+description=Records Composer process, fd, syscall, wchan, service, DRM/sysfs, Binder and isolated tracefs evidence without ptrace or functional kernel changes.

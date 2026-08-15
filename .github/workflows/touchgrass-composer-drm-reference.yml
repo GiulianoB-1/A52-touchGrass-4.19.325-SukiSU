@@ -1,0 +1,301 @@
+name: TouchGrass precise Composer DRM golden reference
+
+run-name: Build TouchGrass precise Composer DRM golden reference recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-composer-drm-reference-v1
+    paths:
+      - .github/workflows/touchgrass-composer-drm-reference.yml
+      - scripts/touchgrass_composer_drm_reference_overlay.py
+      - scripts/touchgrass_composer_drm_reference_resukisu_wrapper.py
+      - scripts/COLLECT_TOUCHGRASS_COMPOSER_DRM_REFERENCE.bat
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: touchgrass-composer-drm-golden-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  TOUCHGRASS_COMMIT: '6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  TOUCHGRASS_CACHE_KEY: 'a52xq-touchgrass-linux-4.19.200-main-v2-Linux-6bf351bdf18bdb228db79e66f14a7a9c0178e5d7'
+  RECORDER_CCACHE_KEY: 'touchgrass-composer-drm-golden-v1-Linux'
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  build-reference:
+    name: Build precise golden Composer DRM recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out golden-recorder branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ${{ env.RECORDER_CCACHE_KEY }}
+          restore-keys: |
+            touchgrass-final-boot-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            touchgrass-gpu-reference-resukisu-safe-ccache-v1-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Hydrate checksum-locked repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image artifacts
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore exact TouchGrass 4.19.200 source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: ${{ env.TOUCHGRASS_CACHE_KEY }}
+
+      - name: Reconstruct exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+
+      - name: Validate exact golden source and recorder scripts
+        run: |
+          set -Eeuo pipefail
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+          test -x workspace/touchgrass-a52xq/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
+          test -x workspace/touchgrass-a52xq/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc
+          python3 -m py_compile scripts/touchgrass_composer_drm_reference_overlay.py
+          python3 -m py_compile scripts/touchgrass_composer_drm_reference_resukisu_wrapper.py
+          python3 scripts/touchgrass_composer_drm_reference_overlay.py --self-test
+          bash -n <(sed 's/\r$//' scripts/COLLECT_TOUCHGRASS_COMPOSER_DRM_REFERENCE.bat) || true
+
+      - name: Prepare proven ReSukiSU-safe golden stack plus precise display recorder
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/touchgrass_composer_drm_reference_resukisu_wrapper.py \
+            scripts/08_build_linux_4.19.153_resukisu_safe.sh
+          bash -n scripts/08_build_linux_4.19.153_resukisu_safe.sh
+
+      - name: Build exact TouchGrass golden reference kernel
+        run: |
+          set -Eeuo pipefail
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200 safe \
+            2>&1 | tee artifacts/touchgrass-composer-drm-reference-build.log
+
+      - name: Upload build failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Composer-DRM-Golden-${{ github.run_number }}-FAILURE-EVIDENCE
+          path: |
+            artifacts/touchgrass-composer-drm-reference-build.log
+            artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+            artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Audit configuration and all three recorders
+        run: |
+          set -Eeuo pipefail
+          CFG=artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          test -s "$CFG"
+          test -s "$IMG"
+
+          for expected in \
+            CONFIG_ARCH_LAGOON=y \
+            CONFIG_ARM_SMMU=y \
+            CONFIG_QCOM_KGSL=y \
+            CONFIG_QCOM_KGSL_IOMMU=y \
+            CONFIG_KSU=y \
+            CONFIG_PROC_FS=y; do
+            grep -Fxq "$expected" "$CFG"
+          done
+
+          for marker in \
+            touchgrass_gpu_reference_v1 \
+            touchgrass_final_boot_reference_v1 \
+            touchgrass_composer_drm_reference_v1 \
+            COMPOSER_EXEC \
+            SYS_OPEN_IN \
+            SYS_IOCTL_IN \
+            SYS_MMAP_IN \
+            DRM_OPEN_IN \
+            DRM_IOCTL_DESC \
+            PROP_CREATE \
+            PROP_GET \
+            PROP_VALUE \
+            PROP_ENUM \
+            OBJ_PROP \
+            ATOMIC_IN \
+            ATOMIC_PROP \
+            MSM_OPEN_IN \
+            MSM_ATOMIC_IN \
+            BINDER_IOCTL_IN \
+            BINDER_TX_IN \
+            BINDER_TX_TARGET; do
+            echo "GOLDEN_MARKER $marker"
+            grep -aFq "$marker" "$IMG"
+          done
+
+      - name: Download exact known-good boot container
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p intake artifacts/touchgrass-composer-drm-reference
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output artifacts/touchgrass-composer-drm-reference/source-validation.json
+
+      - name: Repack exact boot layout with precise golden recorder
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-composer-drm-reference
+          IMG=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          gzip -n -9 -c "$IMG" > "$OUT/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/Image.gz" \
+            --output "$OUT/boot.img" \
+            --report "$OUT/repack-report.json"
+          test -s "$OUT/boot.img"
+          test "$(stat -c %s "$OUT/boot.img")" = 100663296
+
+          cp "$IMG" "$OUT/Image"
+          cp artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe "$OUT/final.config"
+          cp workspace/touchgrass-a52xq/out/System.map "$OUT/System.map"
+          cp scripts/touchgrass_composer_drm_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_composer_drm_reference_resukisu_wrapper.py "$OUT/"
+          cp scripts/touchgrass_final_boot_reference_overlay.py "$OUT/"
+          cp scripts/touchgrass_gpu_reference_overlay.py "$OUT/"
+          cp scripts/COLLECT_TOUCHGRASS_COMPOSER_DRM_REFERENCE.bat "$OUT/"
+          cp artifacts/touchgrass-composer-drm-reference-build.log "$OUT/"
+
+      - name: Build identity and final package audit
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/touchgrass-composer-drm-reference
+          cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
+          TOUCHGRASS_COMPOSER_DRM_REFERENCE_V1
+          source_commit=$TOUCHGRASS_COMMIT
+          repository=$GITHUB_REPOSITORY
+          workflow_run=$GITHUB_RUN_ID
+          workflow_sha=$GITHUB_SHA
+          diagnostic_only=true
+          hardware_validated=false
+          prior_golden_stack=GPU+FINAL_BOOT_RECORDERS
+          EOF
+          sed -i 's/^          //' "$OUT/BUILD-IDENTITY.txt"
+
+          cat > "$OUT/README_FIRST.txt" <<'EOF'
+          TOUCHGRASS PRECISE COMPOSER / DRM GOLDEN REFERENCE V1
+
+          Purpose:
+            Record the known-good kernel/userspace boundary that Phase268 proved
+            the GKI composer reaches but does not progress beyond.
+
+          New recorder:
+            /proc/tg_display_reference
+
+          Precise coverage:
+            - exact display-composer exec and TGID/TID correlation
+            - every Composer open() result and path
+            - every Composer ioctl() and mmap() result
+            - DRM open/release and named DRM ioctl dispatch
+            - DRM property creation, values and enum definitions
+            - object -> property IDs, names, types and current values returned to userspace
+            - GETPROPERTY metadata/value/enum responses
+            - complete atomic object/property requests and results
+            - Qualcomm MSM open/context and atomic-check boundaries
+            - Binder ioctl and transaction target/code/flags boundaries
+            - the previously proven GPU and final-boot golden recorders remain present
+
+          Hardware test:
+            1. Flash ONLY boot.img.
+            2. Boot TouchGrass normally and allow Android/UI to settle.
+            3. Run COLLECT_TOUCHGRASS_COMPOSER_DRM_REFERENCE.bat on the PC.
+            4. Upload TOUCHGRASS_COMPOSER_DRM_GOLDEN_*.zip to ChatGPT.
+          EOF
+          sed -i 's/^          //' "$OUT/README_FIRST.txt"
+
+          for f in boot.img Image Image.gz final.config System.map \
+                   BUILD-IDENTITY.txt README_FIRST.txt \
+                   touchgrass_composer_drm_reference_overlay.py \
+                   COLLECT_TOUCHGRASS_COMPOSER_DRM_REFERENCE.bat; do
+            test -s "$OUT/$f"
+          done
+          grep -Fq '/proc/tg_display_reference' "$OUT/README_FIRST.txt"
+          (
+            cd "$OUT"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | \
+              xargs -0 sha256sum > SHA256SUMS.txt
+          )
+          sha256sum -c "$OUT/SHA256SUMS.txt"
+
+      - name: Upload precise golden hardware-test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Composer-DRM-Golden-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: artifacts/touchgrass-composer-drm-reference/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

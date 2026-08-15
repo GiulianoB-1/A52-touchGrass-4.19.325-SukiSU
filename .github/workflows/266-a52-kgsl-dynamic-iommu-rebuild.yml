@@ -1,0 +1,409 @@
+name: 266 - A52 KGSL dynamic IOMMU one-compile rebuild
+
+run-name: Phase 266 - KGSL dynamic-domain IOMMU group compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase266-kgsl-dynamic-iommu-v1
+    paths:
+      - scripts/266_kgsl_dynamic_iommu_group_compat.py
+      - .github/workflows/266-a52-kgsl-dynamic-iommu-rebuild.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase266-kgsl-dynamic-iommu-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE227_SEED_RUN_ID: '31644392197'
+  PHASE265_BASE_SHA: 8ba858b9e8aaa315fa4de353f43dd94d490a8d1e
+
+jobs:
+  fast-rebuild:
+    name: Reconstruct once and compile Phase 266
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out Phase 266 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare cumulative scripts
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py scripts/218_phase217_wrapper_phase226.py
+
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 scripts/257_namei_510_patcher_repair.py
+
+          python3 -m py_compile \
+            scripts/208_apply_secure_vmid.py \
+            scripts/210_apply_first_atomic_rs48.py \
+            scripts/211_apply_drm_client_trace.py \
+            scripts/212_apply_graphics_startup_trace.py \
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_namei_510_patcher_repair.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/259_compile_repair.py \
+            scripts/263_a615_zap_pil_parity.py \
+            scripts/263_a615_zap_pil_parity_base.py \
+            scripts/263r_hwspinlock_smem_pil_fix.py \
+            scripts/265_gfx_iommu_parity.py \
+            scripts/266_kgsl_dynamic_iommu_group_compat.py \
+            scripts/38_repack_a52_p1_boot.py
+
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/263_a615_zap_pil_parity.py --self-test
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py --self-test
+          python3 scripts/265_gfx_iommu_parity.py --self-test
+          python3 scripts/266_kgsl_dynamic_iommu_group_compat.py --self-test
+
+          grep -Fq 'A52_PHASE265_QCOM_IOMMU_DMA_DISABLED_IDENTITY_V1' scripts/265_gfx_iommu_parity.py
+          grep -Fq 'A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1' scripts/266_kgsl_dynamic_iommu_group_compat.py
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download proven Phase 227 seed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/phase227-seed')
+          ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
+          assert ident['phase'] == 227, ident
+          assert str(ident['run_id']) == '31644392197', ident
+          for path in (
+              root / 'package/boot.img',
+              root / 'compile/Image',
+              root / 'config/before-phase216.config',
+              root / 'stage/phase209-splash-takeover-trace.patch',
+          ):
+              assert path.is_file() and path.stat().st_size > 0, path
+          image = (root / 'compile/Image').read_bytes()
+          assert b'F256 da n=%.16s M=%u m=%u' in image
+          assert b'F257 ' not in image
+          print('Phase227 seed identity: PASS')
+          PY
+
+      - name: Reconstruct Phase 206 source without compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+
+          test -f gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          test -f workspace/gki-phase199-out/.config
+
+      - name: Replay Phase 208 through 216 source mutations
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
+          git -C "$ROOT" apply --check /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          git -C "$ROOT" apply /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase216.config \
+            artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+
+          grep -Fq 'IONPOST 216' "$ROOT/drivers/a52_secure/qseecom.c"
+          grep -Fq 'DRMPOST 212' "$ROOT/fs/open.c"
+
+      - name: Apply cumulative Phase263R Phase265 and Phase266 repair
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+          CFG=workspace/gki-phase199-out/.config
+
+          python3 scripts/227_phase226_retention_wrapper.py "$ROOT"
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py "$ROOT"
+          python3 scripts/265_gfx_iommu_parity.py "$ROOT"
+          python3 scripts/266_kgsl_dynamic_iommu_group_compat.py "$ROOT"
+
+          grep -Fq 'A52_PHASE263R_GOLDEN_PIL_INIT_ORDER_V1' "$ROOT/drivers/a52_pil/Makefile"
+          grep -Fq 'A52_PHASE263R_MINIDUMP_ERRPTR_GUARD_V1' "$ROOT/drivers/a52_pil/peripheral-loader.c"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$CFG"
+
+          CORE="$ROOT/drivers/iommu/iommu.c"
+          SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          KGSL="$ROOT/drivers/gpu/msm/kgsl_iommu.c"
+          test -f "$CORE" -a -f "$SMMU" -a -f "$KGSL"
+
+          grep -Fq 'A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1' "$CORE"
+          grep -Fq 'iommu_domain_get_attr(domain, DOMAIN_ATTR_DYNAMIC, &dynamic)' "$CORE"
+          grep -Fq 'of_device_is_compatible(dev->of_node, "qcom,smmu-kgsl-cb")' "$CORE"
+          grep -Fq 'ret == 0 && !a52_dynamic' "$CORE"
+          grep -Fq 'a52_p266_trace("a1", group, ret)' "$CORE"
+          grep -Fq 'a52_p266_trace("d0", group, 0)' "$CORE"
+          grep -Fq 'A52_PHASE253_KGSL_SMMU_DOMAIN_CONTRACT_V1' "$SMMU"
+          grep -Fq 'if (a52_kgsl_dynamic_domain(domain))' "$SMMU"
+          grep -Fq 'DOMAIN_ATTR_DYNAMIC' "$KGSL"
+          grep -Fq 'F261 it' "$KGSL"
+
+      - name: Resolve final config and compile once
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          grep -Fxq 'CONFIG_HWSPINLOCK=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_IOMMU_SUPPORT=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_IOMMU_DMA=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_ARM_SMMU=y' "$OUT/.config"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" Image 2>&1 | tee phase266-compile.log
+
+          test -s "$OUT/arch/arm64/boot/Image"
+
+      - name: Verify Phase 266 compiled closure
+        run: |
+          set -Eeuo pipefail
+          IMAGE=workspace/gki-phase199-out/arch/arm64/boot/Image
+          CFG=workspace/gki-phase199-out/.config
+          CORE=gki/common/drivers/iommu/iommu.c
+
+          for cfg in \
+            CONFIG_HWSPINLOCK=y \
+            CONFIG_HWSPINLOCK_QCOM=y \
+            CONFIG_QCOM_SMEM=y \
+            CONFIG_MSM_PIL=y \
+            CONFIG_MSM_PIL_SSR_GENERIC=y \
+            CONFIG_MSM_SUBSYSTEM_RESTART=y \
+            CONFIG_IOMMU_SUPPORT=y \
+            CONFIG_IOMMU_DMA=y \
+            CONFIG_ARM_SMMU=y; do
+            grep -Fxq "$cfg" "$CFG"
+          done
+
+          grep -aFq 'F265 iommu-dma disabled -> identity' "$IMAGE"
+          grep -aFq 'F266 %s n=%u g=%d rc=%d' "$IMAGE"
+          grep -aFq 'F261 it' "$IMAGE"
+          grep -Fq 'group->domain != group->default_domain &&' "$CORE"
+          grep -Fq '!a52_dynamic' "$CORE"
+
+          for marker in \
+            'GFXPOST 225' \
+            'F256 da n=%.16s M=%u m=%u' \
+            'F257 add n=%u M=%u m=%u s=%d'; do
+            grep -aFq "$marker" "$IMAGE"
+          done
+
+          grep -Fxq 'CONFIG_ION=y' "$CFG"
+          grep -Fxq 'CONFIG_SYNC_FILE=y' "$CFG"
+
+      - name: Repack proven boot image with Phase 266 kernel
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase266-fast-out
+          mkdir -p phase266-fast-out/compile phase266-fast-out/config \
+            phase266-fast-out/package phase266-fast-out/audit phase266-fast-out/source
+
+          cp workspace/gki-phase199-out/arch/arm64/boot/Image phase266-fast-out/compile/Image
+          cp workspace/gki-phase199-out/.config phase266-fast-out/config/final.config
+          gzip -n -c phase266-fast-out/compile/Image > phase266-fast-out/package/Image.gz
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source /tmp/phase227-seed/package/boot.img \
+            --kernel phase266-fast-out/package/Image.gz \
+            --output phase266-fast-out/package/boot.img \
+            --report phase266-fast-out/package/repack-report.json
+
+          cp scripts/263r_hwspinlock_smem_pil_fix.py phase266-fast-out/audit/
+          cp scripts/265_gfx_iommu_parity.py phase266-fast-out/audit/
+          cp scripts/266_kgsl_dynamic_iommu_group_compat.py phase266-fast-out/audit/
+          cp phase266-compile.log phase266-fast-out/audit/
+          cp gki/common/drivers/iommu/iommu.c phase266-fast-out/source/
+          cp gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c phase266-fast-out/source/
+          cp gki/common/drivers/gpu/msm/kgsl_iommu.c phase266-fast-out/source/
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out = Path('phase266-fast-out')
+          identity = {
+              'phase': '266',
+              'name': 'KGSL-DYNAMIC-IOMMU-GROUP-COMPAT',
+              'build_path': 'one-compile-fast-rebuild',
+              'git_sha': os.environ.get('GITHUB_SHA'),
+              'run_id': os.environ.get('GITHUB_RUN_ID'),
+              'phase265_base_sha': os.environ.get('PHASE265_BASE_SHA'),
+              'phase227_seed_artifact_id': 9160764832,
+              'phase227_seed_run_id': 31644392197,
+              'hardware_validated': False,
+              'final_kernel_compile_count': 1,
+              'root_cause': 'generic Android 5.10 IOMMU group ownership rejects KGSL dynamic per-process domain attach with -EBUSY after KGSL global domain owns gfx3d_user',
+              'repair': [
+                  'Keep generic 5.10 -EBUSY ownership guard for ordinary IOMMU clients',
+                  'Recognize only single-device qcom,smmu-kgsl-cb DOMAIN_ATTR_DYNAMIC domains',
+                  'Allow ARM-SMMU dynamic domain finalization without replacing group->domain',
+                  'Prevent dynamic detach from reattaching the generic default domain',
+                  'Emit bounded R48 F266 a0/a1/d0/d1 markers for hardware proof',
+              ],
+          }
+          (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
+          files = [
+              out / 'compile/Image',
+              out / 'config/final.config',
+              out / 'package/Image.gz',
+              out / 'package/boot.img',
+              out / 'package/repack-report.json',
+          ]
+          with (out / 'SHA256SUMS').open('w') as f:
+              for p in files:
+                  f.write(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  ./{p.relative_to(out)}\n')
+          PY
+
+          (cd phase266-fast-out && sha256sum -c SHA256SUMS)
+          test -s phase266-fast-out/package/boot.img
+
+      - name: Upload Phase 266 flashable candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase266-KGSL-DYNAMIC-IOMMU-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase266-fast-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Collect Phase 266 failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          rm -rf phase266-failure
+          mkdir -p phase266-failure/source phase266-failure/config phase266-failure/logs
+          cp phase266-compile.log phase266-failure/logs/ 2>/dev/null || true
+          cp workspace/gki-phase199-out/.config phase266-failure/config/final-or-partial.config 2>/dev/null || true
+          cp scripts/266_kgsl_dynamic_iommu_group_compat.py phase266-failure/ 2>/dev/null || true
+          cp scripts/265_gfx_iommu_parity.py phase266-failure/ 2>/dev/null || true
+
+          for p in \
+            gki/common/drivers/iommu/iommu.c \
+            gki/common/include/linux/iommu.h \
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c \
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c \
+            gki/common/drivers/gpu/msm/kgsl_iommu.c \
+            gki/common/drivers/gpu/msm/kgsl.c; do
+            if [ -f "$p" ]; then
+              cp "$p" "phase266-failure/source/$(echo "$p" | tr '/' '_')"
+            fi
+          done
+
+          {
+            echo '=== Phase266 source markers ==='
+            grep -RsnE 'A52_PHASE266|F266|DOMAIN_ATTR_DYNAMIC|qcom,smmu-kgsl-cb|__iommu_attach_group|__iommu_detach_group' \
+              gki/common/drivers/iommu gki/common/drivers/gpu/msm 2>/dev/null | head -n 1500
+            echo '=== Relevant config ==='
+            grep -E 'CONFIG_(IOMMU|ARM_SMMU|ION|QCOM_SCM|SYNC_FILE|HWSPINLOCK|QCOM_SMEM|MSM_PIL)' \
+              workspace/gki-phase199-out/.config 2>/dev/null || true
+            echo '=== Git ==='
+            git rev-parse HEAD
+            git status --short
+          } > phase266-failure/phase266-diagnostics.txt 2>&1
+
+      - name: Upload Phase 266 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase266-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: phase266-failure/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 30

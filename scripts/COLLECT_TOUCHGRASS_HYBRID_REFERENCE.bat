@@ -32,6 +32,7 @@ if errorlevel 1 (
 
 echo [3/8] Capturing precise kernel recorders...
 adb exec-out su -c "cat /proc/tg_display_reference 2>/dev/null" > "%OUT%\kernel-recorders\tg_display_reference.txt"
+adb exec-out su -c "cat /proc/tg_boot_reference 2>/dev/null" > "%OUT%\kernel-recorders\tg_boot_reference.txt"
 adb exec-out su -c "cat /proc/tg_final_boot_reference 2>/dev/null" > "%OUT%\kernel-recorders\tg_final_boot_reference.txt"
 adb exec-out su -c "cat /proc/tg_gpu_reference 2>/dev/null" > "%OUT%\kernel-recorders\tg_gpu_reference.txt"
 
@@ -71,7 +72,7 @@ echo [7/8] Writing capture identity...
   echo TOUCHGRASS_HYBRID_REFERENCE_V1
   echo captured=%DATE% %TIME%
   echo expected_module=tg_composer_reference
-  echo includes=tg_display_reference,tg_final_boot_reference,tg_gpu_reference,KernelSU companion,logcat,dmesg,binder,DRM,services
+  echo includes=tg_display_reference,tg_boot_reference,tg_final_boot_reference,tg_gpu_reference,KernelSU companion,logcat,dmesg,binder,DRM,services
 ) > "%OUT%\CAPTURE-IDENTITY.txt"
 
 powershell -NoProfile -Command "$files=Get-ChildItem -Recurse -File '%OUT%'; $rows=foreach($f in $files){$h=Get-FileHash -Algorithm SHA256 $f.FullName; '{0}  {1}' -f $h.Hash.ToLower(),$f.FullName.Substring((Resolve-Path '%OUT%').Path.Length+1)}; $rows | Set-Content -Encoding ASCII '%OUT%\SHA256SUMS.txt'"

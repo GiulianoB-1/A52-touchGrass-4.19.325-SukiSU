@@ -86,13 +86,23 @@ def patch_text(text: str) -> str:
     if "IOMMU_DOMAIN_IDENTITY" not in body:
         raise RuntimeError("unexpected qcom_smmu_def_domain_type() source shape")
 
-    injected = (
-        "\tint a52_type;\n\n"
+    original = body.lstrip("\n")
+    return_stmt = "\treturn match ? IOMMU_DOMAIN_IDENTITY : 0;"
+    if return_stmt not in original:
+        raise RuntimeError("unexpected qcom_smmu_def_domain_type() return shape")
+
+    # Keep all declarations before executable statements. Kernel builds enable
+    # -Wdeclaration-after-statement, so injecting the Phase265 check ahead of
+    # the existing `match` declaration is rejected by Clang.
+    original = original.replace(
+        return_stmt,
         "\ta52_type = a52_qcom_iommu_dma_domain_type(dev);\n"
         "\tif (a52_type)\n"
         "\t\treturn a52_type;\n\n"
-        + body.lstrip("\n")
+        + return_stmt,
+        1,
     )
+    injected = "\tint a52_type;\n" + original
     replacement = "static int qcom_smmu_def_domain_type(struct device *dev)\n{\n" + injected + "\n}"
     return text[:m.start()] + HELPER + replacement + text[m.end():]
 
@@ -180,6 +190,9 @@ def self_test() -> None:
     assert patched.count(MARKER) == 1
     assert "a52_qcom_iommu_dma_domain_type(dev)" in patched
     assert '!strcmp(mode, "disabled")' in patched
+    fn = patched.split("static int qcom_smmu_def_domain_type(struct device *dev)", 1)[1]
+    assert fn.index("int a52_type;") < fn.index("const struct of_device_id *match")
+    assert fn.index("const struct of_device_id *match") < fn.index("a52_type = a52_qcom_iommu_dma_domain_type(dev);")
     assert patch_text(patched) == patched
 
     with tempfile.TemporaryDirectory() as td:

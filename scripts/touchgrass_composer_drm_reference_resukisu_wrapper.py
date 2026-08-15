@@ -24,10 +24,12 @@ block = r'''info "Applying observation-only precise TouchGrass Composer/DRM gold
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py"
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_retention_fix.py"
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_payload_fix.py"
+python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_blob_fix.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py" --self-test
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py" "$ROOT"
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_retention_fix.py" "$ROOT"
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_payload_fix.py" "$ROOT"
+python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_blob_fix.py" "$ROOT"
 
 # Guard against accidentally emitting Python escape text into C source.
 if grep -Fq '\tretcode = drm_ioctl_kernel' "$ROOT/drivers/gpu/drm/drm_ioctl.c"; then
@@ -45,7 +47,7 @@ for marker in \
   COMPOSER_EXEC SYS_OPEN_IN SYS_IOCTL_IN SYS_MMAP_IN DRM_OPEN_IN DRM_IOCTL_DESC \
   PROP_CREATE PROP_GET OBJ_PROP ATOMIC_PROP MSM_ATOMIC_IN BINDER_TX_TARGET \
   DRM_CAP DRM_CLIENT_CAP DRM_RES_COUNTS DRM_CONN_A DRM_PLANE_RES DRM_PLANE_A \
-  DRM_ENCODER DRM_CRTC_A DRM_PROP_SUM DRM_OBJ_SUM; do
+  DRM_ENCODER DRM_CRTC_A DRM_PROP_SUM DRM_OBJ_SUM DRM_BLOB; do
   grep -RqsF "$marker" \
     "$ROOT/kernel/tg_display_reference.c" \
     "$ROOT/fs" "$ROOT/mm/mmap.c" "$ROOT/drivers/gpu/drm" \

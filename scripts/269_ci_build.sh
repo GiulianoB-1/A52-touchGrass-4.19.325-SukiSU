@@ -11,6 +11,7 @@ fail_report() {
   cp phase269-compile.log phase269-failure/logs/ 2>/dev/null || true
   cp "$OUT/.config" phase269-failure/config/final-or-partial.config 2>/dev/null || true
   cp scripts/269_phase268_composer_drm_uapi.py phase269-failure/ 2>/dev/null || true
+  cp scripts/269b_exact_composer_tgid.py phase269-failure/ 2>/dev/null || true
   for p in \
     "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
     "$ROOT/drivers/a52_display/msm/msm_drv.c"; do
@@ -29,14 +30,17 @@ test -s phase268-out/package/boot.img
 test -s "$OUT/arch/arm64/boot/Image"
 cp "$OUT/.config" /tmp/phase268-before-phase269.config
 
-python3 -m py_compile scripts/269_phase268_composer_drm_uapi.py
+python3 -m py_compile scripts/269_phase268_composer_drm_uapi.py scripts/269b_exact_composer_tgid.py
 python3 scripts/269_phase268_composer_drm_uapi.py "$ROOT"
+python3 scripts/269b_exact_composer_tgid.py "$ROOT"
 cmp -s /tmp/phase268-before-phase269.config "$OUT/.config"
 
 REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
 MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
 grep -Fq 'return !strncmp(message, "P269 ", 5) ||' "$REC"
 grep -Fq 'if (strncmp(fmt, "P269", 4) &&' "$REC"
+grep -Fq 'a52_ackfr_phase269_is_composer_tgid' "$REC"
+grep -Fq 'return a52_ackfr_phase269_is_composer_tgid(current->tgid);' "$MSM"
 grep -Fq '#define A52_R269_IOCTL_LIMIT 1024U' "$MSM"
 grep -Fq 'P269 " fmt' "$MSM"
 grep -Fq 'A52_R269_REC("CONN n=%u id=%u enc=%u' "$MSM"
@@ -69,6 +73,7 @@ for marker in \
   'P268 A t=%u cp=%d ex=%d pa=%d/%d/%d dr=%d/%d/%d/%d'; do
   grep -aFq "$marker" "$IMAGE"
 done
+grep -aFq 'a52_ackfr_phase269_is_composer_tgid' "$IMAGE"
 
 rm -rf phase269-out
 mkdir -p phase269-out/compile phase269-out/config phase269-out/package \
@@ -81,7 +86,7 @@ python3 scripts/38_repack_a52_p1_boot.py \
   --kernel phase269-out/package/Image.gz \
   --output phase269-out/package/boot.img \
   --report phase269-out/package/repack-report.json
-cp scripts/269_phase268_composer_drm_uapi.py phase269-out/audit/
+cp scripts/269_phase268_composer_drm_uapi.py scripts/269b_exact_composer_tgid.py phase269-out/audit/
 cp phase269-compile.log phase269-out/audit/
 cp "$REC" "$MSM" phase269-out/source/
 
@@ -99,6 +104,7 @@ identity = {
     'diagnostic_only': True,
     'device_functional_semantics_changed': False,
     'phase268_stream_preserved': True,
+    'composer_identity': 'exact Phase268 exec-latched TGID',
     'observer': 'Composer-only post-drm_ioctl UAPI payload capture',
     'question': 'What is the first DRM UAPI payload divergence versus the hardware-validated TouchGrass golden sequence?',
 }

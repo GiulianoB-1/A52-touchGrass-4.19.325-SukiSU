@@ -1,137 +1,191 @@
 #!/usr/bin/env python3
-"""Phase 267: diagnostic-only direct pre-DRM boundary.
+"""Phase267S retention wrapper for the direct pre-DRM diagnostic.
 
-Retains Phase266 functional semantics and adds one dedicated, low-volume P267
-recorder class. Phase267S also re-admits only the already-compiled DISP lifecycle scope formats and KMSPOST
-milestones so the pre-P267 SDE/DRM bring-up boundary
-can be observed without adding or changing any display call sites. P267 remains
-the dedicated direct boundary class.
-
-P267 checkpoints bracket existing operations only:
-- initial SDE data-bus quota loop;
-- SDE block-init call and DRM-object init result;
-- DRM minor sysfs allocation and device_add publication.
-
-No return value, branch, loop bound, config symbol, bus vote, probe ordering,
-IOMMU behavior, or DRM/SDE control-flow decision is changed.
+Keeps the exact Phase267S display-lifecycle admission and direct P267 call-site
+instrumentation in the frozen base script. This wrapper only adds compact
+sticky state for early DISPINIT/P267 records and re-emits it at late heartbeat
+checkpoints, so early display evidence survives ramoops ring overwrite.
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
-import tempfile
 from pathlib import Path
 
-SDE = Path("drivers/a52_display/msm/sde/sde_kms.c")
-DRM = Path("drivers/gpu/drm/drm_drv.c")
-RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
-IOMMU = Path("drivers/iommu/iommu.c")
-MARKER = "A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3"
+BASE_MARKER = "A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3"
 ADMISSION_MARKER = "A52_PHASE267S_DISPLAY_LIFECYCLE_ADMISSION_V1"
-PHASE266 = "A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1"
+RETENTION_MARKER = "A52_PHASE267_PREDRM_STICKY_RETENTION_V1"
+BASE_PATH = Path(__file__).with_name("267_phase266_display_sticky_boundary_base.py")
 
-CRIT_OLD = 'return !strncmp(message, "F261 ", 5) ||\n'
-CRIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: dedicated diagnostics only. */\n'
-            'return !strncmp(message, "P267 ", 5) ||\n'
-            '       !strncmp(message, "F261 ", 5) ||\n')
-ADMIT_OLD = 'if (strncmp(fmt, "F261", 4) &&\n'
-ADMIT_V3 = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: admit only P267 diagnostics. */\n'
-            'if (strncmp(fmt, "P267", 4) &&\n'
-            '    strncmp(fmt, "F261", 4) &&\n')
-ADMIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: direct boundary diagnostics. */\n'
-             '/* A52_PHASE267S_DISPLAY_LIFECYCLE_ADMISSION_V1: reuse existing low-volume scopes. */\n'
-             'if (strncmp(fmt, "P267", 4) &&\n'
-             '    strcmp(fmt, "%s enter fn=%s") &&\n'
-             '    strcmp(fmt, "%s exit fn=%s us=%llu") &&\n'
-             '    strncmp(fmt, "KMSPOST", 7) &&\n'
-             '    strncmp(fmt, "F261", 4) &&\n')
 
-SDE_BUS_OLD = '''\tfor (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++)
-\t\tsde_power_data_bus_set_quota(&priv->phandle, i,
-\t\t\tSDE_POWER_HANDLE_CONT_SPLASH_BUS_AB_QUOTA,
-\t\t\tSDE_POWER_HANDLE_CONT_SPLASH_BUS_IB_QUOTA);
+def load_base():
+    spec = importlib.util.spec_from_file_location("a52_phase267_base", BASE_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load Phase267S base: {BASE_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-\ta52_ackfr_record("KMSBLK core-rev enter");
-'''
-SDE_BUS_NEW = '''\t/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: diagnostic only. */
-\ta52_ackfr_record("P267 bus-enter n=%d", SDE_POWER_HANDLE_DBUS_ID_MAX);
-\tfor (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++)
-\t\tsde_power_data_bus_set_quota(&priv->phandle, i,
-\t\t\tSDE_POWER_HANDLE_CONT_SPLASH_BUS_AB_QUOTA,
-\t\t\tSDE_POWER_HANDLE_CONT_SPLASH_BUS_IB_QUOTA);
-\ta52_ackfr_record("P267 bus-exit n=%d", SDE_POWER_HANDLE_DBUS_ID_MAX);
 
-\ta52_ackfr_record("KMSBLK core-rev enter");
-'''
+base = load_base()
+base_patch_recorder = base.patch_recorder
 
-SDE_DRMOBJ_OLD = '''\ta52_ackfr_record("KMSBLK drm-obj enter");
-\trc = _sde_kms_drm_obj_init(sde_kms);
-\ta52_ackfr_record("KMSBLK drm-obj exit rc=%d crtc=%d enc=%d conn=%d plane=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-'''
-SDE_DRMOBJ_NEW = '''\ta52_ackfr_record("KMSBLK drm-obj enter");
-\ta52_ackfr_record("P267 drm-obj-enter");
-\trc = _sde_kms_drm_obj_init(sde_kms);
-\ta52_ackfr_record("P267 drm-obj-exit rc=%d c=%d e=%d n=%d p=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-\ta52_ackfr_record("KMSBLK drm-obj exit rc=%d crtc=%d enc=%d conn=%d plane=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-'''
+RETENTION_DECL_ANCHOR = """static void a52_r228_track_message(const char *message)\n"""
+RETENTION_DECL_NEW = r"""/* A52_PHASE267_PREDRM_STICKY_RETENTION_V1
+ * Phase267R hardware showed that direct P267 records can execute before the
+ * retained ramoops window and later be overwritten. Latch only compact
+ * display-init / P267 state and re-emit it during the late heartbeat window.
+ * Observation only: no display, DRM, probe, ordering or return-value change.
+ */
+static atomic_t a52_r267_reg_stage = ATOMIC_INIT(0);
+static atomic_t a52_r267_reg_rc = ATOMIC_INIT(0);
+static atomic_t a52_r267_modeset = ATOMIC_INIT(-1);
+static atomic_t a52_r267_plat_stage = ATOMIC_INIT(0);
+static atomic_t a52_r267_plat_rc = ATOMIC_INIT(0);
+static atomic_t a52_r267_dsi_done = ATOMIC_INIT(0);
+static atomic_t a52_r267_smmu_done = ATOMIC_INIT(0);
+static atomic_t a52_r267_probe_count = ATOMIC_INIT(0);
+static atomic_t a52_r267_probe_sde = ATOMIC_INIT(-1);
+static atomic_t a52_r267_probe_mdss = ATOMIC_INIT(-1);
+static atomic_t a52_r267_bus_stage = ATOMIC_INIT(0);
+static atomic_t a52_r267_bus_n = ATOMIC_INIT(-1);
+static atomic_t a52_r267_blocks_stage = ATOMIC_INIT(0);
+static atomic_t a52_r267_blocks_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r267_blocks_c = ATOMIC_INIT(-1);
+static atomic_t a52_r267_blocks_e = ATOMIC_INIT(-1);
+static atomic_t a52_r267_blocks_n = ATOMIC_INIT(-1);
+static atomic_t a52_r267_blocks_p = ATOMIC_INIT(-1);
+static atomic_t a52_r267_obj_stage = ATOMIC_INIT(0);
+static atomic_t a52_r267_obj_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r267_obj_c = ATOMIC_INIT(-1);
+static atomic_t a52_r267_obj_e = ATOMIC_INIT(-1);
+static atomic_t a52_r267_obj_n = ATOMIC_INIT(-1);
+static atomic_t a52_r267_obj_p = ATOMIC_INIT(-1);
+static atomic_t a52_r267_node_count = ATOMIC_INIT(0);
+static atomic_t a52_r267_node_type = ATOMIC_INIT(-1);
+static atomic_t a52_r267_node_idx = ATOMIC_INIT(-1);
+static atomic_t a52_r267_node_rc = ATOMIC_INIT(-61);
+static atomic_t a52_r267_add_count = ATOMIC_INIT(0);
+static atomic_t a52_r267_add_type = ATOMIC_INIT(-1);
+static atomic_t a52_r267_add_idx = ATOMIC_INIT(-1);
+static atomic_t a52_r267_add_rc = ATOMIC_INIT(-61);
 
-SDE_BLOCKS_OLD = '''\ta52_ackfr_record("KMSPOST blocks enter");
-\trc = _sde_kms_hw_init_blocks(sde_kms, dev, priv);
-\ta52_ackfr_record("KMSPOST blocks exit rc=%d crtc=%d enc=%d conn=%d plane=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-'''
-SDE_BLOCKS_NEW = '''\ta52_ackfr_record("KMSPOST blocks enter");
-\ta52_ackfr_record("P267 blocks-enter");
-\trc = _sde_kms_hw_init_blocks(sde_kms, dev, priv);
-\ta52_ackfr_record("P267 blocks-exit rc=%d c=%d e=%d n=%d p=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-\ta52_ackfr_record("KMSPOST blocks exit rc=%d crtc=%d enc=%d conn=%d plane=%d",
-\t\trc, priv->num_crtcs, priv->num_encoders,
-\t\tpriv->num_connectors, priv->num_planes);
-'''
+static void a52_r267_track_display(const char *message)
+{
+	if (!message)
+		return;
 
-DRM_SYSFS_OLD = '''\tif (IS_ERR(minor->kdev)) {
-\t\tr = PTR_ERR(minor->kdev);
-\t\ta52_ackfr_record("DRMPOST 212 node type=%u idx=%d sysfs=%d",
-\t\t\t\t  type, minor->index, r);
-\t\treturn r;
-\t}
+	if (!strncmp(message, "DISPINIT register enter", 23)) {
+		atomic_set(&a52_r267_reg_stage, 1);
+		atomic_set(&a52_r267_modeset,
+			a52_r228_dec(message, "modeset=", atomic_read(&a52_r267_modeset)));
+	} else if (!strncmp(message, "DISPINIT register disabled", 26)) {
+		atomic_set(&a52_r267_reg_stage, 2);
+		atomic_set(&a52_r267_reg_rc,
+			a52_r228_dec(message, "rc=", atomic_read(&a52_r267_reg_rc)));
+	}
+	if (!strncmp(message, "DISPINIT platform-register enter", 32))
+		atomic_set(&a52_r267_plat_stage, 1);
+	else if (!strncmp(message, "DISPINIT platform-register exit", 31)) {
+		atomic_set(&a52_r267_plat_stage, 2);
+		atomic_set(&a52_r267_plat_rc,
+			a52_r228_dec(message, "rc=", atomic_read(&a52_r267_plat_rc)));
+	}
+	if (!strncmp(message, "DISPINIT dsi-register done", 26))
+		atomic_set(&a52_r267_dsi_done, 1);
+	if (!strncmp(message, "DISPINIT smmu-register done", 27))
+		atomic_set(&a52_r267_smmu_done, 1);
+	if (!strncmp(message, "DISPINIT probe enter", 20)) {
+		atomic_inc(&a52_r267_probe_count);
+		atomic_set(&a52_r267_probe_sde,
+			a52_r228_dec(message, "sde=", atomic_read(&a52_r267_probe_sde)));
+		atomic_set(&a52_r267_probe_mdss,
+			a52_r228_dec(message, "mdss=", atomic_read(&a52_r267_probe_mdss)));
+	}
 
-\ta52_ackfr_record("DRMPOST 212 node type=%u idx=%d name=%.16s",
-\t\t\t  type, minor->index, dev_name(minor->kdev));
-'''
-DRM_SYSFS_NEW = '''\t/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: diagnostic only. */
-\tif (IS_ERR(minor->kdev)) {
-\t\tr = PTR_ERR(minor->kdev);
-\t\ta52_ackfr_record("P267 node type=%u idx=%d rc=%d",
-\t\t\t\t  type, minor->index, r);
-\t\ta52_ackfr_record("DRMPOST 212 node type=%u idx=%d sysfs=%d",
-\t\t\t\t  type, minor->index, r);
-\t\treturn r;
-\t}
+	if (!strncmp(message, "P267 bus-enter", 14)) {
+		atomic_set(&a52_r267_bus_stage, 1);
+		atomic_set(&a52_r267_bus_n,
+			a52_r228_dec(message, "n=", atomic_read(&a52_r267_bus_n)));
+	} else if (!strncmp(message, "P267 bus-exit", 13)) {
+		atomic_set(&a52_r267_bus_stage, 2);
+		atomic_set(&a52_r267_bus_n,
+			a52_r228_dec(message, "n=", atomic_read(&a52_r267_bus_n)));
+	} else if (!strncmp(message, "P267 blocks-enter", 17)) {
+		atomic_set(&a52_r267_blocks_stage, 1);
+	} else if (!strncmp(message, "P267 blocks-exit", 16)) {
+		atomic_set(&a52_r267_blocks_stage, 2);
+		atomic_set(&a52_r267_blocks_rc, a52_r228_dec(message, "rc=", -61));
+		atomic_set(&a52_r267_blocks_c, a52_r228_dec(message, "c=", -1));
+		atomic_set(&a52_r267_blocks_e, a52_r228_dec(message, "e=", -1));
+		atomic_set(&a52_r267_blocks_n, a52_r228_dec(message, "n=", -1));
+		atomic_set(&a52_r267_blocks_p, a52_r228_dec(message, "p=", -1));
+	} else if (!strncmp(message, "P267 drm-obj-enter", 18)) {
+		atomic_set(&a52_r267_obj_stage, 1);
+	} else if (!strncmp(message, "P267 drm-obj-exit", 17)) {
+		atomic_set(&a52_r267_obj_stage, 2);
+		atomic_set(&a52_r267_obj_rc, a52_r228_dec(message, "rc=", -61));
+		atomic_set(&a52_r267_obj_c, a52_r228_dec(message, "c=", -1));
+		atomic_set(&a52_r267_obj_e, a52_r228_dec(message, "e=", -1));
+		atomic_set(&a52_r267_obj_n, a52_r228_dec(message, "n=", -1));
+		atomic_set(&a52_r267_obj_p, a52_r228_dec(message, "p=", -1));
+	} else if (!strncmp(message, "P267 node-add", 13)) {
+		atomic_inc(&a52_r267_add_count);
+		atomic_set(&a52_r267_add_type, a52_r228_dec(message, "type=", -1));
+		atomic_set(&a52_r267_add_idx, a52_r228_dec(message, "idx=", -1));
+		atomic_set(&a52_r267_add_rc, a52_r228_dec(message, "rc=", -61));
+	} else if (!strncmp(message, "P267 node ", 10)) {
+		atomic_inc(&a52_r267_node_count);
+		atomic_set(&a52_r267_node_type, a52_r228_dec(message, "type=", -1));
+		atomic_set(&a52_r267_node_idx, a52_r228_dec(message, "idx=", -1));
+		atomic_set(&a52_r267_node_rc, a52_r228_dec(message, "rc=", -61));
+	}
+}
 
-\ta52_ackfr_record("P267 node type=%u idx=%d rc=0", type, minor->index);
-\ta52_ackfr_record("DRMPOST 212 node type=%u idx=%d name=%.16s",
-\t\t\t  type, minor->index, dev_name(minor->kdev));
-'''
+static void a52_r228_track_message(const char *message)
+"""
 
-DRM_NODE_ADD_OLD = '''\tret = device_add(minor->kdev);
-\ta52_ackfr_record("DRMPOST 212 node-add type=%u idx=%d rc=%d",
-\t\t\t  type, minor->index, ret);
-'''
-DRM_NODE_ADD_NEW = '''\tret = device_add(minor->kdev);
-\ta52_ackfr_record("P267 node-add type=%u idx=%d rc=%d",
-\t\t\t  type, minor->index, ret);
-\ta52_ackfr_record("DRMPOST 212 node-add type=%u idx=%d rc=%d",
-\t\t\t  type, minor->index, ret);
-'''
+RETENTION_TRACK_OLD = """\tif (!message || !strncmp(message, "TRIPOST ", 8))\n\t\treturn;\n"""
+RETENTION_TRACK_NEW = """\tif (!message)\n\t\treturn;\n\ta52_r267_track_display(message);\n\tif (!strncmp(message, "TRIPOST ", 8))\n\t\treturn;\n"""
+
+RETENTION_SNAPSHOT_ANCHOR = """static int a52_r228_clip(int value)\n"""
+RETENTION_SNAPSHOT_NEW = r"""static bool a52_r267_snapshot_tick(unsigned int tick)
+{
+	return tick == 120U || tick == 150U || tick == 160U ||
+	       tick == 170U || tick == 180U;
+}
+
+static void a52_r267_display_snapshot(unsigned int tick)
+{
+	if (!a52_r267_snapshot_tick(tick))
+		return;
+
+	a52_ackfr_record("P267 A t=%u rg=%d/%d ms=%d pl=%d/%d ds=%d sm=%d pr=%d/%d/%d",
+		tick, atomic_read(&a52_r267_reg_stage), atomic_read(&a52_r267_reg_rc),
+		atomic_read(&a52_r267_modeset), atomic_read(&a52_r267_plat_stage),
+		atomic_read(&a52_r267_plat_rc), atomic_read(&a52_r267_dsi_done),
+		atomic_read(&a52_r267_smmu_done), atomic_read(&a52_r267_probe_count),
+		atomic_read(&a52_r267_probe_sde), atomic_read(&a52_r267_probe_mdss));
+	a52_ackfr_record("P267 B t=%u bu=%d/%d bl=%d/%d ob=%d/%d nd=%d/%d/%d ad=%d/%d/%d",
+		tick, atomic_read(&a52_r267_bus_stage), atomic_read(&a52_r267_bus_n),
+		atomic_read(&a52_r267_blocks_stage), atomic_read(&a52_r267_blocks_rc),
+		atomic_read(&a52_r267_obj_stage), atomic_read(&a52_r267_obj_rc),
+		atomic_read(&a52_r267_node_count), atomic_read(&a52_r267_node_idx),
+		atomic_read(&a52_r267_node_rc), atomic_read(&a52_r267_add_count),
+		atomic_read(&a52_r267_add_idx), atomic_read(&a52_r267_add_rc));
+	a52_ackfr_record("P267 C t=%u bc=%d,%d,%d,%d oc=%d,%d,%d,%d nt=%d at=%d",
+		tick, atomic_read(&a52_r267_blocks_c), atomic_read(&a52_r267_blocks_e),
+		atomic_read(&a52_r267_blocks_n), atomic_read(&a52_r267_blocks_p),
+		atomic_read(&a52_r267_obj_c), atomic_read(&a52_r267_obj_e),
+		atomic_read(&a52_r267_obj_n), atomic_read(&a52_r267_obj_p),
+		atomic_read(&a52_r267_node_type), atomic_read(&a52_r267_add_type));
+}
+
+static int a52_r228_clip(int value)
+"""
+
+RETENTION_HEARTBEAT_OLD = """\ta52_r228_tripost_snapshot(tick);\n\t/* A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1: no Phase 242 heartbeat snapshot */\n"""
+RETENTION_HEARTBEAT_NEW = """\ta52_r228_tripost_snapshot(tick);\n\ta52_r267_display_snapshot(tick);\n\t/* A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1: no Phase 242 heartbeat snapshot */\n"""
 
 
 def one(text: str, old: str, new: str, label: str) -> str:
@@ -143,182 +197,60 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def validate_retention(text: str, label: str) -> None:
+    for token in (
+        RETENTION_MARKER,
+        "a52_r267_track_display(message);",
+        "P267 A t=%u rg=%d/%d ms=%d pl=%d/%d ds=%d sm=%d pr=%d/%d/%d",
+        "P267 B t=%u bu=%d/%d bl=%d/%d ob=%d/%d nd=%d/%d/%d ad=%d/%d/%d",
+        "P267 C t=%u bc=%d,%d,%d,%d oc=%d,%d,%d,%d nt=%d at=%d",
+        "a52_r267_display_snapshot(tick);",
+    ):
+        if token not in text:
+            raise RuntimeError(f"{label}: missing {token}")
+
+
 def patch_recorder(text: str, label: str) -> str:
-    if MARKER in text:
-        if ADMISSION_MARKER not in text:
-            text = one(text, ADMIT_V3, ADMIT_NEW, f"{label}: Phase267S admission upgrade")
-        validate_recorder(text, label)
-        return text
-    if 'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1' not in text:
-        raise RuntimeError(f"{label}: expected Phase266 focused recorder shape missing")
-    text = one(text, CRIT_OLD, CRIT_NEW, f"{label}: critical predicate")
-    text = one(text, ADMIT_OLD, ADMIT_NEW, f"{label}: admission predicate")
-    validate_recorder(text, label)
+    text = base_patch_recorder(text, label)
+    if RETENTION_MARKER not in text:
+        text = one(text, RETENTION_DECL_ANCHOR, RETENTION_DECL_NEW,
+                   f"{label}: sticky declarations")
+        text = one(text, RETENTION_TRACK_OLD, RETENTION_TRACK_NEW,
+                   f"{label}: sticky tracker call")
+        text = one(text, RETENTION_SNAPSHOT_ANCHOR, RETENTION_SNAPSHOT_NEW,
+                   f"{label}: sticky snapshot")
+        text = one(text, RETENTION_HEARTBEAT_OLD, RETENTION_HEARTBEAT_NEW,
+                   f"{label}: heartbeat snapshot")
+    validate_retention(text, label)
     return text
 
 
-def patch_sde(text: str, label: str) -> str:
-    if MARKER in text:
-        validate_sde(text, label)
-        return text
-    text = one(text, SDE_BUS_OLD, SDE_BUS_NEW, f"{label}: data-bus loop")
-    text = one(text, SDE_DRMOBJ_OLD, SDE_DRMOBJ_NEW, f"{label}: DRM object init")
-    text = one(text, SDE_BLOCKS_OLD, SDE_BLOCKS_NEW, f"{label}: KMS blocks call")
-    validate_sde(text, label)
-    return text
-
-
-def patch_drm(text: str, label: str) -> str:
-    if MARKER in text:
-        validate_drm(text, label)
-        return text
-    text = one(text, DRM_SYSFS_OLD, DRM_SYSFS_NEW, f"{label}: minor allocation")
-    text = one(text, DRM_NODE_ADD_OLD, DRM_NODE_ADD_NEW, f"{label}: minor publication")
-    validate_drm(text, label)
-    return text
-
-
-def validate_recorder(text: str, label: str) -> None:
-    for token in (
-        MARKER,
-        '!strncmp(message, "P267 ", 5)',
-        'strncmp(fmt, "P267", 4)',
-        ADMISSION_MARKER,
-        'strcmp(fmt, "%s enter fn=%s")',
-        'strcmp(fmt, "%s exit fn=%s us=%llu")',
-        'strncmp(fmt, "KMSPOST", 7)',
-        '!strncmp(message, "F261 ", 5)',
-        'strncmp(fmt, "F261", 4)',
-        'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1',
-    ):
-        if token not in text:
-            raise RuntimeError(f"{label}: missing {token}")
-
-
-def validate_sde(text: str, label: str) -> None:
-    for token in (
-        MARKER,
-        'P267 bus-enter n=%d',
-        'P267 bus-exit n=%d',
-        'P267 drm-obj-enter',
-        'P267 drm-obj-exit rc=%d c=%d e=%d n=%d p=%d',
-        'P267 blocks-enter',
-        'P267 blocks-exit rc=%d c=%d e=%d n=%d p=%d',
-        'sde_power_data_bus_set_quota(&priv->phandle, i,',
-        'KMSBLK core-rev enter',
-    ):
-        if token not in text:
-            raise RuntimeError(f"{label}: missing {token}")
-    if SDE_BUS_NEW not in text:
-        raise RuntimeError(f"{label}: exact instrumented data-bus block is not contiguous")
-    if SDE_DRMOBJ_NEW not in text:
-        raise RuntimeError(f"{label}: exact instrumented DRM-object block is not contiguous")
-    if SDE_BLOCKS_NEW not in text:
-        raise RuntimeError(f"{label}: exact instrumented KMS-block call is not contiguous")
-
-
-def validate_drm(text: str, label: str) -> None:
-    for token in (
-        MARKER,
-        'P267 node type=%u idx=%d rc=%d',
-        'P267 node type=%u idx=%d rc=0',
-        'P267 node-add type=%u idx=%d rc=%d',
-        'DRMPOST 212 node type=%u idx=%d sysfs=%d',
-        'DRMPOST 212 node-add type=%u idx=%d rc=%d',
-        'ret = device_add(minor->kdev);',
-    ):
-        if token not in text:
-            raise RuntimeError(f"{label}: missing {token}")
-    if DRM_SYSFS_NEW not in text:
-        raise RuntimeError(f"{label}: exact instrumented minor-allocation block is not contiguous")
-    if DRM_NODE_ADD_NEW not in text:
-        raise RuntimeError(f"{label}: exact instrumented minor-publication block is not contiguous")
-
-
-def candidate_roots(args: list[str], cwd: Path) -> list[Path]:
-    roots: list[Path] = []
-    for value in args:
-        if value.startswith("-"):
-            continue
-        p = Path(value)
-        if not p.is_absolute():
-            p = cwd / p
-        roots.extend((p, p.parent))
-    roots.extend((cwd / "workspace/gki-phase199-src", cwd / "gki/common"))
-    out: list[Path] = []
-    seen: set[Path] = set()
-    for root in roots:
-        key = root.resolve(strict=False)
-        if key not in seen:
-            seen.add(key)
-            out.append(root)
-    return out
-
-
-def root_matches(root: Path) -> bool:
-    paths = (root / SDE, root / DRM, root / RECORDER, root / IOMMU)
-    return all(p.is_file() for p in paths) and PHASE266 in (root / IOMMU).read_text(encoding="utf-8")
-
-
-def locate(args: list[str], cwd: Path | None = None) -> Path:
-    base = cwd or Path.cwd()
-    hits: list[Path] = []
-    seen: set[Path] = set()
-    for root in candidate_roots(args, base):
-        if not root_matches(root):
-            continue
-        key = root.resolve()
-        if key not in seen:
-            seen.add(key)
-            hits.append(root)
-    if len(hits) != 1:
-        rendered = ", ".join(map(str, hits)) or "none"
-        raise RuntimeError(f"expected one generated Phase266 root, found {len(hits)}: {rendered}")
-    return hits[0]
-
-
-def self_test() -> None:
-    rec = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' + CRIT_OLD + ADMIT_OLD)
-    sde = SDE_BUS_OLD + SDE_DRMOBJ_OLD + SDE_BLOCKS_OLD
-    drm = DRM_SYSFS_OLD + DRM_NODE_ADD_OLD
-    rec2 = patch_recorder(rec, "fixture/rec")
-    sde2 = patch_sde(sde, "fixture/sde")
-    drm2 = patch_drm(drm, "fixture/drm")
-    assert patch_recorder(rec2, "fixture/rec2") == rec2
-    assert patch_sde(sde2, "fixture/sde2") == sde2
-    assert patch_drm(drm2, "fixture/drm2") == drm2
-    rec_v3 = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' + CRIT_NEW + ADMIT_V3)
-    rec_v3s = patch_recorder(rec_v3, "fixture/rec-v3-upgrade")
-    assert ADMISSION_MARKER in rec_v3s
-    assert 'strcmp(fmt, "%s enter fn=%s")' in rec_v3s
-    assert 'strcmp(fmt, "%s exit fn=%s us=%llu")' in rec_v3s
-    assert 'strncmp(fmt, "KMSPOST", 7)' in rec_v3s
-
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td) / "gki/common"
-        for rel, data in ((RECORDER, rec), (SDE, sde), (DRM, drm), (IOMMU, PHASE266 + "\n")):
-            p = root / rel
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(data, encoding="utf-8")
-        if locate([], Path(td)).resolve() != root.resolve():
-            raise AssertionError("generated Phase266 root locator failed")
-    print("Phase267 direct pre-DRM boundary self-test: PASS", flush=True)
+def retention_self_test() -> None:
+    rec = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' +
+           base.CRIT_OLD + base.ADMIT_OLD +
+           'static void a52_r228_track_message(const char *message)\n{\n' +
+           RETENTION_TRACK_OLD + '}\n' +
+           'static int a52_r228_clip(int value)\n{ return value; }\n' +
+           'void heartbeat(void)\n{\n\tunsigned int tick = 0;\n'
+           '\ta52_r228_tripost_snapshot(tick);\n'
+           '\t/* A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1: no Phase 242 heartbeat snapshot */\n}\n')
+    patched = patch_recorder(rec, "fixture/sticky")
+    validate_retention(patched, "fixture/sticky")
+    if patch_recorder(patched, "fixture/sticky-idempotent") != patched:
+        raise AssertionError("Phase267 sticky retention is not idempotent")
 
 
 def main() -> int:
-    args = sys.argv[1:]
-    if "--self-test" in args:
-        self_test()
+    if "--self-test" in sys.argv[1:]:
+        base.self_test()
+        retention_self_test()
+        print("Phase267S sticky-retention wrapper self-test: PASS", flush=True)
         return 0
-    root = locate(args)
-    rec = root / RECORDER
-    sde = root / SDE
-    drm = root / DRM
-    rec.write_text(patch_recorder(rec.read_text(encoding="utf-8"), str(rec)), encoding="utf-8")
-    sde.write_text(patch_sde(sde.read_text(encoding="utf-8"), str(sde)), encoding="utf-8")
-    drm.write_text(patch_drm(drm.read_text(encoding="utf-8"), str(drm)), encoding="utf-8")
-    print(f"{MARKER}: dedicated critical P267 boundary applied", flush=True)
-    return 0
+
+    base.patch_recorder = patch_recorder
+    rc = base.main()
+    print(f"{RETENTION_MARKER}: late P267 state retention applied", flush=True)
+    return rc
 
 
 if __name__ == "__main__":

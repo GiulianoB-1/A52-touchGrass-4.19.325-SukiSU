@@ -22,8 +22,10 @@ text = path.read_text()
 anchor = '''info "Building Linux 4.19.200 + ReSukiSU-safe + GPU + final boot reference recorders"\nbuild_kernel "$LABEL"\n'''
 block = r'''info "Applying observation-only precise TouchGrass Composer/DRM golden recorder v1"
 python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py"
+python3 -m py_compile "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_retention_fix.py"
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py" --self-test
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py" "$ROOT"
+python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_retention_fix.py" "$ROOT"
 
 git -C "$ROOT" diff --check
 
@@ -31,6 +33,7 @@ test -s "$ROOT/include/linux/tg_display_reference.h" || fail "display recorder h
 test -s "$ROOT/kernel/tg_display_reference.c" || fail "display recorder implementation missing"
 grep -Fq 'obj-y += tg_display_reference.o' "$ROOT/kernel/Makefile" || fail "display recorder Kbuild hook missing"
 grep -Fq 'touchgrass_composer_drm_reference_v1' "$ROOT/kernel/tg_display_reference.c" || fail "display recorder marker missing"
+grep -Fq 'first-events-retention' "$ROOT/kernel/tg_display_reference.c" || fail "display recorder retention policy missing"
 for marker in \
   COMPOSER_EXEC SYS_OPEN_IN SYS_IOCTL_IN SYS_MMAP_IN DRM_OPEN_IN DRM_IOCTL_DESC \
   PROP_CREATE PROP_GET OBJ_PROP ATOMIC_PROP MSM_ATOMIC_IN BINDER_TX_TARGET; do

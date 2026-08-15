@@ -29,6 +29,11 @@ python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_overlay.py" "$RO
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_retention_fix.py" "$ROOT"
 python3 "$PROJECT_DIR/scripts/touchgrass_composer_drm_reference_payload_fix.py" "$ROOT"
 
+# Guard against accidentally emitting Python escape text into C source.
+if grep -Fq '\tretcode = drm_ioctl_kernel' "$ROOT/drivers/gpu/drm/drm_ioctl.c"; then
+  fail "literal Python tab escape leaked into drm_ioctl.c"
+fi
+
 git -C "$ROOT" diff --check
 
 test -s "$ROOT/include/linux/tg_display_reference.h" || fail "display recorder header missing"

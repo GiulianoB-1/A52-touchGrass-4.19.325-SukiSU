@@ -59,9 +59,9 @@ static void a52_r267_display_latch(const char *message)
 	    !strncmp(message, "DRMPOST 212 P267B ", 18))
 		return;
 
-	if (!strncmp(message, "DRMPOST 212 P267 bus-enter", 27))
+	if (!strncmp(message, "DRMPOST 212 P267 bus-enter", 26))
 		atomic_inc(&a52_r267_bus_enter);
-	if (!strncmp(message, "DRMPOST 212 P267 bus-exit", 26))
+	if (!strncmp(message, "DRMPOST 212 P267 bus-exit", 25))
 		atomic_inc(&a52_r267_bus_exit);
 	if (!strncmp(message, "KMSPOST blocks enter", 20))
 		atomic_inc(&a52_r267_blocks_enter);

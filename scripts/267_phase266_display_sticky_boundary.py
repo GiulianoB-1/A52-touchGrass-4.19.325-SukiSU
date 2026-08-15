@@ -2,9 +2,10 @@
 """Phase 267: diagnostic-only direct pre-DRM boundary.
 
 Retains Phase266 functional semantics and adds one dedicated, low-volume P267
-recorder class. Phase266's focused pre-format admission gate suppresses the old
-DRMPOST/KMSPOST/KMSBLK classes, so Phase267 admits only strings whose format
-starts with "P267" and marks only messages beginning "P267 " as critical.
+recorder class. Phase267S also re-admits the already-compiled low-volume DISP
+lifecycle scopes and KMSPOST milestones so the pre-P267 SDE/DRM bring-up boundary
+can be observed without adding or changing any display call sites. P267 remains
+the dedicated direct boundary class.
 
 P267 checkpoints bracket existing operations only:
 - initial SDE data-bus quota loop;
@@ -25,6 +26,7 @@ DRM = Path("drivers/gpu/drm/drm_drv.c")
 RECORDER = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 IOMMU = Path("drivers/iommu/iommu.c")
 MARKER = "A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3"
+ADMISSION_MARKER = "A52_PHASE267S_DISPLAY_LIFECYCLE_ADMISSION_V1"
 PHASE266 = "A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1"
 
 CRIT_OLD = 'return !strncmp(message, "F261 ", 5) ||\n'
@@ -32,8 +34,14 @@ CRIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: dedicated diagnostics on
             'return !strncmp(message, "P267 ", 5) ||\n'
             '       !strncmp(message, "F261 ", 5) ||\n')
 ADMIT_OLD = 'if (strncmp(fmt, "F261", 4) &&\n'
-ADMIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: admit only P267 diagnostics. */\n'
+ADMIT_V3 = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: admit only P267 diagnostics. */\n'
+            'if (strncmp(fmt, "P267", 4) &&\n'
+            '    strncmp(fmt, "F261", 4) &&\n')
+ADMIT_NEW = ('/* A52_PHASE267_PREDRM_DIRECT_BOUNDARY_V3: direct boundary diagnostics. */\n'
+             '/* A52_PHASE267S_DISPLAY_LIFECYCLE_ADMISSION_V1: reuse existing low-volume scopes. */\n'
              'if (strncmp(fmt, "P267", 4) &&\n'
+             '    strncmp(fmt, "DISP", 4) &&\n'
+             '    strncmp(fmt, "KMSPOST", 7) &&\n'
              '    strncmp(fmt, "F261", 4) &&\n')
 
 SDE_BUS_OLD = '''\tfor (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++)
@@ -136,6 +144,8 @@ def one(text: str, old: str, new: str, label: str) -> str:
 
 def patch_recorder(text: str, label: str) -> str:
     if MARKER in text:
+        if ADMISSION_MARKER not in text:
+            text = one(text, ADMIT_V3, ADMIT_NEW, f"{label}: Phase267S admission upgrade")
         validate_recorder(text, label)
         return text
     if 'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1' not in text:
@@ -172,6 +182,9 @@ def validate_recorder(text: str, label: str) -> None:
         MARKER,
         '!strncmp(message, "P267 ", 5)',
         'strncmp(fmt, "P267", 4)',
+        ADMISSION_MARKER,
+        'strncmp(fmt, "DISP", 4)',
+        'strncmp(fmt, "KMSPOST", 7)',
         '!strncmp(message, "F261 ", 5)',
         'strncmp(fmt, "F261", 4)',
         'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1',
@@ -272,6 +285,11 @@ def self_test() -> None:
     assert patch_recorder(rec2, "fixture/rec2") == rec2
     assert patch_sde(sde2, "fixture/sde2") == sde2
     assert patch_drm(drm2, "fixture/drm2") == drm2
+    rec_v3 = ('A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1\n' + CRIT_NEW + ADMIT_V3)
+    rec_v3s = patch_recorder(rec_v3, "fixture/rec-v3-upgrade")
+    assert ADMISSION_MARKER in rec_v3s
+    assert 'strncmp(fmt, "DISP", 4)' in rec_v3s
+    assert 'strncmp(fmt, "KMSPOST", 7)' in rec_v3s
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td) / "gki/common"

@@ -30,12 +30,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           MOD=tools/tg_composer_ksu_companion
-          test -f "$MOD/module.prop"
-          test -f "$MOD/service.sh"
-          test -f "$MOD/customize.sh"
-          test -f "$MOD/action.sh"
-          test -f "$MOD/boot-completed.sh"
-          test -f "$MOD/README.md"
+          for f in module.prop customize.sh post-fs-data.sh service.sh recorder.sh action.sh boot-completed.sh README.md; do
+            test -f "$MOD/$f"
+          done
 
           sed -i 's/\r$//' "$MOD"/*.sh "$MOD/module.prop" "$MOD/README.md"
           for f in "$MOD"/*.sh; do
@@ -44,21 +41,25 @@ jobs:
           done
 
           grep -Fxq 'id=tg_composer_reference' "$MOD/module.prop"
-          grep -Fxq 'versionCode=1' "$MOD/module.prop"
-          grep -Fq 'MODDIR=${0%/*}' "$MOD/service.sh"
-          grep -Fq '/data/local/tmp/tg_ksu_composer_reference' "$MOD/service.sh"
-          grep -Fq 'COMPOSER_FOUND' "$MOD/service.sh"
-          grep -Fq 'write_fd_state' "$MOD/service.sh"
-          grep -Fq 'write_thread_state' "$MOD/service.sh"
-          grep -Fq 'set_event_pid' "$MOD/service.sh"
-          grep -Fq 'options/overwrite' "$MOD/service.sh"
-          grep -Fq 'tgcr_getproperty' "$MOD/service.sh"
-          grep -Fq 'tgcr_obj_getprops' "$MOD/service.sh"
-          grep -Fq 'tgcr_atomic' "$MOD/service.sh"
-          grep -Fq 'tgcr_msm_atomic_check' "$MOD/service.sh"
+          grep -Fxq 'versionCode=2' "$MOD/module.prop"
+          grep -Fq 'recorder.sh" early' "$MOD/post-fs-data.sh"
+          grep -Fq 'recorder.sh" late' "$MOD/service.sh"
+          grep -Fq 'PRECOMPOSER_ARMED' "$MOD/recorder.sh"
+          grep -Fq 'vendor.qti.hardware.display.composer-service' "$MOD/recorder.sh"
+          if grep -Fq 'vendor.qti.hardware.displ*' "$MOD/recorder.sh"; then
+            echo 'Broad display-service matcher is forbidden' >&2
+            exit 1
+          fi
+          grep -Fq 'tg_boot_reference' "$MOD/recorder.sh"
+          grep -Fq 'set_event_pid' "$MOD/recorder.sh"
+          grep -Fq 'options/overwrite' "$MOD/recorder.sh"
+          grep -Fq 'drm_mode_getproperty_ioctl' "$MOD/recorder.sh"
+          grep -Fq 'drm_mode_obj_get_properties_ioctl' "$MOD/recorder.sh"
+          grep -Fq 'drm_atomic_ioctl' "$MOD/recorder.sh"
+          grep -Fq 'msm_atomic_check' "$MOD/recorder.sh"
 
-          if grep -En '(^|[[:space:]])(strace|ptrace|setprop|resetprop|stop|start)([[:space:]]|$)' "$MOD/service.sh"; then
-            echo 'Forbidden mutating/ptrace command found in service.sh' >&2
+          if grep -En '(^|[[:space:]])(strace|ptrace|setprop|resetprop|stop|start)([[:space:]]|$)' "$MOD/recorder.sh"; then
+            echo 'Forbidden mutating/ptrace command found in recorder.sh' >&2
             exit 1
           fi
 
@@ -70,6 +71,7 @@ jobs:
           test -s "$BAT"
           for marker in \
             tg_display_reference \
+            tg_boot_reference \
             tg_final_boot_reference \
             tg_gpu_reference \
             tg_ksu_composer_reference \
@@ -91,28 +93,31 @@ jobs:
 
           (
             cd "$MOD"
-            zip -r9 "$GITHUB_WORKSPACE/$OUT/TG-Composer-Reference-KSU-v1.zip" \
-              module.prop customize.sh service.sh action.sh boot-completed.sh README.md
+            zip -r9 "$GITHUB_WORKSPACE/$OUT/TG-Composer-Reference-KSU-v1.1.zip" \
+              module.prop customize.sh post-fs-data.sh service.sh recorder.sh action.sh boot-completed.sh README.md
           )
 
           cp scripts/COLLECT_TOUCHGRASS_HYBRID_REFERENCE.bat "$OUT/"
           cp "$MOD/README.md" "$OUT/README-KSU-COMPANION.md"
 
           cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-          TG_COMPOSER_KSU_COMPANION_V1
+          TG_COMPOSER_KSU_COMPANION_V1_1
           repository=$GITHUB_REPOSITORY
           workflow_run=$GITHUB_RUN_ID
           workflow_sha=$GITHUB_SHA
           module_id=tg_composer_reference
+          module_version=1.1
+          exact_composer_match=true
+          early_post_fs_data=true
           diagnostic_only=true
           use_same_module_on_touchgrass_and_gki=true
           EOF
           sed -i 's/^          //' "$OUT/BUILD-IDENTITY.txt"
 
-          unzip -l "$OUT/TG-Composer-Reference-KSU-v1.zip"
-          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq module.prop
-          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq service.sh
-          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq customize.sh
+          unzip -l "$OUT/TG-Composer-Reference-KSU-v1.1.zip"
+          for f in module.prop customize.sh post-fs-data.sh service.sh recorder.sh; do
+            zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.1.zip" | grep -Fxq "$f"
+          done
 
           (
             cd "$OUT"

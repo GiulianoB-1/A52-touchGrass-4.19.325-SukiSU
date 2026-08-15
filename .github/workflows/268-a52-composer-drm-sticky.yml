@@ -1,0 +1,447 @@
+name: 268 - A52 composer DRM sticky boundary
+
+run-name: Phase 268 - vendor composer to DRM client sticky boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase268-composer-drm-sticky-v1
+    paths:
+      - .github/workflows/268-a52-composer-drm-sticky.yml
+      - scripts/268_phase267_composer_drm_sticky.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase268-composer-drm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE227_SEED_RUN_ID: '31644392197'
+  PHASE266_BASE_SHA: b279c8beb1ae4f032a7dfe0c22cd69dbb1756398
+  PHASE267_HW_SHA: f1c2f2b7f4430b0bfbc0f4acd7f43adf637edf27
+
+jobs:
+  diagnostic-rebuild:
+    name: Reconstruct Phase 267R and add Phase 268 composer DRM diagnostics
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out Phase 268 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare cumulative scripts and self-tests
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/213_payload.py
+          python3 scripts/216_payload.py
+          python3 scripts/217_payload.py
+          mv scripts/217_apply_graphics_service_trace.py scripts/217_apply_graphics_service_trace_base.py
+          python3 scripts/218_payload.py
+          mv scripts/218_phase217_wrapper.py scripts/218_phase217_wrapper_phase226.py
+
+          python3 scripts/234_repair_phase230_layout.py
+          python3 scripts/233_payload.py
+          python3 scripts/239_phase233_fb_msm_audit_repair.py --self-test
+          python3 scripts/239_phase233_fb_msm_audit_repair.py
+          python3 scripts/257_namei_510_patcher_repair.py
+
+          python3 -m py_compile \
+            scripts/208_apply_secure_vmid.py \
+            scripts/210_apply_first_atomic_rs48.py \
+            scripts/211_apply_drm_client_trace.py \
+            scripts/212_apply_graphics_startup_trace.py \
+            scripts/213_apply_ion_transaction_trace.py \
+            scripts/214_apply_qsecom_heap27.py \
+            scripts/215_apply_qsee_transaction_trace.py \
+            scripts/216_apply_qsee_deep_trace.py \
+            scripts/217_apply_graphics_service_trace_base.py \
+            scripts/227_phase226_retention_wrapper.py \
+            scripts/227_phase226_retention_wrapper_base.py \
+            scripts/255_phase254_postboot_visibility_overlay.py \
+            scripts/256_phase255_kgsl_devnode_framework_overlay.py \
+            scripts/257_namei_510_patcher_repair.py \
+            scripts/257_phase256_kgsl_publication_pipeline_overlay.py \
+            scripts/259_compile_repair.py \
+            scripts/263_a615_zap_pil_parity.py \
+            scripts/263_a615_zap_pil_parity_base.py \
+            scripts/263r_hwspinlock_smem_pil_fix.py \
+            scripts/265_gfx_iommu_parity.py \
+            scripts/266_kgsl_dynamic_iommu_group_compat.py \
+            scripts/267_phase266_display_sticky_boundary.py \
+            scripts/268_phase267_composer_drm_sticky.py \
+            scripts/38_repack_a52_p1_boot.py
+
+          python3 scripts/255_phase254_postboot_visibility_overlay.py --self-test
+          python3 scripts/257_phase256_kgsl_publication_pipeline_overlay.py --self-test
+          python3 scripts/263_a615_zap_pil_parity.py --self-test
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py --self-test
+          python3 scripts/265_gfx_iommu_parity.py --self-test
+          python3 scripts/266_kgsl_dynamic_iommu_group_compat.py --self-test
+          python3 scripts/267_phase266_display_sticky_boundary.py --self-test
+          python3 scripts/268_phase267_composer_drm_sticky.py --self-test
+
+          grep -Fq 'A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1' scripts/266_kgsl_dynamic_iommu_group_compat.py
+          grep -Fq 'A52_PHASE267_PREDRM_STICKY_RETENTION_V1' scripts/267_phase266_display_sticky_boundary.py
+          grep -Fq 'A52_PHASE268_COMPOSER_DRM_STICKY_V1' scripts/268_phase267_composer_drm_sticky.py
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "${TOUCHGRASS_REPO}"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "${TOUCHGRASS_COMMIT}"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Download proven Phase 227 seed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/phase227-seed /tmp/phase227-seed.zip
+          mkdir -p /tmp/phase227-seed
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
+            -o /tmp/phase227-seed.zip
+          unzip -q /tmp/phase227-seed.zip -d /tmp/phase227-seed
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/phase227-seed')
+          ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
+          assert ident['phase'] == 227, ident
+          assert str(ident['run_id']) == '31644392197', ident
+          for path in (
+              root / 'package/boot.img',
+              root / 'compile/Image',
+              root / 'config/before-phase216.config',
+              root / 'stage/phase209-splash-takeover-trace.patch',
+          ):
+              assert path.is_file() and path.stat().st_size > 0, path
+          print('Phase227 seed identity: PASS')
+          PY
+
+      - name: Reconstruct Phase 206 source without compiling
+        run: |
+          set -Eeuo pipefail
+          test '${{ steps.gki-cache.outputs.cache-hit }}' = true
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "${TOUCHGRASS_COMMIT}"
+
+          python3 scripts/199_runtime_fix_crc_anchor_v2.py
+          python3 scripts/199_runtime_fix_binary_audit.py
+          bash scripts/209_prepare_phase206.sh
+          bash scripts/208_reconstruct_phase206_source.sh
+
+          test -f gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          test -f workspace/gki-phase199-out/.config
+
+      - name: Replay Phase 208 through 216 source mutations
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+
+          python3 scripts/208_apply_secure_vmid.py --root "$ROOT"
+          git -C "$ROOT" apply --check /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          git -C "$ROOT" apply /tmp/phase227-seed/stage/phase209-splash-takeover-trace.patch
+          python3 scripts/210_apply_first_atomic_rs48.py --root "$ROOT"
+          python3 scripts/211_apply_drm_client_trace.py --root "$ROOT"
+          python3 scripts/212_apply_graphics_startup_trace.py --root "$ROOT"
+          python3 scripts/213_apply_ion_transaction_trace.py --root "$ROOT"
+          python3 scripts/214_apply_qsecom_heap27.py --root "$ROOT"
+          python3 scripts/215_apply_qsee_transaction_trace.py --root "$ROOT"
+          python3 scripts/216_apply_qsee_deep_trace.py --root "$ROOT"
+
+          mkdir -p artifacts/a52xq-graphics-startup-trace/config
+          cp /tmp/phase227-seed/config/before-phase216.config \
+            artifacts/a52xq-graphics-startup-trace/config/before-phase217.config
+
+          grep -Fq 'DRMPOST 211 open n=%u' "$ROOT/drivers/a52_display/msm/msm_drv.c"
+          grep -Fq 'DRMPOST 212 path n=%u' "$ROOT/fs/open.c"
+          grep -Fq 'DRMPOST 212 drm-open n=%u' "$ROOT/drivers/gpu/drm/drm_file.c"
+
+      - name: Reconstruct exact Phase 266 source state
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+          CFG=workspace/gki-phase199-out/.config
+
+          python3 scripts/227_phase226_retention_wrapper.py "$ROOT"
+          python3 scripts/263r_hwspinlock_smem_pil_fix.py "$ROOT"
+          python3 scripts/265_gfx_iommu_parity.py "$ROOT"
+          python3 scripts/266_kgsl_dynamic_iommu_group_compat.py "$ROOT"
+
+          CORE="$ROOT/drivers/iommu/iommu.c"
+          SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          KGSL="$ROOT/drivers/gpu/msm/kgsl_iommu.c"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          grep -Fq 'A52_PHASE266_KGSL_DYNAMIC_IOMMU_GROUP_COMPAT_V1' "$CORE"
+          grep -Fq 'A52_PHASE253_KGSL_SMMU_DOMAIN_CONTRACT_V1' "$SMMU"
+          grep -Fq 'F261 it' "$KGSL"
+          grep -Fq 'A52_PHASE243_PHASE242_RUNTIME_DISABLED_V1' "$REC"
+
+          cp "$CFG" /tmp/phase266-before-diagnostics.config
+
+      - name: Apply hardware-proven Phase 267R sticky boundary
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+          CFG=workspace/gki-phase199-out/.config
+
+          python3 scripts/267_phase266_display_sticky_boundary.py "$ROOT"
+          cmp -s /tmp/phase266-before-diagnostics.config "$CFG"
+
+          grep -Fq 'A52_PHASE267_PREDRM_STICKY_RETENTION_V1' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq 'P267 drm-obj-exit rc=%d c=%d e=%d n=%d p=%d' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
+          grep -Fq 'P267 node-add type=%u idx=%d rc=%d' "$ROOT/drivers/gpu/drm/drm_drv.c"
+
+      - name: Apply Phase 268 composer DRM sticky diagnostic only
+        run: |
+          set -Eeuo pipefail
+          ROOT=gki/common
+          CFG=workspace/gki-phase199-out/.config
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
+          OPEN="$ROOT/fs/open.c"
+          DFILE="$ROOT/drivers/gpu/drm/drm_file.c"
+
+          python3 scripts/268_phase267_composer_drm_sticky.py "$ROOT"
+          cmp -s /tmp/phase266-before-diagnostics.config "$CFG"
+
+          grep -Fq 'A52_PHASE268_COMPOSER_DRM_STICKY_V1' "$REC"
+          grep -Fq 'return !strncmp(message, "P268 ", 5) ||' "$REC"
+          grep -Fq '!strncmp(message, "DRMPOST 211", 11)' "$REC"
+          grep -Fq '!strncmp(message, "DRMPOST 212", 11)' "$REC"
+          grep -Fq 'strncmp(fmt, "DRMPOST 211", 11)' "$REC"
+          grep -Fq 'strncmp(fmt, "DRMPOST 212", 11)' "$REC"
+          grep -Fq 'P268 A t=%u cp=%d ex=%d pa=%d/%d/%d dr=%d/%d/%d/%d' "$REC"
+          grep -Fq 'P268 B t=%u mo=%d/%d io=%d/%d/%d ac=%d/%d cl=%d' "$REC"
+          grep -Fq 'P268 C t=%u pn=%d,%d,%d,%d,%d er=%d,%d,%d,%d,%d' "$REC"
+          grep -Fq 'A52_PHASE268_DRM_TGID_TRACE_V1' "$MSM"
+          grep -Fq 'A52_PHASE268_DRM_TGID_TRACE_V1' "$OPEN"
+          grep -Fq 'A52_PHASE268_DRM_TGID_TRACE_V1' "$DFILE"
+          grep -Fq 'DRMPOST 211 ioctl n=%u pid=%d nr=0x%x g=%d' "$MSM"
+          grep -Fq 'DRMPOST 212 path n=%u p=%d c=%.16s %.32s g=%d' "$OPEN"
+          grep -Fq 'DRMPOST 212 drm-open n=%u id=%u p=%d g=%d' "$DFILE"
+
+      - name: Resolve final config and compile once
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          OUT="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            olddefconfig
+
+          grep -Fxq 'CONFIG_HWSPINLOCK=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_HWSPINLOCK_QCOM=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_IOMMU_SUPPORT=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_IOMMU_DMA=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_ARM_SMMU=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$OUT/.config"
+          grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$OUT/.config"
+
+          make -C "$ROOT" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            -j"$(nproc)" Image 2>&1 | tee phase268-compile.log
+
+          test -s "$OUT/arch/arm64/boot/Image"
+
+      - name: Verify Phase 268 compiled closure
+        run: |
+          set -Eeuo pipefail
+          IMAGE=workspace/gki-phase199-out/arch/arm64/boot/Image
+          CFG=workspace/gki-phase199-out/.config
+
+          for marker in \
+            'F265 iommu-dma disabled -> identity' \
+            'F266 %s n=%u g=%d rc=%d' \
+            'F261 it' \
+            'P267 drm-obj-exit rc=%d c=%d e=%d n=%d p=%d' \
+            'P267 node-add type=%u idx=%d rc=%d' \
+            'P268 A t=%u cp=%d ex=%d pa=%d/%d/%d dr=%d/%d/%d/%d' \
+            'P268 B t=%u mo=%d/%d io=%d/%d/%d ac=%d/%d cl=%d' \
+            'P268 C t=%u pn=%d,%d,%d,%d,%d er=%d,%d,%d,%d,%d' \
+            'DRMPOST 211 ioctl n=%u pid=%d nr=0x%x g=%d' \
+            'DRMPOST 212 drm-open n=%u id=%u p=%d g=%d'; do
+            grep -aFq "$marker" "$IMAGE"
+          done
+
+          grep -Fxq 'CONFIG_ION=y' "$CFG"
+          grep -Fxq 'CONFIG_SYNC_FILE=y' "$CFG"
+          grep -Fxq 'CONFIG_QCOM_BUS_SCALING=y' "$CFG"
+          grep -Fxq 'CONFIG_QCOM_BUS_CONFIG_RPMH=y' "$CFG"
+
+      - name: Repack proven boot image with Phase 268 diagnostic kernel
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase268-out
+          mkdir -p phase268-out/compile phase268-out/config \
+            phase268-out/package phase268-out/audit phase268-out/source
+
+          cp workspace/gki-phase199-out/arch/arm64/boot/Image phase268-out/compile/Image
+          cp workspace/gki-phase199-out/.config phase268-out/config/final.config
+          gzip -n -c phase268-out/compile/Image > phase268-out/package/Image.gz
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source /tmp/phase227-seed/package/boot.img \
+            --kernel phase268-out/package/Image.gz \
+            --output phase268-out/package/boot.img \
+            --report phase268-out/package/repack-report.json
+
+          cp scripts/263r_hwspinlock_smem_pil_fix.py phase268-out/audit/
+          cp scripts/265_gfx_iommu_parity.py phase268-out/audit/
+          cp scripts/266_kgsl_dynamic_iommu_group_compat.py phase268-out/audit/
+          cp scripts/267_phase266_display_sticky_boundary.py phase268-out/audit/
+          cp scripts/268_phase267_composer_drm_sticky.py phase268-out/audit/
+          cp phase268-compile.log phase268-out/audit/
+          cp gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c phase268-out/source/
+          cp gki/common/drivers/a52_display/msm/msm_drv.c phase268-out/source/
+          cp gki/common/drivers/a52_display/msm/sde/sde_kms.c phase268-out/source/
+          cp gki/common/drivers/gpu/drm/drm_drv.c phase268-out/source/
+          cp gki/common/drivers/gpu/drm/drm_file.c phase268-out/source/
+          cp gki/common/fs/open.c phase268-out/source/
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out = Path('phase268-out')
+          identity = {
+              'phase': 268,
+              'name': 'COMPOSER-DRM-STICKY-BOUNDARY',
+              'build_path': 'phase266-plus-phase267r-plus-phase268-one-compile',
+              'git_sha': os.environ.get('GITHUB_SHA'),
+              'run_id': os.environ.get('GITHUB_RUN_ID'),
+              'phase266_base_sha': os.environ.get('PHASE266_BASE_SHA'),
+              'phase267_hardware_sha': os.environ.get('PHASE267_HW_SHA'),
+              'phase267_hardware_result': 'SDE bus, blocks, DRM objects, DRM node and device_add all succeeded',
+              'phase227_seed_artifact_id': 9160764832,
+              'phase227_seed_run_id': 31644392197,
+              'hardware_validated': False,
+              'diagnostic_only': True,
+              'device_functional_semantics_changed': False,
+              'final_kernel_compile_count': 1,
+              'question': 'Does vendor display composer open the published DRM device, complete msm context_init, issue DRM ioctls, and reach atomic_check, or where is the first failing/stalled boundary?',
+              'instrumentation': [
+                  'reuse bounded Phase211 DRM open/ioctl/atomic/close traces',
+                  'reuse bounded Phase212 graphics exec/path/generic drm_open traces',
+                  'add TGID identity to existing DRM trace entry records',
+                  'track vendor composer process from existing graphics exec prefix',
+                  'retain P268 A/B/C sticky state at ticks 120/150/160/170/180',
+                  'keep admitted DRMPOST 211/212 noncritical to protect retained window',
+              ],
+          }
+          (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
+          files = [
+              out / 'compile/Image',
+              out / 'config/final.config',
+              out / 'package/Image.gz',
+              out / 'package/boot.img',
+              out / 'package/repack-report.json',
+          ]
+          with (out / 'SHA256SUMS').open('w') as f:
+              for p in files:
+                  f.write(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  ./{p.relative_to(out)}\n')
+          PY
+
+          (cd phase268-out && sha256sum -c SHA256SUMS)
+          test -s phase268-out/package/boot.img
+
+      - name: Upload Phase 268 diagnostic candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase268-COMPOSER-DRM-STICKY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase268-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Collect Phase 268 failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          rm -rf phase268-failure
+          mkdir -p phase268-failure/source phase268-failure/config phase268-failure/logs
+          cp phase268-compile.log phase268-failure/logs/ 2>/dev/null || true
+          cp workspace/gki-phase199-out/.config phase268-failure/config/final-or-partial.config 2>/dev/null || true
+          cp scripts/268_phase267_composer_drm_sticky.py phase268-failure/ 2>/dev/null || true
+
+          for p in \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c \
+            gki/common/drivers/a52_display/msm/msm_drv.c \
+            gki/common/drivers/a52_display/msm/sde/sde_kms.c \
+            gki/common/drivers/gpu/drm/drm_drv.c \
+            gki/common/drivers/gpu/drm/drm_file.c \
+            gki/common/fs/open.c; do
+            if [ -f "$p" ]; then
+              cp "$p" "phase268-failure/source/$(echo "$p" | tr '/' '_')"
+            fi
+          done
+
+          {
+            echo '=== Phase268 markers ==='
+            grep -RsnE 'A52_PHASE268|P268|DRMPOST 21[12]' \
+              gki/common/drivers/a52_secure gki/common/drivers/a52_display/msm \
+              gki/common/drivers/gpu/drm gki/common/fs/open.c 2>/dev/null | head -n 3000
+            echo '=== Phase267 retained markers ==='
+            grep -RsnE 'A52_PHASE267|P267' \
+              gki/common/drivers/a52_secure gki/common/drivers/a52_display/msm/sde \
+              gki/common/drivers/gpu/drm 2>/dev/null | head -n 2000
+            echo '=== Git ==='
+            git rev-parse HEAD
+            git status --short
+          } > phase268-failure/phase268-diagnostics.txt 2>&1
+
+      - name: Upload Phase 268 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase268-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: phase268-failure/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 30

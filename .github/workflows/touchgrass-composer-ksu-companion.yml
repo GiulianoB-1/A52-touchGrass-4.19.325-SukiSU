@@ -1,0 +1,130 @@
+name: TouchGrass GKI Composer KernelSU companion
+
+run-name: Package precise Composer KernelSU companion recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-composer-ksu-companion-v1
+    paths:
+      - .github/workflows/touchgrass-composer-ksu-companion.yml
+      - tools/tg_composer_ksu_companion/**
+      - scripts/COLLECT_TOUCHGRASS_HYBRID_REFERENCE.bat
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package-module:
+    name: Audit and package KernelSU companion
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out module branch
+        uses: actions/checkout@v4
+
+      - name: Normalize and syntax-check module
+        run: |
+          set -Eeuo pipefail
+          MOD=tools/tg_composer_ksu_companion
+          test -f "$MOD/module.prop"
+          test -f "$MOD/service.sh"
+          test -f "$MOD/customize.sh"
+          test -f "$MOD/action.sh"
+          test -f "$MOD/boot-completed.sh"
+          test -f "$MOD/README.md"
+
+          sed -i 's/\r$//' "$MOD"/*.sh "$MOD/module.prop" "$MOD/README.md"
+          for f in "$MOD"/*.sh; do
+            echo "SYNTAX $f"
+            sh -n "$f"
+          done
+
+          grep -Fxq 'id=tg_composer_reference' "$MOD/module.prop"
+          grep -Fxq 'versionCode=1' "$MOD/module.prop"
+          grep -Fq 'MODDIR=${0%/*}' "$MOD/service.sh"
+          grep -Fq '/data/local/tmp/tg_ksu_composer_reference' "$MOD/service.sh"
+          grep -Fq 'COMPOSER_FOUND' "$MOD/service.sh"
+          grep -Fq 'write_fd_state' "$MOD/service.sh"
+          grep -Fq 'write_thread_state' "$MOD/service.sh"
+          grep -Fq 'set_event_pid' "$MOD/service.sh"
+          grep -Fq 'options/overwrite' "$MOD/service.sh"
+          grep -Fq 'tgcr_getproperty' "$MOD/service.sh"
+          grep -Fq 'tgcr_obj_getprops' "$MOD/service.sh"
+          grep -Fq 'tgcr_atomic' "$MOD/service.sh"
+          grep -Fq 'tgcr_msm_atomic_check' "$MOD/service.sh"
+
+          if grep -En '(^|[[:space:]])(strace|ptrace|setprop|resetprop|stop|start)([[:space:]]|$)' "$MOD/service.sh"; then
+            echo 'Forbidden mutating/ptrace command found in service.sh' >&2
+            exit 1
+          fi
+
+      - name: Audit Windows hybrid collector
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BAT=scripts/COLLECT_TOUCHGRASS_HYBRID_REFERENCE.bat
+          test -s "$BAT"
+          for marker in \
+            tg_display_reference \
+            tg_final_boot_reference \
+            tg_gpu_reference \
+            tg_ksu_composer_reference \
+            dmesg.txt \
+            logcat-all.txt \
+            binder-state.txt \
+            lshal.txt \
+            SHA256SUMS.txt; do
+            echo "COLLECTOR_MARKER $marker"
+            grep -Fq "$marker" "$BAT"
+          done
+
+      - name: Build KernelSU installer and handoff package
+        run: |
+          set -Eeuo pipefail
+          MOD=tools/tg_composer_ksu_companion
+          OUT=artifacts/tg-composer-ksu-companion
+          mkdir -p "$OUT"
+
+          (
+            cd "$MOD"
+            zip -r9 "$GITHUB_WORKSPACE/$OUT/TG-Composer-Reference-KSU-v1.zip" \
+              module.prop customize.sh service.sh action.sh boot-completed.sh README.md
+          )
+
+          cp scripts/COLLECT_TOUCHGRASS_HYBRID_REFERENCE.bat "$OUT/"
+          cp "$MOD/README.md" "$OUT/README-KSU-COMPANION.md"
+
+          cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
+          TG_COMPOSER_KSU_COMPANION_V1
+          repository=$GITHUB_REPOSITORY
+          workflow_run=$GITHUB_RUN_ID
+          workflow_sha=$GITHUB_SHA
+          module_id=tg_composer_reference
+          diagnostic_only=true
+          use_same_module_on_touchgrass_and_gki=true
+          EOF
+          sed -i 's/^          //' "$OUT/BUILD-IDENTITY.txt"
+
+          unzip -l "$OUT/TG-Composer-Reference-KSU-v1.zip"
+          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq module.prop
+          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq service.sh
+          zipinfo -1 "$OUT/TG-Composer-Reference-KSU-v1.zip" | grep -Fxq customize.sh
+
+          (
+            cd "$OUT"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - name: Upload KernelSU companion package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TG-Composer-KSU-Companion-${{ github.run_number }}-DIAGNOSTIC
+          path: artifacts/tg-composer-ksu-companion/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

@@ -1,0 +1,1 @@
+Phase271 broad zero-state recorder scope marker. This file exists only to force replacement of the obsolete narrow run; full instrumentation is in scripts/271_drm_mode_validation_observer.py.

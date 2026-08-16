@@ -11,11 +11,12 @@ PAIRS = [
     ('dsi_host_transfer', ROOT/'drivers/a52_display/msm/dsi/dsi_display.c', TG/'techpack/display/msm/dsi/dsi_display.c'),
     ('dsi_ctrl_cmd_transfer', ROOT/'drivers/a52_display/msm/dsi/dsi_ctrl.c', TG/'techpack/display/msm/dsi/dsi_ctrl.c'),
     ('dsi_message_tx', ROOT/'drivers/a52_display/msm/dsi/dsi_ctrl.c', TG/'techpack/display/msm/dsi/dsi_ctrl.c'),
+    ('dsi_kickoff_msg_tx', ROOT/'drivers/a52_display/msm/dsi/dsi_ctrl.c', TG/'techpack/display/msm/dsi/dsi_ctrl.c'),
+    ('dsi_ctrl_dma_cmd_wait_for_done', ROOT/'drivers/a52_display/msm/dsi/dsi_ctrl.c', TG/'techpack/display/msm/dsi/dsi_ctrl.c'),
 ]
 
 def extract(text: str, name: str) -> str:
-    # Accept static/non-static and ssize_t/int return types. Find a real definition.
-    pat = re.compile(r'^[ \t]*(?:static[ \t]+)?(?:int|ssize_t)[ \t]+' + re.escape(name) + r'\s*\([^;]*?\)\s*\{', re.M|re.S)
+    pat = re.compile(r'^[ \t]*(?:static[ \t]+)?(?:int|ssize_t|void)[ \t]+' + re.escape(name) + r'\s*\([^;]*?\)\s*\{', re.M|re.S)
     ms = list(pat.finditer(text))
     if len(ms) != 1:
         raise RuntimeError(f'{name}: definition count {len(ms)}')

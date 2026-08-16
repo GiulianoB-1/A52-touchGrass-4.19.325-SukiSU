@@ -7,6 +7,7 @@ on:
       - agent/a52-phase276r-deep-dsi-root-cause-recorder-v1
     paths:
       - .github/workflows/276r-a52-deep-dsi-root-cause-recorder.yml
+      - scripts/276_dsi_panel_transfer_frontier.py
       - scripts/276r_ci_build.sh
       - scripts/276r_deep_dsi_parity_probe.py
       - scripts/276r_deep_dsi_frontier.py

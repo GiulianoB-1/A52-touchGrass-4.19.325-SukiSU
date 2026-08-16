@@ -39,21 +39,22 @@ test -s "$HDR"
 test -s "$TGHDR"
 cp "$OUT/.config" /tmp/phase271-before-phase272.config
 
-# Record the source mismatch proven by the Phase271 hardware trace before
-# touching behavior. The pre-fix probe must show that the pinned GKI rejects
-# TouchGrass's command-mode panel flag from DRM_MODE_FLAG_ALL.
+# Record the exact source mismatch proven by the Phase271 hardware trace before
+# touching behavior. The reconstructed Phase271 GKI already carries the five
+# Qualcomm/SDE vendor flag definitions, but DRM_MODE_FLAG_ALL still omits the
+# command/video/RGB/YUV flags that TouchGrass accepts.
 python3 -m py_compile scripts/272_probe_drm_flag_parity.py
 python3 -m py_compile scripts/272_drm_vendor_mode_flag_parity.py
 python3 scripts/272_probe_drm_flag_parity.py "$ROOT" "$TG" >/tmp/phase272-probe-before.stdout
 cp phase272-probe.txt phase272-parity-before.txt
-grep -Fq 'gki_cmd_macro_present=0' phase272-parity-before.txt
+grep -Fq 'gki_cmd_macro_present=1' phase272-parity-before.txt
 grep -Fq 'gki_all_mentions_cmd=0' phase272-parity-before.txt
 grep -Fq 'tg_cmd_macro_present=1' phase272-parity-before.txt
 grep -Fq 'tg_all_mentions_cmd=1' phase272-parity-before.txt
 
-# Functional fix: restore only the vendor mode-flag definitions and
-# DRM_MODE_FLAG_ALL membership present in the exact TouchGrass A52 reference.
-# No mode is forced valid and no validation stage is bypassed.
+# Functional fix: preserve the already-correct vendor flag definitions and
+# restore only DRM_MODE_FLAG_ALL membership present in the exact TouchGrass
+# A52 reference. No mode is forced valid and no validation stage is bypassed.
 python3 scripts/272_drm_vendor_mode_flag_parity.py "$ROOT" "$TG"
 cmp -s /tmp/phase271-before-phase272.config "$OUT/.config"
 
@@ -70,8 +71,8 @@ grep -Fq 'gki_all_mentions_cmd=1' phase272-parity-after.txt
 grep -Fq 'tg_cmd_macro_present=1' phase272-parity-after.txt
 grep -Fq 'tg_all_mentions_cmd=1' phase272-parity-after.txt
 
-# Rebuild from the same config. The only functional delta is DRM vendor flag
-# parity in the UAPI header; all Phase269/270/271 observers remain intact.
+# Rebuild from the same config. The only functional delta is DRM_MODE_FLAG_ALL
+# vendor membership parity; all Phase269/270/271 observers remain intact.
 make -C "$ROOT" O="$OUT" \
   ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
@@ -136,7 +137,7 @@ identity = {
         'first_rejection_stage': 'drm_mode_validate_driver',
         'status': -2,
     },
-    'root_cause': 'pinned GKI DRM_MODE_FLAG_ALL lacks TouchGrass Qualcomm/SDE vendor panel-mode flags; command-mode bit30 is rejected by drm_mode_validate_basic as MODE_BAD',
+    'root_cause': 'pinned GKI DRM_MODE_FLAG_ALL omits TouchGrass Qualcomm/SDE vendor panel-mode flags even though the exact definitions already exist; command-mode bit30 is rejected by drm_mode_validate_basic as MODE_BAD',
     'touchgrass_parity': {
         'SUPPORTS_RGB': 23,
         'SUPPORTS_YUV': 24,
@@ -144,7 +145,7 @@ identity = {
         'CMD_MODE_PANEL': 30,
         'SEAMLESS_defined_only': 31,
     },
-    'functional_change': 'restore exact TouchGrass vendor DRM mode-flag definitions and accept RGB/YUV/VID/CMD flags in DRM_MODE_FLAG_ALL',
+    'functional_change': 'preserve exact existing vendor DRM flag definitions and restore TouchGrass RGB/YUV/VID/CMD membership in DRM_MODE_FLAG_ALL',
     'not_changed': [
         'no mode status forced to MODE_OK',
         'no validation callback bypassed',

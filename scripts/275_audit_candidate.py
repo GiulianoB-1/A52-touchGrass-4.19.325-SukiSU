@@ -51,12 +51,21 @@ wrap = (root / "source/ss_wrapper_common.c").read_text()
 for token in (
     "A52_PHASE275_LEVEL1_KEY_SEND_FRONTIER_V1",
     'return !strncmp(message, "P275 ", 5)',
+    'if (strncmp(fmt, "P275", 4) &&',
     'P273 F t=%lu n=%x e=%x g=%x f=%d z=%d s=%d u=%d b=%d',
 ):
     assert token in rec, token
-for token in (
+
+panel_tokens = (
     "A52_PHASE275_SS_SEND_CMD_FRONTIER_V1",
     'P275 S E ty=%d',
+    'P275 S F ty=%d p=0 fm=%u',
+    'P275 S F ty=%d p=1',
+    'P275 S H ty=%d p=0',
+    'P275 S H ty=%d p=1',
+    'P275 S G ty=%d p=0',
+    'P275 S G ty=%d p=1 ok=%u',
+    'P275 S A ty=%d ex=%u xp=%u',
     'P275 S L ty=%d p=0',
     'P275 S L ty=%d p=1',
     'P275 S M ty=%d p=0',
@@ -64,9 +73,11 @@ for token in (
     'P275 S W ty=%d p=0',
     'P275 S W ty=%d p=1',
     'P275 S Z ty=%d rc=%d',
-):
+)
+for token in panel_tokens:
     assert token in panel, token
-for token in (
+
+wrapper_tokens = (
     "A52_PHASE275_DSI_TX_WRAPPER_FRONTIER_V1",
     'P275 W E ty=%d',
     'P275 W C ty=%d p=0 on=1',
@@ -76,8 +87,20 @@ for token in (
     'P275 W C ty=%d p=0 on=0',
     'P275 W C ty=%d p=1 on=0 rc=%d',
     'P275 W Z ty=%d rc=%d',
-):
+)
+for token in wrapper_tokens:
     assert token in wrap, token
+
+# The hardware runs the compiled Image, not the packaged source. Require every
+# target checkpoint format string in the final kernel binary as well.
+image = (root / "compile/Image").read_bytes()
+for token in panel_tokens[1:] + wrapper_tokens[1:] + (
+    'P274 G K n=%d p=0 lk=%x',
+    'P273 F t=%lu n=%x e=%x g=%x f=%d z=%d s=%d u=%d b=%d',
+    'P271 V id=%u k=D st=%d',
+):
+    if token.encode() not in image:
+        raise SystemExit(f"compiled Image marker missing: {token}")
 
 if (root / "config/final.config").read_bytes() != (root / "audit/phase274-final.config").read_bytes():
     raise SystemExit("Phase275 mutated kernel config")
@@ -94,6 +117,7 @@ for line in (root / "SHA256SUMS").read_text().splitlines():
 print(json.dumps({
     "status": "phase275-audit-pass",
     "preinstrumentation_send_path_touchgrass_exact": True,
+    "all_target_markers_present_in_image": True,
     "target": "TX_LEVEL1_KEY_ENABLE",
     "config_unchanged_from_phase274": True,
     "hardware_validated": False,

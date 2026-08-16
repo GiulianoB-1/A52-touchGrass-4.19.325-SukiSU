@@ -79,6 +79,40 @@ def patch_panel(text: str) -> str:
         "ss_send_cmd entry",
     )
 
+    text = replace_once(
+        text,
+        '\t}\n\n\t/* Make not to turn on the panel power when ub_con_det gpio is high (ub is not connected) */\n'
+        '\tif (unlikely(vdd->is_factory_mode)) {\n',
+        '\t}\n\n'
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S F ty=%d p=0 fm=%u", type, vdd->is_factory_mode);\n'
+        '\t/* Make not to turn on the panel power when ub_con_det gpio is high (ub is not connected) */\n'
+        '\tif (unlikely(vdd->is_factory_mode)) {\n',
+        "factory pre",
+    )
+
+    text = replace_once(
+        text,
+        '\t}\n\n\tif (!ss_panel_attach_get(vdd)) {\n',
+        '\t}\n\n'
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S F ty=%d p=1", type);\n'
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S H ty=%d p=0", type);\n'
+        '\tif (!ss_panel_attach_get(vdd)) {\n',
+        "factory post / attach pre",
+    )
+
+    text = replace_once(
+        text,
+        '\t\treturn -EAGAIN;\n\t}\n\n\t/* Skip to lock vdd_lock for commands that has exclusive_pass token\n',
+        '\t\treturn -EAGAIN;\n\t}\n'
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S H ty=%d p=1", type);\n\n'
+        '\t/* Skip to lock vdd_lock for commands that has exclusive_pass token\n',
+        "attach post",
+    )
+
     old = (
         '\tset = ss_get_cmds(vdd, type);\n'
         '\ta52_ackfr_record("DISP SS_CMD start i=%d type=%d name=%s count=%u state=%u ps=%d",\n'
@@ -90,7 +124,11 @@ def patch_panel(text: str) -> str:
         '\t}\n\n'
     )
     new = (
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S G ty=%d p=0", type);\n'
         '\tset = ss_get_cmds(vdd, type);\n'
+        f'\tif (type == {TARGET})\n'
+        '\t\ta52_ackfr_record("P275 S G ty=%d p=1 ok=%u", type, !IS_ERR_OR_NULL(set));\n'
         '\ta52_ackfr_record("DISP SS_CMD start i=%d type=%d name=%s count=%u state=%u ps=%d",\n'
         '\t\tvdd->ndx, type, ss_get_cmd_name(type), set ? set->count : 0,\n'
         '\t\tset ? set->state : 0, vdd->panel_state);\n\n'
@@ -106,7 +144,7 @@ def patch_panel(text: str) -> str:
         '\t\tis_vdd_locked = true;\n'
         '\t}\n\n'
     )
-    text = replace_once(text, old, new, "vdd_lock checkpoints")
+    text = replace_once(text, old, new, "get_cmds / vdd_lock checkpoints")
 
     text = replace_once(
         text,

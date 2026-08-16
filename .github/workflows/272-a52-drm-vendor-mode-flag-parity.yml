@@ -71,3 +71,5 @@ jobs:
           name: A52XQ-Phase272-DRM-MODE-FLAG-PARITY-${{ github.run_number }}
           path: phase272-probe.txt
           if-no-files-found: error
+
+# Registered workflow retrigger for exact source-parity evidence.

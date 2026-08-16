@@ -51,6 +51,8 @@ def extract_function(text: str, name: str) -> str:
 
 
 def normalize_gki(fn: str) -> str:
+    # Existing display lifecycle instrumentation is observational and is the
+    # only expected source delta inside this TouchGrass function before P274.
     fn = re.sub(
         r'^\s*A52_ACKFR_SCOPE\("DISP",\s*"a52\.ss_panel_data_read_gpara"\);\s*\n',
         '', fn, flags=re.M,
@@ -65,10 +67,8 @@ tg_fn = extract_function(tg_text, FUNC)
 gki_fn = normalize_gki(gki_fn_raw)
 match = gki_fn == tg_fn
 
-
 def sha(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
-
 
 lines = [
     f"function={FUNC}",

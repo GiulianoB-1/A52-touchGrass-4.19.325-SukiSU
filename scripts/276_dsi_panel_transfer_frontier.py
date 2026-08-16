@@ -227,6 +227,7 @@ def patch_dsi(text: str) -> str:
         "#if defined(CONFIG_DISPLAY_SAMSUNG)\n"
         "\tmutex_unlock(&vdd->cmd_lock);\n"
         "#endif\n"
+        '\ta52_ackfr_record("DISP CMDSET done type=%d rc=%d count=%u", type, rc, count);\n'
         "\treturn rc;\n"
         "}\n",
         "error:\n"
@@ -237,6 +238,7 @@ def patch_dsi(text: str) -> str:
         f"\tif (type == {TARGET})\n"
         '\t\ta52_ackfr_record("P276 T Z ty=%d p=1 rc=%d", type, rc);\n'
         "#endif\n"
+        '\ta52_ackfr_record("DISP CMDSET done type=%d rc=%d count=%u", type, rc, count);\n'
         "\treturn rc;\n"
         "}\n",
         "exit checkpoints",

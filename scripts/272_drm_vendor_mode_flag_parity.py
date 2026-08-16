@@ -53,11 +53,15 @@ def macro_block_bounds(lines: list[str], name: str) -> tuple[int, int]:
     raise RuntimeError(f"missing {name}")
 
 
-def verify_touchgrass(text: str) -> None:
+def verify_exact_definitions(text: str, who: str) -> None:
     for name, bit in EXPECTED.items():
         got = macro_bit(text, name)
         if got != bit:
-            raise RuntimeError(f"TouchGrass {name}: expected bit {bit}, got {got}")
+            raise RuntimeError(f"{who} {name}: expected bit {bit}, got {got}")
+
+
+def verify_touchgrass(text: str) -> None:
+    verify_exact_definitions(text, "TouchGrass")
 
     lines = text.splitlines()
     i, j = macro_block_bounds(lines, "DRM_MODE_FLAG_ALL")
@@ -73,40 +77,36 @@ def patch_gki(text: str) -> str:
     if MARKER in text:
         return text
 
-    for name in EXPECTED:
-        if re.search(rf"^\s*#\s*define\s+{re.escape(name)}\b", text, re.MULTILINE):
-            raise RuntimeError(f"GKI already defines {name}; refusing ambiguous partial parity patch")
+    # Phase271 reconstruction already carries the Qualcomm/SDE flag definitions.
+    # Verify their exact bit assignments instead of trying to redefine them.
+    verify_exact_definitions(text, "GKI")
 
     lines = text.splitlines()
     i, j = macro_block_bounds(lines, "DRM_MODE_FLAG_ALL")
-    block = lines[i : j + 1]
+    block_text = "\n".join(lines[i : j + 1])
 
-    if not any("DRM_MODE_FLAG_3D_MASK" in line for line in block):
+    if not any("DRM_MODE_FLAG_3D_MASK" in line for line in lines[i : j + 1]):
         raise RuntimeError("DRM_MODE_FLAG_ALL anchor lacks DRM_MODE_FLAG_3D_MASK")
-    if any(name in "\n".join(block) for name in EXPECTED):
-        raise RuntimeError("DRM_MODE_FLAG_ALL already contains vendor flag text")
+    if "DRM_MODE_FLAG_SEAMLESS" in block_text:
+        raise RuntimeError("GKI DRM_MODE_FLAG_ALL unexpectedly includes SEAMLESS")
 
-    defs = [
-        "",
+    marker_lines = [
         f"/* {MARKER}",
-        " * Qualcomm/SDE display mode flags carried by the A52 vendor display stack.",
-        " * Numeric values and DRM_MODE_FLAG_ALL membership match the exact",
-        " * TouchGrass A52 4.19 reference. SEAMLESS is defined but intentionally",
-        " * not accepted by DRM_MODE_FLAG_ALL, matching that reference.",
+        " * Qualcomm/SDE display mode flag definitions are already present in",
+        " * the reconstructed Phase271 GKI header with the exact TouchGrass bits.",
+        " * Restore only TouchGrass DRM_MODE_FLAG_ALL membership here.",
+        " * SEAMLESS remains defined but intentionally excluded from the mask.",
         " */",
-        "#define DRM_MODE_FLAG_SUPPORTS_RGB\t\t(1<<23)",
-        "#define DRM_MODE_FLAG_SUPPORTS_YUV\t\t(1<<24)",
-        "#define DRM_MODE_FLAG_VID_MODE_PANEL\t(1<<29)",
-        "#define DRM_MODE_FLAG_CMD_MODE_PANEL\t(1<<30)",
-        "#define DRM_MODE_FLAG_SEAMLESS\t\t\t(1<<31)",
-        "",
     ]
-    lines[i:i] = defs
-    i += len(defs)
-    j += len(defs)
+    lines[i:i] = marker_lines
+    i += len(marker_lines)
+    j += len(marker_lines)
 
-    # Insert the four TouchGrass-accepted vendor flags immediately before the
-    # final 3D mask term. Preserve the existing macro formatting otherwise.
+    # Insert only missing TouchGrass-accepted flags immediately before the 3D
+    # mask term. Preserve all existing DRM_MODE_FLAG_ALL formatting otherwise.
+    current_block = "\n".join(lines[i : j + 1])
+    missing = [name for name in ACCEPTED if name not in current_block]
+
     insert_at = None
     indent = "\t\t\t "
     for k in range(i, j + 1):
@@ -119,7 +119,7 @@ def patch_gki(text: str) -> str:
     if insert_at is None:
         raise RuntimeError("could not locate 3D mask insertion point")
 
-    additions = [f"{indent}{name} |\\" for name in ACCEPTED]
+    additions = [f"{indent}{name} |\\" for name in missing]
     lines[insert_at:insert_at] = additions
     return "\n".join(lines) + "\n"
 
@@ -127,10 +127,7 @@ def patch_gki(text: str) -> str:
 def verify_patched(text: str) -> None:
     if MARKER not in text:
         raise RuntimeError("Phase272 marker missing after patch")
-    for name, bit in EXPECTED.items():
-        got = macro_bit(text, name)
-        if got != bit:
-            raise RuntimeError(f"patched GKI {name}: expected bit {bit}, got {got}")
+    verify_exact_definitions(text, "patched GKI")
     lines = text.splitlines()
     i, j = macro_block_bounds(lines, "DRM_MODE_FLAG_ALL")
     block = "\n".join(lines[i : j + 1])
@@ -151,7 +148,7 @@ def main() -> None:
     verify_patched(patched)
     if patched != gki:
         GKI_HDR.write_text(patched, encoding="utf-8")
-        print("Phase272 applied exact TouchGrass DRM vendor mode-flag parity")
+        print("Phase272 restored exact TouchGrass DRM_MODE_FLAG_ALL vendor membership")
     else:
         print("Phase272 DRM vendor mode-flag parity already present")
     print(MARKER)

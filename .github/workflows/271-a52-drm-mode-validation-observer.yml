@@ -1,6 +1,6 @@
-name: 271 - A52 DRM mode validation observer
+name: 271 - A52 broad DRM zero-state observer
 
-run-name: Phase 271 - DRM mode validation observer
+run-name: Phase 271 - broad DRM zero-state observer
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
       - .github/workflows/271-a52-drm-mode-validation-observer.yml
       - scripts/271_ci_build.sh
       - scripts/271_drm_mode_validation_observer.py
+      - scripts/271b_broad_zero_state_observer.py
       - scripts/270_ci_build.sh
       - scripts/270_phase269_msm_legacy_force_probe.py
       - scripts/269_ci_build.sh
@@ -22,7 +23,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: a52-phase271-drm-mode-validation-${{ github.ref }}
+  group: a52-phase271-drm-zero-state-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -35,14 +36,14 @@ env:
 
 jobs:
   build:
-    name: Reconstruct Phase270 and build Phase271 validation observer
+    name: Reconstruct Phase270 and build broad Phase271 zero-state observer
     runs-on: ubuntu-22.04
     timeout-minutes: 210
     env:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Check out Phase271 branch
+      - name: Check out broad Phase271 branch
         uses: actions/checkout@v4
 
       - name: Prepare runner
@@ -81,14 +82,14 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Reconstruct and compile Phase271
+      - name: Reconstruct and compile broad Phase271
         run: bash scripts/271_ci_build.sh
 
-      - name: Upload Phase271 candidate
+      - name: Upload broad Phase271 candidate
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase271-DRM-MODE-VALIDATION-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-Phase271-BROAD-DRM-ZERO-STATE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase271-out/
           if-no-files-found: error
           compression-level: 1
@@ -98,7 +99,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase271-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          name: A52XQ-Phase271-BROAD-FAILURE-DIAGNOSTICS-${{ github.run_number }}
           path: |
             phase271-failure/
             phase270-failure/

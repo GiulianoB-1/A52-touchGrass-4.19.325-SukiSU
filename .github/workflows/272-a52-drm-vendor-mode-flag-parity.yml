@@ -1,0 +1,73 @@
+name: 272 - A52 DRM vendor mode-flag parity probe
+
+run-name: Phase 272 - exact GKI vs TouchGrass DRM mode-flag parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase272-drm-vendor-mode-flag-parity-v1
+    paths:
+      - .github/workflows/272-a52-drm-vendor-mode-flag-parity.yml
+      - scripts/272_probe_drm_flag_parity.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase272-drm-mode-flag-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+jobs:
+  probe:
+    name: Inspect exact cached GKI DRM mode flags against TouchGrass
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Phase272 branch
+        uses: actions/checkout@v4
+
+      - name: Restore exact pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Probe exact DRM mode-flag definitions and validation path
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/272_probe_drm_flag_parity.py gki/common workspace/touchgrass-a52xq
+
+      - name: Upload Phase272 source-parity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase272-DRM-MODE-FLAG-PARITY-${{ github.run_number }}
+          path: phase272-probe.txt
+          if-no-files-found: error

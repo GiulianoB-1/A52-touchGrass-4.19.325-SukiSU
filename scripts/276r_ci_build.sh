@@ -25,9 +25,11 @@ python3 scripts/276r_deep_dsi_parity_probe.py "$ROOT" "$TG"
 grep -Fq 'all_exact_match=1' phase276r-deep-path-parity-before.txt
 
 python3 scripts/276r_deep_dsi_frontier.py "$ROOT"
-# The deep patcher originally placed the cross-file helper declaration immediately
-# before dsi_ctrl_cmd_transfer(), but new kickoff/DMA-wait checkpoints live earlier
-# in dsi_ctrl.c. Relocate that declaration to file scope after the recorder include.
+# The deep patcher places the cross-file helper declaration immediately before
+# dsi_ctrl_cmd_transfer(), but kickoff/DMA-wait checkpoints live earlier in
+# dsi_ctrl.c. Relocate that declaration to file scope after the first recorder
+# include. Phase276 may already carry the same recorder include, so duplicate
+# include lines are valid input and must not abort the relocation.
 # This is declaration-order only: no checkpoint, branch, lock, command, or return changes.
 python3 - "$CTRL" <<'PY'
 import sys
@@ -36,17 +38,20 @@ p = Path(sys.argv[1])
 s = p.read_text()
 decl = 'extern bool a52_p276r_deep_active(void);\n'
 inc = '#include <linux/a52_ack_secure_flight_recorder.h>\n'
-if s.count(decl) != 1:
-    raise SystemExit(f'deep-active declaration count {s.count(decl)}, expected 1')
-if s.count(inc) != 1:
-    raise SystemExit(f'recorder include count {s.count(inc)}, expected 1')
+decl_count = s.count(decl)
+inc_count = s.count(inc)
+if decl_count != 1:
+    raise SystemExit(f'deep-active declaration count {decl_count}, expected 1')
+if inc_count < 1:
+    raise SystemExit('recorder include missing')
 s = s.replace(decl, '', 1)
 s = s.replace(inc, inc + decl, 1)
-first_call = s.find('a52_p276r_deep_active()')
-if first_call < 0 or s.find(decl) > first_call:
+decl_pos = s.find(decl)
+first_call = s.find('a52_p276r_deep_active()', decl_pos + len(decl))
+if decl_pos < 0 or first_call < 0 or decl_pos > first_call:
     raise SystemExit('deep-active declaration still follows first call')
 p.write_text(s)
-print('Phase276R deep-active declaration relocated before first use')
+print(f'Phase276R deep-active declaration relocated before first use (recorder includes={inc_count})')
 PY
 ! cmp -s /tmp/p276r-panel.c "$PANEL"
 ! cmp -s /tmp/p276r-display.c "$DISPLAY"

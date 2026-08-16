@@ -71,13 +71,14 @@ for name, gki_path, tg_path in PAIRS:
     tg = extract_function(tg_path.read_text(encoding="utf-8", errors="strict"), name)
     if name == "ss_send_cmd":
         # Existing pre-P275 display recorder calls are observational. Remove
-        # only those two known calls before comparing the Samsung function.
+        # exactly those statement lines only. Keep the surrounding Samsung
+        # whitespace intact so byte parity remains a strict source gate.
         gki = re.sub(
-            r'^\s*a52_ackfr_record\("DISP SS_CMD start[^;]*?;\s*\n',
+            r'^[ \t]*a52_ackfr_record\("DISP SS_CMD start[^;]*?;\n',
             '', gki, flags=re.M | re.S,
         )
         gki = re.sub(
-            r'^\s*a52_ackfr_record\("DISP SS_CMD done[^;]*?;\s*\n',
+            r'^[ \t]*a52_ackfr_record\("DISP SS_CMD done[^;]*?;\n',
             '', gki, flags=re.M | re.S,
         )
     match = gki == tg

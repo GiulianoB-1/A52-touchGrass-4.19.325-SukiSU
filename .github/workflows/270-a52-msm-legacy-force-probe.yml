@@ -1,6 +1,6 @@
-name: 270 - A52 MSM legacy Composer forced mode probe
+name: 270 - A52 DSI mode path observer
 
-run-name: Phase 270 - scoped legacy Composer forced mode probe
+run-name: Phase 270 - DSI mode path observer
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: a52-phase270-msm-legacy-force-probe-${{ github.ref }}
+  group: a52-phase270-dsi-mode-path-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,7 +33,7 @@ env:
 
 jobs:
   build:
-    name: Reconstruct Phase269 and build Phase270
+    name: Reconstruct Phase269 and build Phase270 DSI observer
     runs-on: ubuntu-22.04
     timeout-minutes: 210
     env:
@@ -86,7 +86,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase270-MSM-LEGACY-FORCE-PROBE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-Phase270-DSI-MODE-PATH-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase270-out/
           if-no-files-found: error
           compression-level: 1
@@ -96,7 +96,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase270-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          name: A52XQ-Phase270-DSI-MODE-PATH-FAILURE-${{ github.run_number }}
           path: |
             phase270-failure/
             phase269-failure/

@@ -49,6 +49,23 @@ def extract(text: str) -> str:
 
 g = extract(GKI.read_text(encoding="utf-8", errors="strict"))
 t = extract(TGF.read_text(encoding="utf-8", errors="strict"))
+
+# The reconstructed pre-Phase276 source already contains two flight-recorder
+# observations around this function from the established display lifecycle
+# recorder. They do not exist in TouchGrass and do not alter command selection,
+# locking, message flags/payloads, retries, waits, or return values. Remove only
+# these exact known statements before enforcing byte-for-byte source parity.
+KNOWN_OBSERVERS = (
+    '\ta52_ackfr_record("DISP CMDSET start type=%d count=%u state=%u p=%s",\n'
+    '\t\ttype, count, state, panel ? panel->name : "none");\n',
+    '\ta52_ackfr_record("DISP CMDSET done type=%d rc=%d count=%u", type, rc, count);\n',
+)
+for observer in KNOWN_OBSERVERS:
+    n = g.count(observer)
+    if n != 1:
+        raise RuntimeError(f"known pre-Phase276 observer count {n}: {observer!r}")
+    g = g.replace(observer, "", 1)
+
 match = g == t
 sha = lambda s: hashlib.sha256(s.encode()).hexdigest()
 lines = [

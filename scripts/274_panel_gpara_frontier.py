@@ -99,8 +99,7 @@ def find_function(text: str, name: str) -> tuple[int, int]:
         elif c == "'" and not in_str:
             in_chr = not in_chr
         elif not in_str and not in_chr:
-            if c == "{":
-                depth += 1
+            if c == "{": depth += 1
             elif c == "}":
                 depth -= 1
                 if depth == 0:
@@ -115,6 +114,8 @@ def patch_panel(text: str) -> str:
     fn_start, fn_end = find_function(text, "ss_panel_data_read_gpara")
     fn = text[fn_start:fn_end]
 
+    # Keep the exact TouchGrass control flow and returns. Only insert records
+    # immediately before/after existing operations.
     static = (
         '/* ' + PANEL_MARKER + '\n'
         ' * Two independent hardware captures reached this function and retained\n'
@@ -223,6 +224,7 @@ def patch_panel(text: str) -> str:
         "panel RX send",
     )
 
+    # The exact function has one final return 0 after key disable/logging.
     idx = fn.rfind('\n\treturn 0;\n')
     if idx < 0:
         raise RuntimeError("gpara completion return not found")

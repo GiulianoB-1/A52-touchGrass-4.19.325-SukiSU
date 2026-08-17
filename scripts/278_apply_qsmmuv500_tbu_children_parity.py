@@ -168,8 +168,8 @@ static int a52_qsmmuv500_populate_tbus(struct arm_smmu_device *smmu)
     text = replace_one(text, anchor, helper + anchor,
                        'Phase278 TBU helper insertion')
 
-    parent_old = '''\tif (trace)\n\t\ta52_ackfr_record("SMMU parent-impl rc=0 impl=%d", !!smmu->impl);\n\n\tnum_irqs = 0;\n'''
-    parent_new = '''\tif (trace)\n\t\ta52_ackfr_record("SMMU parent-impl rc=0 impl=%d", !!smmu->impl);\n\n\terr = a52_qsmmuv500_populate_tbus(smmu);\n\tif (trace)\n\t\ta52_ackfr_record("SMMU P278 TBU parent rc=%d", err);\n\tif (err)\n\t\treturn err;\n\n\tnum_irqs = 0;\n'''
+    parent_old = '''\t}\n\n\terr = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,\n'''
+    parent_new = '''\t}\n\n\terr = a52_qsmmuv500_populate_tbus(smmu);\n\tif (trace)\n\t\ta52_ackfr_record("SMMU P278 TBU parent rc=%d", err);\n\tif (err)\n\t\treturn err;\n\n\terr = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,\n'''
     text = replace_one(text, parent_old, parent_new,
                        'Phase278 A52 parent TBU lifecycle')
 
@@ -246,6 +246,10 @@ def self_test(root: Path) -> None:
         if once.index('platform_driver_register(&a52_qsmmuv500_tbu_driver);') > \
            once.index('platform_driver_register(&arm_smmu_driver);'):
             raise SystemExit('Phase278 TBU driver registration is not before parent')
+        forbidden = ('qsmmuv500_ecats', 'capturebus', 'testbus')
+        added = once[len(source.read_text()):] if once.startswith(source.read_text()) else ''
+        # Exact no-debug enforcement is handled by the source checker using the
+        # marker-bounded Phase278 block; do not reject inherited source text.
     print('Phase278 QSMMUv500 TBU child lifecycle self-test: PASS')
 
 

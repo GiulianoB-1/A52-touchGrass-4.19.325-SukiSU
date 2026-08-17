@@ -99,9 +99,13 @@ def check(root: Path) -> None:
         'static int arm_smmu_device_probe(struct platform_device *pdev)')
     require('err = a52_qsmmuv500_populate_tbus(smmu);' in parent,
             'A52 parent probe does not invoke TBU lifecycle')
-    require(parent.find('err = a52_qsmmuv500_populate_tbus(smmu);') <
-            parent.find('iommu_device_register(&smmu->iommu)'),
-            'TBU lifecycle occurs after parent IOMMU registration')
+    cfg = parent.find('err = arm_smmu_device_cfg_probe(smmu);')
+    irq = parent.find('err = devm_request_irq(smmu->dev, smmu->irqs[i],')
+    tbu = parent.find('err = a52_qsmmuv500_populate_tbus(smmu);')
+    sysfs = parent.find('err = iommu_device_sysfs_add(&smmu->iommu')
+    register = parent.find('iommu_device_register(&smmu->iommu)')
+    require(0 <= cfg < irq < tbu < sysfs < register,
+            'parent cfg/IRQ/TBU/sysfs/IOMMU registration ordering is wrong')
 
     init = function_body(text, 'static int __init a52_arm_smmu_driver_init(void)')
     tbu_reg = init.find('platform_driver_register(&a52_qsmmuv500_tbu_driver);')
@@ -119,6 +123,7 @@ def check(root: Path) -> None:
             exit_body.find('platform_driver_unregister(&a52_qsmmuv500_tbu_driver);'),
             'driver unregister order is not parent then child')
 
+    # Phase278 deliberately does not alter the prior conservative PM policy.
     require('runtime PM disabled until qsmmuv500 TBU support is ported' in text,
             'Phase278 unexpectedly changed the inherited runtime-PM guard')
     require('system suspend blocked until qsmmuv500 TBU support is ported' in text,

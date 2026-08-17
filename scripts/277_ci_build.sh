@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-export BUILD_CROSS_COMPILE="${BUILD_CROSS_COMPILE:-1}"
 ROOT="$PWD/gki/common"
 OUT="$PWD/workspace/gki-phase199-out"
 SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
@@ -16,6 +15,7 @@ fail_report(){
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
 # Reconstruct the exact hardware-tested Phase276R source and candidate first.
+# Keep the inherited environment identical to the proven Phase276R workflow.
 bash scripts/276r_ci_build.sh
 test -s phase276r-out/package/boot.img
 test -s "$OUT/arch/arm64/boot/Image"

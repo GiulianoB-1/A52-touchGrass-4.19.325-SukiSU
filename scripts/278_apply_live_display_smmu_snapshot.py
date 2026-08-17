@@ -79,6 +79,7 @@ static void a52_p278_remember_display_context(
 
 void a52_p278_display_smmu_snapshot(unsigned int point)
 {
+	bool any = false;
 	int slot;
 
 	for (slot = 0; slot < ARRAY_SIZE(a52_p278_display_ctx); slot++) {
@@ -90,6 +91,7 @@ void a52_p278_display_smmu_snapshot(unsigned int point)
 
 		if (!ctx->valid)
 			continue;
+		any = true;
 		smmu = ctx->smmu;
 		if (!smmu || ctx->sme < 0 ||
 		    ctx->sme >= smmu->num_mapping_groups ||
@@ -127,15 +129,19 @@ void a52_p278_display_smmu_snapshot(unsigned int point)
 
 		arm_smmu_rpm_put(smmu);
 	}
+
+	if (!any)
+		a52_ackfr_record("SMMU P278 X p=%u noctx=1", point);
 }
 EXPORT_SYMBOL_GPL(a52_p278_display_smmu_snapshot);
 
 '''
     text = replace_one(text, anchor, helper + anchor, 'Phase278 SMMU helper insertion')
 
-    old = '''\tif (after != chosen_actlr)\n\t\treturn -EIO;\n\n\treturn 0;\n}\n\nstatic int arm_smmu_attach_dev'''
-    new = '''\tif (after != chosen_actlr)\n\t\treturn -EIO;\n\n\ta52_p278_remember_display_context(smmu_domain, fwspec, dev);\n\treturn 0;\n}\n\nstatic int arm_smmu_attach_dev'''
-    text = replace_one(text, old, new, 'Phase278 remember display context')
+    attach_old = '''\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n\tif (!ret)\n\t\tret = a52_arm_smmu_apply_display_actlr(smmu_domain, fwspec, dev);\n'''
+    attach_new = '''\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n\tif (!ret) {\n\t\ta52_p278_remember_display_context(smmu_domain, fwspec, dev);\n\t\tret = a52_arm_smmu_apply_display_actlr(smmu_domain, fwspec, dev);\n\t}\n'''
+    text = replace_one(text, attach_old, attach_new,
+                       'Phase278 remember display context after master attach')
     return text
 
 
@@ -193,6 +199,8 @@ def self_test(root: Path) -> None:
         required = [
             MARK,
             'a52_p278_remember_display_context(smmu_domain, fwspec, dev);',
+            'if (!ret) {\n\t\ta52_p278_remember_display_context(smmu_domain, fwspec, dev);',
+            'SMMU P278 X p=%u noctx=1',
             'ARM_SMMU_CB_ACTLR', 'ARM_SMMU_CB_SCTLR', 'ARM_SMMU_CB_FSR',
             'ARM_SMMU_GR0_S2CR(ctx->sme)', 'ARM_SMMU_GR0_SMR(ctx->sme)',
             'ARM_SMMU_GR1_CBAR(ctx->cbndx)',

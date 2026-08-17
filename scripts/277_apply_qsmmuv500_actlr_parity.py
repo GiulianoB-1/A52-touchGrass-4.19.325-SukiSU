@@ -138,7 +138,7 @@ static int a52_arm_smmu_apply_display_actlr(
     text = replace_one(text, attach, helper + attach,
                        'Phase277 ACTLR helper insertion')
 
-    old = '''\tif (a52_unported_secure_display(dev))\n\t\tret = a52_arm_smmu_attach_fault(dev, cfg, fwspec);\n\telse\n\t\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n'''
+    old = '''\tret = arm_smmu_domain_add_master(smmu_domain, cfg, fwspec);\n'''
     new = old + '''\tif (!ret)\n\t\tret = a52_arm_smmu_apply_display_actlr(smmu_domain, fwspec, dev);\n'''
     text = replace_one(text, old, new,
                        'Phase277 post-master ACTLR programming')

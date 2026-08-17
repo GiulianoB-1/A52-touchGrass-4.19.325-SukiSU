@@ -29,7 +29,7 @@ cp "$DISPLAY" /tmp/p276r-display.c
 cp "$CTRL" /tmp/p276r-ctrl.c
 
 # Golden gate before any Phase276R instrumentation. In addition to the already
-# proven host/controller/message path, V4 requires exact parity for the common
+# proven host/controller/message path, V5 requires exact parity for the common
 # memory-DMA kickoff, error-status reader, and catalog op wiring.
 python3 -m py_compile \
   scripts/276r_deep_dsi_parity_probe.py \
@@ -72,19 +72,20 @@ print(f'Phase276R deep-active declaration relocated before first use (recorder i
 PY
 
 # Hardware V3 proved: wait timeout, raw status=0, DMA_DONE=0, dma_irq_trig=0,
-# IRQ mask=0x401, DMA_DONE refcount=1, then Samsung panic path. V4 therefore adds
-# only two new target-only discriminators around that exact failure:
-#   1) memory-DMA IOVA/length/hw_flags immediately before kickoff_command();
-#   2) read-only DSI hardware error bitmap after the existing timeout status read.
-# It keeps the V3 status/panic records for correlation. No control flow, register
-# write, lock, command, timeout, payload, flag, or return value is changed.
+# IRQ mask=0x401, DMA_DONE refcount=1, then Samsung panic path. Final V5 keeps
+# V4's software DMA programming and timeout error discriminators, and adds exactly
+# one new recorder point after the already-triggered Golden-identical memory DMA:
+# read back controller/status/DMA/IRQ/clock plus programmed offset/length registers.
+# No read is inserted between register programming and SW trigger. No control flow,
+# register write, lock, command, timeout, payload, flag, or return value is changed.
 python3 scripts/276r_precise_dma_probe.py "$CTRL"
 
 ! cmp -s /tmp/p276r-panel.c "$PANEL"
 ! cmp -s /tmp/p276r-display.c "$DISPLAY"
 ! cmp -s /tmp/p276r-ctrl.c "$CTRL"
-grep -Fq 'A52_PHASE276R_DMA_PROGRAM_ERROR_DISCRIMINATOR_V4' "$CTRL"
+grep -Fq 'A52_PHASE276R_FINAL_DMA_ROOT_CAUSE_RECORDER_V5' "$CTRL"
 grep -Fq 'P276 H K o=%llx l=%u h=%x' "$CTRL"
+grep -Fq 'P276 H R c=%x s=%x d=%x i=%x k=%x q=%x o=%x l=%x' "$CTRL"
 grep -Fq 'P276 H E e=%llx' "$CTRL"
 grep -Fq 'P276 P S st=%x dn=%u a=%d im=%x ir=%u' "$CTRL"
 grep -Fq 'P276 P P e=%u d=%u' "$CTRL"
@@ -123,20 +124,20 @@ from pathlib import Path
 r = Path('phase276r-out')
 idn = {
     'phase': '276R',
-    'name': 'DEEP-DSI-DMA-PROGRAM-ERROR-DISCRIMINATOR-V4',
+    'name': 'DEEP-DSI-FINAL-DMA-ROOT-CAUSE-RECORDER-V5',
     'git_sha': os.getenv('GITHUB_SHA'),
     'hardware_validated': False,
     'supersedes_phase276_for_hardware': True,
     'hardware_question': (
         'For the proven TX_LEVEL1_KEY_ENABLE memory-DMA failure with DMA_DONE=0, '
-        'capture the programmed DMA IOVA/length/hw_flags and the read-only DSI '
-        'hardware error bitmap to distinguish DMA mapping/programming failure from '
-        'controller/PHY/FIFO/timeout/clock failure.'
+        'capture software DMA IOVA/length/hw_flags, post-trigger hardware register '
+        'readback, and the read-only DSI error bitmap to distinguish programming, '
+        'MMIO/readback, controller/clock, and hardware-error failure classes.'
     ),
     'previous_hardware_result': 'status=0 DMA_DONE=0 dma_irq_trig=0 irq_mask=0x401 dma_done_refcount=1',
     'functional_change': (
-        'none; observation only; adds exactly two target-only runtime records beyond V3 '
-        'and preserves the V3 timeout/panic discriminators'
+        'none; observation only; V5 adds exactly one post-trigger hardware-readback record '
+        'beyond V4 and preserves all existing V3/V4 discriminators'
     ),
 }
 (r/'BUILD-IDENTITY.json').write_text(json.dumps(idn, indent=2, sort_keys=True) + '\n')
@@ -161,23 +162,24 @@ from pathlib import Path
 r = Path('phase276r-out')
 s = (r/'source/dsi_ctrl.c').read_text()
 img = (r/'compile/Image').read_bytes()
-source_only = ['A52_PHASE276R_DMA_PROGRAM_ERROR_DISCRIMINATOR_V4']
+source_only = ['A52_PHASE276R_FINAL_DMA_ROOT_CAUSE_RECORDER_V5']
 runtime = [
     'P276 P S st=%x dn=%u a=%d im=%x ir=%u',
     'P276 P P e=%u d=%u',
     'P276 H K o=%llx l=%u h=%x',
+    'P276 H R c=%x s=%x d=%x i=%x k=%x q=%x o=%x l=%x',
     'P276 H E e=%llx',
 ]
 for t in source_only:
     if t not in s:
-        raise SystemExit('source V4 marker missing ' + t)
+        raise SystemExit('source V5 marker missing ' + t)
 for t in runtime:
     if t not in s:
-        raise SystemExit('source V4 runtime marker missing ' + t)
+        raise SystemExit('source V5 runtime marker missing ' + t)
     if t.encode() not in img:
-        raise SystemExit('Image V4 runtime marker missing ' + t)
-print('Phase276R precise DMA programming/error V4 marker audit: PASS')
+        raise SystemExit('Image V5 runtime marker missing ' + t)
+print('Phase276R final DMA root-cause V5 marker audit: PASS')
 PY
 
 trap - EXIT
-echo 'Phase276R precise DSI DMA programming/error V4 build/repack: PASS'
+echo 'Phase276R final DSI DMA root-cause V5 build/repack: PASS'

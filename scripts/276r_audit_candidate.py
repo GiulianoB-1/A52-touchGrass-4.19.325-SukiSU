@@ -28,7 +28,8 @@ for f, toks in {
     ],
     'source/dsi_ctrl.c': [
         'A52_PHASE276R_DSI_CTRL_DEEP_FRONTIER_V1',
-        'A52_PHASE276R_DMA_PROGRAM_ERROR_DISCRIMINATOR_V4',
+        'A52_PHASE276R_FINAL_DMA_ROOT_CAUSE_RECORDER_V5',
+        '#include "dsi_ctrl_reg.h"',
         'P276 D C s=0 f=%x',
         'P276 D M s=0 f=%x mt=%u l=%u',
         'P276 D K s=0 f=%x',
@@ -38,6 +39,7 @@ for f, toks in {
         'P276 P S st=%x dn=%u a=%d im=%x ir=%u',
         'P276 P P e=%u d=%u',
         'P276 H K o=%llx l=%u h=%x',
+        'P276 H R c=%x s=%x d=%x i=%x k=%x q=%x o=%x l=%x',
         'P276 H E e=%llx',
     ],
 }.items():
@@ -60,6 +62,7 @@ for t in [
     'P276 P S st=%x dn=%u a=%d im=%x ir=%u',
     'P276 P P e=%u d=%u',
     'P276 H K o=%llx l=%u h=%x',
+    'P276 H R c=%x s=%x d=%x i=%x k=%x q=%x o=%x l=%x',
     'P276 H E e=%llx',
 ]:
     if t.encode() not in img:
@@ -83,9 +86,10 @@ for t in [
         raise SystemExit('parity missing ' + t)
 
 print(json.dumps({
-    'status': 'phase276r-v4-audit-pass',
+    'status': 'phase276r-v5-audit-pass',
     'deep_functions_touchgrass_exact_before_instrumentation': True,
     'low_level_dma_hw_functions_touchgrass_exact_before_instrumentation': True,
+    'post_trigger_hw_readback_present': True,
     'config_unchanged': True,
     'hardware_validated': False,
 }, indent=2))

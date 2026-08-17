@@ -169,7 +169,7 @@ static int a52_qsmmuv500_populate_tbus(struct arm_smmu_device *smmu)
                        'Phase278 TBU helper insertion')
 
     parent_old = '''\t}\n\n\terr = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,\n'''
-    parent_new = '''\t}\n\n\terr = a52_qsmmuv500_populate_tbus(smmu);\n\tif (trace)\n\t\ta52_ackfr_record("SMMU P278 TBU parent rc=%d", err);\n\tif (err)\n\t\treturn err;\n\n\terr = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,\n'''
+    parent_new = '''\t}\n\n\terr = a52_qsmmuv500_populate_tbus(smmu);\n\tif (trace)\n\t\ta52_ackfr_record("SMMU P278 TBU parent rc=%d", err);\n\tif (err) {\n\t\t/* Probe may defer after the parent enabled these manual votes. */\n\t\tclk_bulk_disable(smmu->num_clks, smmu->clks);\n\t\ta52_arm_smmu_disable_gdscs(smmu);\n\t\tclk_bulk_unprepare(smmu->num_clks, smmu->clks);\n\t\treturn err;\n\t}\n\n\terr = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,\n'''
     text = replace_one(text, parent_old, parent_new,
                        'Phase278 A52 parent TBU lifecycle')
 

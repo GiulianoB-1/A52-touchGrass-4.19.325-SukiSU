@@ -106,6 +106,16 @@ def check(root: Path) -> None:
     register = parent.find('iommu_device_register(&smmu->iommu)')
     require(0 <= cfg < irq < tbu < sysfs < register,
             'parent cfg/IRQ/TBU/sysfs/IOMMU registration ordering is wrong')
+    tbu_error = parent[parent.find('err = a52_qsmmuv500_populate_tbus(smmu);'):sysfs]
+    require('clk_bulk_disable(smmu->num_clks, smmu->clks);' in tbu_error and
+            'a52_arm_smmu_disable_gdscs(smmu);' in tbu_error and
+            'clk_bulk_unprepare(smmu->num_clks, smmu->clks);' in tbu_error,
+            'TBU parent-defer path does not release manual clock/GDSC votes')
+    require(tbu_error.find('clk_bulk_disable(smmu->num_clks, smmu->clks);') <
+            tbu_error.find('a52_arm_smmu_disable_gdscs(smmu);') <
+            tbu_error.find('clk_bulk_unprepare(smmu->num_clks, smmu->clks);') <
+            tbu_error.find('return err;'),
+            'TBU parent-defer cleanup ordering is wrong')
 
     init = function_body(text, 'static int __init a52_arm_smmu_driver_init(void)')
     tbu_reg = init.find('platform_driver_register(&a52_qsmmuv500_tbu_driver);')

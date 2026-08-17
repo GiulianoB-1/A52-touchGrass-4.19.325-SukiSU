@@ -3,6 +3,8 @@ set -Eeuo pipefail
 ROOT="$PWD/gki/common"
 OUT="$PWD/workspace/gki-phase199-out"
 SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+TG_ROOT="$PWD/workspace/touchgrass-a52xq"
+TG_SHA="6bf351bdf18bdb228db79e66f14a7a9c0178e5d7"
 
 fail_report(){
   set +e
@@ -13,6 +15,29 @@ fail_report(){
   cp scripts/277_apply_qsmmuv500_actlr_parity.py phase277-failure/audit/ 2>/dev/null || true
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
+
+# Phase252 historically fetched ~30 pinned TouchGrass files one-by-one from
+# raw.githubusercontent.com. The Phase277 workflow already checks out the exact
+# pinned TouchGrass commit, so make Phase252 consume that local tree first.
+# This removes GitHub HTTP rate limiting from the inherited reconstruction while
+# preserving byte-for-byte source identity and the existing remote fallback.
+test -d "$TG_ROOT/.git"
+test "$(git -C "$TG_ROOT" rev-parse HEAD)" = "$TG_SHA"
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path('scripts/252_phase251_legacy_msm_bus_rpmh_overlay.py')
+text = p.read_text(encoding='utf-8')
+old = '''def fetch(relative: str) -> bytes:\n    url = RAW_BASE + relative\n    last: Exception | None = None\n    for attempt in range(4):\n        req = urllib.request.Request(url, headers={"User-Agent": "A52-Phase252-pinned-port"})\n        try:\n            with urllib.request.urlopen(req, timeout=90) as response:\n                data = response.read()\n            if not data or b"404: Not Found" in data[:64]:\n                raise RuntimeError(f"empty/not-found upstream file: {relative}")\n            return data\n        except (OSError, urllib.error.URLError, RuntimeError) as exc:\n            last = exc\n            if attempt != 3:\n                time.sleep(2 * (attempt + 1))\n    raise RuntimeError(f"failed to fetch pinned TouchGrass file {relative}: {last}")\n'''
+new = '''def fetch(relative: str) -> bytes:\n    local = Path.cwd() / "workspace/touchgrass-a52xq" / relative\n    if local.is_file():\n        data = local.read_bytes()\n        if not data:\n            raise RuntimeError(f"empty pinned local TouchGrass file: {relative}")\n        return data\n\n    url = RAW_BASE + relative\n    last: Exception | None = None\n    for attempt in range(4):\n        req = urllib.request.Request(url, headers={"User-Agent": "A52-Phase252-pinned-port"})\n        try:\n            with urllib.request.urlopen(req, timeout=90) as response:\n                data = response.read()\n            if not data or b"404: Not Found" in data[:64]:\n                raise RuntimeError(f"empty/not-found upstream file: {relative}")\n            return data\n        except (OSError, urllib.error.URLError, RuntimeError) as exc:\n            last = exc\n            if attempt != 3:\n                time.sleep(2 * (attempt + 1))\n    raise RuntimeError(f"failed to fetch pinned TouchGrass file {relative}: {last}")\n'''
+marker = 'workspace/touchgrass-a52xq'
+if marker not in text:
+    if text.count(old) != 1:
+        raise SystemExit('Phase277 Phase252 local-source repair anchor mismatch')
+    text = text.replace(old, new, 1)
+    p.write_text(text, encoding='utf-8')
+print('Phase277 Phase252 local TouchGrass source repair: PASS')
+PY
 
 # Reconstruct the exact hardware-tested Phase276R source and candidate first.
 # Keep the inherited environment identical to the proven Phase276R workflow.

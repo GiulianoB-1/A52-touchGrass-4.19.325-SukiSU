@@ -1,0 +1,108 @@
+name: TouchGrass - A52 critical flight recorder v1
+run-name: TouchGrass critical recorder v1 from successful Phase279
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-touchgrass-critical-flight-recorder-v1
+    paths:
+      - .github/workflows/touchgrass-critical-flight-recorder-v1.yml
+      - scripts/tg1_payload.py
+      - scripts/tg1_apply_critical_flight_recorder.py
+      - scripts/tg1_check_critical_flight_recorder.py
+      - scripts/tg1_decode_critical_bank.py
+      - scripts/tg1_ci_build.sh
+      - scripts/tg1_design.md
+  pull_request:
+    branches:
+      - agent/a52-phase279-broad-display-failure-snapshot-v1
+    paths:
+      - .github/workflows/touchgrass-critical-flight-recorder-v1.yml
+      - scripts/tg1_payload.py
+      - scripts/tg1_apply_critical_flight_recorder.py
+      - scripts/tg1_check_critical_flight_recorder.py
+      - scripts/tg1_decode_critical_bank.py
+      - scripts/tg1_ci_build.sh
+      - scripts/tg1_design.md
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-touchgrass-critical-recorder-v1-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+jobs:
+  build:
+    name: Build sealed TouchGrass critical recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out TouchGrass critical-recorder branch
+        uses: actions/checkout@v4
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Materialize TouchGrass critical-recorder toolchain
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/tg1_payload.py
+          python3 -m py_compile scripts/tg1_payload.py \
+            scripts/tg1_apply_critical_flight_recorder.py \
+            scripts/tg1_check_critical_flight_recorder.py \
+            scripts/tg1_decode_critical_bank.py
+          bash -n scripts/tg1_ci_build.sh
+
+      - name: Reconstruct Phase279, add sealed critical bank, compile and repack
+        run: bash scripts/tg1_ci_build.sh
+      - name: Upload TouchGrass critical-recorder candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TOUCHGRASS-CRITICAL-RECORDER-V1-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: tg1-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TOUCHGRASS-CRITICAL-RECORDER-V1-FAILURE-${{ github.run_number }}
+          path: |
+            tg1-failure/
+            phase*-failure/
+          if-no-files-found: warn
+          retention-days: 30
+
+# v1 workflow registration push

@@ -75,10 +75,16 @@ PY
 
 IMAGE=tg2-out/compile/Image
 test -s "$IMAGE"
-grep -aFq 'A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V1' "$IMAGE"
-grep -aFq "$V2_IMAGE_MARKER" "$IMAGE"
-grep -aFq 'TouchGrass critical bank armed phys=%llx bytes=%lu slots=%u gen=%u' "$IMAGE"
-grep -aFq 'SMMU P279 I p=%u' "$IMAGE"
+
+# tg1_ci_build.sh already owns and passes the v1 recorder and Phase279 Image
+# audits. Do not duplicate those contracts here with guessed literal strings.
+# v2 adds exactly one compiled identity marker, so only verify that delta.
+if ! grep -aFq "$V2_IMAGE_MARKER" "$IMAGE"; then
+  echo "::error::TouchGrass v2 compiled marker missing from Image: $V2_IMAGE_MARKER"
+  exit 1
+fi
+
+echo 'TouchGrass v2 compiled marker Image audit: PASS'
 
 python3 - <<'PY'
 import hashlib

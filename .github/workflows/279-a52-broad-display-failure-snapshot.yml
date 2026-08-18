@@ -13,6 +13,7 @@ on:
   pull_request:
     branches:
       - agent/a52-phase278-live-display-smmu-state-v1
+      - agent/a52-phase279-broad-display-failure-snapshot-v1
     paths:
       - .github/workflows/279-a52-broad-display-failure-snapshot.yml
       - scripts/279_apply_live_dsi_iova_translation.py

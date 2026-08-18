@@ -33,7 +33,7 @@ def patch_smmu(text: str) -> str:
 /* A52_PHASE279_BROAD_DISPLAY_FAILURE_SNAPSHOT_V1
  * Broad but read-only cross-section at the already-proven DSI DMA failure
  * boundary. The command IOVA is translated through the software io-pgtable
- * walk only; this deliberately avoids arm_smmu_iova_to_phys_hard()/ATS1PR.
+ * walk only; no hardware translation request is issued by this recorder.
  * Context/global fault registers are read but never cleared here. TTBR0/TCR
  * are read back only to correlate the active hardware root with cached state.
  */

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 APPLY = Path("scripts/tg1_apply_critical_flight_recorder.py")
@@ -14,6 +15,37 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     if n != 1:
         raise SystemExit(f"{label}: expected one anchor, found {n}")
     return text.replace(old, new, 1)
+
+
+def disable_v1_payload_rematerialization(ci: str) -> str:
+    """Disable exactly one executable tg1_payload.py invocation in the v1 wrapper."""
+    lines = ci.splitlines(keepends=True)
+    hits: list[int] = []
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if re.match(r"^\s*python3(?:\s|$)", line) and "tg1_payload.py" in line:
+            hits.append(idx)
+
+    if len(hits) != 1:
+        candidates = [line.rstrip("\n") for line in lines if "tg1_payload.py" in line]
+        raise SystemExit(
+            "v1 wrapper payload rematerialization: expected one executable "
+            f"python3 tg1_payload.py line, found {len(hits)}; candidates={candidates!r}"
+        )
+
+    idx = hits[0]
+    original = lines[idx]
+    newline = "\n" if original.endswith("\n") else ""
+    indent = original[: len(original) - len(original.lstrip())]
+    lines[idx] = (
+        indent
+        + ": # TouchGrass v2: payload already materialized and patched; "
+        + "do not overwrite generated tools."
+        + newline
+    )
+    return "".join(lines)
 
 
 def main() -> int:
@@ -83,12 +115,7 @@ static int __init a52_tgcr_init(void)
     # compile a v1 Image. Disable exactly that redundant transport step only;
     # every v1 reconstruction, safety check, build, Image audit and repack step
     # remains unchanged.
-    ci = replace_once(
-        ci,
-        'python3 scripts/tg1_payload.py\n',
-        '# TouchGrass v2: payload already materialized and patched; do not overwrite generated tools.\n',
-        'v1 wrapper payload rematerialization',
-    )
+    ci = disable_v1_payload_rematerialization(ci)
 
     APPLY.write_text(apply, encoding="utf-8")
     DECODE.write_text(decode, encoding="utf-8")

@@ -73,9 +73,10 @@ def main() -> int:
         'fallback comment',
     )
 
-    # Reapply the proven Phase261 diagnostic watchdog handoff to the final
-    # reconstructed Phase279 tree. Later cumulative reconstruction retained the
-    # F261 trace points but no longer retained the qcom-wdt stop itself.
+    # Tag the watchdog handoff already present in the reconstructed Phase279
+    # tree as the v3 diagnostic contract. Phase279 already stops qcom-wdt and
+    # returns before watchdog registration, so v3 must preserve that proven
+    # disarm instead of anchoring on the pre-Phase279 probe layout.
     apply = replace_once(
         apply,
         'SMMU_REL = Path("drivers/iommu/arm/arm-smmu/arm-smmu.c")',
@@ -84,7 +85,45 @@ def main() -> int:
         'watchdog path',
     )
 
-    watchdog_fn = f'''\n\ndef patch_watchdog(text: str) -> str:\n    marker = "{WDT_MARKER}"\n    if marker in text:\n        return text\n    old = (\n        "\\tif (running) {{\\n"\n        "\\t\\tqcom_wdt_start(&wdt->wdd);\\n"\n        "\\t\\tset_bit(WDOG_HW_RUNNING, &wdt->wdd.status);\\n"\n        "\\t}}\\n\\n"\n        "\\tret = devm_watchdog_register_device(dev, &wdt->wdd);\\n"\n    )\n    new = (\n        f"\\t/* {{marker}}: diagnostic boot only */\\n"\n        "\\tif (running)\\n"\n        "\\t\\tqcom_wdt_stop(&wdt->wdd);\\n"\n        "\\tdev_warn(dev, \\\"A52 TouchGrass v3: QCOM watchdog disabled for late recorder\\\\n\\\");\\n"\n        "\\tret = 0; /* diagnostic only: do not register/re-arm */\\n"\n    )\n    return replace_once(text, old, new, "watchdog handoff")\n'''
+    watchdog_fn = f'''\n\ndef patch_watchdog(text: str) -> str:
+    marker = "{WDT_MARKER}"
+    if marker in text:
+        return text
+    old = (
+        "\\t\\t/* A52_FAILURE_WINDOW_WATCHDOG_DISARM */\\n"
+        "\\t\\t{{\\n"
+        "\\t\\t\\tu32 a52_wdt_before;\\n"
+        "\\t\\t\\tu32 a52_wdt_after;\\n\\n"
+        "\\t\\t\\ta52_wdt_before = readl(wdt_addr(wdt, WDT_STS));\\n"
+        "\\t\\t\\tqcom_wdt_stop(&wdt->wdd);\\n"
+        "\\t\\t\\ta52_wdt_after = readl(wdt_addr(wdt, WDT_STS));\\n"
+        "\\t\\t\\ta52_ackfr_record(\\\"WDT disarm before=%u after=%u\\\",\\n"
+        "\\t\\t\\t\\t\\t  !!(a52_wdt_before & 1),\\n"
+        "\\t\\t\\t\\t\\t  !!(a52_wdt_after & 1));\\n"
+        "\\t\\t\\tdev_warn(&pdev->dev,\\n"
+        "\\t\\t\\t\\t \\\"A52 diagnostic: watchdog disabled for manual recovery\\\\n\\\");\\n"
+        "\\t\\t\\treturn 0;\\n"
+        "\\t\\t}}\\n"
+    )
+    new = (
+        "\\t\\t/* A52_FAILURE_WINDOW_WATCHDOG_DISARM */\\n"
+        f"\\t\\t/* {{marker}}: diagnostic boot only */\\n"
+        "\\t\\t{{\\n"
+        "\\t\\t\\tu32 a52_wdt_before;\\n"
+        "\\t\\t\\tu32 a52_wdt_after;\\n\\n"
+        "\\t\\t\\ta52_wdt_before = readl(wdt_addr(wdt, WDT_STS));\\n"
+        "\\t\\t\\tqcom_wdt_stop(&wdt->wdd);\\n"
+        "\\t\\t\\ta52_wdt_after = readl(wdt_addr(wdt, WDT_STS));\\n"
+        "\\t\\t\\ta52_ackfr_record(\\\"WDT disarm before=%u after=%u\\\",\\n"
+        "\\t\\t\\t\\t\\t  !!(a52_wdt_before & 1),\\n"
+        "\\t\\t\\t\\t\\t  !!(a52_wdt_after & 1));\\n"
+        "\\t\\t\\tdev_warn(&pdev->dev,\\n"
+        "\\t\\t\\t\\t \\\"A52 TouchGrass v3: QCOM watchdog disabled for late recorder\\\\n\\\");\\n"
+        "\\t\\t\\treturn 0; /* diagnostic only: do not register/re-arm */\\n"
+        "\\t\\t}}\\n"
+    )
+    return replace_once(text, old, new, "Phase279 watchdog handoff")
+'''
     apply = replace_once(apply, '\n\ndef apply(root: Path) -> None:\n', watchdog_fn + '\n\ndef apply(root: Path) -> None:\n', 'watchdog patch function')
 
     apply = replace_once(

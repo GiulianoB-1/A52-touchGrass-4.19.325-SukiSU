@@ -5,7 +5,9 @@ from pathlib import Path
 
 APPLY = Path("scripts/tg1_apply_critical_flight_recorder.py")
 DECODE = Path("scripts/tg1_decode_critical_bank.py")
+CI = Path("scripts/tg1_ci_build.sh")
 V2_IMAGE_MARKER = "A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V2_EARLY_SEAL_90S"
+
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     n = text.count(old)
@@ -13,9 +15,11 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
         raise SystemExit(f"{label}: expected one anchor, found {n}")
     return text.replace(old, new, 1)
 
+
 def main() -> int:
     apply = APPLY.read_text(encoding="utf-8")
     decode = DECODE.read_text(encoding="utf-8")
+    ci = CI.read_text(encoding="utf-8")
 
     apply = replace_once(
         apply,
@@ -73,10 +77,26 @@ static int __init a52_tgcr_init(void)
         'decoder reason map',
     )
 
+    # tg1_ci_build.sh is itself materialized by tg1_payload.py. v2 has already
+    # materialized that payload and patched APPLY/DECODE above. Running the v1
+    # wrapper's own materializer again would overwrite those v2 changes and
+    # compile a v1 Image. Disable exactly that redundant transport step only;
+    # every v1 reconstruction, safety check, build, Image audit and repack step
+    # remains unchanged.
+    ci = replace_once(
+        ci,
+        'python3 scripts/tg1_payload.py\n',
+        '# TouchGrass v2: payload already materialized and patched; do not overwrite generated tools.\n',
+        'v1 wrapper payload rematerialization',
+    )
+
     APPLY.write_text(apply, encoding="utf-8")
     DECODE.write_text(decode, encoding="utf-8")
+    CI.write_text(ci, encoding="utf-8")
     print("TouchGrass v2 generated-tool patch: PASS")
+    print("TouchGrass v2 v1-wrapper rematerialization bypass: PASS")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

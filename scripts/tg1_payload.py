@@ -19,8 +19,13 @@ JSON_SHA256 = "4b9163e3aec3d01462253a0e97f24010c02883c385140bbd3029b39367444883"
 def main() -> int:
     parts = []
     for i in range(CHUNKS):
-        p = Path("scripts") / f"tg1_payload_{i:02d}.txt"
-        parts.append(p.read_text(encoding="ascii").strip())
+        if i == 2:
+            for j in range(6):
+                p = Path("scripts") / f"tg1_payload_02_{j}.txt"
+                parts.append(p.read_text(encoding="ascii").strip())
+        else:
+            p = Path("scripts") / f"tg1_payload_{i:02d}.txt"
+            parts.append(p.read_text(encoding="ascii").strip())
     encoded = "".join(parts)
     compressed = base64.b64decode(encoded, validate=True)
     got = hashlib.sha256(compressed).hexdigest()

@@ -157,6 +157,15 @@ def main() -> int:
         expected_loop,
         'for rel in [REC_REL, HDR_REL, DSI_REL, SMMU_REL, WDT_REL]:',
     )
+    apply = replace_once(
+        apply,
+        '            if text.count(MARKER) != 1:\n'
+        '                raise RuntimeError(f"self-test marker count for {rel}")',
+        f'            expected_marker = "{WDT_MARKER}" if rel == WDT_REL else MARKER\n'
+        '            if text.count(expected_marker) != 1:\n'
+        '                raise RuntimeError(f"self-test marker count for {rel}: {expected_marker}")',
+        'self-test per-file marker',
+    )
 
     decode = replace_once(
         decode,

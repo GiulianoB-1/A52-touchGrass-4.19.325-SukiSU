@@ -23,6 +23,14 @@ on:
       - scripts/tg2_prepare_generated_tools.py
       - scripts/tg2_finalize_boot.py
       - scripts/tg2_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-touchgrass-critical-flight-recorder-v1
+    paths:
+      - .github/workflows/touchgrass-critical-flight-recorder-v2.yml
+      - scripts/tg2_prepare_generated_tools.py
+      - scripts/tg2_finalize_boot.py
+      - scripts/tg2_ci_build.sh
 permissions:
   contents: read
   actions: read

@@ -104,3 +104,5 @@ jobs:
             phase*-failure/
           if-no-files-found: warn
           retention-days: 30
+
+# v1 workflow registration push

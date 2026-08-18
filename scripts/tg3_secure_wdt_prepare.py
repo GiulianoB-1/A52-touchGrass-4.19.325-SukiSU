@@ -6,6 +6,7 @@ from pathlib import Path
 APPLY = Path("scripts/tg1_apply_critical_flight_recorder.py")
 SCM_MARKER = "A52_TOUCHGRASS_V3_SECURE_WDOG_SCM_OFF"
 WDT_SECURE_MARKER = "A52_TOUCHGRASS_V3_SECURE_AND_LOCAL_WDOG_OFF"
+WDT_PROOF_MARKER = "A52_TOUCHGRASS_V3_WDOG_LATE_PROOF_15S"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -19,7 +20,7 @@ def main() -> int:
     apply = APPLY.read_text(encoding="utf-8")
     if "A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V3_WDT_OFF_TYPED_SEAL_210S" not in apply:
         raise SystemExit("secure-WDT extension requires the v3 generated-tool patch first")
-    if SCM_MARKER in apply and WDT_SECURE_MARKER in apply:
+    if SCM_MARKER in apply and WDT_SECURE_MARKER in apply and WDT_PROOF_MARKER in apply:
         print("TouchGrass v3 secure-WDT generated-tool patch: already applied")
         return 0
 
@@ -64,15 +65,59 @@ EXPORT_SYMBOL(a52_qcom_scm_disable_secure_wdog);
 def patch_secure_watchdog(text: str) -> str:
     text = patch_watchdog(text)
     marker = "{WDT_SECURE_MARKER}"
-    if marker in text:
+    proof_marker = "{WDT_PROOF_MARKER}"
+    if marker in text and proof_marker in text:
         return text
+
     text = replace_once(
         text,
         "#include <linux/a52_ack_secure_flight_recorder.h>\\n",
-        "#include <linux/a52_ack_secure_flight_recorder.h>\\n\\n"
+        "#include <linux/a52_ack_secure_flight_recorder.h>\\n"
+        "#include <linux/jiffies.h>\\n"
+        "#include <linux/workqueue.h>\\n\\n"
         "extern int a52_qcom_scm_disable_secure_wdog(void);\\n",
         "secure watchdog SCM declaration",
     )
+    text = replace_once(
+        text,
+        "\\tconst u32\\t\\t*layout;\\n}};\\n",
+        "\\tconst u32\\t\\t*layout;\\n"
+        "\\tstruct delayed_work\\ta52_diag_work;\\n"
+        "\\tint\\t\\t\\ta52_secure_wdt_rc;\\n"
+        "\\tunsigned int\\t\\ta52_diag_samples;\\n"
+        "}};\\n",
+        "watchdog diagnostic state",
+    )
+
+    worker_anchor = "static int qcom_wdt_ping(struct watchdog_device *wdd)\\n{{"
+    worker = """/* {WDT_PROOF_MARKER}: retain watchdog state near the late failure window */
+static void a52_qcom_wdt_diag_workfn(struct work_struct *work)
+{{
+\tstruct qcom_wdt *wdt = container_of(to_delayed_work(work),
+\t\t\t\t\t    struct qcom_wdt, a52_diag_work);
+\tu32 en;
+\tu32 sts;
+
+\tif (wdt->a52_secure_wdt_rc)
+\t\twdt->a52_secure_wdt_rc = a52_qcom_scm_disable_secure_wdog();
+
+\ten = readl(wdt_addr(wdt, WDT_EN));
+\tsts = readl(wdt_addr(wdt, WDT_STS));
+\twdt->a52_diag_samples++;
+\ta52_ackfr_record("WDT late sec=%d en=%u sts=%u sample=%u",
+\t\t\t  wdt->a52_secure_wdt_rc,
+\t\t\t  !!(en & QCOM_WDT_ENABLE), !!(sts & 1),
+\t\t\t  wdt->a52_diag_samples);
+
+\tif (wdt->a52_diag_samples < 14)
+\t\tschedule_delayed_work(&wdt->a52_diag_work,
+\t\t\t\t      msecs_to_jiffies(15000));
+}}
+
+"""
+    text = replace_once(text, worker_anchor, worker + worker_anchor,
+                        "late watchdog proof worker")
+
     text = replace_once(
         text,
         "\\t\\t/* A52_TOUCHGRASS_V3_DIAGNOSTIC_QCOM_WDT_OFF: diagnostic boot only */\\n",
@@ -86,9 +131,8 @@ def patch_secure_watchdog(text: str) -> str:
         "\\t\\t\\tu32 a52_wdt_after;\\n\\n"
         "\\t\\t\\ta52_wdt_before = readl(wdt_addr(wdt, WDT_STS));\\n",
         "\\t\\t\\tu32 a52_wdt_before;\\n"
-        "\\t\\t\\tu32 a52_wdt_after;\\n"
-        "\\t\\t\\tint a52_secure_wdt_rc;\\n\\n"
-        "\\t\\t\\ta52_secure_wdt_rc = a52_qcom_scm_disable_secure_wdog();\\n"
+        "\\t\\t\\tu32 a52_wdt_after;\\n\\n"
+        "\\t\\t\\twdt->a52_secure_wdt_rc = a52_qcom_scm_disable_secure_wdog();\\n"
         "\\t\\t\\ta52_wdt_before = readl(wdt_addr(wdt, WDT_STS));\\n",
         "secure watchdog call",
     )
@@ -98,10 +142,14 @@ def patch_secure_watchdog(text: str) -> str:
         "\\t\\t\\t\\t\\t  !!(a52_wdt_before & 1),\\n"
         "\\t\\t\\t\\t\\t  !!(a52_wdt_after & 1));\\n",
         "\\t\\t\\ta52_ackfr_record(\\\"WDT secure rc=%d local before=%u after=%u\\\",\\n"
-        "\\t\\t\\t\\t\\t  a52_secure_wdt_rc,\\n"
+        "\\t\\t\\t\\t\\t  wdt->a52_secure_wdt_rc,\\n"
         "\\t\\t\\t\\t\\t  !!(a52_wdt_before & 1),\\n"
-        "\\t\\t\\t\\t\\t  !!(a52_wdt_after & 1));\\n",
-        "watchdog recorder result",
+        "\\t\\t\\t\\t\\t  !!(a52_wdt_after & 1));\\n"
+        "\\t\\t\\tINIT_DELAYED_WORK(&wdt->a52_diag_work, a52_qcom_wdt_diag_workfn);\\n"
+        "\\t\\t\\twdt->a52_diag_samples = 0;\\n"
+        "\\t\\t\\tschedule_delayed_work(&wdt->a52_diag_work, msecs_to_jiffies(15000));\\n"
+        "\\t\\t\\tplatform_set_drvdata(pdev, wdt);\\n",
+        "watchdog recorder result and late proof",
     )
     text = replace_once(
         text,
@@ -111,13 +159,13 @@ def patch_secure_watchdog(text: str) -> str:
     )
     return text
 '''
+
     apply = replace_once(
         apply,
         "\n\ndef apply(root: Path) -> None:\n",
         secure_patchers + "\n\ndef apply(root: Path) -> None:\n",
         "secure watchdog patch functions",
     )
-
     apply = replace_once(
         apply,
         "paths = [REC_REL, HDR_REL, DSI_REL, SMMU_REL, WDT_REL]",
@@ -155,6 +203,8 @@ def patch_secure_watchdog(text: str) -> str:
         '            expected_marker = "A52_TOUCHGRASS_V3_DIAGNOSTIC_QCOM_WDT_OFF" if rel == WDT_REL else MARKER\n',
         f'            if rel == WDT_REL:\n'
         f'                expected_marker = "{WDT_SECURE_MARKER}"\n'
+        f'                if text.count("{WDT_PROOF_MARKER}") != 1:\n'
+        f'                    raise RuntimeError("self-test late watchdog proof marker count")\n'
         f'            elif rel == SCM_REL:\n'
         f'                expected_marker = "{SCM_MARKER}"\n'
         f'            else:\n'
@@ -165,6 +215,7 @@ def patch_secure_watchdog(text: str) -> str:
     APPLY.write_text(apply, encoding="utf-8")
     print("TouchGrass v3 secure-WDT generated-tool patch: PASS")
     print("TouchGrass v3 secure watchdog SCM command 0x07: staged")
+    print("TouchGrass v3 15-second watchdog proof recorder: staged")
     return 0
 
 

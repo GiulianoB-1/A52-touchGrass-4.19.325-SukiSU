@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# CI harness child branch: no kernel/source behavior change.
 ROOT="$PWD/gki/common"
 OUT="$PWD/workspace/gki-phase199-out"
 SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"

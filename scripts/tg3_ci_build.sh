@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# v3 PR workflow synchronization trigger
 
 fail_report() {
   set +e

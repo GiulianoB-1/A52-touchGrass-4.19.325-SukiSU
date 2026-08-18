@@ -43,13 +43,15 @@ def main() -> int:
     source = args.source.read_bytes()
     original = boot.parse_boot(source)
     cmdline = original["cmdline"]
+    source_tokens = cmdline.split()
 
-    if cmdline.count(OLD) != 1:
-        raise SystemExit(f"expected exactly one {OLD!r} in source cmdline")
-    if NEW in cmdline:
+    if source_tokens.count(OLD) != 1:
+        raise SystemExit(f"expected exactly one {OLD!r} token in source cmdline")
+    if NEW in source_tokens:
         raise SystemExit("source cmdline already contains disabled pmsg token")
 
-    new_cmdline = cmdline.replace(OLD, NEW, 1)
+    new_cmdline = " ".join(NEW if token == OLD else token
+                           for token in source_tokens)
     encoded = new_cmdline.encode("ascii")
     if len(encoded) > 1536:
         raise SystemExit(f"command line too long: {len(encoded)} > 1536")
@@ -62,6 +64,7 @@ def main() -> int:
         output[608:608 + len(encoded) - 512] = encoded[512:]
 
     rebuilt = boot.parse_boot(bytes(output))
+    rebuilt_tokens = rebuilt["cmdline"].split()
     invariants = {
         "partition_size_preserved": len(output) == len(source),
         "kernel_preserved": rebuilt["kernel"] == original["kernel"],
@@ -70,9 +73,9 @@ def main() -> int:
         "recovery_dtbo_preserved": rebuilt["recovery_dtbo"] == original["recovery_dtbo"],
         "dtb_preserved": rebuilt["dtb"] == original["dtb"],
         "boot_id_preserved": rebuilt["id"] == original["id"],
-        "pmsg_disabled_exactly_once": rebuilt["cmdline"].split().count(NEW) == 1,
-        "old_pmsg_token_removed": OLD not in rebuilt["cmdline"],
-        "other_ramoops_contract_preserved": all(x in rebuilt["cmdline"] for x in REQUIRED),
+        "pmsg_disabled_exactly_once": rebuilt_tokens.count(NEW) == 1,
+        "old_pmsg_token_removed": OLD not in rebuilt_tokens,
+        "other_ramoops_contract_preserved": all(x in rebuilt_tokens for x in REQUIRED),
     }
     failed = [k for k, v in invariants.items() if not v]
     if failed:

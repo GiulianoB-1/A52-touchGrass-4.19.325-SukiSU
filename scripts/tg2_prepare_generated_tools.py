@@ -5,6 +5,7 @@ from pathlib import Path
 
 APPLY = Path("scripts/tg1_apply_critical_flight_recorder.py")
 DECODE = Path("scripts/tg1_decode_critical_bank.py")
+V2_IMAGE_MARKER = "A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V2_EARLY_SEAL_90S"
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     n = text.count(old)
@@ -56,13 +57,14 @@ static int __init a52_tgcr_init(void)
     arm_anchor = '''        atomic_set(&a52_tgcr_state, A52_TGCR_STATE_ARMED);
         pr_info("TouchGrass critical bank armed phys=%llx bytes=%lu slots=%u gen=%u\\n",
 '''
-    arm_repl = '''        atomic_set(&a52_tgcr_state, A52_TGCR_STATE_ARMED);
+    arm_repl = f'''        atomic_set(&a52_tgcr_state, A52_TGCR_STATE_ARMED);
         schedule_delayed_work(&a52_tgcr_deadline_work,
                               msecs_to_jiffies(90000));
+        pr_info("{V2_IMAGE_MARKER}\\n");
         pr_info("TouchGrass critical bank armed phys=%llx bytes=%lu slots=%u gen=%u\\n",
 '''
     apply = replace_once(apply, arm_anchor, arm_repl,
-                         'deadline scheduling')
+                         'deadline scheduling and v2 identity')
 
     decode = replace_once(
         decode,

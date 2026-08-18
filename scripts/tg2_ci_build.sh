@@ -12,6 +12,8 @@ fail_report() {
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
+V2_IMAGE_MARKER='A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V2_EARLY_SEAL_90S'
+
 python3 scripts/tg1_payload.py
 python3 scripts/tg2_prepare_generated_tools.py
 python3 -m py_compile \
@@ -21,7 +23,16 @@ python3 -m py_compile \
   scripts/tg2_prepare_generated_tools.py \
   scripts/tg2_finalize_boot.py
 
+grep -Fq "$V2_IMAGE_MARKER" scripts/tg1_apply_critical_flight_recorder.py
+grep -Fq 'A52_TGCR_REASON_DEADLINE_90S' scripts/tg1_apply_critical_flight_recorder.py
+grep -Fq 'msecs_to_jiffies(90000)' scripts/tg1_apply_critical_flight_recorder.py
+
 bash scripts/tg1_ci_build.sh
+
+# The v1 wrapper must not rematerialize and erase the v2 generated-tool patch.
+grep -Fq "$V2_IMAGE_MARKER" scripts/tg1_apply_critical_flight_recorder.py
+grep -Fq 'A52_TGCR_REASON_DEADLINE_90S' scripts/tg1_apply_critical_flight_recorder.py
+grep -Fq 'msecs_to_jiffies(90000)' scripts/tg1_apply_critical_flight_recorder.py
 
 rm -rf tg2-out
 cp -a tg1-out tg2-out
@@ -52,6 +63,7 @@ d.update({
     'fallback_seal_ms': 90000,
     'fallback_seal_reason': 'DEADLINE_90S',
     'recovery_exporter_compatible': True,
+    'compiled_v2_marker': 'A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V2_EARLY_SEAL_90S',
     'functional_change': (
         'diagnostic infrastructure only: disable ramoops pmsg allocation for '
         'exclusive TGCR ownership of the fourth quarter; add recorder-only '
@@ -64,6 +76,7 @@ PY
 IMAGE=tg2-out/compile/Image
 test -s "$IMAGE"
 grep -aFq 'A52_TOUCHGRASS_CRITICAL_FLIGHT_RECORDER_V1' "$IMAGE"
+grep -aFq "$V2_IMAGE_MARKER" "$IMAGE"
 grep -aFq 'TouchGrass critical bank armed phys=%llx bytes=%lu slots=%u gen=%u' "$IMAGE"
 grep -aFq 'SMMU P279 I p=%u' "$IMAGE"
 

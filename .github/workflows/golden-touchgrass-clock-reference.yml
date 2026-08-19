@@ -1,0 +1,73 @@
+name: Golden TouchGrass - DSI clock reference
+run-name: Golden TouchGrass 4.19.200 DSI clock reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-golden-touchgrass-clock-reference-v1
+    paths:
+      - .github/workflows/golden-touchgrass-clock-reference.yml
+      - scripts/golden_touchgrass_clock_reference.py
+      - scripts/golden_touchgrass_clock_reference_build.sh
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-golden-touchgrass-clock-reference-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build:
+    name: Reconstruct Golden 4.19.200 and add read-only clock trace
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - name: Check out Golden reference branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-golden-clock-ref-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.180-ccache-${{ runner.os }}-
+
+      - name: Reconstruct and build Golden clock reference
+        run: bash scripts/golden_touchgrass_clock_reference_build.sh
+
+      - name: Upload Golden clock reference Image and audit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-GOLDEN-TOUCHGRASS-4.19.200-CLOCK-REFERENCE-${{ github.run_number }}-IMAGE-ONLY
+          path: golden-clock-ref-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-GOLDEN-CLOCK-REFERENCE-FAILURE-${{ github.run_number }}
+          path: golden-clock-ref-failure/
+          if-no-files-found: warn
+          retention-days: 30

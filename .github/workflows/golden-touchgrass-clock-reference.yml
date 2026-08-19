@@ -3,14 +3,6 @@ run-name: Golden TouchGrass 4.19.200 DSI clock reference
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/a52-golden-touchgrass-clock-reference-v1
-    paths:
-      - .github/workflows/golden-touchgrass-clock-reference.yml
-      - scripts/golden_touchgrass_clock_reference.py
-      - scripts/golden_touchgrass_clock_origin.py
-      - scripts/golden_touchgrass_clock_reference_build.sh
   pull_request:
     branches:
       - agent/a52-golden-touchgrass-4.19.200-base

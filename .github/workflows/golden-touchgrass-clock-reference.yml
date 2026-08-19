@@ -10,6 +10,13 @@ on:
       - .github/workflows/golden-touchgrass-clock-reference.yml
       - scripts/golden_touchgrass_clock_reference.py
       - scripts/golden_touchgrass_clock_reference_build.sh
+  pull_request:
+    branches:
+      - agent/a52-golden-touchgrass-4.19.200-base
+    paths:
+      - .github/workflows/golden-touchgrass-clock-reference.yml
+      - scripts/golden_touchgrass_clock_reference.py
+      - scripts/golden_touchgrass_clock_reference_build.sh
 
 permissions:
   contents: read

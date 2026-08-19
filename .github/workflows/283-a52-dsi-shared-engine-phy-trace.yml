@@ -1,0 +1,87 @@
+name: 283 - A52 DSI shared engine clock PHY trace
+run-name: Phase 283 - DSI shared engine clock PHY trace
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase283-dsi-shared-engine-clock-trace-v1
+    paths:
+      - .github/workflows/283-a52-dsi-shared-engine-phy-trace.yml
+      - scripts/283_apply_shared_engine_phy_trace.py
+      - scripts/283_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase282-golden-fifo-ab-v1
+    paths:
+      - .github/workflows/283-a52-dsi-shared-engine-phy-trace.yml
+      - scripts/283_apply_shared_engine_phy_trace.py
+      - scripts/283_ci_build.sh
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-phase283-dsi-shared-engine-phy-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+jobs:
+  build:
+    name: Reconstruct Phase282 and build shared DSI engine PHY trace
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Phase283 branch
+        uses: actions/checkout@v4
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Reconstruct exact Phase282 and build Phase283 candidate
+        run: bash scripts/283_ci_build.sh
+      - name: Upload Phase283 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase283-DSI-SHARED-ENGINE-PHY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase283-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase283-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: |
+            phase*-failure/
+          if-no-files-found: warn
+          retention-days: 30

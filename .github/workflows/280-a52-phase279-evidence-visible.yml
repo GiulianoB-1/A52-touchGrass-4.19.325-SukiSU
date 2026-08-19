@@ -1,5 +1,5 @@
-name: 280 - A52 Phase279 evidence visible
-run-name: Phase 280 - make Phase279 DSI SMMU evidence persist
+name: 280 - A52 Phase279 evidence retained
+run-name: Phase 280 - retain Phase279 DSI SMMU timeout evidence
 on:
   workflow_dispatch:
   push:
@@ -9,6 +9,7 @@ on:
       - .github/workflows/280-a52-phase279-evidence-visible.yml
       - scripts/280_apply_phase279_evidence_visible.py
       - scripts/280_check_phase279_evidence_visible.py
+      - scripts/280_apply_timeout_retention_latch.py
       - scripts/280_ci_build.sh
   pull_request:
     branches:
@@ -17,6 +18,7 @@ on:
       - .github/workflows/280-a52-phase279-evidence-visible.yml
       - scripts/280_apply_phase279_evidence_visible.py
       - scripts/280_check_phase279_evidence_visible.py
+      - scripts/280_apply_timeout_retention_latch.py
       - scripts/280_ci_build.sh
 permissions:
   contents: read
@@ -31,7 +33,7 @@ env:
   PHASE227_SEED_ARTIFACT_ID: '9160764832'
 jobs:
   build:
-    name: Reconstruct Phase279 and build evidence-visible Phase280
+    name: Reconstruct Phase279 and build retained-evidence Phase280
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
@@ -67,13 +69,13 @@ jobs:
           git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
-      - name: Reconstruct exact Phase279 and build Phase280 evidence-visible candidate
+      - name: Reconstruct exact Phase279 and build retained Phase280 candidate
         run: bash scripts/280_ci_build.sh
       - name: Upload Phase280 candidate
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase280-PHASE279-EVIDENCE-VISIBLE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-Phase280-PHASE279-EVIDENCE-RETAINED-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase280-out/
           if-no-files-found: error
           compression-level: 1

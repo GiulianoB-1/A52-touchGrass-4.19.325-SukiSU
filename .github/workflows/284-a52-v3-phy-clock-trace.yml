@@ -1,5 +1,5 @@
-name: 284 - A52 v3 PHY + link clock chain trace
-run-name: Phase 284 - v3 PHY and link clock chain trace
+name: 284 - A52 v3 PHY + full clock causality trace
+run-name: Phase 284 - v3 PHY and full clock causality trace
 on:
   workflow_dispatch:
   push:
@@ -8,14 +8,16 @@ on:
     paths:
       - .github/workflows/284-a52-v3-phy-clock-trace.yml
       - scripts/284_apply_v3_phy_clock_trace.py
-      - scripts/284_ci_build.sh
+      - scripts/284b_apply_clock_causality_trace.py
+      - scripts/284b_ci_build.sh
   pull_request:
     branches:
       - agent/a52-phase283-dsi-shared-engine-clock-trace-v1
     paths:
       - .github/workflows/284-a52-v3-phy-clock-trace.yml
       - scripts/284_apply_v3_phy_clock_trace.py
-      - scripts/284_ci_build.sh
+      - scripts/284b_apply_clock_causality_trace.py
+      - scripts/284b_ci_build.sh
 permissions:
   contents: read
   actions: read
@@ -29,7 +31,7 @@ env:
   PHASE227_SEED_ARTIFACT_ID: '9160764832'
 jobs:
   build:
-    name: Reconstruct Phase283 and build v3 PHY/clock-chain probe
+    name: Reconstruct Phase283 and build full clock-causality probe
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
@@ -66,12 +68,12 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
       - name: Reconstruct Phase283 and build Phase284 candidate
-        run: bash scripts/284_ci_build.sh
+        run: bash scripts/284b_ci_build.sh
       - name: Upload Phase284 candidate
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase284-V3-PHY-CLOCK-CHAIN-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-Phase284-V3-PHY-FULL-CLOCK-CAUSALITY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase284-out/
           if-no-files-found: error
           compression-level: 1
@@ -80,7 +82,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase284-V3-PHY-CLOCK-FAILURE-${{ github.run_number }}
+          name: A52XQ-Phase284-CLOCK-CAUSALITY-FAILURE-${{ github.run_number }}
           path: phase284-failure/
           if-no-files-found: warn
           retention-days: 30

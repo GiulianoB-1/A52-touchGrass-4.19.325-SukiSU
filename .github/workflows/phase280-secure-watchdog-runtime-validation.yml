@@ -7,6 +7,9 @@ on:
       - agent/a52-phase280-secure-watchdog-runtime-validation-v1
     paths:
       - .github/workflows/phase280-secure-watchdog-runtime-validation.yml
+  pull_request:
+    paths:
+      - .github/workflows/phase280-secure-watchdog-runtime-validation.yml
 permissions:
   contents: read
   actions: read
@@ -18,6 +21,7 @@ env:
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE280_BASE_SHA: 6e1ef23f02caa6d5d7385e4c7b1a1d7ced6581b5
 jobs:
   build:
     name: Rebuild exact v3 secure-watchdog candidate as Phase 280
@@ -28,12 +32,15 @@ jobs:
     steps:
       - name: Check out Phase 280 branch
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Verify zero-kernel-diff phase boundary
         run: |
           set -Eeuo pipefail
-          test "$(git rev-parse HEAD^)" = "6e1ef23f02caa6d5d7385e4c7b1a1d7ced6581b5"
-          git diff --name-only HEAD^ HEAD | grep -qx '.github/workflows/phase280-secure-watchdog-runtime-validation.yml'
-          test "$(git diff --name-only HEAD^ HEAD | wc -l)" -eq 1
+          git cat-file -e "$PHASE280_BASE_SHA^{commit}"
+          changed="$(git diff --name-only "$PHASE280_BASE_SHA"..HEAD)"
+          printf '%s\n' "$changed"
+          test "$changed" = '.github/workflows/phase280-secure-watchdog-runtime-validation.yml'
       - name: Prepare runner
         run: |
           set -Eeuo pipefail

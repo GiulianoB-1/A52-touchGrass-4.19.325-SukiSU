@@ -49,10 +49,14 @@ python3 scripts/golden_touchgrass_clock_reference.py --root "$KERNEL" --check-on
 
 git -C "$KERNEL" diff --check
 
-grep -Fq 'A52_GOLDEN_TOUCHGRASS_CLOCK_REFERENCE_V1' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
-grep -Fq 'TGREF SKIP' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+grep -Fq 'A52_GOLDEN_TOUCHGRASS_CLOCK_CHAIN_REFERENCE_V2' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+grep -Fq 'TGREF RATE_SKIP' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+grep -Fq 'TGREF PARENT PRE' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+grep -Fq 'TGREF REQ' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
 grep -Fq 'TGREF CMD PRE' "$KERNEL/techpack/display/msm/dsi/dsi_ctrl.c"
 grep -Fq 'TGREF CMD POST' "$KERNEL/techpack/display/msm/dsi/dsi_ctrl.c"
+! grep -Fq 'TGREF APPLY0' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+! grep -Fq 'TGREF APPLY1' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
 
 ./scripts/07_patch_resukisu_exec_hook.sh
 
@@ -73,25 +77,31 @@ cp scripts/golden_touchgrass_clock_reference.py "$OUT/audit/"
 
 strings "$OUT/Image" > "$OUT/Image.strings.txt"
 for marker in \
-  'TGREF CACHE' 'TGREF SETP' 'TGREF SETB' 'TGREF APPLY0' \
-  'TGREF SKIP' 'TGREF APPLY1' 'TGREF SPLASH' \
+  'TGREF CACHE' 'TGREF SETP' 'TGREF SETB' \
+  'TGREF PARENT PRE' 'TGREF PARENT POST' \
+  'TGREF SRC_ON' 'TGREF SRC_OFF' \
+  'TGREF RATE_SKIP' 'TGREF RATE_B' 'TGREF RATE_P' 'TGREF RATE_I' \
+  'TGREF PREP' 'TGREF ENABLE' 'TGREF HS_STOP' \
+  'TGREF MGR' 'TGREF REQ' 'TGREF SPLASH' \
   'TGREF CMD PRE' 'TGREF CMD POST'; do
   grep -Fq "$marker" "$OUT/Image.strings.txt"
 done
 
+! grep -Fq 'TGREF APPLY0' "$OUT/Image.strings.txt"
+! grep -Fq 'TGREF APPLY1' "$OUT/Image.strings.txt"
 grep -Fq 'Linux version 4.19.200-touchGrassKernel+' "$OUT/Image.strings.txt"
 
 sha256sum "$OUT/Image" "$OUT/config" > "$OUT/SHA256SUMS"
 cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-experiment=GOLDEN-TOUCHGRASS-CLOCK-REFERENCE
-behavior_change=none-read-only-pr_info-only
+experiment=GOLDEN-TOUCHGRASS-CLOCK-CHAIN-REFERENCE-V2
+behavior_change=none-read-only-bounded-pr_info-only
 base_project_commit=d6f75d100f0307866938c386347732b8a776c97e
 touchgrass_base=6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
 kernel_version=4.19.200-touchGrassKernel+
 reference_workflow_run=29199421254
 reference_runtime_build_time=2026-07-12T16:13:54Z
-markers=TGREF_CACHE,TGREF_SETP,TGREF_SETB,TGREF_APPLY0,TGREF_SKIP,TGREF_APPLY1,TGREF_SPLASH,TGREF_CMD_PRE,TGREF_CMD_POST
-flashable=no-image-only-until-template-repack
+markers=TGREF_CACHE,TGREF_SETP,TGREF_SETB,TGREF_PARENT_PRE,TGREF_PARENT_POST,TGREF_SRC_ON,TGREF_SRC_OFF,TGREF_RATE_SKIP,TGREF_RATE_B,TGREF_RATE_P,TGREF_RATE_I,TGREF_PREP,TGREF_ENABLE,TGREF_HS_STOP,TGREF_MGR,TGREF_REQ,TGREF_SPLASH,TGREF_CMD_PRE,TGREF_CMD_POST
+flashable=no-image-only-until-golden-boot-container-repack
 EOF
 
-echo "Golden TouchGrass clock reference build passed"
+echo "Golden TouchGrass clock-chain reference V2 build passed"

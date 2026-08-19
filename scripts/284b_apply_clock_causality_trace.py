@@ -213,10 +213,11 @@ struct dsi_core_clks {
 \tbool a52_trace = a52_p284_parent_logs < 8;
 
 \tif (a52_trace)
-\t\ta52_ackfr_record("P276 284M3 cb=%lx cp=%lx tb=%lx pp=%lx tp=%lx",
+\t\ta52_ackfr_record("P276 284M3 cb=%lx bp=%lx tb=%lx cp=%lx pp=%lx tp=%lx",
 \t\t\ta52_p284_clk_rate(child->byte_clk),
-\t\t\ta52_p284_clk_rate(child->pixel_clk),
+\t\t\ta52_p284_parent_rate(child->byte_clk),
 \t\t\ta52_p284_clk_rate(parent->byte_clk),
+\t\t\ta52_p284_clk_rate(child->pixel_clk),
 \t\t\ta52_p284_parent_rate(child->pixel_clk),
 \t\t\ta52_p284_clk_rate(parent->pixel_clk));
 
@@ -355,7 +356,7 @@ def validate(root: Path) -> None:
         'P276 284M0 c=%u m=%d b=%llx p=%llx i=%llx e=%llx',
         'P276 284M1 c=%u req=%llx rc=%d a=%lx p=%lx',
         'P276 284M2 c=%u rb=%llx ri=%llx rc=%d ab=%lx pb=%lx ai=%lx',
-        'P276 284M3 cb=%lx cp=%lx tb=%lx pp=%lx tp=%lx',
+        'P276 284M3 cb=%lx bp=%lx tb=%lx cp=%lx pp=%lx tp=%lx',
         'P276 284M4 rc=%d cb=%lx bp=%lx cp=%lx pp=%lx',
         'P276 284M5 c=%d sp=1 b=%llx p=%llx i=%llx',
         'P276 284M6 c=%d req=%llx rc=%d a=%lx p=%lx',

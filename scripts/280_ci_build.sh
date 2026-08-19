@@ -141,7 +141,10 @@ for m in [
  if m not in s or m.encode() not in img: raise SystemExit('Phase280 evidence marker missing: '+m)
 for m in ['A52_PHASE280_TIMEOUT_RETENTION_LATCH_V1','P276 280Z q=2','a52_ackfr_retain_timeout_snapshot']:
  if m not in d+rec: raise SystemExit('Phase280 retention source marker missing: '+m)
- if m.encode() not in img: raise SystemExit('Phase280 retention Image marker missing: '+m)
+# Only runtime string literals are required to survive as raw Image bytes.
+# C comments are compiled out, and symbol names may be kallsyms-compressed.
+if b'P276 280Z q=2' not in img:
+ raise SystemExit('Phase280 retention runtime marker missing from Image: P276 280Z q=2')
 print('Phase280 compiled evidence + retention audit: PASS')
 PY
 

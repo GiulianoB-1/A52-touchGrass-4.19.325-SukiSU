@@ -133,6 +133,12 @@ def patch_dsi(text: str) -> str:
 
     text = replace_one(
         text,
+        '#include <linux/clk.h>\n',
+        '#include <linux/clk.h>\n#include <linux/clk-provider.h>\n',
+        'Phase283 clock framework introspection include')
+
+    text = replace_one(
+        text,
         'static atomic_t a52_p282_fifo_inflight = ATOMIC_INIT(0);\n',
         'static atomic_t a52_p282_fifo_inflight = ATOMIC_INIT(0);\n'
         '\n/* ' + MARK + '\n'
@@ -219,6 +225,7 @@ def patch_dsi(text: str) -> str:
 def validate(dsi: str, phy: str) -> None:
     required_dsi = [
         MARK,
+        '#include <linux/clk-provider.h>',
         'extern void a52_p283_phy_snapshot',
         'P276 283S q=%u v=%u p=%u c=%u m=%u h=%u t=%u',
         'P276 283R0 q=%u %x %x %x %x %x %x',

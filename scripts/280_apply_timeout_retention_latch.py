@@ -17,8 +17,8 @@ def main():
   r=one(r,'EXPORT_SYMBOL_GPL(a52_ackfr_record);\n','EXPORT_SYMBOL_GPL(a52_ackfr_record);\n\nvoid a52_ackfr_retain_timeout_snapshot(void)\n{\n\tatomic_set(&a52_r280_retained, 1);\n}\nEXPORT_SYMBOL_GPL(a52_ackfr_retain_timeout_snapshot);\n')
   rp.write_text(r)
  if not a.check_only and MARK not in d:
-  inc='#include <linux/a52_ack_secure_flight_recorder.h>\n'
-  d=one(d,inc,inc+'/* '+MARK+' */\nextern void a52_ackfr_retain_timeout_snapshot(void);\n')
+  anchor='''extern void a52_p279_display_fault_snapshot(unsigned int point);\n'''
+  d=one(d,anchor,anchor+'/* '+MARK+' */\nextern void a52_ackfr_retain_timeout_snapshot(void);\n')
   old='''\t\tif (a52_p276r_deep_active() && dsi_hw_ops.get_error_status)\n\t\t\ta52_ackfr_record("P276 H E e=%llx",\n\t\t\t\t(unsigned long long)dsi_hw_ops.get_error_status(&dsi_ctrl->hw));\n\t\tif (status & mask) {\n'''
   new='''\t\tif (a52_p276r_deep_active() && dsi_hw_ops.get_error_status)\n\t\t\ta52_ackfr_record("P276 H E e=%llx",\n\t\t\t\t(unsigned long long)dsi_hw_ops.get_error_status(&dsi_ctrl->hw));\n\t\tif (a52_p276r_deep_active()) {\n\t\t\ta52_ackfr_record("P276 280Z q=2");\n\t\t\ta52_ackfr_retain_timeout_snapshot();\n\t\t}\n\t\tif (status & mask) {\n'''
   d=one(d,old,new); dp.write_text(d)

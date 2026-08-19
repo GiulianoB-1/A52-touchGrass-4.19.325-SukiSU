@@ -43,13 +43,18 @@ chmod +x scripts/*.sh scripts/*.py
 # Freeze the pre-instrumentation display files for audit.
 cp "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c" "$OUT/audit/dsi_clk_manager-before.c"
 cp "$KERNEL/techpack/display/msm/dsi/dsi_ctrl.c" "$OUT/audit/dsi_ctrl-before.c"
+cp "$KERNEL/techpack/display/msm/dsi/dsi_display.c" "$OUT/audit/dsi_display-before.c"
 
 python3 scripts/golden_touchgrass_clock_reference.py --root "$KERNEL"
 python3 scripts/golden_touchgrass_clock_reference.py --root "$KERNEL" --check-only
+python3 scripts/golden_touchgrass_clock_origin.py --root "$KERNEL"
+python3 scripts/golden_touchgrass_clock_origin.py --root "$KERNEL" --check-only
 
 git -C "$KERNEL" diff --check
 
 grep -Fq 'A52_GOLDEN_TOUCHGRASS_CLOCK_CHAIN_REFERENCE_V2' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
+grep -Fq 'A52_GOLDEN_TOUCHGRASS_CLOCK_CHAIN_ORIGIN_V2' "$KERNEL/techpack/display/msm/dsi/dsi_display.c"
+grep -Fq 'TGREF DERIVE' "$KERNEL/techpack/display/msm/dsi/dsi_display.c"
 grep -Fq 'TGREF RATE_SKIP' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
 grep -Fq 'TGREF PARENT PRE' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
 grep -Fq 'TGREF REQ' "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c"
@@ -73,11 +78,13 @@ cp "$IMAGE" "$OUT/Image"
 cp "$CONFIG" "$OUT/config"
 cp "$KERNEL/techpack/display/msm/dsi/dsi_clk_manager.c" "$OUT/audit/dsi_clk_manager-after.c"
 cp "$KERNEL/techpack/display/msm/dsi/dsi_ctrl.c" "$OUT/audit/dsi_ctrl-after.c"
+cp "$KERNEL/techpack/display/msm/dsi/dsi_display.c" "$OUT/audit/dsi_display-after.c"
 cp scripts/golden_touchgrass_clock_reference.py "$OUT/audit/"
+cp scripts/golden_touchgrass_clock_origin.py "$OUT/audit/"
 
 strings "$OUT/Image" > "$OUT/Image.strings.txt"
 for marker in \
-  'TGREF CACHE' 'TGREF SETP' 'TGREF SETB' \
+  'TGREF DERIVE' 'TGREF CACHE' 'TGREF SETP' 'TGREF SETB' \
   'TGREF PARENT PRE' 'TGREF PARENT POST' \
   'TGREF SRC_ON' 'TGREF SRC_OFF' \
   'TGREF RATE_SKIP' 'TGREF RATE_B' 'TGREF RATE_P' 'TGREF RATE_I' \
@@ -100,7 +107,7 @@ touchgrass_base=6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
 kernel_version=4.19.200-touchGrassKernel+
 reference_workflow_run=29199421254
 reference_runtime_build_time=2026-07-12T16:13:54Z
-markers=TGREF_CACHE,TGREF_SETP,TGREF_SETB,TGREF_PARENT_PRE,TGREF_PARENT_POST,TGREF_SRC_ON,TGREF_SRC_OFF,TGREF_RATE_SKIP,TGREF_RATE_B,TGREF_RATE_P,TGREF_RATE_I,TGREF_PREP,TGREF_ENABLE,TGREF_HS_STOP,TGREF_MGR,TGREF_REQ,TGREF_SPLASH,TGREF_CMD_PRE,TGREF_CMD_POST
+markers=TGREF_DERIVE,TGREF_CACHE,TGREF_SETP,TGREF_SETB,TGREF_PARENT_PRE,TGREF_PARENT_POST,TGREF_SRC_ON,TGREF_SRC_OFF,TGREF_RATE_SKIP,TGREF_RATE_B,TGREF_RATE_P,TGREF_RATE_I,TGREF_PREP,TGREF_ENABLE,TGREF_HS_STOP,TGREF_MGR,TGREF_REQ,TGREF_SPLASH,TGREF_CMD_PRE,TGREF_CMD_POST
 flashable=no-image-only-until-golden-boot-container-repack
 EOF
 

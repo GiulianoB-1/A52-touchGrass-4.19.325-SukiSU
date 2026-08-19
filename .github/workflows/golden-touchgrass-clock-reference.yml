@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/golden-touchgrass-clock-reference.yml
       - scripts/golden_touchgrass_clock_reference.py
+      - scripts/golden_touchgrass_clock_origin.py
       - scripts/golden_touchgrass_clock_reference_build.sh
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
     paths:
       - .github/workflows/golden-touchgrass-clock-reference.yml
       - scripts/golden_touchgrass_clock_reference.py
+      - scripts/golden_touchgrass_clock_origin.py
       - scripts/golden_touchgrass_clock_reference_build.sh
 
 permissions:

@@ -232,7 +232,7 @@ for token in [
 for token in [
     'A52_PHASE284_CLOCK_CAUSALITY_TRACE_V1',
     'P276 284M0 c=%u m=%d b=%llx p=%llx i=%llx e=%llx',
-    'P276 284M3 cb=%lx cp=%lx tb=%lx pp=%lx tp=%lx',
+    'P276 284M3 cb=%lx bp=%lx tb=%lx cp=%lx pp=%lx tp=%lx',
     'P276 284M4 rc=%d cb=%lx bp=%lx cp=%lx pp=%lx',
     'P276 284M5 c=%d sp=1 b=%llx p=%llx i=%llx',
     'P276 284M6 c=%d req=%llx rc=%d a=%lx p=%lx',

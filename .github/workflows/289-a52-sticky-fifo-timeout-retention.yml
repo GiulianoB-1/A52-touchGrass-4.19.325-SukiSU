@@ -24,6 +24,7 @@ on:
 permissions:
   contents: read
   actions: read
+  statuses: write
 concurrency:
   group: a52-phase289-sticky-fifo-timeout-retention-${{ github.ref }}
   cancel-in-progress: true
@@ -42,6 +43,13 @@ jobs:
     steps:
       - name: Check out Phase289 branch
         uses: actions/checkout@v4
+      - name: Publish Phase289 run locator
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='phase289/sticky-fifo' \
+            -f description='Phase289 build running' \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
       - name: Prepare runner
         run: |
           set -Eeuo pipefail
@@ -97,3 +105,18 @@ jobs:
           path: phase*-failure/
           if-no-files-found: warn
           retention-days: 30
+      - name: Publish Phase289 final status
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          case "$JOB_STATUS" in
+            success) state=success; description='Phase289 build and Golden-FDR repack passed' ;;
+            failure) state=failure; description='Phase289 build failed' ;;
+            *) state=error; description="Phase289 job ${JOB_STATUS}" ;;
+          esac
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='phase289/sticky-fifo' \
+            -f description="$description" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

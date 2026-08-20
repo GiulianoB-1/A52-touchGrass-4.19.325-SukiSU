@@ -1,0 +1,154 @@
+name: 284 - A52 v3 PHY + full clock causality trace
+run-name: Phase 284 - v3 PHY and full clock causality trace
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase284-v3-phy-clock-chain-v1
+    paths:
+      - .github/workflows/284-a52-v3-phy-clock-trace.yml
+      - scripts/284_apply_v3_phy_clock_trace.py
+      - scripts/284b_apply_clock_causality_trace.py
+      - scripts/284b_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase283-dsi-shared-engine-clock-trace-v1
+    paths:
+      - .github/workflows/284-a52-v3-phy-clock-trace.yml
+      - scripts/284_apply_v3_phy_clock_trace.py
+      - scripts/284b_apply_clock_causality_trace.py
+      - scripts/284b_ci_build.sh
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-phase284-v3-phy-clock-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+jobs:
+  build:
+    name: Reconstruct Phase283 and build full clock-causality probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Phase284 branch
+        uses: actions/checkout@v4
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Normalize Phase284 config audit and preserve diagnostics
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('scripts/284b_ci_build.sh')
+          s = p.read_text()
+
+          old = "grep -Fxq 'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n' \"$OUT/.config\""
+          new = "\n".join([
+              'trusted_line="$(grep -E \'^CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=\' "$OUT/.config" || true)"',
+              'if [ -n "$trusted_line" ] && [ "$trusted_line" != \'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n\' ]; then',
+              "  echo '::error::CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE must remain disabled'",
+              '  printf \'%s\\n\' "$trusted_line"',
+              '  exit 1',
+              'fi',
+          ])
+          if s.count(old) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one stale disabled-Kconfig assertion')
+          s = s.replace(old, new, 1)
+
+          old_fail = "  cp scripts/284b_apply_clock_causality_trace.py phase284-failure/audit/ 2>/dev/null || true\n"
+          new_fail = old_fail + "  cp /tmp/p284-*.config /tmp/p284-*.diff phase284-failure/audit/ 2>/dev/null || true\n"
+          if s.count(old_fail) != 1:
+              raise SystemExit('Phase284 workflow: expected fail_report audit-copy anchor once')
+          s = s.replace(old_fail, new_fail, 1)
+
+          old_make = "\n".join([
+              'make -C "$ROOT" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \\',
+              '  CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig',
+              '',
+          ])
+          pre_audit = "\n".join([
+              'cp "$OUT/.config" /tmp/p284-pre-olddefconfig.config',
+              'if ! cmp -s /tmp/p284-base.config /tmp/p284-pre-olddefconfig.config; then',
+              '  diff -u /tmp/p284-base.config /tmp/p284-pre-olddefconfig.config > /tmp/p284-pre-olddefconfig.diff || true',
+              "  echo '::error::Phase284 tracing changed .config before olddefconfig'",
+              '  cat /tmp/p284-pre-olddefconfig.diff',
+              '  exit 1',
+              'fi',
+              '',
+              '',
+          ])
+          if s.count(old_make) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one Phase284 olddefconfig command')
+          s = s.replace(old_make, pre_audit + old_make, 1)
+
+          old_cmp = 'cmp -s /tmp/p284-base.config "$OUT/.config"'
+          new_cmp = "\n".join([
+              'cp "$OUT/.config" /tmp/p284-post-olddefconfig.config',
+              'if ! cmp -s /tmp/p284-base.config /tmp/p284-post-olddefconfig.config; then',
+              '  diff -u /tmp/p284-base.config /tmp/p284-post-olddefconfig.config > /tmp/p284-config.diff || true',
+              "  echo '::error::Phase284 .config changed after olddefconfig'",
+              '  cat /tmp/p284-config.diff',
+              '  exit 1',
+              'fi',
+          ])
+          if s.count(old_cmp) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one silent config equality audit')
+          s = s.replace(old_cmp, new_cmp, 1)
+
+          p.write_text(s)
+          print('Phase284 workflow: trusted-source disabled invariant normalized semantically')
+          print('Phase284 workflow: strict pre/post-olddefconfig diagnostics installed')
+          PY
+      - name: Reconstruct Phase283 and build Phase284 candidate
+        run: bash scripts/284b_ci_build.sh
+      - name: Upload Phase284 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase284-V3-PHY-FULL-CLOCK-CAUSALITY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase284-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase284-CLOCK-CAUSALITY-FAILURE-${{ github.run_number }}
+          path: phase284-failure/
+          if-no-files-found: warn
+          retention-days: 30

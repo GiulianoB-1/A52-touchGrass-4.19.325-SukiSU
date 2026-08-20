@@ -25,7 +25,7 @@ def patch_ctrl(text: str) -> str:
     # Exact memory-backed command-buffer provenance immediately after the
     # normal GEM sync and before CPU copies the encoded packet bytes.
     old = '''\t\tcmdbuf = (u8 *)(dsi_ctrl->vaddr);\n\n\t\tmsm_gem_sync(dsi_ctrl->tx_cmd_buf);\n\t\tfor (cnt = 0; cnt < length; cnt++)\n'''
-    new = '''\t\tcmdbuf = (u8 *)(dsi_ctrl->vaddr);\n\n\t\tmsm_gem_sync(dsi_ctrl->tx_cmd_buf);\n\t\t/* %s */\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P287 M0 c=%d i=%llx va=%llx pre=%u add=%u",\n\t\t\t\tdsi_ctrl->cell_index,\n\t\t\t\t(unsigned long long)dsi_ctrl->cmd_buffer_iova,\n\t\t\t\t(unsigned long long)(uintptr_t)dsi_ctrl->vaddr,\n\t\t\t\tdsi_ctrl->cmd_len, length);\n\t\tfor (cnt = 0; cnt < length; cnt++)\n''' % MARK
+    new = '''\t\tcmdbuf = (u8 *)(dsi_ctrl->vaddr);\n\n\t\tmsm_gem_sync(dsi_ctrl->tx_cmd_buf);\n\t\t/* %s */\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P287 M0 c=%d i=%llx va=%llx pre=%u add=%u",\n\t\t\t\tdsi_ctrl->cell_index,\n\t\t\t\t(unsigned long long)dsi_ctrl->cmd_buffer_iova,\n\t\t\t\t(unsigned long long)(unsigned long)dsi_ctrl->vaddr,\n\t\t\t\tdsi_ctrl->cmd_len, length);\n\t\tfor (cnt = 0; cnt < length; cnt++)\n''' % MARK
     text = replace_one(text, old, new, 'Phase287 post-sync provenance')
 
     # The final DMA descriptor length is only committed on LASTCOMMAND.

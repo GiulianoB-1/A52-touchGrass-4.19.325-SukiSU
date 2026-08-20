@@ -67,7 +67,7 @@ jobs:
           git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
-      - name: Normalize Phase284 disabled-Kconfig assertion
+      - name: Normalize Phase284 config audit and preserve diagnostics
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
@@ -75,12 +75,50 @@ jobs:
 
           p = Path('scripts/284b_ci_build.sh')
           s = p.read_text()
+
           old = "grep -Fxq 'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n' \"$OUT/.config\""
           new = "grep -Fxq '# CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE is not set' \"$OUT/.config\""
           if s.count(old) != 1:
               raise SystemExit('Phase284 workflow: expected exactly one stale disabled-Kconfig assertion')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+
+          old_fail = "  cp scripts/284b_apply_clock_causality_trace.py phase284-failure/audit/ 2>/dev/null || true\n"
+          new_fail = old_fail + "  cp /tmp/p284-*.config /tmp/p284-*.diff phase284-failure/audit/ 2>/dev/null || true\n"
+          if s.count(old_fail) != 1:
+              raise SystemExit('Phase284 workflow: expected fail_report audit-copy anchor once')
+          s = s.replace(old_fail, new_fail, 1)
+
+          old_make = '''make -C "$ROOT" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \\
+  CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+'''
+          pre_audit = '''cp "$OUT/.config" /tmp/p284-pre-olddefconfig.config
+if ! cmp -s /tmp/p284-base.config /tmp/p284-pre-olddefconfig.config; then
+  diff -u /tmp/p284-base.config /tmp/p284-pre-olddefconfig.config > /tmp/p284-pre-olddefconfig.diff || true
+  echo '::error::Phase284 tracing changed .config before olddefconfig'
+  cat /tmp/p284-pre-olddefconfig.diff
+  exit 1
+fi
+
+'''
+          if s.count(old_make) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one Phase284 olddefconfig command')
+          s = s.replace(old_make, pre_audit + old_make, 1)
+
+          old_cmp = 'cmp -s /tmp/p284-base.config "$OUT/.config"'
+          new_cmp = '''cp "$OUT/.config" /tmp/p284-post-olddefconfig.config
+if ! cmp -s /tmp/p284-base.config /tmp/p284-post-olddefconfig.config; then
+  diff -u /tmp/p284-base.config /tmp/p284-post-olddefconfig.config > /tmp/p284-config.diff || true
+  echo '::error::Phase284 .config changed after olddefconfig'
+  cat /tmp/p284-config.diff
+  exit 1
+fi'''
+          if s.count(old_cmp) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one silent config equality audit')
+          s = s.replace(old_cmp, new_cmp, 1)
+
+          p.write_text(s)
           print('Phase284 workflow: disabled-Kconfig assertion normalized')
+          print('Phase284 workflow: strict pre/post-olddefconfig diagnostics installed')
           PY
       - name: Reconstruct Phase283 and build Phase284 candidate
         run: bash scripts/284b_ci_build.sh

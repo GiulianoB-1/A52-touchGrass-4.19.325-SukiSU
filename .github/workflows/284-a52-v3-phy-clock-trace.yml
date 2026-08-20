@@ -77,7 +77,12 @@ jobs:
           s = p.read_text()
 
           old = "grep -Fxq 'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n' \"$OUT/.config\""
-          new = "grep -Fxq '# CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE is not set' \"$OUT/.config\""
+          new = '''trusted_line="$(grep -E '^CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=' "$OUT/.config" || true)"
+if [ -n "$trusted_line" ] && [ "$trusted_line" != 'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n' ]; then
+  echo '::error::CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE must remain disabled'
+  printf '%s\\n' "$trusted_line"
+  exit 1
+fi'''
           if s.count(old) != 1:
               raise SystemExit('Phase284 workflow: expected exactly one stale disabled-Kconfig assertion')
           s = s.replace(old, new, 1)
@@ -117,7 +122,7 @@ fi'''
           s = s.replace(old_cmp, new_cmp, 1)
 
           p.write_text(s)
-          print('Phase284 workflow: disabled-Kconfig assertion normalized')
+          print('Phase284 workflow: trusted-source disabled invariant normalized semantically')
           print('Phase284 workflow: strict pre/post-olddefconfig diagnostics installed')
           PY
       - name: Reconstruct Phase283 and build Phase284 candidate

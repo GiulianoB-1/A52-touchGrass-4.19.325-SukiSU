@@ -1,0 +1,99 @@
+name: 288B - A52 retained DSI FIFO causal chain
+run-name: Phase 288B - Retained DSI FIFO causal chain
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase288-retained-fifo-causal-chain-v1
+    paths:
+      - .github/workflows/288-a52-retained-fifo-causal-chain.yml
+      - scripts/288_apply_retained_fifo_causal_chain.py
+      - scripts/288b_apply_fifo_typed_retention.py
+      - scripts/288_ci_build.sh
+      - scripts/287_ci_build.sh
+      - scripts/287_apply_dsi_dma_fetch_provenance.py
+      - scripts/287b_apply_retained_fetch_provenance.py
+      - scripts/286_ci_build.sh
+      - scripts/286b_apply_dma_chain_retention.py
+      - scripts/286c_fix_dma_replay_width.py
+  pull_request:
+    branches:
+      - agent/a52-phase287-dsi-dma-fetch-provenance-v1
+    paths:
+      - .github/workflows/288-a52-retained-fifo-causal-chain.yml
+      - scripts/288_apply_retained_fifo_causal_chain.py
+      - scripts/288b_apply_fifo_typed_retention.py
+      - scripts/288_ci_build.sh
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-phase288-retained-fifo-causal-chain-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+jobs:
+  build:
+    name: Build Phase288B retained FIFO causal-chain recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Check out Phase288B branch
+        uses: actions/checkout@v4
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Build Phase288B candidate
+        run: bash scripts/288_ci_build.sh
+      - name: Verify real boot image
+        run: |
+          set -Eeuo pipefail
+          test -s phase288-out/package/boot.img
+          test "$(stat -c '%s' phase288-out/package/boot.img)" -gt 1000000
+          file phase288-out/package/boot.img
+          sha256sum phase288-out/package/boot.img
+      - name: Upload Phase288B candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase288B-RETAINED-FIFO-CAUSAL-CHAIN-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase288-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase288B-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: phase*-failure/
+          if-no-files-found: warn
+          retention-days: 30

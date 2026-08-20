@@ -67,6 +67,21 @@ jobs:
           git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Normalize Phase284 disabled-Kconfig assertion
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('scripts/284b_ci_build.sh')
+          s = p.read_text()
+          old = "grep -Fxq 'CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE=n' \"$OUT/.config\""
+          new = "grep -Fxq '# CONFIG_A52_VENDOR_BLOB_TRUSTED_SOURCE is not set' \"$OUT/.config\""
+          if s.count(old) != 1:
+              raise SystemExit('Phase284 workflow: expected exactly one stale disabled-Kconfig assertion')
+          p.write_text(s.replace(old, new, 1))
+          print('Phase284 workflow: disabled-Kconfig assertion normalized')
+          PY
       - name: Reconstruct Phase283 and build Phase284 candidate
         run: bash scripts/284b_ci_build.sh
       - name: Upload Phase284 candidate

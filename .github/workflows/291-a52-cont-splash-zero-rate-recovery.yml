@@ -1,0 +1,136 @@
+name: 291 - A52 continuous-splash zero-rate recovery
+run-name: Phase 291 - Continuous-splash zero-rate recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase291-cont-splash-zero-rate-recovery-v1
+    paths:
+      - .github/workflows/291-a52-cont-splash-zero-rate-recovery.yml
+      - scripts/291_apply_cont_splash_zero_rate_recovery.py
+      - scripts/291_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase290-touchgrass-runtime-prereq-compare-v1
+    paths:
+      - .github/workflows/291-a52-cont-splash-zero-rate-recovery.yml
+      - scripts/291_apply_cont_splash_zero_rate_recovery.py
+      - scripts/291_ci_build.sh
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: a52-phase291-cont-splash-zero-rate-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+
+jobs:
+  build:
+    name: Build Phase291 clock-handoff recovery
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Phase291 branch
+        uses: actions/checkout@v4
+
+      - name: Publish Phase291 run locator
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='phase291/clock-handoff' \
+            -f description='Phase291 build running' \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase291 candidate
+        run: bash scripts/291_ci_build.sh
+
+      - name: Verify real Golden-FDR boot image
+        run: |
+          set -Eeuo pipefail
+          test -s phase291-out/package/boot.img
+          test "$(stat -c '%s' phase291-out/package/boot.img)" -gt 1000000
+          file phase291-out/package/boot.img
+          sha256sum phase291-out/package/boot.img
+          test -s phase291-out/package/repack-report.json
+          grep -Fq 'scripts/38_repack_a52_p1_boot.py' phase291-out/BUILD-IDENTITY.json
+
+      - name: Upload Phase291 candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase291-CONT-SPLASH-ZERO-RATE-RECOVERY-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase291-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase291-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: phase*-failure/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish Phase291 final status
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          case "$JOB_STATUS" in
+            success) state=success; description='Phase291 build and Golden-FDR repack passed' ;;
+            failure) state=failure; description='Phase291 build failed' ;;
+            *) state=error; description="Phase291 job ${JOB_STATUS}" ;;
+          esac
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='phase291/clock-handoff' \
+            -f description="$description" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

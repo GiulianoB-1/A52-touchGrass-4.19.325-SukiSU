@@ -38,6 +38,10 @@ jobs:
     steps:
       - name: Check out Phase286 branch
         uses: actions/checkout@v4
+      - name: Publish Phase286 run ID
+        run: |
+          set -Eeuo pipefail
+          gh pr comment 151 --repo "$GITHUB_REPOSITORY" --body "Phase286 CI started | run ${{ github.run_id }} | https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }} | commit ${{ github.sha }}"
       - name: Prepare runner
         run: |
           set -Eeuo pipefail
@@ -97,4 +101,4 @@ jobs:
         if: always()
         run: |
           set -Eeuo pipefail
-          gh pr comment 151 --repo "$GITHUB_REPOSITORY" --body "Phase286 CI: **${{ job.status }}** | run ${{ github.run_id }} | https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }} | commit ${{ github.sha }}"
+          gh pr comment 151 --repo "$GITHUB_REPOSITORY" --body "Phase286 CI finished: **${{ job.status }}** | run ${{ github.run_id }} | https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }} | commit ${{ github.sha }}"

@@ -19,6 +19,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: write
 concurrency:
   group: a52-phase286-golden-fdr-dma-chain-${{ github.ref }}
   cancel-in-progress: true
@@ -92,3 +93,8 @@ jobs:
             phase*-failure/
           if-no-files-found: warn
           retention-days: 30
+      - name: Report this run to Phase286 PR
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          gh pr comment 151 --repo "$GITHUB_REPOSITORY" --body "Phase286 CI: **${{ job.status }}** | run ${{ github.run_id }} | https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }} | commit ${{ github.sha }}"

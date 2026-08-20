@@ -192,13 +192,27 @@ def patch_dsi(text: str) -> str:
                   'P276 280Z q=2']:
         if token not in text:
             raise SystemExit('Phase286B DSI prerequisite missing: ' + token)
+    # Phase286A's original generic status anchor matched the 50us slave-status
+    # polling loop instead of the real 200ms completion-timeout path. Move T
+    # to the timeout status read before retaining the causal tail.
+    misplaced = '''\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P286 T c=%d st=%x done=%d irq=%d",\n\t\t\t\tdsi_ctrl->cell_index, status, !!(status & mask),\n\t\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t\tif (status & mask) {\n'''
+    clean_poll = '''\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);\n\t\tif (status & mask) {\n'''
+    if misplaced in text:
+        text = one(text, misplaced, clean_poll, 'remove misplaced timeout marker')
+    wait_fn = text.index('static void dsi_ctrl_dma_cmd_wait_for_done(')
+    freeze_fn = text.index('P276 280Z q=2', wait_fn)
+    timeout_fmt = 'P286 T c=%d st=%x done=%d irq=%d'
+    if timeout_fmt not in text[wait_fn:freeze_fn]:
+        real_old = '''\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P276 P S st=%x dn=%u a=%d im=%x ir=%u",\n'''
+        real_new = '''\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P286 T c=%d st=%x done=%d irq=%d",\n\t\t\t\tdsi_ctrl->cell_index, status, !!(status & mask),\n\t\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t\tif (a52_p276r_deep_active())\n\t\t\ta52_ackfr_record("P276 P S st=%x dn=%u a=%d im=%x ir=%u",\n'''
+        text = one(text, real_old, real_new, 'real 200ms timeout marker')
     text = one(text,
                'extern void a52_ackfr_retain_timeout_snapshot(void);\n',
                'extern void a52_ackfr_retain_timeout_snapshot(void);\nextern void a52_p286_flush_timeout_chain(void); /* ' + MARK + ' */\n',
                'flush declaration')
     text = one(text,
-               '\t\tif (a52_p276r_deep_active()) {\n\t\t\ta52_ackfr_record("P276 280Z q=2");\n\t\t\ta52_ackfr_retain_timeout_snapshot();\n',
-               '\t\tif (a52_p276r_deep_active()) {\n\t\t\ta52_p286_flush_timeout_chain();\n\t\t\ta52_ackfr_record("P276 280Z q=2");\n\t\t\ta52_ackfr_retain_timeout_snapshot();\n',
+               '\t\t\ta52_ackfr_record("P276 282Z q=2");\n\t\t\ta52_ackfr_record("P276 280Z q=2");\n\t\t\ta52_ackfr_retain_timeout_snapshot();\n',
+               '\t\t\ta52_ackfr_record("P276 282Z q=2");\n\t\t\ta52_p286_flush_timeout_chain();\n\t\t\ta52_ackfr_record("P276 280Z q=2");\n\t\t\ta52_ackfr_retain_timeout_snapshot();\n',
                'flush immediately before retention freeze')
     return text
 

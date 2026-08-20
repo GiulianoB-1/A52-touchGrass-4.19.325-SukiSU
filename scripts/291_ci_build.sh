@@ -20,7 +20,12 @@ fail_report() {
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
-# Reconstruct the exact hardware-tested Phase289 lineage first.
+# Reconstruct the exact hardware-tested Phase289 lineage first. The Phase290
+# audit exposed that this branch inherited the pre-5b253ca brittle Phase289
+# deferred-trigger patch anchor. Repair build tooling only, restoring the exact
+# robust behavior already used for the successful Phase289 lineage.
+python3 scripts/291_repair_phase289_anchor.py
+python3 -m py_compile scripts/289_apply_sticky_fifo_timeout_retention.py
 bash scripts/289_ci_build.sh
 test -s phase289-out/package/boot.img
 test -s "$CLK"
@@ -127,6 +132,7 @@ cp "$DSI" phase291-out/source/dsi_ctrl.c
 cp "$HW" phase291-out/source/dsi_ctrl_hw_cmn.c
 cp phase291-compile.log phase291-out/audit/
 cp scripts/291_apply_cont_splash_zero_rate_recovery.py phase291-out/audit/
+cp scripts/291_repair_phase289_anchor.py phase291-out/audit/
 cp scripts/291_ci_build.sh phase291-out/audit/
 
 gzip -n -c "$IMAGE" > phase291-out/package/Image.gz

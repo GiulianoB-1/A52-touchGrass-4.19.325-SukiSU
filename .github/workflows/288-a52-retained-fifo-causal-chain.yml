@@ -40,6 +40,8 @@ jobs:
     name: Build Phase288B retained FIFO causal-chain recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out Phase288B branch
         uses: actions/checkout@v4

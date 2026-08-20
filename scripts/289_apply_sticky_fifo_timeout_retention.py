@@ -261,12 +261,21 @@ extern void a52_p289_snapshot_record(unsigned int stage, unsigned int n,
 \t\t\t\t(u32)DSI_R32(ctrl, DSI_INT_CTRL));\n'''
     text = one(text, f4_imm_old, f4_imm_new, 'Phase289 immediate actual trigger slot')
 
-    trig_old = '''void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\tif (a52_p286_dma_trace_active())\n\t\ta52_ackfr_record("P286 HT c=%d sw=1", ctrl->index);\n}\n'''
-    trig_new = '''void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\tif (a52_p286_dma_trace_active())\n\t\ta52_ackfr_record("P286 HT c=%d sw=1", ctrl->index);\n\tif (a52_p289_fifo_trace_active())
+    # Insert the deferred-path F4 directly after the production SW_TRIGGER
+    # write inside trigger_command_dma(). Do not match the whole function:
+    # Phase287 and later passive provenance phases may append read-only records
+    # after the write, and those must not make Phase289 source patching brittle.
+    trig_start = text.index('void dsi_ctrl_hw_cmn_trigger_command_dma(')
+    trig_end = text.index('\n}\n', trig_start) + 3
+    trig_fn = text[trig_start:trig_end]
+    trig_write = '\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n'
+    trig_snap = trig_write + '''\tif (a52_p289_fifo_trace_active())
 \t\ta52_p289_snapshot_record(5, 5, (u32)ctrl->index, 1U,
 \t\t\t(u32)DSI_R32(ctrl, DSI_STATUS), (u32)DSI_R32(ctrl, DSI_FIFO_STATUS),
-\t\t\t(u32)DSI_R32(ctrl, DSI_INT_CTRL));\n}\n'''
-    text = one(text, trig_old, trig_new, 'Phase289 deferred actual trigger slot')
+\t\t\t(u32)DSI_R32(ctrl, DSI_INT_CTRL));\n'''
+    trig_fn = one(trig_fn, trig_write, trig_snap,
+                  'Phase289 deferred actual trigger slot')
+    text = text[:trig_start] + trig_fn + text[trig_end:]
     return text
 
 

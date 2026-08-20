@@ -4,6 +4,7 @@ set -Eeuo pipefail
 TARGET="scripts/286_ci_build.sh"
 MARK="A52_PHASE286_HS_CLOCK_HANDOFF_FIX_V1"
 
+# Phase286B dispatch anchor: workflow is registered before this matching push.
 # Phase286 compiled successfully, then its strict post-build audit failed because
 # MARK is intentionally only a C source comment. The source audit in Phase286
 # already verifies MARK in dsi_display.c before compilation. Remove exactly that

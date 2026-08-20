@@ -1,0 +1,144 @@
+name: 290 - A52 TouchGrass runtime prerequisite compare
+run-name: Phase 290 - TouchGrass runtime prerequisite compare
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase290-touchgrass-runtime-prereq-compare-v1
+    paths:
+      - .github/workflows/290-a52-touchgrass-runtime-prereq-compare.yml
+      - scripts/290_compare_touchgrass_runtime_prereqs.py
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+concurrency:
+  group: a52-phase290-touchgrass-runtime-prereq-compare-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+jobs:
+  compare:
+    name: Rebuild Phase289 and diff runtime prerequisites
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Phase290 branch
+        uses: actions/checkout@v4
+      - name: Publish Phase290 run locator
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='phase290/runtime-compare' \
+            -f description='Phase290 source comparison running' \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Reconstruct exact successful Phase289 source
+        run: bash scripts/289_ci_build.sh
+      - name: Compare imported display tree with TouchGrass
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase290-out
+          mkdir -p phase290-out
+          python3 scripts/290_compare_touchgrass_runtime_prereqs.py \
+            --touchgrass workspace/touchgrass-a52xq/techpack/display \
+            --gki-display gki/common/drivers/a52_display \
+            --out phase290-out | tee phase290-out/console.txt
+          cp phase289-out/BUILD-IDENTITY.json phase290-out/PHASE289-BUILD-IDENTITY.json
+          cp phase289-out/package/boot-sha256.txt phase290-out/PHASE289-BOOT-SHA256.txt
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('phase290-out')
+          ident={
+            'phase':'290',
+            'name':'TOUCHGRASS-RUNTIME-PREREQUISITE-COMPARE',
+            'git_sha':os.getenv('GITHUB_SHA'),
+            'hardware_change':False,
+            'phone_boot_required':False,
+            'base_phase':'289',
+            'touchgrass_commit':os.getenv('TOUCHGRASS_COMMIT'),
+            'gki_common_sha':os.getenv('GKI_COMMON_SHA'),
+            'question':'Which reconstructed Phase289 display sources differ from exact TouchGrass in PHY, PLL, clocks, power, regulators, reset, lane, catalog, display lifecycle, or DSI command paths?'
+          }
+          (p/'BUILD-IDENTITY.json').write_text(json.dumps(ident,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Print focused comparison
+        run: |
+          set -Eeuo pipefail
+          cat phase290-out/console.txt
+          echo '--- runtime prerequisite modified files ---'
+          cat phase290-out/runtime-prereq-modified.txt || true
+          echo '--- focused diffs ---'
+          for f in phase290-out/diffs/*.diff; do
+            [ -e "$f" ] || continue
+            echo "===== $f ====="
+            sed -n '1,260p' "$f"
+          done
+      - name: Upload Phase290 comparison
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase290-TOUCHGRASS-RUNTIME-PREREQ-COMPARE-${{ github.run_number }}
+          path: phase290-out/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase290-FAILURE-DIAGNOSTICS-${{ github.run_number }}
+          path: |
+            phase290-out/
+            phase289-failure/
+            phase288-failure/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Publish Phase290 final status
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          case "$JOB_STATUS" in
+            success) state=success; description='Phase290 TouchGrass runtime comparison passed' ;;
+            failure) state=failure; description='Phase290 comparison failed' ;;
+            *) state=error; description="Phase290 job ${JOB_STATUS}" ;;
+          esac
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='phase290/runtime-compare' \
+            -f description="$description" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

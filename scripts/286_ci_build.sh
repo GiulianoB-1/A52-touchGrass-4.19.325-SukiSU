@@ -19,9 +19,9 @@ fail_report(){
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
 # Reconstruct the exact Phase285 lineage first. Phase286 adds passive DSI
-# producers; Phase286B adds typed retention specifically because the earlier
-# clock-chain recorder attempt proved that ordinary live FDR lines can be
-# overwritten before ramoops is harvested.
+# producers. Phase286B captures their exact typed varargs in a private circular
+# tail and replays them just before Phase280 freezes the timeout snapshot.
+# Phase286C enforces that every replay record fits the recorder's packed field.
 bash scripts/285_ci_build.sh
 test -s phase285-out/package/boot.img
 test -s "$OUT/arch/arm64/boot/Image"
@@ -34,11 +34,14 @@ cp "$REC" /tmp/p286-rec-before.c
 
 python3 -m py_compile \
   scripts/286_apply_golden_fdr_dma_chain.py \
-  scripts/286b_apply_dma_chain_retention.py
+  scripts/286b_apply_dma_chain_retention.py \
+  scripts/286c_fix_dma_replay_width.py
 python3 scripts/286_apply_golden_fdr_dma_chain.py --root "$ROOT"
 python3 scripts/286b_apply_dma_chain_retention.py --root "$ROOT"
 python3 scripts/286_apply_golden_fdr_dma_chain.py --root "$ROOT" --check-only
 python3 scripts/286b_apply_dma_chain_retention.py --root "$ROOT" --check-only
+python3 scripts/286c_fix_dma_replay_width.py --root "$ROOT"
+python3 scripts/286c_fix_dma_replay_width.py --root "$ROOT" --check-only
 
 ! cmp -s /tmp/p286-dsi-before.c "$DSI"
 ! cmp -s /tmp/p286-hw-before.c "$HW"
@@ -62,13 +65,14 @@ for token in \
   'P286 HT c=%d sw=1'; do grep -Fq "$token" "$HW"; done
 for token in \
   'A52_PHASE286B_DMA_CHAIN_TYPED_RETENTION_V1' \
+  'A52_PHASE286C_PACKED_REPLAY_WIDTH_V1' \
   '#define A52_P286_TAIL 32U' \
   'a52_p286_capture_fmt(fmt, args);' \
   'return !strncmp(message, "P286 ", 5)' \
   'strncmp(fmt, "P286", 4)' \
-  'P286 RH n=%llx first=%llx' \
-  'P286 R0 q=%llx t=%x n=%x a=%llx b=%llx' \
-  'P286 R1 q=%llx c=%llx d=%llx e=%llx' \
+  'P286 RH %llx %llx' \
+  'P286 R0 %llx %x %x %llx %llx' \
+  'P286 R1 %llx %llx %llx' \
   'EXPORT_SYMBOL_GPL(a52_p286_flush_timeout_chain);'; do grep -Fq "$token" "$REC"; done
 
 grep -Fq 'a52_p286_flush_timeout_chain();' "$DSI"
@@ -81,14 +85,11 @@ assert d.index('P276 280Z q=2') < d.index('a52_ackfr_retain_timeout_snapshot();'
 print('Phase286 replay-before-freeze ordering: PASS')
 PY
 
-# Every replay line must fit the recorder's packed 72-byte message payload even
-# at maximum-width hexadecimal values. This is the exact failure class Phase285
-# already guarded against for its own typed replay.
 python3 - <<'PY'
 lines = [
-    'P286 RH n=' + 'f'*16 + ' first=' + 'f'*16,
-    'P286 R0 q=' + 'f'*16 + ' t=ff n=ff a=' + 'f'*16 + ' b=' + 'f'*16,
-    'P286 R1 q=' + 'f'*16 + ' c=' + 'f'*16 + ' d=' + 'f'*16 + ' e=' + 'f'*16,
+    'P286 RH ' + 'f'*16 + ' ' + 'f'*16,
+    'P286 R0 ' + 'f'*16 + ' ff ff ' + 'f'*16 + ' ' + 'f'*16,
+    'P286 R1 ' + 'f'*16 + ' ' + 'f'*16 + ' ' + 'f'*16,
 ]
 for line in lines:
     if len(line) > 72:
@@ -123,13 +124,12 @@ cp /tmp/p286-rec-before.c phase286-out/audit/recorder-before.c
 cp phase286-compile.log phase286-out/audit/
 cp scripts/286_apply_golden_fdr_dma_chain.py phase286-out/audit/
 cp scripts/286b_apply_dma_chain_retention.py phase286-out/audit/
+cp scripts/286c_fix_dma_replay_width.py phase286-out/audit/
 cp "$DSI" phase286-out/source/dsi_ctrl.c
 cp "$HW" phase286-out/source/dsi_ctrl_hw_cmn.c
 cp "$REC" phase286-out/source/a52_ack_secure_flight_recorder.c
 
 gzip -n -c "$IMAGE" > phase286-out/package/Image.gz
-# Golden FDR repack: keep the exact validated Phase285 boot container and only
-# replace its kernel payload using the established Phase38 repacker.
 python3 scripts/38_repack_a52_p1_boot.py \
   --source phase285-out/package/boot.img \
   --kernel phase286-out/package/Image.gz \
@@ -154,16 +154,17 @@ G  ISR observed DMA_DONE before setting dma_irq_trig/completing waiter
 W  completion wait result and dma_irq_trig
 T  timeout raw interrupt status and DMA_DONE bit
 
-Phase286B guaranteed timeout-tail retention:
+Phase286B/C guaranteed timeout-tail retention:
 The exact varargs for the final 32 P286 producer events are captured in a
 private circular typed buffer before normal FDR text packing. On DMA timeout,
 that tail is replayed immediately before P276 280Z and the Phase280 recorder
 freeze. Therefore ordinary ring overwrite cannot remove the causal tail.
+Every replay line is CI-audited to fit the recorder's 72-byte packed field.
 
 Replay:
-  P286 RH: total typed event count and first retained sequence
-  P286 R0: q, type, argc, v0, v1
-  P286 R1: q, v2, v3, v4 when argc > 2
+  P286 RH <total> <first-retained-seq>
+  P286 R0 <seq> <type> <argc> <v0> <v1>
+  P286 R1 <v2> <v3> <v4> when argc > 2; associates with preceding R0
 Type map:
   1=A
   2=B
@@ -190,7 +191,7 @@ import hashlib, json, os
 from pathlib import Path
 r=Path('phase286-out')
 idn={
- 'phase':'286B',
+ 'phase':'286C',
  'name':'GOLDEN-FDR-DSI-DMA-CAUSAL-CHAIN-TYPED-RETENTION',
  'git_sha':os.getenv('GITHUB_SHA'),
  'hardware_validated':False,
@@ -201,8 +202,8 @@ idn={
  'timeout_recovery_changed':False,
  'brightness_behavior_changed':False,
  'recorder_implementation_changed':True,
- 'recorder_change':'admit P286; capture exact varargs for last 32 causal events; replay immediately before Phase280 timeout freeze',
- 'previous_failure_addressed':'ordinary early trace records can be overwritten before ramoops harvest; Phase286B does not depend on their continued ring residency',
+ 'recorder_change':'admit P286; capture exact varargs for last 32 causal events; replay immediately before Phase280 timeout freeze; enforce <=72 byte replay records',
+ 'previous_failure_addressed':'ordinary early trace records can be filtered, overwritten, or packed/truncated before ramoops harvest; Phase286C explicitly guards all three failure modes',
  'question':'Where exactly does the real TouchGrass command-DMA path stop before DMA_DONE: deferred gate, SW trigger, hardware completion, IRQ delivery, or waiter completion?',
  'golden_repack_source':'phase285-out/package/boot.img',
  'repacker':'scripts/38_repack_a52_p1_boot.py'
@@ -225,13 +226,12 @@ for m in [
  'P286 D c=%d f=%x last=%d bm=%d b=%d','P286 DX c=%d reason=nolast',
  'P286 HT c=%d sw=1','P286 E c=%d k=master','P286 W c=%d r=%d irq=%d',
  'P286 T c=%d st=%x done=%d irq=%d','P286 G c=%d st=%x irq0=%d',
- 'P286 RH n=%llx first=%llx','P286 R0 q=%llx t=%x n=%x a=%llx b=%llx',
- 'P286 R1 q=%llx c=%llx d=%llx e=%llx']:
+ 'P286 RH %llx %llx','P286 R0 %llx %x %x %llx %llx','P286 R1 %llx %llx %llx']:
  if m.encode() not in img: raise SystemExit('Phase286 runtime marker missing: '+m)
 print('Phase286 compiled producer + typed-retention marker audit: PASS')
 PY
 
 python3 scripts/286_apply_golden_fdr_dma_chain.py --root "$ROOT" --check-only
-python3 scripts/286b_apply_dma_chain_retention.py --root "$ROOT" --check-only
+python3 scripts/286c_fix_dma_replay_width.py --root "$ROOT" --check-only
 trap - EXIT
-echo 'Phase286B Golden-FDR DSI DMA causal-chain build/repack: PASS'
+echo 'Phase286C Golden-FDR DSI DMA causal-chain build/repack: PASS'

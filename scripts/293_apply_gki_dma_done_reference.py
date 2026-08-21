@@ -9,6 +9,32 @@ HW = Path('drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c')
 MARK_CTRL = 'A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1'
 MARK_HW = 'A52_PHASE293_GKI_DMA_DONE_HW_REFERENCE_V1'
 
+FETCH_MEMORY_CLEAR = '*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY'
+
+
+def assert_no_fetch_memory_fifo_reroute(text: str) -> None:
+    """Allow only the stock secure-session FETCH_MEMORY -> FIFO safeguard."""
+    if text.count(FETCH_MEMORY_CLEAR) != 1:
+        raise SystemExit(
+            'Phase293 refuses later behavioral lineage: unexpected '
+            f'FETCH_MEMORY clear count ({text.count(FETCH_MEMORY_CLEAR)})'
+        )
+
+    fn_start = text.find('void dsi_message_setup_tx_mode(')
+    fn_end = text.find('\nint dsi_message_validate_tx_mode(', fn_start)
+    if fn_start < 0 or fn_end < 0:
+        raise SystemExit('Phase293 stock dsi_message_setup_tx_mode boundary missing')
+    fn = text[fn_start:fn_end]
+    secure = fn.find('if (dsi_ctrl->secure_mode) {')
+    clear = fn.find(FETCH_MEMORY_CLEAR)
+    fifo = fn.find('*flags |= DSI_CTRL_CMD_FIFO_STORE', clear)
+    ret = fn.find('return;', fifo)
+    if not (0 <= secure < clear < fifo < ret):
+        raise SystemExit(
+            'Phase293 refuses later behavioral lineage: stock secure-mode '
+            'FETCH_MEMORY -> FIFO safeguard moved or altered'
+        )
+
 
 def one(text: str, old: str, new: str, label: str) -> str:
     n = text.count(old)
@@ -34,10 +60,10 @@ def patch_ctrl(text: str) -> str:
         'A52_PHASE281_DSI_DMA_CONSUMPTION_TRACE_V1',
         'A52_PHASE291_CONT_SPLASH_ZERO_RATE_RECOVERY_V1',
         'A52_PHASE292_DSI_CHAIN_TAPS_V1',
-        '*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY',
     ]:
         if forbidden in text:
             raise SystemExit('Phase293 refuses later behavioral lineage: ' + forbidden)
+    assert_no_fetch_memory_fifo_reroute(text)
 
     text = one(text, '#include "dsi_ctrl_hw.h"\n',
                '#include "dsi_ctrl_hw.h"\n#include "dsi_ctrl_reg.h"\n#include "dsi_hw.h"\n',
@@ -121,14 +147,9 @@ static void a52_p293_gdm_arm_snapshot(struct dsi_ctrl *dsi_ctrl, unsigned int st
 '''
     text = one(text, hwflags, hwflags + state, 'selected flags/state/target clocks')
 
-    arm0 = '\t\tatomic_set(&dsi_ctrl->dma_irq_trig, 0);\n'
-    text = one(text, arm0,
-               '\t\ta52_p293_gdm_arm_snapshot(dsi_ctrl, 0);\n' + arm0,
-               'pre IRQ-arm snapshot')
-
-    arm1 = '\t\treinit_completion(&dsi_ctrl->irq_info.cmd_dma_done);\n'
-    text = one(text, arm1, arm1 + '\t\ta52_p293_gdm_arm_snapshot(dsi_ctrl, 1);\n',
-               'post IRQ-arm snapshot')
+    irq_arm = '''\t\tdsi_ctrl_mask_overflow(dsi_ctrl, true);\n\n\t\tatomic_set(&dsi_ctrl->dma_irq_trig, 0);\n\t\tdsi_ctrl_enable_status_interrupt(dsi_ctrl,\n\t\t\t\t\tDSI_SINT_CMD_MODE_DMA_DONE, NULL);\n\t\treinit_completion(&dsi_ctrl->irq_info.cmd_dma_done);\n'''
+    irq_arm_rec = '''\t\tdsi_ctrl_mask_overflow(dsi_ctrl, true);\n\n\t\ta52_p293_gdm_arm_snapshot(dsi_ctrl, 0);\n\t\tatomic_set(&dsi_ctrl->dma_irq_trig, 0);\n\t\tdsi_ctrl_enable_status_interrupt(dsi_ctrl,\n\t\t\t\t\tDSI_SINT_CMD_MODE_DMA_DONE, NULL);\n\t\treinit_completion(&dsi_ctrl->irq_info.cmd_dma_done);\n\t\ta52_p293_gdm_arm_snapshot(dsi_ctrl, 1);\n'''
+    text = one(text, irq_arm, irq_arm_rec, 'command-DMA IRQ-arm snapshots')
 
     wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n'''
     wait_rec = r'''	if (a52_p293_gdm_armed(dsi_ctrl)) {
@@ -252,8 +273,7 @@ def validate(ctrl: str, hw: str) -> None:
                   'GDM S06b tg=%x in=%x']:
         if token not in hw:
             raise SystemExit('Phase293 HW validation missing: ' + token)
-    if '*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY' in ctrl:
-        raise SystemExit('Phase293 FIFO reroute detected')
+    assert_no_fetch_memory_fifo_reroute(ctrl)
     if ctrl.index('GDM S09 st=%x fs=%x ln=%x ck=%x') > ctrl.index('P276 280Z q=2'):
         raise SystemExit('Phase293 final GDM snapshot is after Phase280 retention latch')
 

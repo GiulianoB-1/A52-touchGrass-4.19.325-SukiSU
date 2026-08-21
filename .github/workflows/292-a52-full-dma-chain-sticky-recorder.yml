@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/292-a52-full-dma-chain-sticky-recorder.yml
       - scripts/292_apply_full_dma_chain_sticky_recorder.py
+      - scripts/292_fix_patcher_anchor_drift.py
       - scripts/292_ci_build.sh
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
     paths:
       - .github/workflows/292-a52-full-dma-chain-sticky-recorder.yml
       - scripts/292_apply_full_dma_chain_sticky_recorder.py
+      - scripts/292_fix_patcher_anchor_drift.py
       - scripts/292_ci_build.sh
 
 permissions:
@@ -43,6 +45,12 @@ jobs:
     steps:
       - name: Check out Phase292 branch
         uses: actions/checkout@v4
+
+      - name: Reconcile Phase292 patcher anchors
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/292_fix_patcher_anchor_drift.py
+          python3 -m py_compile scripts/292_apply_full_dma_chain_sticky_recorder.py
 
       - name: Publish Phase292 run locator
         run: |

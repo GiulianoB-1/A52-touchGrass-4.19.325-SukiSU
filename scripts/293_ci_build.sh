@@ -38,11 +38,17 @@ cp "$SMMU" /tmp/p293-smmu-before.c
 cp "$REC" /tmp/p293-rec-before.c
 
 # Refuse accidental inheritance of the experiments this comparison is meant
-# to remove.
-! grep -Fq 'A52_PHASE281_DSI_DMA_CONSUMPTION_TRACE_V1' "$DSI"
-! grep -Fq 'A52_PHASE292_DSI_CHAIN_TAPS_V1' "$DSI"
-! grep -Fq '*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY' "$DSI"
-! grep -Fq 'A52_PHASE291_CONT_SPLASH_ZERO_RATE_RECOVERY_V1' "$DSI"
+# to remove. The stock secure-session FETCH_MEMORY -> FIFO safeguard is
+# validated structurally by the Phase293 patcher immediately below.
+for marker in \
+  'A52_PHASE281_DSI_DMA_CONSUMPTION_TRACE_V1' \
+  'A52_PHASE292_DSI_CHAIN_TAPS_V1' \
+  'A52_PHASE291_CONT_SPLASH_ZERO_RATE_RECOVERY_V1'; do
+  if grep -Fq "$marker" "$DSI"; then
+    echo "Phase293 refuses later behavioral lineage: $marker" >&2
+    exit 1
+  fi
+done
 
 grep -Fq 'A52_PHASE280_TIMEOUT_RETENTION_LATCH_V1' "$DSI"
 grep -Fq 'P276 280Z q=2' "$DSI"
@@ -142,7 +148,7 @@ python3 - <<'PY'
 from pathlib import Path
 r=Path('phase293-out')
 d=(r/'source/dsi_ctrl.c').read_text(); h=(r/'source/dsi_ctrl_hw_cmn.c').read_text(); img=(r/'compile/Image').read_bytes()
-for bad in ['A52_PHASE281_DSI_DMA_CONSUMPTION_TRACE_V1','A52_PHASE292_DSI_CHAIN_TAPS_V1','*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY']:
+for bad in ['A52_PHASE281_DSI_DMA_CONSUMPTION_TRACE_V1','A52_PHASE292_DSI_CHAIN_TAPS_V1','A52_PHASE291_CONT_SPLASH_ZERO_RATE_RECOVERY_V1']:
  if bad in d: raise SystemExit('Phase293 forbidden inherited behavior: '+bad)
 for m in ['A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1','GDM S00 c=0 in=%x mf=%x t=%x l=%u','GDM S01 sel=%x hw=%x pm=%u pwr=%u','GDM S02 ct=%u,%u,%u,%u ca=na','GDM S03 irq=%d in=%x st=%x','GDM S04 irq=%d in=%x st=%x','GDM S07 seen=1 st=%x in=%x irq0=%d','GDM S08 ret=%d irq=%d in=%x st=%x','GDM S09 st=%x fs=%x ln=%x ck=%x','GDM DONE success=0 target=0/8/20/29/3','P276 280Z q=2']:
  if m not in d: raise SystemExit('Phase293 source marker missing: '+m)

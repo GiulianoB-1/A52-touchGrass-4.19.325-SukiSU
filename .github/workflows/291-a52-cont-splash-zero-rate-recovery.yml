@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - agent/a52-phase291-cont-splash-zero-rate-recovery-v1
+      - agent/a52-phase291-cont-splash-zero-rate-recovery-v2
     paths:
       - .github/workflows/291-a52-cont-splash-zero-rate-recovery.yml
       - scripts/291_apply_cont_splash_zero_rate_recovery.py

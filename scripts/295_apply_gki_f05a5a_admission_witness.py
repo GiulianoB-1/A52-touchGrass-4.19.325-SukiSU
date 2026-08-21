@@ -78,11 +78,10 @@ def main() -> None:
     validate(after)
     if not args.check_only:
         counts_after = behavioral_counts(after)
-        # One additional textual FETCH_MEMORY comparison is expected; all
-        # behavioral/write/wait/clock/FIFO token counts must remain unchanged.
-        expected = dict(counts_before)
-        expected['DSI_CTRL_CMD_FETCH_MEMORY'] += 1
-        if counts_after != expected:
+        # The witness broadens only the payload observation. The exact Phase293
+        # FETCH_MEMORY comparison is moved into the preserved admission check,
+        # so every behavioral/write/wait/clock/FIFO token count stays identical.
+        if counts_after != counts_before:
             raise SystemExit(f'Phase295 behavioral-token count changed: {counts_before} -> {counts_after}')
     print('Phase295 passive F05A5A admission witness: PASS')
 

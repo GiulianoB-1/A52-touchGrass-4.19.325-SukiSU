@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 concurrency:
   group: a52-recovery-preserve-ramoops
@@ -34,6 +35,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: rebase/resukisu-linux-4.19.325
+
+      - name: Publish traceable run status
+        id: trace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          BODY="Workflow 294 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Status: in_progress
+          Conclusion: pending
+          Workflow head SHA: ${GITHUB_SHA}
+          Base recovery dump SHA256: 2441125abef5c4aa85b1eeaa725c948f236c183d82352d50afe710ca192f9f71
+
+          Purpose: rebuild the proven 4.19.206 recovery raw exporter while disabling PSTORE_RAM, PSTORE_CONSOLE and PSTORE_PMSG so recovery cannot overwrite retained ramoops evidence."
+          COMMENT_ID="$(gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/45/comments" \
+            -f body="$BODY" --jq '.id')"
+          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
 
       - name: Hydrate proven recovery raw-exporter staging script
         env:
@@ -269,3 +289,24 @@ jobs:
           path: artifacts/a52-recovery-preserve-ramoops
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish final run status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ steps.trace.outputs.comment_id }}
+          FINAL_STATUS: ${{ job.status }}
+        run: |
+          set -Eeuo pipefail
+          [ -n "$COMMENT_ID" ] || exit 0
+          BODY="Workflow 294 run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Status: completed
+          Conclusion: ${FINAL_STATUS}
+          Workflow head SHA: ${GITHUB_SHA}
+          Base recovery dump SHA256: 2441125abef5c4aa85b1eeaa725c948f236c183d82352d50afe710ca192f9f71
+
+          Purpose: rebuild the proven 4.19.206 recovery raw exporter while disabling PSTORE_RAM, PSTORE_CONSOLE and PSTORE_PMSG so recovery cannot overwrite retained ramoops evidence."
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+            -f body="$BODY"

@@ -1,0 +1,271 @@
+name: 294 - A52 recovery preserve ramoops evidence
+
+run-name: Build A52 4.19.206 recovery kernel without ramoops writers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-recovery-preserve-ramoops-v1
+    paths:
+      - '.github/workflows/294-a52-recovery-preserve-ramoops.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-recovery-preserve-ramoops
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build:
+    name: Build recovery kernel with ramoops writers disabled
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out kernel project branch
+        uses: actions/checkout@v4
+        with:
+          ref: rebase/resukisu-linux-4.19.325
+
+      - name: Hydrate proven recovery raw-exporter staging script
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts
+          gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/90_stage_a52_recovery_ramoops_exporter.py?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > scripts/90_stage_a52_recovery_ramoops_exporter.py
+          chmod +x scripts/90_stage_a52_recovery_ramoops_exporter.py
+          python3 -m py_compile scripts/90_stage_a52_recovery_ramoops_exporter.py
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-recovery-preserve-ramoops-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-recovery-ramoops-exporter-fixed-${{ runner.os }}-
+            a52xq-recovery-ramoops-exporter-${{ runner.os }}-
+            a52xq-linux-4.19.206-no-root-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source through Linux 4.19.200
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+      - name: Derive and apply official Linux 4.19.206 merge
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_merge_linux_4.19.210.sh scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          sed -i \
+            -e 's/TO_TAG=v4.19.210/TO_TAG=v4.19.206/' \
+            -e '/^TARGET_COMMIT=/d' \
+            -e '/test "$to_sha" = "$TARGET_COMMIT"/d' \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.206
+
+      - name: Apply conditional merge-shape repairs for 4.19.206
+        run: |
+          set -Eeuo pipefail
+          cp scripts/checkpoint_fix_linux_4.19.210_compile.sh scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          sed -i 's/TARGET_VERSION=4.19.210/TARGET_VERSION=4.19.206/' \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          ./scripts/checkpoint_fix_linux_4.19.206.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('workspace/touchgrass-a52xq')
+
+          header = (root / 'include/linux/timerqueue.h').read_text()
+          path = root / 'drivers/soc/qcom/event_timer.c'
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          wants_newer = 'struct rb_root_cached rb_root;' in header
+          desired = newer if wants_newer else older
+          obsolete = older if wants_newer else newer
+          if desired not in text:
+              if obsolete not in text:
+                  raise SystemExit('event_timer initializer shape is unrecognized')
+              path.write_text(text.replace(obsolete, desired, 1))
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              path.write_text(text.replace(anchor, helper + anchor, 1))
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing after generic repair')
+          PY
+
+      - name: Stage existing read-only early ramoops snapshot exporter
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-recovery-preserve-ramoops
+          mkdir -p "$OUT"
+          python3 scripts/90_stage_a52_recovery_ramoops_exporter.py \
+            --kernel workspace/touchgrass-a52xq \
+            --output "$OUT"
+          git -C workspace/touchgrass-a52xq diff --check
+          git -C workspace/touchgrass-a52xq diff --binary --no-ext-diff \
+            > "$OUT/recovery-raw-exporter.patch"
+          test -s "$OUT/recovery-raw-exporter.patch"
+
+      - name: Disable recovery ramoops writers
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CONFIG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          "$KERNEL/scripts/config" --file "$CONFIG" \
+            -e IKCONFIG -e IKCONFIG_PROC -e PSTORE \
+            -d PSTORE_RAM -d PSTORE_CONSOLE -d PSTORE_PMSG \
+            -d DEVMEM -d PROC_KCORE -d DEBUG_FS
+
+          grep -q '^CONFIG_PSTORE=y$' "$CONFIG"
+          grep -q '^# CONFIG_PSTORE_RAM is not set$' "$CONFIG"
+          grep -q '^# CONFIG_PSTORE_CONSOLE is not set$' "$CONFIG"
+          grep -q '^# CONFIG_PSTORE_PMSG is not set$' "$CONFIG"
+
+      - name: Build recovery preservation kernel
+        run: |
+          set -Eeuo pipefail
+          source scripts/common.sh
+          LABEL=a52xq-recovery-preserve-ramoops-4.19.206
+          OUT=artifacts/a52-recovery-preserve-ramoops
+
+          build_kernel "$LABEL"
+          cp "$ARTIFACTS_DIR/config-$LABEL" "$OUT/final.config"
+          cp "$ARTIFACTS_DIR/Image-$LABEL" "$OUT/Image"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/Image.gz"
+          gzip -t "$OUT/Image.gz"
+          cp "$KERNEL_DIR/out/System.map" "$OUT/System.map"
+          cp "$KERNEL_DIR/out/vmlinux" "$OUT/vmlinux"
+
+      - name: Audit preservation kernel
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-recovery-preserve-ramoops
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+
+          out = Path('artifacts/a52-recovery-preserve-ramoops')
+          image = (out / 'Image').read_bytes()
+          config = set((out / 'final.config').read_text(errors='replace').splitlines())
+          checks = {
+              'snapshot_marker_in_image': b'a52_ramoops_raw: captured 0x%llx-0x%llx before ramoops init' in image,
+              'device_marker_in_image': b'/dev/a52_ramoops_raw ready, size=%u' in image,
+              'pstore_core_builtin': 'CONFIG_PSTORE=y' in config,
+              'pstore_ram_disabled': '# CONFIG_PSTORE_RAM is not set' in config,
+              'pstore_console_disabled': '# CONFIG_PSTORE_CONSOLE is not set' in config,
+              'pstore_pmsg_disabled': '# CONFIG_PSTORE_PMSG is not set' in config,
+              'devmem_disabled': '# CONFIG_DEVMEM is not set' in config,
+              'proc_kcore_disabled': '# CONFIG_PROC_KCORE is not set' in config,
+              'debugfs_disabled': '# CONFIG_DEBUG_FS is not set' in config,
+          }
+          for name, passed in checks.items():
+              print(f'AUDIT {name}: {"PASS" if passed else "FAIL"}')
+          failed = [name for name, passed in checks.items() if not passed]
+          report = {
+              'status': 'passed' if not failed else 'failed',
+              'source_kernel': 'touchGrass 4.19.206 recovery lineage',
+              'base_recovery_dump_size': 81788928,
+              'base_recovery_dump_sha256': '2441125abef5c4aa85b1eeaa725c948f236c183d82352d50afe710ca192f9f71',
+              'preserved_range': '0xB1B00000-0xB1BFFFFF',
+              'checks': checks,
+              'Image_sha256': hashlib.sha256(image).hexdigest(),
+              'Image_gz_sha256': hashlib.sha256((out / 'Image.gz').read_bytes()).hexdigest(),
+          }
+          (out / 'preservation-audit.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+          if failed:
+              raise SystemExit('preservation audit failed: ' + ', '.join(failed))
+          PY
+
+      - name: Finalize artifact
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/a52-recovery-preserve-ramoops
+          cat > "$OUT/README-FIRST.txt" <<'EOF'
+          A52 RECOVERY RAMOOPS-PRESERVATION KERNEL
+
+          Purpose: boot recovery without allowing the normal ramoops RAM backend,
+          console writer, or pmsg writer to register and overwrite retained evidence.
+
+          The existing recovery-only a52_ramoops_raw exporter remains built in and
+          snapshots physical 0xB1B00000-0xB1BFFFFF during pure_initcall. Read it from
+          /dev/a52_ramoops_raw as before.
+
+          This artifact contains a kernel only. The final recovery.img is repacked
+          separately from the user's exact 81,788,928-byte installed recovery dump.
+          EOF
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload recovery preservation kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-recovery-preserve-ramoops-${{ github.run_number }}-KERNEL
+          path: artifacts/a52-recovery-preserve-ramoops
+          if-no-files-found: error
+          retention-days: 14

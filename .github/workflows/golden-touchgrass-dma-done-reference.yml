@@ -1,0 +1,202 @@
+name: Golden FDR - DSI DMA_DONE reference
+run-name: Golden FDR 4.19.200 successful DMA_DONE chain recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-golden-fdr-dma-done-reference-v1
+    paths:
+      - .github/workflows/golden-touchgrass-dma-done-reference.yml
+      - scripts/golden_touchgrass_dma_done_reference.py
+      - scripts/golden_touchgrass_dma_done_reference_build.sh
+      - scripts/golden_touchgrass_clock_reference.py
+      - scripts/golden_touchgrass_clock_origin.py
+      - scripts/golden_touchgrass_clock_reference_build.sh
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: a52-golden-fdr-dma-done-reference-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+  WORKING_GOLDEN_BOOT_SHA256: '7c61a4fa58679c955391eedad666b3cb38e0eb5e49bc69ac87f1edd862a79f12'
+  WORKING_GOLDEN_CONTAINER_SHA256: '50683df47b3f74fd3dd4ca7ff96bc114a6b7339955670b4c555fecaeda07e8c0'
+  WORKING_GOLDEN_RAMDISK_SHA256: '54f7891881a755536e908acd66fa2cf48bb24ed5f9f8d2fc4b0bf259f395a4c1'
+  WORKING_GOLDEN_DTB_SHA256: '93612e8e1c49cff5660b733e5ff75e53dfca6511c79c00eee4d0355b5bb92d94'
+
+jobs:
+  build:
+    name: Rebuild proven Golden and add passive DMA_DONE recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Golden DMA reference branch
+        uses: actions/checkout@v4
+
+      - name: Publish run locator
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='golden-fdr/dma-done-reference' \
+            -f description='Golden DMA_DONE reference build running' \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Hydrate proven Golden FDR repack helpers
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1"
+            local path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-golden-dma-ref-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-golden-clock-ref-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Build from proven Golden lineage with passive recorder
+        run: bash scripts/golden_touchgrass_dma_done_reference_build.sh
+
+      - name: Repack into locked Golden FDR boot structure
+        run: |
+          set -Eeuo pipefail
+          OUT=golden-dma-done-ref-out
+          mkdir -p intake
+
+          test -s "$OUT/package/Image.gz"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+
+          python3 scripts/37_validate_a52_p1_boot_source.py \
+            intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+
+          test -s "$OUT/package/boot.img"
+          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          file "$OUT/package/boot.img" | tee "$OUT/package/boot-file.txt"
+          sha256sum "$OUT/package/boot.img" | tee "$OUT/package/boot-sha256.txt"
+
+          python3 - "$OUT/package/repack-report.json" <<'PY'
+          import json, os, sys
+          r=json.load(open(sys.argv[1]))
+          expected_ramdisk=os.environ['WORKING_GOLDEN_RAMDISK_SHA256']
+          expected_dtb=os.environ['WORKING_GOLDEN_DTB_SHA256']
+          assert r['status']=='repacked-audited', r
+          assert r['source_sha256']==os.environ['BOOT_SOURCE_SHA256'], r['source_sha256']
+          assert r['ramdisk_sha256']==expected_ramdisk, (r['ramdisk_sha256'], expected_ramdisk)
+          assert r['dtb_sha256']==expected_dtb, (r['dtb_sha256'], expected_dtb)
+          for key, val in r['invariants'].items():
+              assert val, (key,val)
+          print('Golden non-kernel boot-component identity audit: PASS')
+          PY
+
+          grep -Fq 'behavior_change=none-read-only-single-shot-dma-observation' "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq "hardware_proven_golden_boot_sha256=${WORKING_GOLDEN_BOOT_SHA256}" "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq "hardware_proven_golden_container_sha256=${WORKING_GOLDEN_CONTAINER_SHA256}" "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq 'modified_runtime_source=techpack/display/msm/dsi/dsi_ctrl.c-only-after-proven-golden-reconstruction' "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq 'register_writes_added=false' "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq 'triggers_added_or_removed=false' "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq 'waits_added_or_removed=false' "$OUT/BUILD-IDENTITY.txt"
+
+          (
+            cd "$OUT"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Verify compiled Golden DMA recorder markers
+        run: |
+          set -Eeuo pipefail
+          OUT=golden-dma-done-ref-out
+          test -s "$OUT/compile/Image"
+          test -s "$OUT/source/dsi_ctrl.c"
+          grep -Fq 'A52_GOLDEN_DMA_DONE_REFERENCE_V1' "$OUT/source/dsi_ctrl.c"
+          for m in 'GDM S00' 'GDM S01' 'GDM S02' 'GDM S03' 'GDM S04' 'GDM S05' 'GDM S06' 'GDM S07' 'GDM S08' 'GDM S09' 'GDM DONE'; do
+            grep -Fq "$m" "$OUT/audit/Image.strings.txt"
+          done
+          grep -Fq 'Golden DMA recorder behavior-preservation primitive audit: PASS' "$OUT/audit/production-primitives-audit.txt"
+          echo 'Golden DMA_DONE reference artifact audit: PASS'
+
+      - name: Upload Golden DMA_DONE reference boot image and audit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-GOLDEN-FDR-DMA-DONE-REFERENCE-${{ github.run_number }}-BOOT-IMG
+          path: golden-dma-done-ref-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-GOLDEN-FDR-DMA-DONE-REFERENCE-FAILURE-${{ github.run_number }}
+          path: |
+            golden-dma-done-ref-failure/
+            golden-clock-ref-failure/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish final status
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          case "$JOB_STATUS" in
+            success) state=success; description='Golden DMA_DONE reference boot.img passed CI audits' ;;
+            failure) state=failure; description='Golden DMA_DONE reference build failed' ;;
+            *) state=error; description="Golden DMA_DONE reference job ${JOB_STATUS}" ;;
+          esac
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='golden-fdr/dma-done-reference' \
+            -f description="$description" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

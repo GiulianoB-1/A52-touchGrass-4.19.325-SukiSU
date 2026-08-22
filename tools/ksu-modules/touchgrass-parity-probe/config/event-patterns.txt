@@ -1,0 +1,10 @@
+^(power|clk|regulator|drm|dma_fence|dma_heap|ion|iommu|arm_smmu|thermal|cpufreq|devfreq|gpio|pinctrl|remoteproc|rpmsg|scm|qseecom|qtee|msm_drm|dsi|sde|kgsl|mdss|msm_bus|icc):
+^sched:sched_process_(exec|exit|fork|free)$
+^workqueue:workqueue_(queue_work|activate_work|execute_start|execute_end)$
+^irq:irq_handler_(entry|exit)$
+^irq:softirq_(raise|entry|exit)$
+^timer:(timer_start|timer_expire_entry|timer_expire_exit)$
+^module:(module_load|module_free)$
+^vmscan:
+^kmem:(kmalloc|kfree|kmem_cache_alloc|kmem_cache_free)$
+^block:block_rq_(issue|complete)$

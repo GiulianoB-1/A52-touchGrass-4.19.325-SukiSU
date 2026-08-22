@@ -10,7 +10,7 @@ DRV = Path('drivers/a52_display/msm/msm_drv.c')
 ATOMIC = Path('drivers/a52_display/msm/msm_atomic.c')
 KMS = Path('drivers/a52_display/msm/sde/sde_kms.c')
 REC = Path('drivers/a52_secure/a52_ack_secure_flight_recorder.c')
-MARK = 'A52_PHASE296_USERSPACE_DRM_ATOMIC_FRONTIER_V1'
+MARK = 'A52_PHASE296_USERSPACE_DRM_ATOMIC_FRONTIER_V2'
 REC_INCLUDE = '#include <linux/a52_ack_secure_flight_recorder.h>\n'
 
 
@@ -21,10 +21,10 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def ensure_include(text: str, anchor: str, label: str) -> str:
-    if REC_INCLUDE in text:
+def ensure_include(text: str, include: str, anchor: str, label: str) -> str:
+    if include in text:
         return text
-    return one(text, anchor, anchor + REC_INCLUDE, f'{label} recorder include')
+    return one(text, anchor, anchor + include, f'{label} include')
 
 
 def inject_function_entry(text: str, name: str, statement: str) -> str:
@@ -68,29 +68,47 @@ def patch_drv(text: str) -> str:
     if MARK in text:
         return text
     before = behavior_counts(text)
-    text = ensure_include(text, '#include "sde_dbg.h"\n', 'msm_drv')
+    if REC_INCLUDE not in text:
+        text = ensure_include(text, REC_INCLUDE, '#include "sde_dbg.h"\n', 'msm_drv recorder')
+    text = ensure_include(text, '#include <linux/workqueue.h>\n', '#include <linux/atomic.h>\n', 'msm_drv workqueue')
+    text = ensure_include(text, '#include <linux/jiffies.h>\n', '#include <linux/workqueue.h>\n', 'msm_drv jiffies')
+
+    marker_anchor = REC_INCLUDE
     text = one(
         text,
-        '#include "sde_dbg.h"\n' + REC_INCLUDE,
-        '#include "sde_dbg.h"\n' + REC_INCLUDE +
+        marker_anchor,
+        marker_anchor +
         '\n/* ' + MARK + '\n'
-        ' * Passive post-bind frontier. Records only whether userspace reaches\n'
-        ' * the DRM open/atomic path. No display state or control flow changes.\n'
+        ' * Passive post-bind frontier. Records whether userspace reaches the\n'
+        ' * DRM open/atomic/commit path. The delayed summary only snapshots\n'
+        ' * sticky counters; it does not alter display state.\n'
         ' */\n',
         'msm_drv marker',
     )
 
-    old = '''int msm_atomic_check(struct drm_device *dev,\n\t\t\t    struct drm_atomic_state *state)\n{\n\tstruct msm_drm_private *priv;\n\n\tpriv = dev->dev_private;\n\tif (priv && priv->kms && priv->kms->funcs &&\n\t\t\tpriv->kms->funcs->atomic_check)\n\t\treturn priv->kms->funcs->atomic_check(priv->kms, state);\n\n\treturn drm_atomic_helper_check(dev, state);\n}\n'''
-    new = '''int msm_atomic_check(struct drm_device *dev,\n\t\t\t    struct drm_atomic_state *state)\n{\n\tstruct msm_drm_private *priv;\n\tint ret;\n\n\ta52_ackfr_record("P276 296A e");\n\tpriv = dev->dev_private;\n\tif (priv && priv->kms && priv->kms->funcs &&\n\t\t\tpriv->kms->funcs->atomic_check)\n\t\tret = priv->kms->funcs->atomic_check(priv->kms, state);\n\telse\n\t\tret = drm_atomic_helper_check(dev, state);\n\ta52_ackfr_record("P276 296A x r=%d", ret);\n\n\treturn ret;\n}\n'''
-    text = one(text, old, new, 'msm_atomic_check')
+    state_anchor = 'static atomic_t a52_r211_close_sequence = ATOMIC_INIT(0);\n'
+    state_block = '''static atomic_t a52_r211_close_sequence = ATOMIC_INIT(0);\n\nstatic atomic_t a52_p296_open_count = ATOMIC_INIT(0);\nstatic atomic_t a52_p296_open_rc = ATOMIC_INIT(-61);\nstatic atomic_t a52_p296_check_count = ATOMIC_INIT(0);\nstatic atomic_t a52_p296_check_rc = ATOMIC_INIT(-61);\n\nstatic void a52_p296_snapshot_workfn(struct work_struct *work)\n{\n\t(void)work;\n\ta52_ackfr_record("P276 296S o=%d/%d a=%d/%d",\n\t\t\tatomic_read(&a52_p296_open_count),\n\t\t\tatomic_read(&a52_p296_open_rc),\n\t\t\tatomic_read(&a52_p296_check_count),\n\t\t\tatomic_read(&a52_p296_check_rc));\n}\n\nstatic DECLARE_DELAYED_WORK(a52_p296_snapshot_work,\n\t\ta52_p296_snapshot_workfn);\n'''
+    text = one(text, state_anchor, state_block, 'sticky summary state')
 
-    old = '''static int msm_open(struct drm_device *dev, struct drm_file *file)\n{\n\treturn context_init(dev, file);\n}\n'''
-    new = '''static int msm_open(struct drm_device *dev, struct drm_file *file)\n{\n\tint ret;\n\n\ta52_ackfr_record("P276 296O e");\n\tret = context_init(dev, file);\n\ta52_ackfr_record("P276 296O x r=%d", ret);\n\treturn ret;\n}\n'''
-    text = one(text, old, new, 'msm_open')
+    check_entry = '''\tint rc;\n\n\ttrace_id = atomic_inc_return(&a52_r211_check_sequence);\n'''
+    check_entry_new = '''\tint rc;\n\n\ta52_ackfr_record("P276 296A e");\n\ttrace_id = atomic_inc_return(&a52_r211_check_sequence);\n'''
+    text = one(text, check_entry, check_entry_new, 'msm_atomic_check entry')
 
-    old = '''\tret = drm_dev_register(ddev, 0);\n\tif (ret)\n\t\tgoto fail;\n\tpriv->registered = true;\n'''
-    new = '''\tret = drm_dev_register(ddev, 0);\n\ta52_ackfr_record("P276 296R r=%d", ret);\n\tif (ret)\n\t\tgoto fail;\n\tpriv->registered = true;\n'''
-    text = one(text, old, new, 'drm_dev_register return')
+    check_exit = '''\tif (trace)\n\t\ta52_ackfr_record("DRMPOST 211 check-exit n=%u rc=%d",\n\t\t\t\t  trace_id, rc);\n\treturn rc;\n}\n'''
+    check_exit_new = '''\tif (trace)\n\t\ta52_ackfr_record("DRMPOST 211 check-exit n=%u rc=%d",\n\t\t\t\t  trace_id, rc);\n\tatomic_inc(&a52_p296_check_count);\n\tatomic_set(&a52_p296_check_rc, rc);\n\ta52_ackfr_record("P276 296A x r=%d", rc);\n\treturn rc;\n}\n'''
+    text = one(text, check_exit, check_exit_new, 'msm_atomic_check exit')
+
+    open_entry = '''\tint rc;\n\n\ttrace_id = atomic_inc_return(&a52_r211_open_sequence);\n'''
+    open_entry_new = '''\tint rc;\n\n\ta52_ackfr_record("P276 296O e");\n\ttrace_id = atomic_inc_return(&a52_r211_open_sequence);\n'''
+    text = one(text, open_entry, open_entry_new, 'msm_open entry')
+
+    open_exit = '''\tif (trace)\n\t\ta52_ackfr_record("DRMPOST 211 open-exit n=%u rc=%d",\n\t\t\t\t  trace_id, rc);\n\treturn rc;\n}\n'''
+    open_exit_new = '''\tif (trace)\n\t\ta52_ackfr_record("DRMPOST 211 open-exit n=%u rc=%d",\n\t\t\t\t  trace_id, rc);\n\tatomic_inc(&a52_p296_open_count);\n\tatomic_set(&a52_p296_open_rc, rc);\n\ta52_ackfr_record("P276 296O x r=%d", rc);\n\treturn rc;\n}\n'''
+    text = one(text, open_exit, open_exit_new, 'msm_open exit')
+
+    register = '''\tret = drm_dev_register(ddev, 0);\n\ta52_ackfr_record("DRMPOST dev-register exit rc=%d", ret);\n\tif (ret)\n\t\tgoto fail;\n'''
+    register_new = '''\tret = drm_dev_register(ddev, 0);\n\ta52_ackfr_record("DRMPOST dev-register exit rc=%d", ret);\n\ta52_ackfr_record("P276 296R r=%d", ret);\n\tif (!ret)\n\t\tschedule_delayed_work(&a52_p296_snapshot_work,\n\t\t\tmsecs_to_jiffies(15000));\n\tif (ret)\n\t\tgoto fail;\n'''
+    text = one(text, register, register_new, 'drm_dev_register return')
 
     if behavior_counts(text) != before:
         raise SystemExit('Phase296 msm_drv hardware-affecting token count changed')
@@ -101,7 +119,8 @@ def patch_atomic(text: str) -> str:
     if 'P276 296C e n=%d' in text:
         return text
     before = behavior_counts(text)
-    text = ensure_include(text, '#include "sde_trace.h"\n', 'msm_atomic')
+    if REC_INCLUDE not in text:
+        text = ensure_include(text, REC_INCLUDE, '#include "sde_trace.h"\n', 'msm_atomic recorder')
 
     text = inject_function_entry(
         text, 'msm_atomic_commit',
@@ -112,17 +131,17 @@ def patch_atomic(text: str) -> str:
         'a52_ackfr_record("P276 296W e");',
     )
 
-    old = '''\tret = drm_atomic_helper_prepare_planes(dev, state);\n\tif (ret) {\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n'''
-    new = '''\tret = drm_atomic_helper_prepare_planes(dev, state);\n\tif (ret) {\n\t\ta52_ackfr_record("P276 296C x r=%d q=1", ret);\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n'''
-    text = one(text, old, new, 'prepare_planes error')
+    prepare_err = '''\tif (ret) {\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n\n\tc = commit_init(state, nonblock);\n'''
+    prepare_err_new = '''\tif (ret) {\n\t\ta52_ackfr_record("P276 296C x r=%d q=1", ret);\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n\n\tc = commit_init(state, nonblock);\n'''
+    text = one(text, prepare_err, prepare_err_new, 'prepare_planes error')
 
-    old = '''\tdrm_atomic_state_get(state);\n\tmsm_atomic_commit_dispatch(dev, state, c);\n\n\tSDE_ATRACE_END("atomic_commit");\n\n\treturn 0;\nerr_free:\n'''
-    new = '''\tdrm_atomic_state_get(state);\n\tmsm_atomic_commit_dispatch(dev, state, c);\n\n\tSDE_ATRACE_END("atomic_commit");\n\ta52_ackfr_record("P276 296C x r=0 q=0");\n\n\treturn 0;\nerr_free:\n'''
-    text = one(text, old, new, 'atomic success')
+    success = '''\tA52_R210_REC_ID(a52_trace, a52_trace_index, "commit return rc=0");\n\n\treturn 0;\nerr_free:\n'''
+    success_new = '''\tA52_R210_REC_ID(a52_trace, a52_trace_index, "commit return rc=0");\n\ta52_ackfr_record("P276 296C x r=0 q=0");\n\n\treturn 0;\nerr_free:\n'''
+    text = one(text, success, success_new, 'atomic success')
 
-    old = '''error:\n\tdrm_atomic_helper_cleanup_planes(dev, state);\n\tSDE_ATRACE_END("atomic_commit");\n\treturn ret;\n}\n\nstruct drm_atomic_state *msm_atomic_state_alloc'''
-    new = '''error:\n\tdrm_atomic_helper_cleanup_planes(dev, state);\n\tSDE_ATRACE_END("atomic_commit");\n\ta52_ackfr_record("P276 296C x r=%d q=2", ret);\n\treturn ret;\n}\n\nstruct drm_atomic_state *msm_atomic_state_alloc'''
-    text = one(text, old, new, 'atomic final error')
+    final_error = '''\tdrm_atomic_helper_cleanup_planes(dev, state);\n\tSDE_ATRACE_END("atomic_commit");\n\treturn ret;\n}\n\nstruct drm_atomic_state *msm_atomic_state_alloc'''
+    final_error_new = '''\tdrm_atomic_helper_cleanup_planes(dev, state);\n\tSDE_ATRACE_END("atomic_commit");\n\ta52_ackfr_record("P276 296C x r=%d q=2", ret);\n\treturn ret;\n}\n\nstruct drm_atomic_state *msm_atomic_state_alloc'''
+    text = one(text, final_error, final_error_new, 'atomic final error')
 
     if behavior_counts(text) != before:
         raise SystemExit('Phase296 msm_atomic hardware-affecting token count changed')
@@ -133,7 +152,8 @@ def patch_kms(text: str) -> str:
     if 'P276 296K p' in text:
         return text
     before = behavior_counts(text)
-    text = ensure_include(text, '#include "sde_trace.h"\n', 'sde_kms')
+    if REC_INCLUDE not in text:
+        text = ensure_include(text, REC_INCLUDE, '#include "sde_trace.h"\n', 'sde_kms recorder')
     text = inject_function_entry(text, 'sde_kms_prepare_commit', 'a52_ackfr_record("P276 296K p");')
     text = inject_function_entry(text, 'sde_kms_commit', 'a52_ackfr_record("P276 296K c");')
     text = inject_function_entry(text, 'sde_kms_complete_commit', 'a52_ackfr_record("P276 296K x");')
@@ -143,10 +163,23 @@ def patch_kms(text: str) -> str:
 
 
 def verify(root: Path) -> dict:
-    files = {DRV: (root / DRV).read_text(), ATOMIC: (root / ATOMIC).read_text(), KMS: (root / KMS).read_text()}
+    files = {
+        DRV: (root / DRV).read_text(),
+        ATOMIC: (root / ATOMIC).read_text(),
+        KMS: (root / KMS).read_text(),
+    }
     required = {
-        DRV: [MARK, 'P276 296R r=%d', 'P276 296O e', 'P276 296O x r=%d', 'P276 296A e', 'P276 296A x r=%d'],
-        ATOMIC: ['P276 296C e n=%d', 'P276 296C x r=%d q=1', 'P276 296C x r=0 q=0', 'P276 296C x r=%d q=2', 'P276 296W e'],
+        DRV: [
+            MARK, 'P276 296R r=%d', 'P276 296S o=%d/%d a=%d/%d',
+            'P276 296O e', 'P276 296O x r=%d',
+            'P276 296A e', 'P276 296A x r=%d',
+            'msecs_to_jiffies(15000)',
+        ],
+        ATOMIC: [
+            'P276 296C e n=%d', 'P276 296C x r=%d q=1',
+            'P276 296C x r=0 q=0', 'P276 296C x r=%d q=2',
+            'P276 296W e',
+        ],
         KMS: ['P276 296K p', 'P276 296K c', 'P276 296K x'],
     }
     for path, markers in required.items():
@@ -160,13 +193,14 @@ def verify(root: Path) -> dict:
     if 'return !strncmp(message, "P276 ", 5)' not in rec or 'strncmp(fmt, "P276", 4)' not in rec:
         raise SystemExit('Phase296 inherited P276 critical/admission contract missing')
     return {
-        'status': 'phase296-userspace-drm-atomic-frontier-v1-staged',
-        'functional_change': 'instrumentation-only',
+        'status': 'phase296-userspace-drm-atomic-frontier-v2-staged',
+        'functional_change': 'instrumentation-only-with-delayed-diagnostic-summary',
         'targets': [str(p) for p in files],
         'marker_count': sum(len(v) for v in required.values()),
+        'summary_delay_ms': 15000,
         'recorder_transport': 'inherited P276 critical-after-capacity path',
         'recorder_modified': False,
-        'hardware_control_flow_changed': False,
+        'display_hardware_control_flow_changed': False,
     }
 
 

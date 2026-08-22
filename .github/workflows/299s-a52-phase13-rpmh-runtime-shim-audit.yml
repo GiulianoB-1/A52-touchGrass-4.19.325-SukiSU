@@ -36,6 +36,8 @@ jobs:
     name: Reconstruct Phase296 and prove Phase13 RPMh shims
     runs-on: ubuntu-22.04
     timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out Phase299S branch
         uses: actions/checkout@v4

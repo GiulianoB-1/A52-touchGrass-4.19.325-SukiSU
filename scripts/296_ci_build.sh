@@ -17,6 +17,7 @@ fail_report(){
   done
   cp scripts/296_apply_userspace_drm_atomic_frontier.py phase296-failure/audit/ 2>/dev/null || true
   cp /tmp/p296-base.config phase296-failure/audit/ 2>/dev/null || true
+  cp phase296-patch-report.json phase296-failure/audit/ 2>/dev/null || true
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
@@ -26,17 +27,18 @@ bash scripts/293_ci_build.sh
 test -s phase293-out/package/boot.img
 test -s "$OUT/arch/arm64/boot/Image"
 for f in "$DRV" "$ATOMIC" "$KMS" "$REC"; do test -s "$f"; done
-
 test "$(stat -c '%s' phase293-out/package/boot.img)" -eq 100663296
+
 cp "$OUT/.config" /tmp/p296-base.config
 cp "$DRV" /tmp/p296-msm-drv-before.c
 cp "$ATOMIC" /tmp/p296-msm-atomic-before.c
 cp "$KMS" /tmp/p296-sde-kms-before.c
 cp "$REC" /tmp/p296-rec-before.c
 
-# Hardware capture proved the normal DSI probe/bind succeeds. Also lock down
-# the exact build fact that eliminates fbdev as the source of a first modeset.
+# Hardware capture proved normal DSI probe/bind succeeds. Lock the exact build
+# facts that rule out fbdev/fbcon as the source of the first modeset.
 grep -Fxq '# CONFIG_DRM_FBDEV_EMULATION is not set' /tmp/p296-base.config
+grep -Fxq 'CONFIG_FB_CMDLINE=y' /tmp/p296-base.config
 grep -Fxq '# CONFIG_FB is not set' /tmp/p296-base.config
 
 python3 -m py_compile scripts/296_apply_userspace_drm_atomic_frontier.py
@@ -45,11 +47,11 @@ python3 scripts/296_apply_userspace_drm_atomic_frontier.py \
 python3 scripts/296_apply_userspace_drm_atomic_frontier.py \
   --root "$ROOT" --check-only
 
-# The retained recorder transport itself must not change. Phase296 reuses the
-# already-admitted P276 critical prefix so short-tail captures remain useful.
+# Recorder transport must remain byte-for-byte identical. Phase296 only uses
+# the already-admitted critical P276 prefix from the inherited R48/RS48 path.
 cmp -s /tmp/p296-rec-before.c "$REC"
 
-# Preserve the exact Phase293 kernel configuration.
+# Preserve Phase293's exact kernel configuration.
 make -C "$ROOT" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
 cmp -s /tmp/p296-base.config "$OUT/.config"
@@ -92,18 +94,20 @@ from pathlib import Path
 r=Path('phase296-out')
 idn={
  'phase':'296',
- 'name':'USERSPACE-DRM-ATOMIC-FRONTIER',
+ 'name':'USERSPACE-DRM-ATOMIC-FRONTIER-R2',
  'git_sha':os.getenv('GITHUB_SHA'),
  'hardware_validated':False,
  'base':'exact Phase293 reconstruction from Phase280 retained-timeout lineage',
  'phase295_correction':'hardware ramoops proved dsi_display_dev_probe, dsi_panel_get and DRM/KMS bind succeed; later -61 was diagnostic data, not probe return',
  'fbdev_runtime_source':False,
- 'fbdev_evidence':['# CONFIG_DRM_FBDEV_EMULATION is not set','# CONFIG_FB is not set'],
- 'functional_change':'instrumentation-only',
+ 'fbdev_evidence':['# CONFIG_DRM_FBDEV_EMULATION is not set','CONFIG_FB_CMDLINE=y','# CONFIG_FB is not set'],
+ 'functional_change':'instrumentation-only plus one delayed diagnostic work item',
  'recorder_change':False,
  'recorder_transport':'inherited P276 critical-after-capacity R48/RS48 path',
+ 'summary_delay_ms':15000,
  'markers':{
    '296R':'drm_dev_register return',
+   '296S':'one-shot sticky summary 15 seconds after successful DRM registration: open_count/open_rc and atomic_check_count/check_rc',
    '296O':'msm DRM file open entry/exit; recorder metadata carries pid/tgid/comm',
    '296A':'driver atomic_check entry/return',
    '296C':'msm_atomic_commit entry/return/error stage',
@@ -111,13 +115,13 @@ idn={
    '296K':'SDE prepare_commit / commit / complete_commit entry'
  },
  'interpretation':{
-   'R0_no_O':'DRM device registered but Android userspace never opens this DRM device before capture ends',
-   'O_no_A':'userspace opens DRM but never reaches an atomic validation request; inspect capability/resource/ioctl/userspace admission',
-   'A_error':'atomic validation is reached and rejected; next phase must isolate exact KMS atomic_check rejection',
-   'A0_no_C':'validation succeeds but no commit is submitted',
+   'S_open0_check0':'DRM registered but no msm_open before the short-tail summary; userspace graphics/admission failed above this kernel display path',
+   'S_open_check0':'DRM opened but no atomic validation reached the driver',
+   'S_check_error':'atomic validation reached the driver and the latest check was rejected; isolate KMS atomic_check rejection next',
+   'S_check0':'at least one atomic validation succeeded; direct 296C/296W/296K markers localize commit execution',
    'C_no_W':'atomic commit entered but completion dispatch/worker is not reached',
    'W_no_K':'completion began but KMS prepare_commit callback is not reached',
-   'K':'normal SDE commit path exists; move frontier downstream toward bridge/DSI enable and target F0 5A 5A'
+   'K':'normal SDE commit path exists; move downstream toward bridge/DSI enable and target F0 5A 5A'
  },
  'hardware_question':'After successful DRM/KMS bind, does Android userspace open the DRM card and submit a valid atomic commit, and what is the last persistent boundary reached?'
 }
@@ -142,18 +146,21 @@ d=(r/'source/msm_drv.c').read_text()
 a=(r/'source/msm_atomic.c').read_text()
 k=(r/'source/sde_kms.c').read_text()
 markers=[
- 'P276 296R r=%d','P276 296O e','P276 296O x r=%d',
- 'P276 296A e','P276 296A x r=%d','P276 296C e n=%d',
- 'P276 296C x r=%d q=1','P276 296C x r=0 q=0','P276 296C x r=%d q=2',
+ 'P276 296R r=%d','P276 296S o=%d/%d a=%d/%d',
+ 'P276 296O e','P276 296O x r=%d','P276 296A e','P276 296A x r=%d',
+ 'P276 296C e n=%d','P276 296C x r=%d q=1','P276 296C x r=0 q=0','P276 296C x r=%d q=2',
  'P276 296W e','P276 296K p','P276 296K c','P276 296K x']
 for m in markers:
  if m not in (d+a+k): raise SystemExit('Phase296 source marker missing: '+m)
  if m.encode() not in img: raise SystemExit('Phase296 runtime marker missing from Image: '+m)
 if (r/'source/a52_ack_secure_flight_recorder.c').read_bytes() != (r/'audit/recorder-before.c').read_bytes():
  raise SystemExit('Phase296 recorder changed unexpectedly')
-print('Phase296 passive userspace DRM atomic frontier audit: PASS')
+config=(r/'config/final.config').read_text().splitlines()
+for line in ['# CONFIG_DRM_FBDEV_EMULATION is not set','CONFIG_FB_CMDLINE=y','# CONFIG_FB is not set']:
+ if line not in config: raise SystemExit('Phase296 config invariant missing: '+line)
+print('Phase296 R2 userspace DRM atomic frontier audit: PASS')
 PY
 
 python3 scripts/296_apply_userspace_drm_atomic_frontier.py --root "$ROOT" --check-only
 trap - EXIT
-echo 'Phase296 userspace DRM atomic frontier build/repack: PASS'
+echo 'Phase296 R2 userspace DRM atomic frontier build/repack: PASS'

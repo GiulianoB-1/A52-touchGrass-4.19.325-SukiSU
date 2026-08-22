@@ -73,15 +73,23 @@ def patch(text: str) -> str:
 
     before_behavior = behavioral_counts(text)
 
+    display_mark_anchor = (
+        '#include "dsi_parser.h"\n'
+        + REC_INCLUDE
+        + "\n#if defined(CONFIG_DISPLAY_SAMSUNG)\n"
+    )
     text = one(
         text,
-        REC_INCLUDE,
-        REC_INCLUDE + "\n/* " + MARK + "\n"
+        display_mark_anchor,
+        '#include "dsi_parser.h"\n'
+        + REC_INCLUDE
+        + "\n/* " + MARK + "\n"
         " * Passive Phase293 follow-up. The preserved hardware capture proved\n"
         " * dsi_display_dev_probe returns -ENODATA before the target memory-DMA\n"
         " * transaction is admitted. These probes only read existing software\n"
         " * state and append R48/RS48 records through the existing recorder.\n"
-        " */\n",
+        " */\n\n"
+        "#if defined(CONFIG_DISPLAY_SAMSUNG)\n",
         "marker insertion",
     )
 

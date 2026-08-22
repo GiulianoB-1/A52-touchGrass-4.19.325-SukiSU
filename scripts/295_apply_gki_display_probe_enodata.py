@@ -5,8 +5,10 @@ import argparse
 from pathlib import Path
 
 DISPLAY = Path("drivers/a52_display/msm/dsi/dsi_display.c")
+PANEL = Path("drivers/a52_display/msm/dsi/dsi_panel.c")
 CTRL = Path("drivers/a52_display/msm/dsi/dsi_ctrl.c")
 MARK = "A52_PHASE295_DISPLAY_PROBE_ENODATA_V1"
+PANEL_MARK = "A52_PHASE295_PANEL_GET_ENODATA_R2"
 REC_INCLUDE = "#include <linux/a52_ack_secure_flight_recorder.h>\n"
 
 
@@ -93,7 +95,6 @@ def patch(text: str) -> str:
         "marker insertion",
     )
 
-    # dsi_display_dev_probe -> dsi_display_init boundary.
     old = '''\tplatform_set_drvdata(pdev, display);\n\n\n\t/* initialize display in firmware callback */\n'''
     new = '''\tplatform_set_drvdata(pdev, display);\n\ta52_ackfr_record("P276 295P s=0 i=%d be=%d pn=%d fr=%d",\n\t\tindex, boot_disp->boot_disp_en, !!panel_node, firm_req);\n\n\n\t/* initialize display in firmware callback */\n'''
     text = one(text, old, new, "probe pre-init snapshot")
@@ -102,25 +103,22 @@ def patch(text: str) -> str:
     new = '''\tif (!firm_req) {\n\t\trc = dsi_display_init(display);\n\t\ta52_ackfr_record("P276 295P s=1 rc=%d", rc);\n\t\tif (rc)\n\t\t\tgoto end;\n\t}\n'''
     text = one(text, old, new, "probe init return")
 
-    # dsi_display_init -> _dev_init -> component_add.
     old = '''\tmutex_init(&display->display_lock);\n\n\trc = _dsi_display_dev_init(display);\n\tif (rc) {\n'''
     new = '''\tmutex_init(&display->display_lock);\n\n\ta52_ackfr_record("P276 295I s=0");\n\trc = _dsi_display_dev_init(display);\n\ta52_ackfr_record("P276 295I s=1 rc=%d", rc);\n\tif (rc) {\n'''
     text = one(text, old, new, "display init dev-init return")
 
-    old = '''\trc = component_add(&pdev->dev, &dsi_display_comp_ops);\n\tif (rc)\n\t\tDSI_ERR("component add failed, rc=%d\\n", rc);\n'''
-    new = '''\ta52_ackfr_record("P276 295I s=2");\n\trc = component_add(&pdev->dev, &dsi_display_comp_ops);\n\ta52_ackfr_record("P276 295I s=3 rc=%d", rc);\n\tif (rc)\n\t\tDSI_ERR("component add failed, rc=%d\\n", rc);\n'''
+    old = '''\ta52_ackfr_record("DRMCOMP component-add enter dev=%s display=%s",\n\t\t\t dev_name(&pdev->dev), display->name ? display->name : "-");\n\trc = component_add(&pdev->dev, &dsi_display_comp_ops);\n\ta52_ackfr_record("DRMCOMP component-add exit dev=%s rc=%d",\n\t\t\t dev_name(&pdev->dev), rc);\n\tif (rc)\n\t\tDSI_ERR("component add failed, rc=%d\\n", rc);\n'''
+    new = '''\ta52_ackfr_record("DRMCOMP component-add enter dev=%s display=%s",\n\t\t\t dev_name(&pdev->dev), display->name ? display->name : "-");\n\ta52_ackfr_record("P276 295I s=2");\n\trc = component_add(&pdev->dev, &dsi_display_comp_ops);\n\ta52_ackfr_record("DRMCOMP component-add exit dev=%s rc=%d",\n\t\t\t dev_name(&pdev->dev), rc);\n\ta52_ackfr_record("P276 295I s=3 rc=%d", rc);\n\tif (rc)\n\t\tDSI_ERR("component add failed, rc=%d\\n", rc);\n'''
     text = one(text, old, new, "component add return")
 
-    # _dsi_display_dev_init -> parse_dt -> res_init.
     old = '''\tif (display->fw && display->parser)\n\t\tdisplay->parser_node = dsi_parser_get_head_node(\n\t\t\t\tdisplay->parser, display->fw->data,\n\t\t\t\tdisplay->fw->size);\n\n\trc = dsi_display_parse_dt(display);\n'''
     new = '''\tif (display->fw && display->parser)\n\t\tdisplay->parser_node = dsi_parser_get_head_node(\n\t\t\t\tdisplay->parser, display->fw->data,\n\t\t\t\tdisplay->fw->size);\n\n\ta52_ackfr_record("P276 295D s=0 fw=%d pn=%d", !!display->fw,\n\t\t!!display->panel_node);\n\trc = dsi_display_parse_dt(display);\n\ta52_ackfr_record("P276 295D s=1 rc=%d cc=%d", rc, display->ctrl_count);\n'''
     text = one(text, old, new, "dev-init parse return")
 
-    old = '''\trc = dsi_display_res_init(display);\n\tif (rc) {\n'''
-    new = '''\trc = dsi_display_res_init(display);\n\ta52_ackfr_record("P276 295D s=2 rc=%d", rc);\n\tif (rc) {\n'''
+    old = '''\trc = dsi_display_res_init(display);\n\ta52_ackfr_record("DISP DEV res rc=%d cmd=%u clk=%u", rc,\n\t\tdisplay->cmd_master_idx, display->clk_master_idx);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_display_res_init(display);\n\ta52_ackfr_record("DISP DEV res rc=%d cmd=%u clk=%u", rc,\n\t\tdisplay->cmd_master_idx, display->clk_master_idx);\n\ta52_ackfr_record("P276 295D s=2 rc=%d", rc);\n\tif (rc) {\n'''
     text = one(text, old, new, "dev-init resource return")
 
-    # dsi_display_parse_dt: counts and resolved ctrl/phy handles.
     old = '''\tdisplay->ctrl_count = dsi_display_get_phandle_count(display,\n\t\t\t\t\tdsi_ctrl_name);\n\tphy_count = dsi_display_get_phandle_count(display, dsi_phy_name);\n\n\tDSI_DEBUG("ctrl count=%d, phy count=%d\\n",\n'''
     new = '''\tdisplay->ctrl_count = dsi_display_get_phandle_count(display,\n\t\t\t\t\tdsi_ctrl_name);\n\tphy_count = dsi_display_get_phandle_count(display, dsi_phy_name);\n\ta52_ackfr_record("P276 295T s=0 cc=%d pc=%u",\n\t\tdisplay->ctrl_count, phy_count);\n\n\tDSI_DEBUG("ctrl count=%d, phy count=%d\\n",\n'''
     text = one(text, old, new, "dt count snapshot")
@@ -137,7 +135,6 @@ def patch(text: str) -> str:
     new = '''\tDSI_DEBUG("success\\n");\nerror:\n\ta52_ackfr_record("P276 295T s=3 rc=%d eb=%d", rc,\n\t\tdisplay->ext_bridge_cnt);\n\treturn rc;\n}\n\nstatic int dsi_display_res_init(struct dsi_display *display)\n'''
     text = one(text, old, new, "dt final return")
 
-    # dsi_display_res_init: identify the exact acquisition that propagates rc.
     old = '''\t\tctrl->ctrl = dsi_ctrl_get(ctrl->ctrl_of_node);\n\t\tif (IS_ERR_OR_NULL(ctrl->ctrl)) {\n'''
     new = '''\t\tctrl->ctrl = dsi_ctrl_get(ctrl->ctrl_of_node);\n\t\ta52_ackfr_record("P276 295R s=0 i=%d e=%d", i,\n\t\t\tIS_ERR(ctrl->ctrl) ? (int)PTR_ERR(ctrl->ctrl) :\n\t\t\t(ctrl->ctrl ? 0 : -1));\n\t\tif (IS_ERR_OR_NULL(ctrl->ctrl)) {\n'''
     text = one(text, old, new, "resource controller get")
@@ -162,7 +159,6 @@ def patch(text: str) -> str:
     new = '''\ta52_ackfr_record("P276 295R s=5 rc=0");\n\treturn 0;\nerror_ctrl_put:\n\ta52_ackfr_record("P276 295R s=9 rc=%d i=%d", rc, i);\n\tfor (i = i - 1; i >= 0; i--) {\n'''
     text = one(text, old, new, "resource final return")
 
-    # dsi_display_clocks_init: enough detail if the resource failure is a clk.
     old = '''\tnum_clk = dsi_display_get_clocks_count(display, dsi_clock_name);\n\n\tDSI_DEBUG("clk count=%d\\n", num_clk);\n'''
     new = '''\tnum_clk = dsi_display_get_clocks_count(display, dsi_clock_name);\n\ta52_ackfr_record("P276 295C s=0 n=%d", num_clk);\n\n\tDSI_DEBUG("clk count=%d\\n", num_clk);\n'''
     text = one(text, old, new, "clock count")
@@ -186,6 +182,84 @@ def patch(text: str) -> str:
     return text
 
 
+def verify_panel(text: str) -> None:
+    required = (
+        PANEL_MARK,
+        'P276 295G s=0 pr=%d bp=%d bl=%d br=%d bv=%u',
+        'P276 295G s=1 tp=%d tl=%d tr=%d tv=%u',
+        'P276 295G s=2 host=%d',
+        'P276 295G s=3 mode=%d pm=%d',
+        'P276 295G s=4 phy=%d',
+        'P276 295G s=5 gpio=%d',
+        'P276 295G s=6 modes=%d n=%d',
+        'P276 295G s=7 ok=1',
+        'P276 295G s=9 rc=%d',
+    )
+    for marker in required:
+        if text.count(marker) != 1:
+            raise SystemExit(
+                f"Phase295 panel audit marker count failed: {marker!r}: "
+                f"{text.count(marker)}"
+            )
+    if REC_INCLUDE not in text:
+        raise SystemExit("Phase295 panel recorder include missing")
+
+
+def patch_panel(text: str) -> str:
+    if PANEL_MARK in text:
+        verify_panel(text)
+        return text
+
+    if REC_INCLUDE not in text:
+        raise SystemExit("Phase295 requires inherited dsi_panel recorder include")
+    if 'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_get");' not in text:
+        raise SystemExit("Phase295 requires inherited dsi_panel_get lifecycle scope")
+
+    before_behavior = behavioral_counts(text)
+
+    signature = '''struct dsi_panel *dsi_panel_get(struct device *parent,\n\t\t\t\tstruct device_node *of_node,\n\t\t\t\tstruct device_node *parser_node,\n\t\t\t\tconst char *type,\n\t\t\t\tint topology_override)\n'''
+    helper = '''/* A52_PHASE295_PANEL_GET_ENODATA_R2\n * Passive active-parser witness for the dsi_panel_get() -ENODATA frontier.\n * Reads only parser metadata/properties and records them in the preserved\n * flight recorder. No panel, command, GPIO, regulator, clock or timing state\n * is changed.\n */\nstatic void a52_phase295_probe_parser(struct dsi_parser_utils *utils,\n\t\t\t\t      bool parser_node)\n{\n\tstruct property *prop;\n\tu32 value = 0;\n\tint len = -1;\n\tint rc;\n\n\tprop = utils->find_property(utils->data, "qcom,mdss-dsi-bpp", &len);\n\trc = utils->read_u32(utils->data, "qcom,mdss-dsi-bpp", &value);\n\ta52_ackfr_record("P276 295G s=0 pr=%d bp=%d bl=%d br=%d bv=%u",\n\t\tparser_node, !!prop, len, rc, rc ? 0 : value);\n\n\tprop = NULL;\n\tvalue = 0;\n\tlen = -1;\n\tprop = utils->find_property(utils->data,\n\t\t\t"qcom,mdss-dsi-te-dcs-command", &len);\n\trc = utils->read_u32(utils->data,\n\t\t\t"qcom,mdss-dsi-te-dcs-command", &value);\n\ta52_ackfr_record("P276 295G s=1 tp=%d tl=%d tr=%d tv=%u",\n\t\t!!prop, len, rc, rc ? 0 : value);\n}\n\n'''
+    text = one(text, signature, helper + signature, "panel helper insertion")
+
+    old = '''\tdsi_panel_update_util(panel, parser_node);\n\tutils = &panel->utils;\n\n\tpanel->name = utils->get_property(utils->data,\n'''
+    new = '''\tdsi_panel_update_util(panel, parser_node);\n\tutils = &panel->utils;\n\ta52_phase295_probe_parser(utils, !!parser_node);\n\n\tpanel->name = utils->get_property(utils->data,\n'''
+    text = one(text, old, new, "active parser witness")
+
+    old = '''\trc = dsi_panel_parse_host_config(panel);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_panel_parse_host_config(panel);\n\ta52_ackfr_record("P276 295G s=2 host=%d", rc);\n\tif (rc) {\n'''
+    text = one(text, old, new, "host config return")
+
+    old = '''\trc = dsi_panel_parse_panel_mode(panel);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_panel_parse_panel_mode(panel);\n\ta52_ackfr_record("P276 295G s=3 mode=%d pm=%d", rc, panel->panel_mode);\n\tif (rc) {\n'''
+    text = one(text, old, new, "panel mode return")
+
+    old = '''\trc = dsi_panel_parse_phy_props(panel);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_panel_parse_phy_props(panel);\n\ta52_ackfr_record("P276 295G s=4 phy=%d", rc);\n\tif (rc) {\n'''
+    text = one(text, old, new, "phy props return")
+
+    old = '''\trc = dsi_panel_parse_gpios(panel);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_panel_parse_gpios(panel);\n\ta52_ackfr_record("P276 295G s=5 gpio=%d", rc);\n\tif (rc) {\n'''
+    text = one(text, old, new, "gpio parse return")
+
+    old = '''\trc = dsi_panel_get_mode_count(panel);\n\tif (rc) {\n'''
+    new = '''\trc = dsi_panel_get_mode_count(panel);\n\ta52_ackfr_record("P276 295G s=6 modes=%d n=%d",\n\t\trc, panel->num_display_modes);\n\tif (rc) {\n'''
+    text = one(text, old, new, "mode count return")
+
+    old = '''\tmutex_init(&panel->panel_lock);\n\n\treturn panel;\nerror:\n\tkfree(panel);\n\treturn ERR_PTR(rc);\n}\n'''
+    new = '''\tmutex_init(&panel->panel_lock);\n\n\ta52_ackfr_record("P276 295G s=7 ok=1");\n\treturn panel;\nerror:\n\ta52_ackfr_record("P276 295G s=9 rc=%d", rc);\n\tkfree(panel);\n\treturn ERR_PTR(rc);\n}\n'''
+    text = one(text, old, new, "panel final return")
+
+    after_behavior = behavioral_counts(text)
+    if before_behavior != after_behavior:
+        raise SystemExit(
+            "Phase295 refuses functional panel changes; behavioral token counts changed: "
+            f"before={before_behavior} after={after_behavior}"
+        )
+
+    verify_panel(text)
+    return text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -194,24 +268,36 @@ def main() -> int:
 
     root = args.root.resolve()
     display_path = root / DISPLAY
+    panel_path = root / PANEL
     ctrl_path = root / CTRL
-    if not display_path.is_file() or not ctrl_path.is_file():
+    if (not display_path.is_file() or not panel_path.is_file()
+            or not ctrl_path.is_file()):
         raise SystemExit("Phase295 active A52 display source missing")
+
     ctrl = ctrl_path.read_text(encoding="utf-8", errors="strict")
     if "A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1" not in ctrl:
         raise SystemExit("Phase295 requires reconstructed Phase293 controller source")
 
-    original = display_path.read_text(encoding="utf-8", errors="strict")
+    display_original = display_path.read_text(encoding="utf-8", errors="strict")
+    panel_original = panel_path.read_text(encoding="utf-8", errors="strict")
+
     if args.check_only:
-        verify(original)
-        print("Phase295 passive display-probe ENODATA audit: PASS")
+        verify(display_original)
+        verify_panel(panel_original)
+        print("Phase295 R2 display/panel ENODATA audit: PASS")
         return 0
 
-    patched = patch(original)
-    if patched == original:
-        raise SystemExit("Phase295 patch unexpectedly made no change")
-    display_path.write_text(patched, encoding="utf-8")
-    print("Phase295 passive display-probe ENODATA instrumentation staged")
+    display_patched = patch(display_original)
+    panel_patched = patch_panel(panel_original)
+
+    if display_patched == display_original:
+        raise SystemExit("Phase295 display patch unexpectedly made no change")
+    if panel_patched == panel_original:
+        raise SystemExit("Phase295 panel patch unexpectedly made no change")
+
+    display_path.write_text(display_patched, encoding="utf-8")
+    panel_path.write_text(panel_patched, encoding="utf-8")
+    print("Phase295 R2 display/panel ENODATA instrumentation staged")
     return 0
 
 

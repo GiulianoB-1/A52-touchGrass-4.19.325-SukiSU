@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT="$PWD/gki/common"
 OUT="$PWD/workspace/gki-phase199-out"
 DISPLAY="$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+PANEL="$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c"
 CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
 HW="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
 REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
@@ -13,28 +14,31 @@ fail_report() {
   rm -rf phase295-failure
   mkdir -p phase295-failure/{source,logs,audit}
   cp phase295-compile.log phase295-failure/logs/ 2>/dev/null || true
-  for f in "$DISPLAY" "$CTRL" "$HW" "$REC"; do
+  for f in "$DISPLAY" "$PANEL" "$CTRL" "$HW" "$REC"; do
     [ -f "$f" ] && cp "$f" phase295-failure/source/ || true
   done
   cp scripts/295_apply_gki_display_probe_enodata.py phase295-failure/audit/ 2>/dev/null || true
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
-# Reconstruct the exact successful Phase293 software image first. Phase295 is
-# observation-only and changes only dsi_display.c after that reconstruction.
+# Reconstruct the exact successful Phase293 software image first. Phase295 R2
+# is observation-only and changes only dsi_display.c and dsi_panel.c after
+# that reconstruction.
 bash scripts/293_ci_build.sh
 
 test -s phase293-out/package/boot.img
 test "$(stat -c '%s' phase293-out/package/boot.img)" -eq 100663296
 test -s "$OUT/arch/arm64/boot/Image"
-for f in "$DISPLAY" "$CTRL" "$HW" "$REC"; do test -s "$f"; done
+for f in "$DISPLAY" "$PANEL" "$CTRL" "$HW" "$REC"; do test -s "$f"; done
 
 grep -Fq 'A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1' "$CTRL"
 grep -Fq 'A52_PHASE280_TIMEOUT_RETENTION_LATCH_V1' "$CTRL"
 grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_dev_probe");' "$DISPLAY"
+grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_get");' "$PANEL"
 
 cp "$OUT/.config" /tmp/p295-base.config
 cp "$DISPLAY" /tmp/p295-display-before.c
+cp "$PANEL" /tmp/p295-panel-before.c
 cp "$CTRL" /tmp/p295-ctrl-before.c
 cp "$HW" /tmp/p295-hw-before.c
 cp "$REC" /tmp/p295-rec-before.c
@@ -43,9 +47,11 @@ python3 -m py_compile scripts/295_apply_gki_display_probe_enodata.py
 python3 scripts/295_apply_gki_display_probe_enodata.py --root "$ROOT"
 python3 scripts/295_apply_gki_display_probe_enodata.py --root "$ROOT" --check-only
 
-# Phase295 may modify only dsi_display.c. The Phase293 controller/HW recorder,
-# timeout-retention backend, and kernel config remain byte-for-byte identical.
+# Phase295 R2 may modify only dsi_display.c and dsi_panel.c. The Phase293
+# controller/HW recorder, timeout-retention backend, and kernel config remain
+# byte-for-byte identical.
 ! cmp -s /tmp/p295-display-before.c "$DISPLAY"
+! cmp -s /tmp/p295-panel-before.c "$PANEL"
 cmp -s /tmp/p295-ctrl-before.c "$CTRL"
 cmp -s /tmp/p295-hw-before.c "$HW"
 cmp -s /tmp/p295-rec-before.c "$REC"
@@ -56,7 +62,7 @@ for marker in \
   'A52_PHASE282' \
   'A52_PHASE291_CONT_SPLASH_ZERO_RATE_RECOVERY_V1' \
   'A52_PHASE292_DSI_CHAIN_TAPS_V1'; do
-  if grep -Fq "$marker" "$DISPLAY"; then
+  if grep -Fq "$marker" "$DISPLAY" || grep -Fq "$marker" "$PANEL"; then
     echo "Phase295 refuses unrelated display behavior: $marker" >&2
     exit 1
   fi
@@ -80,12 +86,14 @@ cp "$IMAGE" phase295-out/compile/Image
 cp "$OUT/.config" phase295-out/config/final.config
 cp /tmp/p295-base.config phase295-out/audit/phase293-final.config
 cp /tmp/p295-display-before.c phase295-out/audit/dsi-display-before.c
+cp /tmp/p295-panel-before.c phase295-out/audit/dsi-panel-before.c
 cp /tmp/p295-ctrl-before.c phase295-out/audit/dsi-ctrl-before.c
 cp /tmp/p295-hw-before.c phase295-out/audit/dsi-ctrl-hw-before.c
 cp /tmp/p295-rec-before.c phase295-out/audit/recorder-before.c
 cp phase295-compile.log phase295-out/audit/
 cp scripts/295_apply_gki_display_probe_enodata.py phase295-out/audit/
 cp "$DISPLAY" phase295-out/source/dsi_display.c
+cp "$PANEL" phase295-out/source/dsi_panel.c
 cp "$CTRL" phase295-out/source/dsi_ctrl.c
 cp "$HW" phase295-out/source/dsi_ctrl_hw_cmn.c
 cp "$REC" phase295-out/source/a52_ack_secure_flight_recorder.c
@@ -108,7 +116,8 @@ from pathlib import Path
 out = Path('phase295-out')
 identity = {
     'phase': 295,
-    'name': 'GKI-DISPLAY-PROBE-ENODATA-FRONTIER',
+    'revision': 'R2',
+    'name': 'GKI-PANEL-GET-ENODATA-FRONTIER',
     'git_sha': os.getenv('GITHUB_SHA'),
     'run_id': os.getenv('GITHUB_RUN_ID'),
     'hardware_validated': False,
@@ -140,19 +149,22 @@ identity = {
         '295T': 'parse_dt controller/PHY counts and phandle resolution',
         '295R': 'resource init: dsi_ctrl_get, dsi_phy_get, dsi_panel_get, lane-map and clocks',
         '295C': 'clock count and individual devm_clk_get results',
+        '295G': 'dsi_panel_get active parser property witnesses and fatal parse-stage returns',
     },
-    'hardware_question': 'Which exact dsi_display_dev_probe subcall first produces the preserved -ENODATA before Phase293 can reach the target memory-DMA transaction?',
+    'hardware_question': 'Inside dsi_panel_get, which active-parser property or fatal parse stage first produces the preserved -ENODATA?',
 }
 (out / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
 
 files = [
     'compile/Image', 'config/final.config', 'package/Image.gz', 'package/boot.img',
     'package/repack-report.json', 'audit/phase293-final.config',
-    'audit/dsi-display-before.c', 'audit/dsi-ctrl-before.c',
-    'audit/dsi-ctrl-hw-before.c', 'audit/recorder-before.c',
-    'audit/phase295-compile.log', 'audit/295_apply_gki_display_probe_enodata.py',
-    'source/dsi_display.c', 'source/dsi_ctrl.c', 'source/dsi_ctrl_hw_cmn.c',
-    'source/a52_ack_secure_flight_recorder.c', 'BUILD-IDENTITY.json',
+    'audit/dsi-display-before.c', 'audit/dsi-panel-before.c',
+    'audit/dsi-ctrl-before.c', 'audit/dsi-ctrl-hw-before.c',
+    'audit/recorder-before.c', 'audit/phase295-compile.log',
+    'audit/295_apply_gki_display_probe_enodata.py',
+    'source/dsi_display.c', 'source/dsi_panel.c', 'source/dsi_ctrl.c',
+    'source/dsi_ctrl_hw_cmn.c', 'source/a52_ack_secure_flight_recorder.c',
+    'BUILD-IDENTITY.json',
 ]
 with (out / 'SHA256SUMS').open('w') as handle:
     for name in files:
@@ -165,9 +177,11 @@ python3 - <<'PY'
 from pathlib import Path
 
 root = Path('phase295-out')
-src = (root / 'source/dsi_display.c').read_text()
+display = (root / 'source/dsi_display.c').read_text()
+panel = (root / 'source/dsi_panel.c').read_text()
 img = (root / 'compile/Image').read_bytes()
-required = [
+
+display_required = [
     'A52_PHASE295_DISPLAY_PROBE_ENODATA_V1',
     'P276 295P s=0 i=%d be=%d pn=%d fr=%d',
     'P276 295P s=1 rc=%d',
@@ -185,26 +199,49 @@ required = [
     'P276 295C s=1 i=%d e=%d n=%.24s',
     'P276 295C s=9 rc=%d',
 ]
-for marker in required:
-    if marker not in src:
-        raise SystemExit('Phase295 source marker missing: ' + marker)
-for marker in required[1:]:
+panel_required = [
+    'A52_PHASE295_PANEL_GET_ENODATA_R2',
+    'P276 295G s=0 pr=%d bp=%d bl=%d br=%d bv=%u',
+    'P276 295G s=1 tp=%d tl=%d tr=%d tv=%u',
+    'P276 295G s=2 host=%d',
+    'P276 295G s=3 mode=%d pm=%d',
+    'P276 295G s=4 phy=%d',
+    'P276 295G s=5 gpio=%d',
+    'P276 295G s=6 modes=%d n=%d',
+    'P276 295G s=7 ok=1',
+    'P276 295G s=9 rc=%d',
+]
+
+for marker in display_required:
+    if marker not in display:
+        raise SystemExit('Phase295 display source marker missing: ' + marker)
+for marker in panel_required:
+    if marker not in panel:
+        raise SystemExit('Phase295 panel source marker missing: ' + marker)
+for marker in display_required[1:] + panel_required[1:]:
     if marker.encode() not in img:
         raise SystemExit('Phase295 runtime marker missing from Image: ' + marker)
 
-before = (root / 'audit/dsi-display-before.c').read_text()
 behavior = [
     'DSI_W32(', 'writel(', 'writel_relaxed(', 'clk_set_rate(',
     'wait_for_completion', 'msleep(', 'usleep_range(', 'udelay(',
     'gpio_set_value(', 'dsi_ctrl_cmd_transfer(', 'dsi_panel_tx_cmd_set(',
 ]
-for token in behavior:
-    if before.count(token) != src.count(token):
-        raise SystemExit(f'Phase295 functional token changed: {token}: {before.count(token)} -> {src.count(token)}')
-print('Phase295 compiled passive ENODATA frontier audit: PASS')
+for before_name, after_text, label in [
+    ('audit/dsi-display-before.c', display, 'display'),
+    ('audit/dsi-panel-before.c', panel, 'panel'),
+]:
+    before = (root / before_name).read_text()
+    for token in behavior:
+        if before.count(token) != after_text.count(token):
+            raise SystemExit(
+                f'Phase295 functional {label} token changed: {token}: '
+                f'{before.count(token)} -> {after_text.count(token)}'
+            )
+print('Phase295 R2 compiled passive panel-get ENODATA frontier audit: PASS')
 PY
 
 python3 scripts/295_apply_gki_display_probe_enodata.py --root "$ROOT" --check-only
 
 trap - EXIT
-echo 'Phase295 passive display-probe ENODATA build/repack: PASS'
+echo 'Phase295 R2 passive panel-get ENODATA build/repack: PASS'

@@ -232,9 +232,9 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
 {
 \tif (a52_p301_disp_rsc(drv))
 \t\ta52_ackfr_record("P276 301I s=%u w=%u use=%u",
-\t\t\tbitmap_weight(drv->tcs[SLEEP_TCS].slots, MAX_TCS_SLOTS),
-\t\t\tbitmap_weight(drv->tcs[WAKE_TCS].slots, MAX_TCS_SLOTS),
-\t\t\tbitmap_weight(drv->tcs_in_use, MAX_TCS_NR));
+\t\t\t(unsigned int)bitmap_weight(drv->tcs[SLEEP_TCS].slots, MAX_TCS_SLOTS),
+\t\t\t(unsigned int)bitmap_weight(drv->tcs[WAKE_TCS].slots, MAX_TCS_SLOTS),
+\t\t\t(unsigned int)bitmap_weight(drv->tcs_in_use, MAX_TCS_NR));
 \ttcs_invalidate(drv, SLEEP_TCS);
 \ttcs_invalidate(drv, WAKE_TCS);
 }
@@ -254,8 +254,8 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
 \tif (a52_p301_disp_rsc(drv))
 \t\ta52_ackfr_record("P276 301R e st=%d ty=%d n=%d off=%d use=%u ws=%u irq=%d",
 \t\t\tmsg->state, tcs->type, tcs->num_tcs, tcs->offset,
-\t\t\tbitmap_weight(drv->tcs_in_use, MAX_TCS_NR),
-\t\t\tbitmap_weight(drv->tcs[WAKE_TCS].slots, MAX_TCS_SLOTS),
+\t\t\t(unsigned int)bitmap_weight(drv->tcs_in_use, MAX_TCS_NR),
+\t\t\t(unsigned int)bitmap_weight(drv->tcs[WAKE_TCS].slots, MAX_TCS_SLOTS),
 \t\t\tirqs_disabled());
 
 \tspin_lock_irq(&drv->lock);
@@ -265,11 +265,7 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
     old_claim = '''\ttcs->req[tcs_id - tcs->offset] = msg;
 \tset_bit(tcs_id, drv->tcs_in_use);
 '''
-    new_claim = '''\tif (a52_p301_disp_rsc(drv))
-\t\ta52_ackfr_record("P276 301R c id=%d ty=%d", tcs_id, tcs->type);
-\ttcs->req[tcs_id - tcs->offset] = msg;
-\tset_bit(tcs_id, drv->tcs_in_use);
-'''
+    new_claim = old_claim
     text = one(text, old_claim, new_claim, 'rsc send claim')
 
     old_trigger = '''\t__tcs_buffer_write(drv, tcs_id, 0, msg);
@@ -278,7 +274,9 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
 \treturn 0;
 }
 '''
-    new_trigger = '''\t__tcs_buffer_write(drv, tcs_id, 0, msg);
+    new_trigger = '''\tif (a52_p301_disp_rsc(drv))
+\t\ta52_ackfr_record("P276 301R c id=%d ty=%d", tcs_id, tcs->type);
+\t__tcs_buffer_write(drv, tcs_id, 0, msg);
 \t__tcs_set_trigger(drv, tcs_id, true);
 \tif (a52_p301_disp_rsc(drv))
 \t\ta52_ackfr_record("P276 301R x id=%d ty=%d", tcs_id, tcs->type);
@@ -299,7 +297,7 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
     new_ctrl = '''\tif (a52_p301_disp_rsc(drv))
 \t\ta52_ackfr_record("P276 301C e st=%d ty=%d n=%d slots=%u",
 \t\t\tmsg->state, tcs->type, msg->num_cmds,
-\t\t\tbitmap_weight(tcs->slots, MAX_TCS_SLOTS));
+\t\t\t(unsigned int)bitmap_weight(tcs->slots, MAX_TCS_SLOTS));
 \t/* find the TCS id and the command in the TCS to write to */
 \tret = find_slots(tcs, msg, &tcs_id, &cmd_id);
 \tif (!ret)
@@ -307,7 +305,7 @@ static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
 \tif (a52_p301_disp_rsc(drv))
 \t\ta52_ackfr_record("P276 301C x r=%d id=%d cmd=%d slots=%u",
 \t\t\tret, tcs_id, cmd_id,
-\t\t\tbitmap_weight(tcs->slots, MAX_TCS_SLOTS));
+\t\t\t(unsigned int)bitmap_weight(tcs->slots, MAX_TCS_SLOTS));
 
 \treturn ret;
 }

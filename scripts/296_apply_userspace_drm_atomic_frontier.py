@@ -10,7 +10,7 @@ DRV = Path('drivers/a52_display/msm/msm_drv.c')
 ATOMIC = Path('drivers/a52_display/msm/msm_atomic.c')
 KMS = Path('drivers/a52_display/msm/sde/sde_kms.c')
 REC = Path('drivers/a52_secure/a52_ack_secure_flight_recorder.c')
-MARK = 'A52_PHASE296_USERSPACE_DRM_ATOMIC_FRONTIER_V2'
+MARK = 'A52_PHASE296_USERSPACE_DRM_ATOMIC_FRONTIER_V3'
 REC_INCLUDE = '#include <linux/a52_ack_secure_flight_recorder.h>\n'
 
 
@@ -122,14 +122,15 @@ def patch_atomic(text: str) -> str:
     if REC_INCLUDE not in text:
         text = ensure_include(text, REC_INCLUDE, '#include "sde_trace.h"\n', 'msm_atomic recorder')
 
-    text = inject_function_entry(
-        text, 'msm_atomic_commit',
-        'a52_ackfr_record("P276 296C e n=%d", nonblock);',
-    )
-    text = inject_function_entry(
-        text, 'complete_commit',
-        'a52_ackfr_record("P276 296W e");',
-    )
+    # Kernel sources are compiled with -Wdeclaration-after-statement. Place
+    # entry records after each function's declaration block.
+    complete_decl_end = '''#endif\n\n\tA52_R210_REC(c, "complete enter");\n'''
+    complete_decl_end_new = '''#endif\n\n\ta52_ackfr_record("P276 296W e");\n\tA52_R210_REC(c, "complete enter");\n'''
+    text = one(text, complete_decl_end, complete_decl_end_new, 'complete_commit post-declarations')
+
+    commit_decl_end = '''#endif\n\n\ta52_trace_index = atomic_inc_return(&a52_r210_commit_sequence);\n'''
+    commit_decl_end_new = '''#endif\n\n\ta52_ackfr_record("P276 296C e n=%d", nonblock);\n\ta52_trace_index = atomic_inc_return(&a52_r210_commit_sequence);\n'''
+    text = one(text, commit_decl_end, commit_decl_end_new, 'msm_atomic_commit post-declarations')
 
     prepare_err = '''\tif (ret) {\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n\n\tc = commit_init(state, nonblock);\n'''
     prepare_err_new = '''\tif (ret) {\n\t\ta52_ackfr_record("P276 296C x r=%d q=1", ret);\n\t\tSDE_ATRACE_END("atomic_commit");\n\t\treturn ret;\n\t}\n\n\tc = commit_init(state, nonblock);\n'''
@@ -154,9 +155,26 @@ def patch_kms(text: str) -> str:
     before = behavior_counts(text)
     if REC_INCLUDE not in text:
         text = ensure_include(text, REC_INCLUDE, '#include "sde_trace.h"\n', 'sde_kms recorder')
-    text = inject_function_entry(text, 'sde_kms_prepare_commit', 'a52_ackfr_record("P276 296K p");')
-    text = inject_function_entry(text, 'sde_kms_commit', 'a52_ackfr_record("P276 296K c");')
-    text = inject_function_entry(text, 'sde_kms_complete_commit', 'a52_ackfr_record("P276 296K x");')
+    # A52_ACKFR_SCOPE expands to a declaration, so all executable records must
+    # come after it and the function's ordinary declarations.
+    text = one(
+        text,
+        '\tint i, rc;\n\n\tif (!kms)\n',
+        '\tint i, rc;\n\n\ta52_ackfr_record("P276 296K p");\n\tif (!kms)\n',
+        'sde_kms_prepare_commit post-declarations',
+    )
+    text = one(
+        text,
+        '\tint i;\n\n\tif (!kms || !old_state)\n',
+        '\tint i;\n\n\ta52_ackfr_record("P276 296K c");\n\tif (!kms || !old_state)\n',
+        'sde_kms_commit post-declarations',
+    )
+    text = one(
+        text,
+        '\tint i, rc = 0;\n\n\tif (!kms || !old_state)\n',
+        '\tint i, rc = 0;\n\n\ta52_ackfr_record("P276 296K x");\n\tif (!kms || !old_state)\n',
+        'sde_kms_complete_commit post-declarations',
+    )
     if behavior_counts(text) != before:
         raise SystemExit('Phase296 sde_kms hardware-affecting token count changed')
     return text
@@ -193,7 +211,7 @@ def verify(root: Path) -> dict:
     if 'return !strncmp(message, "P276 ", 5)' not in rec or 'strncmp(fmt, "P276", 4)' not in rec:
         raise SystemExit('Phase296 inherited P276 critical/admission contract missing')
     return {
-        'status': 'phase296-userspace-drm-atomic-frontier-v2-staged',
+        'status': 'phase296-userspace-drm-atomic-frontier-v3-staged',
         'functional_change': 'instrumentation-only-with-delayed-diagnostic-summary',
         'targets': [str(p) for p in files],
         'marker_count': sum(len(v) for v in required.values()),

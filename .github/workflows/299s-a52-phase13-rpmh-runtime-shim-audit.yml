@@ -30,6 +30,7 @@ env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
 
 jobs:
   audit:

@@ -12,6 +12,15 @@ on:
       - tests/qemu/phase297_trace_init.c
       - scripts/296_apply_userspace_drm_atomic_frontier.py
       - scripts/296_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase296-userspace-drm-atomic-frontier-v1
+    paths:
+      - .github/workflows/297-a52-phase296-qemu-trace-lab.yml
+      - scripts/297_qemu_trace_lab.sh
+      - tests/qemu/phase297_trace_init.c
+      - scripts/296_apply_userspace_drm_atomic_frontier.py
+      - scripts/296_ci_build.sh
 
 permissions:
   contents: read

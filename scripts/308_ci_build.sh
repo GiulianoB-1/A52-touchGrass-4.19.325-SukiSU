@@ -29,7 +29,6 @@ fail_report() {
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
-# Reconstruct the exact Phase307 observer base and preserve its tested F0 target.
 bash scripts/307_ci_build.sh
 
 test -s phase307-gki-out/package/boot.img
@@ -40,10 +39,12 @@ for f in "$PHY" "$PHYV3" "$TGPHYV3"; do test -s "$f"; done
 grep -Fq 'A52_PHASE307_V3_PHY_CLOCKLANE_CORRELATION_V1' "$PHY"
 grep -Fq 'P276 307P0 q=%u v=%u p=%u s=%u %x %x %x %x' "$PHY"
 
-PLLDRV="$(find_one "$ROOT" mdss-pll.c)"
-PLL10="$(find_one "$ROOT" mdss-dsi-pll-10nm.c)"
-TGPLLDRV="$(find_one "$TG" mdss-pll.c)"
-TGPLL10="$(find_one "$TG" mdss-dsi-pll-10nm.c)"
+PLLDRV="$(find_one "$ROOT" pll_drv.c)"
+PLL10="$(find_one "$ROOT" dsi_pll_10nm.c)"
+PLLUTIL="$(find_one "$ROOT" pll_util.c)"
+TGPLLDRV="$(find_one "$TG" pll_drv.c)"
+TGPLL10="$(find_one "$TG" dsi_pll_10nm.c)"
+TGPLLUTIL="$(find_one "$TG" pll_util.c)"
 
 # Gate every hard-coded Phase308 register offset against the actual sources.
 grep -Eq '^#define[[:space:]]+DSIPHY_LNX_TX_DCTRL\(n\)[[:space:]]+\(0x22C[[:space:]]+\+[[:space:]]+\(0x80[[:space:]]+\*[[:space:]]+\(n\)\)\)' "$PHYV3"
@@ -57,17 +58,21 @@ grep -Fq '((status & BIT(0)) > 0)' "$PLL10"
 
 # Static provider provenance. Evidence only, not a parity build gate.
 {
-  echo "gki_mdss_pll=$PLLDRV"
-  echo "golden_mdss_pll=$TGPLLDRV"
-  echo "gki_10nm=$PLL10"
-  echo "golden_10nm=$TGPLL10"
+  echo "gki_pll_drv=$PLLDRV"
+  echo "golden_pll_drv=$TGPLLDRV"
+  echo "gki_dsi_pll_10nm=$PLL10"
+  echo "golden_dsi_pll_10nm=$TGPLL10"
+  echo "gki_pll_util=$PLLUTIL"
+  echo "golden_pll_util=$TGPLLUTIL"
 } > /tmp/p308-pll-paths.txt
-sha256sum "$PLLDRV" "$TGPLLDRV" "$PLL10" "$TGPLL10" > /tmp/p308-pll-source.sha256
-diff -u "$TGPLLDRV" "$PLLDRV" > /tmp/p308-mdss-pll.diff || true
-diff -u "$TGPLL10" "$PLL10" > /tmp/p308-10nm-pll.diff || true
+sha256sum "$PLLDRV" "$TGPLLDRV" "$PLL10" "$TGPLL10" "$PLLUTIL" "$TGPLLUTIL" > /tmp/p308-pll-source.sha256
+diff -u "$TGPLLDRV" "$PLLDRV" > /tmp/p308-pll-drv.diff || true
+diff -u "$TGPLL10" "$PLL10" > /tmp/p308-dsi-pll-10nm.diff || true
+diff -u "$TGPLLUTIL" "$PLLUTIL" > /tmp/p308-pll-util.diff || true
 {
-  if cmp -s "$TGPLLDRV" "$PLLDRV"; then echo 'mdss_pll_byte_identical=true'; else echo 'mdss_pll_byte_identical=false'; fi
+  if cmp -s "$TGPLLDRV" "$PLLDRV"; then echo 'pll_drv_byte_identical=true'; else echo 'pll_drv_byte_identical=false'; fi
   if cmp -s "$TGPLL10" "$PLL10"; then echo 'dsi_pll_10nm_byte_identical=true'; else echo 'dsi_pll_10nm_byte_identical=false'; fi
+  if cmp -s "$TGPLLUTIL" "$PLLUTIL"; then echo 'pll_util_byte_identical=true'; else echo 'pll_util_byte_identical=false'; fi
 } > /tmp/p308-pll-source-summary.txt
 
 cp phase307-gki-out/config/final.config /tmp/p308-phase307.config
@@ -107,7 +112,6 @@ for before, after in pairs:
 print('Phase308 observer-only hardware primitive audit: PASS')
 PY
 
-# The actual v3 programming and 10-nm PLL implementation remain byte untouched.
 cmp -s /tmp/p308-phyv3-before.c "$PHYV3"
 cmp -s /tmp/p308-pll10-before.c "$PLL10"
 
@@ -151,8 +155,9 @@ cp scripts/308_apply_pll_lock_clamp_observer.py "$OUT/audit/"
 cp /tmp/p308-* "$OUT/audit/" 2>/dev/null || true
 cp "$PHY" "$OUT/source/dsi_phy.c"
 cp "$PHYV3" "$OUT/source/dsi_phy_hw_v3_0.c"
-cp "$PLLDRV" "$OUT/source/mdss-pll.c"
-cp "$PLL10" "$OUT/source/mdss-dsi-pll-10nm.c"
+cp "$PLLDRV" "$OUT/source/pll_drv.c"
+cp "$PLL10" "$OUT/source/dsi_pll_10nm.c"
+cp "$PLLUTIL" "$OUT/source/pll_util.c"
 
 gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
 python3 scripts/38_repack_a52_p1_boot.py \
@@ -188,8 +193,9 @@ identity = {
   'pll_provider_state': ['pll_on','handoff_resources','resource_enable','resource_ref_cnt','vco_current_rate','vco_cached_rate','cached_cfg0','cached_cfg1','cached_outdiv'],
   'pll_physical_state': ['COMMON_STATUS_ONE','SYSTEM_MUXES','PLL_OUTDIV_RATE','PHY_CMN_CLK_CFG0','PHY_CMN_CLK_CFG1','PHY_CMN_RBUF_CTRL'],
   'clamp_observer': 'TX_DCTRL0..4 immediately before and after existing dsi_phy_set_clamp_state clamp_ctrl callback',
-  'mdss_pll_source_byte_identical_to_golden': summary.get('mdss_pll_byte_identical'),
+  'pll_drv_source_byte_identical_to_golden': summary.get('pll_drv_byte_identical'),
   'dsi_pll_10nm_source_byte_identical_to_golden': summary.get('dsi_pll_10nm_byte_identical'),
+  'pll_util_source_byte_identical_to_golden': summary.get('pll_util_byte_identical'),
   'mmio_writes_added': False,
   'delay_or_timeout_changes_added': False,
   'clock_or_regulator_changes_added': False,

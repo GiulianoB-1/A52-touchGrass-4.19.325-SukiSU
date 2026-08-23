@@ -111,6 +111,7 @@ def patch_ctrl(text: str) -> str:
 /* A52_PHASE307_GOLDEN_V3_PHY_CLOCKLANE_REFERENCE_V1 */
 static atomic_t a52_g307_state = ATOMIC_INIT(0);
 extern void a52_g307_phy_snapshot(unsigned int index, unsigned int point);
+extern void a52_g307_hw_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point);
 
 bool a52_g307_trace_active(void)
 {
@@ -148,7 +149,7 @@ static void a52_g307_try_arm(struct dsi_ctrl *ctrl,
     text = repl(text, old_arm, new_arm, 'exact target arm')
 
     old_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
-    new_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (a52_g307_armed(dsi_ctrl)) {\n\t\tpr_info("TG307 C q=2 st=%x ln=%x ck=%x cc=%x in=%x ret=%d irq=%d\\n",\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_LANE_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_CTRL),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL), ret,\n\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t\ta52_g307_phy_snapshot(dsi_ctrl->cell_index, 2);\n\t}\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
+    new_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (a52_g307_armed(dsi_ctrl)) {\n\t\ta52_g307_hw_snapshot(&dsi_ctrl->hw, 2);\n\t\tpr_info("TG307 C q=2 ret=%d irq=%d\\n", ret,\n\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t}\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
     return repl(text, old_wait, new_wait, 'q2 completion snapshot')
 
 
@@ -161,7 +162,8 @@ def patch_hw(text: str) -> str:
 /* A52_PHASE307_GOLDEN_V3_PHY_CLOCKLANE_REFERENCE_V1 */
 extern bool a52_g307_trace_active(void);
 extern void a52_g307_phy_snapshot(unsigned int index, unsigned int point);
-static void a52_g307_hw_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
+void a52_g307_hw_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point);
+void a52_g307_hw_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 {
 	if (!a52_g307_trace_active() || !ctrl || !ctrl->base)
 		return;

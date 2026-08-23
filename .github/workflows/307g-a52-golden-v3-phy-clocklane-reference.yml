@@ -25,6 +25,10 @@ concurrency:
 env:
   BOOT_SOURCE_ASSET_ID: '478920392'
   BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+  GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+  CCACHE_MAXSIZE: 5G
 
 jobs:
   build:
@@ -45,33 +49,54 @@ jobs:
           python3 -m py_compile scripts/307g_apply_golden_v3_phy_clocklane_reference.py
           bash -n scripts/307g_ci_build.sh
 
+      - name: Create exact proven Golden-control workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- \
+            --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+          test -s golden-work/scripts/golden_touchgrass_clock_reference_build.sh
+          test -s golden-work/scripts/04_apply_linux_4.19.154.sh
+          test -s golden-work/scripts/checkpoint_resolve_linux_4.19.200.sh
+          cp scripts/307g_apply_golden_v3_phy_clocklane_reference.py golden-work/scripts/
+          cp scripts/307g_ci_build.sh golden-work/scripts/
+          python3 -m py_compile golden-work/scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+          bash -n golden-work/scripts/307g_ci_build.sh
+
       - name: Hydrate known-good Golden FDR repack helpers
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          mkdir -p scripts projects/a52-p1-boot-image
+          mkdir -p golden-work/scripts golden-work/projects/a52-p1-boot-image
           fetch_file() {
-            local ref="$1" path="$2"
-            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq '.content' | tr -d '\n' | base64 --decode > "$path"
-            test -s "$path"
+            local ref="$1" path="$2" out="golden-work/$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$out"
+            test -s "$out"
           }
           fetch_file main scripts/37_validate_a52_p1_boot_source.py
           fetch_file main scripts/38_repack_a52_p1_boot.py
           fetch_file main projects/a52-p1-boot-image/boot-source.lock
-          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+          chmod +x golden-work/scripts/37_validate_a52_p1_boot_source.py \
+            golden-work/scripts/38_repack_a52_p1_boot.py
 
       - name: Restore compiler cache
         uses: actions/cache@v4
         with:
-          path: .ccache
+          path: golden-work/.ccache
           key: a52xq-phase307-golden-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             a52xq-linux-4.19.200-ccache-${{ runner.os }}-
             a52xq-linux-4.19.180-ccache-${{ runner.os }}-
 
       - name: Reconstruct and build Golden observer
-        run: bash scripts/307g_ci_build.sh
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          bash scripts/307g_ci_build.sh
 
       - name: Repack with known-good Golden FDR boot container
         if: success()
@@ -79,6 +104,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+          cd golden-work
           OUT=phase307-golden-out
           mkdir -p intake "$OUT/package"
           gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
@@ -95,15 +121,17 @@ jobs:
             --source intake/boot.img --kernel "$OUT/package/Image.gz" \
             --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
           test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
-          sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' "$OUT/BUILD-IDENTITY.txt"
-          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' \
+            "$OUT/BUILD-IDENTITY.txt"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS)
 
       - name: Upload Golden evidence
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-Phase307-GOLDEN-TOUCHGRASS-V3-PHY-CLOCKLANE-${{ github.run_number }}-BOOT-IMG
-          path: phase307-golden-out/
+          path: golden-work/phase307-golden-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
@@ -113,6 +141,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-Phase307-GOLDEN-V3-PHY-CLOCKLANE-${{ github.run_number }}-FAILED
-          path: phase307-golden-failure/
+          path: golden-work/phase307-golden-failure/
           if-no-files-found: warn
           retention-days: 30

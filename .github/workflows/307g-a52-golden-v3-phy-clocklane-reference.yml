@@ -1,0 +1,118 @@
+name: 307G - A52 Golden TouchGrass v3 PHY clock-lane reference
+run-name: Phase 307G - known-good TouchGrass exact F05A5A v3 PHY observer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase307-golden-gki-v3-phy-clocklane-correlation-v1
+    paths:
+      - .github/workflows/307g-a52-golden-v3-phy-clocklane-reference.yml
+      - scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+      - scripts/307g_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase296-userspace-drm-atomic-frontier-v1
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase307-golden-v3-phy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  build:
+    name: Build and repack known-good TouchGrass observer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - name: Check out Phase307 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+          bash -n scripts/307g_ci_build.sh
+
+      - name: Hydrate known-good Golden FDR repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1" path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-phase307-golden-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.180-ccache-${{ runner.os }}-
+
+      - name: Reconstruct and build Golden observer
+        run: bash scripts/307g_ci_build.sh
+
+      - name: Repack with known-good Golden FDR boot container
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          OUT=phase307-golden-out
+          mkdir -p intake "$OUT/package"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
+          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' "$OUT/BUILD-IDENTITY.txt"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+
+      - name: Upload Golden evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase307-GOLDEN-TOUCHGRASS-V3-PHY-CLOCKLANE-${{ github.run_number }}-BOOT-IMG
+          path: phase307-golden-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase307-GOLDEN-V3-PHY-CLOCKLANE-${{ github.run_number }}-FAILED
+          path: phase307-golden-failure/
+          if-no-files-found: warn
+          retention-days: 30

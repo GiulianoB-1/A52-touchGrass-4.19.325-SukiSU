@@ -18,6 +18,9 @@ on:
       - scripts/304_ci_build.sh
       - scripts/301_apply_rpmh_rsc_contract_trace.py
       - scripts/301_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase307-golden-gki-v3-phy-clocklane-correlation-v1
 
 permissions:
   contents: read

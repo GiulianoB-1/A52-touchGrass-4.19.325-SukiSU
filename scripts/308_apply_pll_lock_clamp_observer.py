@@ -139,7 +139,7 @@ def patch_pll(text: str) -> str:
     )
 
     anchor = "static int mdss_pll_probe(struct platform_device *pdev)\n"
-    helper = r'''/* A52_PHASE308_PLL_LOCK_CLAMP_OBSERVER_V1
+    helper = '''/* A52_PHASE308_PLL_LOCK_CLAMP_OBSERVER_V1
  * Recorder-only view of the already-mapped MDSS DSI 10-nm PLL provider.
  * PLL_COMMON_STATUS_ONE bit0 is the provider's own lock criterion.
  */
@@ -196,7 +196,7 @@ void a52_p308_pll_snapshot(unsigned int index, unsigned int point)
     ret = text.find("\n\treturn rc;", pos)
     if ret < 0:
         raise SystemExit("Phase308 PLL probe success return missing")
-    registration = r'''
+    registration = '''
 \tif (pll_res->pll_interface_type == MDSS_DSI_PLL_10NM &&
 \t    pll_res->index < A52_P308_PLL_MAX) {
 \t\tWRITE_ONCE(a52_p308_pll_res[pll_res->index], pll_res);

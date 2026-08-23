@@ -17,13 +17,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def find_pll_driver(root: Path) -> Path:
-    preferred = root / "drivers/clk/qcom/mdss/mdss-pll.c"
+    preferred = root / "drivers/a52_display/pll/pll_drv.c"
     if preferred.is_file():
         return preferred
-    matches = [p for p in root.rglob("mdss-pll.c") if "drivers" in p.parts]
+    matches = [p for p in root.rglob("pll_drv.c") if "drivers" in p.parts]
     if len(matches) != 1:
         raise SystemExit(
-            "Phase308 could not uniquely locate mdss-pll.c: "
+            "Phase308 could not uniquely locate pll_drv.c: "
             + ", ".join(str(p) for p in matches)
         )
     return matches[0]
@@ -129,9 +129,9 @@ def patch_pll(text: str) -> str:
     if "struct mdss_pll_resources" not in text or "mdss_pll_probe" not in text:
         raise SystemExit("Phase308 PLL driver shape not recognized")
 
-    inc = '#include "mdss-pll.h"\n'
+    inc = '#include "pll_drv.h"\n'
     if inc not in text:
-        raise SystemExit("Phase308 mdss-pll.h include anchor missing")
+        raise SystemExit("Phase308 pll_drv.h include anchor missing")
     text = text.replace(
         inc,
         inc + '#include <linux/a52_ack_secure_flight_recorder.h>\n',

@@ -148,7 +148,7 @@ static void a52_g307_try_arm(struct dsi_ctrl *ctrl,
     text = repl(text, old_arm, new_arm, 'exact target arm')
 
     old_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
-    new_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (a52_g307_armed(dsi_ctrl)) {\n\t\tpr_info("TG307 C q=2 st=%x ln=%x ck=%x cc=%x in=%x ret=%d irq=%d\n",\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_LANE_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_CTRL),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL), ret,\n\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t\ta52_g307_phy_snapshot(dsi_ctrl->cell_index, 2);\n\t}\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
+    new_wait = '''\tret = wait_for_completion_timeout(\n\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n\tif (a52_g307_armed(dsi_ctrl)) {\n\t\tpr_info("TG307 C q=2 st=%x ln=%x ck=%x cc=%x in=%x ret=%d irq=%d\\n",\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_LANE_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_STATUS),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_CLK_CTRL),\n\t\t\tDSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL), ret,\n\t\t\tatomic_read(&dsi_ctrl->dma_irq_trig));\n\t\ta52_g307_phy_snapshot(dsi_ctrl->cell_index, 2);\n\t}\n\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n'''
     return repl(text, old_wait, new_wait, 'q2 completion snapshot')
 
 

@@ -1,0 +1,158 @@
+name: 308G - A52 Golden TouchGrass PLL lock and clamp reference
+run-name: Phase 308G - known-good TouchGrass PLL lock handoff and clamp reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase308g-golden-pll-lock-clamp-reference-v1
+    paths:
+      - .github/workflows/308g-a52-golden-pll-lock-clamp-reference.yml
+      - scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+      - scripts/308g_apply_golden_pll_lock_clamp_reference.py
+      - scripts/308g_ci_build.sh
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase308g-golden-pll-clamp-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+  GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  build:
+    name: Build matched known-good TouchGrass PLL/clamp observer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - name: Check out Phase308G branch
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+          python3 -m py_compile scripts/308g_apply_golden_pll_lock_clamp_reference.py
+          bash -n scripts/308g_ci_build.sh
+
+      - name: Create exact proven Golden-control workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- \
+            --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+          test -s golden-work/scripts/golden_touchgrass_clock_reference_build.sh
+          test -s golden-work/scripts/04_apply_linux_4.19.154.sh
+          test -s golden-work/scripts/checkpoint_resolve_linux_4.19.200.sh
+          cp scripts/307g_apply_golden_v3_phy_clocklane_reference.py golden-work/scripts/
+          cp scripts/308g_apply_golden_pll_lock_clamp_reference.py golden-work/scripts/
+          cp scripts/308g_ci_build.sh golden-work/scripts/
+          python3 -m py_compile golden-work/scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+          python3 -m py_compile golden-work/scripts/308g_apply_golden_pll_lock_clamp_reference.py
+          bash -n golden-work/scripts/308g_ci_build.sh
+
+      - name: Hydrate known-good Golden FDR repack helpers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p golden-work/scripts golden-work/projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1" path="$2" out="golden-work/$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$out"
+            test -s "$out"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x golden-work/scripts/37_validate_a52_p1_boot_source.py \
+            golden-work/scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase308g-golden-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase307-golden-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+            a52xq-linux-4.19.180-ccache-${{ runner.os }}-
+
+      - name: Reconstruct and build Golden Phase308G observer
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          bash scripts/308g_ci_build.sh
+
+      - name: Repack with known-good Golden FDR boot container
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          OUT=phase308g-golden-out
+          mkdir -p intake "$OUT/package"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
+          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' \
+            "$OUT/BUILD-IDENTITY.txt"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS)
+
+      - name: Upload Golden evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase308G-GOLDEN-TOUCHGRASS-PLL-LOCK-CLAMP-${{ github.run_number }}-EVIDENCE
+          path: golden-work/phase308g-golden-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Golden boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase308G-GOLDEN-TOUCHGRASS-PLL-LOCK-CLAMP-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase308g-golden-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase308G-GOLDEN-PLL-LOCK-CLAMP-${{ github.run_number }}-FAILED
+          path: golden-work/phase308g-golden-failure/
+          if-no-files-found: warn
+          retention-days: 30

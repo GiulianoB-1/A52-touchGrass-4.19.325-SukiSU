@@ -8,7 +8,6 @@ from pathlib import Path
 DISP_REL = Path('drivers/clk/qcom/dispcc-lagoon.c')
 PHY_REL = Path('drivers/a52_display/msm/dsi/dsi_phy.c')
 MARK = 'A52_PHASE310_GKI_LAGOON_DISPCC_SNAPSHOT_V1'
-P310 = 'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2'
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -84,9 +83,6 @@ def patch_disp(text: str) -> str:
     if '#include <linux/regmap.h>\n' not in text:
         raise SystemExit('Phase310 DISP_CC regmap include missing')
 
-    # The imported 5.10 Lagoon driver already carries the persistent recorder
-    # declaration from the existing diagnostic lineage. Anchor the helper to
-    # that real source shape rather than the newer downstream vdd header shape.
     anchor = 'extern void a52_ackfr_record(const char *fmt, ...);\n\n'
     if anchor not in text:
         raise SystemExit('Phase310 DISP_CC recorder declaration anchor missing')
@@ -149,8 +145,9 @@ EXPORT_SYMBOL_GPL(a52_p310_dispcc_snapshot);
 def patch_phy(text: str) -> str:
     if MARK in text:
         return text
-    if P310 not in text:
-        raise SystemExit('Phase310 DISP_CC requires consolidated Phase310 observer first')
+    if ('extern void a52_p310_clk_snapshot(unsigned int index, unsigned int point);' not in text or
+            'extern void a52_p310_pll_lifecycle_snapshot(unsigned int index, unsigned int point);' not in text):
+        raise SystemExit('Phase310 DISP_CC requires consolidated Phase310 PHY hooks first')
 
     old = ('extern void a52_p310_clk_snapshot(unsigned int index, unsigned int point);\n'
            'extern void a52_p310_pll_lifecycle_snapshot(unsigned int index, unsigned int point);\n\n')
@@ -183,8 +180,9 @@ def validate(disp: str, phy: str) -> None:
         'P276 310G q=%u pc=%x pf=%x bc=%x bf=%x ec=%x ef=%x',
         'P276 310DR p=1',
         'regmap_read(regmap, A52_P310_DISP_BYTE0_BRANCH, &b)',
+        'a52_p310_clk_snapshot(index, point);',
         'a52_p310_dispcc_snapshot(point);',
-        P310,
+        'a52_p310_pll_lifecycle_snapshot(index, point);',
     ]
     for token in required:
         if token not in combined:

@@ -1,5 +1,5 @@
-name: 310 - A52 GKI sticky DSI link clock lifecycle
-run-name: Phase 310 - GKI sticky DSI link clock lifecycle at exact F0
+name: 310 - A52 GKI consolidated DSI clock lifecycle
+run-name: Phase 310 - GKI consolidated link-clock PLL DISP_CC lifecycle at exact F0
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/310-a52-gki-link-clock-lifecycle.yml
       - scripts/310_apply_gki_link_clock_lifecycle.py
+      - scripts/310_apply_gki_dispcc_snapshot.py
       - scripts/310_ci_build.sh
       - scripts/309_apply_gki_clamp_release_latch.py
       - scripts/309_ci_build.sh
@@ -36,7 +37,7 @@ env:
 
 jobs:
   build:
-    name: Build Phase309-based sticky DSI link clock lifecycle observer
+    name: Build Phase309-based consolidated DSI clock lifecycle observer
     runs-on: ubuntu-22.04
     timeout-minutes: 300
     env:
@@ -57,6 +58,7 @@ jobs:
           python3 -m py_compile scripts/308_apply_pll_lock_clamp_observer.py
           python3 -m py_compile scripts/309_apply_gki_clamp_release_latch.py
           python3 -m py_compile scripts/310_apply_gki_link_clock_lifecycle.py
+          python3 -m py_compile scripts/310_apply_gki_dispcc_snapshot.py
           bash -n scripts/308_ci_build.sh
           bash -n scripts/309_ci_build.sh
           bash -n scripts/310_ci_build.sh
@@ -86,14 +88,14 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Build and audit Phase310 GKI link clock lifecycle observer
+      - name: Build and audit Phase310 consolidated observer
         run: bash scripts/310_ci_build.sh
 
       - name: Upload complete Phase310 evidence
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase310-GKI-LINK-CLOCK-LIFECYCLE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-Phase310-GKI-CONSOLIDATED-CLOCK-LIFECYCLE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase310-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -103,7 +105,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase310-GKI-LINK-CLOCK-LIFECYCLE-${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-Phase310-GKI-CONSOLIDATED-CLOCK-LIFECYCLE-${{ github.run_number }}-BOOT-IMG
           path: phase310-gki-out/package/boot.img
           if-no-files-found: error
           compression-level: 0
@@ -113,7 +115,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-Phase310-GKI-LINK-CLOCK-LIFECYCLE-${{ github.run_number }}-FAILED
+          name: A52XQ-Phase310-GKI-CONSOLIDATED-CLOCK-LIFECYCLE-${{ github.run_number }}-FAILED
           path: phase310-gki-failure/
           if-no-files-found: warn
           retention-days: 30

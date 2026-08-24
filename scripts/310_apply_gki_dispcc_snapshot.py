@@ -81,17 +81,16 @@ def patch_disp(text: str) -> str:
         return text
     if 'disp_cc_lagoon_probe' not in text or 'qcom_cc_really_probe' not in text:
         raise SystemExit('Phase310 DISP_CC Lagoon source shape not recognized')
+    if '#include <linux/regmap.h>\n' not in text:
+        raise SystemExit('Phase310 DISP_CC regmap include missing')
 
-    inc = '#include "vdd-level-lagoon.h"\n'
-    if inc not in text:
-        raise SystemExit('Phase310 DISP_CC include anchor missing')
-    text = text.replace(
-        inc,
-        inc + '#include <linux/a52_ack_secure_flight_recorder.h>\n',
-        1,
-    )
+    # The imported 5.10 Lagoon driver already carries the persistent recorder
+    # declaration from the existing diagnostic lineage. Anchor the helper to
+    # that real source shape rather than the newer downstream vdd header shape.
+    anchor = 'extern void a52_ackfr_record(const char *fmt, ...);\n\n'
+    if anchor not in text:
+        raise SystemExit('Phase310 DISP_CC recorder declaration anchor missing')
 
-    anchor = 'static DEFINE_VDD_REGULATORS(vdd_cx, VDD_NUM, 1, vdd_corner);\n'
     helper = r'''/* A52_PHASE310_GKI_LAGOON_DISPCC_SNAPSHOT_V1
  * Read-only physical view of the Lagoon display clock controller at the
  * exact F0 q0/q1/q2 points. Branch registers expose enable/halt state while
@@ -141,7 +140,7 @@ void a52_p310_dispcc_snapshot(unsigned int point)
 EXPORT_SYMBOL_GPL(a52_p310_dispcc_snapshot);
 
 '''
-    text = replace_once(text, anchor, helper + anchor, 'physical snapshot helper')
+    text = replace_once(text, anchor, anchor + helper, 'physical snapshot helper')
 
     code = '''\n\tWRITE_ONCE(a52_p310_dispcc_regmap, regmap);\n\ta52_ackfr_record("P276 310DR p=1");\n'''
     return inject_before_last_return(text, 'disp_cc_lagoon_probe', code)
@@ -163,7 +162,6 @@ def patch_phy(text: str) -> str:
     new = '''\ta52_p310_clk_snapshot(index, point);\n\ta52_p310_dispcc_snapshot(point);\n\ta52_p310_pll_lifecycle_snapshot(index, point);\n'''
     text = replace_once(text, old, new, 'exact-F0 physical snapshot call')
 
-    # Put the marker in PHY too so check-only/idempotence is explicit.
     marker_anchor = 'extern void a52_p310_dispcc_snapshot(unsigned int point);\n'
     text = text.replace(marker_anchor,
         marker_anchor + '/* ' + MARK + ' */\n', 1)

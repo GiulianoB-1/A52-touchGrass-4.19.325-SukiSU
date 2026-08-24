@@ -26,15 +26,22 @@ def validate(text: str) -> None:
     required = [
         MARK,
         'u8 tx_dctrl[] = {0x00, 0x00, 0x00, 0x04, 0x01};',
-        'reg |= BIT(2);',
         'DSI_W32(phy, DSIPHY_LNX_TX_DCTRL(3), reg | BIT(0));',
         'DSI_W32(phy, DSIPHY_LNX_TX_DCTRL(3), reg & ~BIT(0));',
     ]
     for token in required:
         if token not in text:
             raise SystemExit('Phase311 required token missing: ' + token)
-    if text.count('reg |= BIT(2);') != 1:
-        raise SystemExit('Phase311 expected exactly one lane-3 bit2 repair')
+
+    # Validate the repair only at the intended clamp-release site. The source
+    # already has unrelated "reg |= BIT(2);" operations elsewhere, so a
+    # whole-file count is not a valid uniqueness check for this experiment.
+    if text.count(MARK) != 1:
+        raise SystemExit(f'Phase311 expected one repair marker, found {text.count(MARK)}')
+    if text.count(NEW) != 1:
+        raise SystemExit(f'Phase311 expected one exact repaired clamp-release block, found {text.count(NEW)}')
+    if text.count(OLD) != 0:
+        raise SystemExit(f'Phase311 original clamp-release block still present {text.count(OLD)} time(s)')
 
 
 def main() -> None:

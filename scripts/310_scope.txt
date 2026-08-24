@@ -1,0 +1,1 @@
+Phase310 consolidated observer scope: DSI link-clock lifecycle, effective clock state, and 10nm PLL/VCO handoff lifecycle.

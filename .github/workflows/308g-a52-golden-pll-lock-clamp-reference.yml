@@ -11,6 +11,14 @@ on:
       - scripts/307g_apply_golden_v3_phy_clocklane_reference.py
       - scripts/308g_apply_golden_pll_lock_clamp_reference.py
       - scripts/308g_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase307-golden-gki-v3-phy-clocklane-correlation-v1
+    paths:
+      - .github/workflows/308g-a52-golden-pll-lock-clamp-reference.yml
+      - scripts/307g_apply_golden_v3_phy_clocklane_reference.py
+      - scripts/308g_apply_golden_pll_lock_clamp_reference.py
+      - scripts/308g_ci_build.sh
 
 permissions:
   contents: read

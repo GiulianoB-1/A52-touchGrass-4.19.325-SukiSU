@@ -6,6 +6,7 @@ BUILD="$PWD/workspace/gki-phase199-out"
 OUT="$PWD/phase310-gki-out"
 PHY="$ROOT/drivers/a52_display/msm/dsi/dsi_phy.c"
 CLK="$ROOT/drivers/a52_display/msm/dsi/dsi_clk_manager.c"
+PLL="$ROOT/drivers/a52_display/pll/dsi_pll_10nm.c"
 
 fail_report() {
   set +e
@@ -16,6 +17,7 @@ fail_report() {
   cp scripts/310_apply_gki_link_clock_lifecycle.py phase310-gki-failure/audit/ 2>/dev/null || true
   [ -f "$PHY" ] && cp "$PHY" phase310-gki-failure/source/ || true
   [ -f "$CLK" ] && cp "$CLK" phase310-gki-failure/source/ || true
+  [ -f "$PLL" ] && cp "$PLL" phase310-gki-failure/source/ || true
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
@@ -26,32 +28,39 @@ test -s phase309-gki-out/compile/Image
 test -s phase309-gki-out/config/final.config
 test -s "$PHY"
 test -s "$CLK"
+test -s "$PLL"
 test "$(stat -c '%s' phase309-gki-out/package/boot.img)" -eq 100663296
 grep -Fq 'A52_PHASE309_GKI_CLAMP_RELEASE_LATCH_V1' "$PHY"
 grep -Fq 'dsi_clk_update_link_clk_state' "$CLK"
 grep -Fq 'dsi_link_hs_clk_set_rate' "$CLK"
+grep -Fq 'vco_10nm_prepare' "$PLL"
+grep -Fq 'dsi_pll_10nm_lock_status' "$PLL"
 
 cp phase309-gki-out/config/final.config /tmp/p310-phase309.config
 cp "$PHY" /tmp/p310-phy-before.c
 cp "$CLK" /tmp/p310-clk-before.c
+cp "$PLL" /tmp/p310-pll-before.c
 
 python3 -m py_compile scripts/310_apply_gki_link_clock_lifecycle.py
 python3 scripts/310_apply_gki_link_clock_lifecycle.py --root "$ROOT"
 python3 scripts/310_apply_gki_link_clock_lifecycle.py --root "$ROOT" --check-only
 cp "$PHY" /tmp/p310-phy-after.c
 cp "$CLK" /tmp/p310-clk-after.c
+cp "$PLL" /tmp/p310-pll-after.c
 diff -u /tmp/p310-phy-before.c /tmp/p310-phy-after.c > /tmp/p310-phy.diff || true
 diff -u /tmp/p310-clk-before.c /tmp/p310-clk-after.c > /tmp/p310-clk.diff || true
+diff -u /tmp/p310-pll-before.c /tmp/p310-pll-after.c > /tmp/p310-pll.diff || true
 
-# Phase310 may add only atomics and recorder snapshots around the inherited
-# clock-manager path. It must not add/remove any actual clock, MMIO, delay,
-# regulator, reset, PLL-resource, or clamp operation.
-python3 - "$PHY" "$CLK" <<'PY'
+# Phase310 may add only recorder calls, atomics, and read-only clock queries.
+# No MMIO write, PLL programming, delay/timeout, clock set/prepare/enable,
+# regulator/reset, provider-resource, or clamp primitive count may change.
+python3 - "$PHY" "$CLK" "$PLL" <<'PY'
 from pathlib import Path
 import sys
 pairs = [
     (Path('/tmp/p310-phy-before.c').read_text(), Path(sys.argv[1]).read_text(), 'PHY'),
     (Path('/tmp/p310-clk-before.c').read_text(), Path(sys.argv[2]).read_text(), 'CLK'),
+    (Path('/tmp/p310-pll-before.c').read_text(), Path(sys.argv[3]).read_text(), 'PLL'),
 ]
 protected = [
     'DSI_W32(', 'MDSS_PLL_REG_W(', 'writel_relaxed(', 'writel(',
@@ -60,7 +69,7 @@ protected = [
     'clk_enable(', 'clk_disable(', 'regulator_enable(', 'regulator_disable(',
     'reset_control_assert(', 'reset_control_deassert(', 'msleep(',
     'usleep_range(', 'udelay(', 'ndelay(', 'mdss_pll_resource_enable(',
-    'phy->hw.ops.clamp_ctrl(',
+    'phy->hw.ops.clamp_ctrl(', 'readl_poll_timeout_atomic(',
 ]
 for before, after, label in pairs:
     for token in protected:
@@ -70,7 +79,7 @@ for before, after, label in pairs:
                 f'{before.count(token)} -> {after.count(token)}'
             )
 required = [
-    'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V1',
+    'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2',
     'atomic_inc(&a52_p310_sr_in);',
     'atomic_inc(&a52_p310_sr_skip);',
     'atomic_inc(&a52_p310_sr_run);',
@@ -78,16 +87,24 @@ required = [
     'atomic_inc(&a52_p310_enable_in);',
     'atomic_inc(&a52_p310_hs_start);',
     'atomic_inc(&a52_p310_update_in);',
+    '__clk_is_enabled(', '__clk_is_prepared(', 'clk_get_rate(', 'clk_get_parent(',
+    'dsi0_phy_pll_out_byteclk', 'dsi0_phy_pll_out_dsiclk',
     'P276 310C q=%u i=%u sr=%d run=%d sk=%d ok=%d rc=%d si=%d',
     'P276 310H q=%u pr=%d po=%d pc=%d en=%d eo=%d ec=%d hs=%d hp=%d',
     'P276 310U q=%u di=%d up=%d ls=%d lp=%d ui=%d uo=%d ur=%d t=%d s=%d e=%d',
+    'P276 310R q=%u br=%lu pr=%lu ir=%lu er=%lu',
+    'P276 310E q=%u em=%x pm=%x bp=%d pp=%d',
+    'P276 310PE i=%u e=%u rc=%d',
+    'P276 310P q=%u i=%u sr=%d ss=%d so=%d pr=%d ps=%d po=%d en=%d eo=%d',
+    'P276 310L q=%u lp=%d lo=%d lr=%d er=%d re=%d hs=%d up=%d on=%d ho=%d',
     'a52_p310_clk_snapshot(index, point);',
+    'a52_p310_pll_lifecycle_snapshot(index, point);',
 ]
-combined = pairs[0][1] + pairs[1][1]
+combined = ''.join(after for _, after, _ in pairs)
 for token in required:
     if token not in combined:
         raise SystemExit('Phase310 required source token missing: ' + token)
-print('Phase310 software-only link-clock lifecycle scope audit: PASS')
+print('Phase310 consolidated observer-only scope audit: PASS')
 PY
 
 cp /tmp/p310-phase309.config "$BUILD/.config"
@@ -113,6 +130,11 @@ for marker in \
   'P276 310C q=%u i=%u sr=%d run=%d sk=%d ok=%d rc=%d si=%d' \
   'P276 310H q=%u pr=%d po=%d pc=%d en=%d eo=%d ec=%d hs=%d hp=%d' \
   'P276 310U q=%u di=%d up=%d ls=%d lp=%d ui=%d uo=%d ur=%d t=%d s=%d e=%d' \
+  'P276 310R q=%u br=%lu pr=%lu ir=%lu er=%lu' \
+  'P276 310E q=%u em=%x pm=%x bp=%d pp=%d' \
+  'P276 310PE i=%u e=%u rc=%d' \
+  'P276 310P q=%u i=%u sr=%d ss=%d so=%d pr=%d ps=%d po=%d en=%d eo=%d' \
+  'P276 310L q=%u lp=%d lo=%d lr=%d er=%d re=%d hs=%d up=%d on=%d ho=%d' \
   'P276 309T q=%u i=%u ce=%d cr=%d' \
   'P276 308L q=%u i=%u on=%u ho=%u re=%u rr=%u lk=%x' \
   'P276 307C q=%u st=%x ln=%x ck=%x cc=%x in=%x' \
@@ -129,6 +151,7 @@ cp scripts/310_apply_gki_link_clock_lifecycle.py "$OUT/audit/"
 cp /tmp/p310-* "$OUT/audit/" 2>/dev/null || true
 cp "$PHY" "$OUT/source/dsi_phy.c"
 cp "$CLK" "$OUT/source/dsi_clk_manager.c"
+cp "$PLL" "$OUT/source/dsi_pll_10nm.c"
 cp phase309-gki-out/BUILD-IDENTITY.json "$OUT/audit/PHASE309-BASE-BUILD-IDENTITY.json"
 
 gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
@@ -147,7 +170,7 @@ repack = json.loads((r/'package/repack-report.json').read_text())
 identity = {
   'phase': '310',
   'variant': 'GKI-PHASE309-BASE',
-  'name': 'STICKY-DSI-LINK-CLOCK-LIFECYCLE-V1',
+  'name': 'CONSOLIDATED-DSI-LINK-CLOCK-PLL-LIFECYCLE-V2',
   'git_sha': os.getenv('GITHUB_SHA'),
   'hardware_validated': False,
   'base': 'Phase309 GKI exact-F0 PLL/PHY + persistent clamp release latch',
@@ -156,21 +179,24 @@ identity = {
   'exact_f0_points': {'q0':'before SW_TRIGGER','q1':'immediately after SW_TRIGGER','q2':'after DMA completion/timeout'},
   'new_evidence': [
     'HS set-rate entered/run/continuous-splash-skipped/last-rc',
-    'HS prepare entered/success/last-rc',
-    'HS enable entered/success/last-rc',
-    'HS start/stop and disable/unprepare counters',
-    'LP start/stop counters',
+    'HS prepare/enable/start/stop and LP start/stop lifecycle counters',
     'link clock state update count/last request/last rc',
+    'effective byte/pixel/byte-intf/escape clock rates at q0/q1/q2',
+    'clock prepared/enabled masks at q0/q1/q2',
+    'byte/pixel clock ancestry reaches expected DSI0 PHY PLL output',
+    '10nm VCO set-rate/prepare/handoff-skip/enable/lock/recalc/unprepare sticky history',
+    'ordered sparse PLL lifecycle event records',
   ],
   'decision': {
-    'sr_zero':'HS set-rate path never reached before exact F0',
-    'sr_nonzero_skip_nonzero_run_zero':'continuous splash skipped HS source rate programming',
-    'run_nonzero_prepare_or_enable_zero':'link-clock transition breaks after rate programming',
-    'prepare_enable_success_nonzero_target_still_fails':'clock-manager lifecycle executed; next inspect DISP_CC branch/RCG/parent state directly',
+    'pll_recalc_handoff_then_prepare_skip':'bootloader PLL handoff established and Linux intentionally skipped re-enable',
+    'clock_rates_or_enable_masks_bad':'DISP_CC/link clock state is the first concrete failing frontier',
+    'clock_tree_good_lanes_still_stop':'move below DISP_CC to PHY clock-lane enable/mux sequencing',
+    'lock_poll_failure':'PLL lock lifecycle failure despite prior late lock snapshot',
   },
   'mmio_writes_added': False,
   'delay_or_timeout_changes_added': False,
-  'clock_operations_added_or_removed': False,
+  'mutating_clock_operations_added_or_removed': False,
+  'read_only_clock_queries_added': True,
   'clock_regulator_reset_changes_added': False,
   'boot_bytes': (r/'package/boot.img').stat().st_size,
   'boot_sha256': hashlib.sha256((r/'package/boot.img').read_bytes()).hexdigest(),
@@ -187,4 +213,4 @@ with (r/'SHA256SUMS').open('w') as f:
 PY
 (cd "$OUT" && sha256sum -c SHA256SUMS)
 trap - EXIT
-echo 'Phase310 GKI sticky DSI link-clock lifecycle build/repack: PASS'
+echo 'Phase310 GKI consolidated link-clock + PLL lifecycle build/repack: PASS'

@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/310-a52-gki-link-clock-lifecycle.yml
       - scripts/310_apply_gki_link_clock_lifecycle.py
+      - scripts/310_sanitize_passive_clock_snapshot.py
       - scripts/310_apply_gki_dispcc_snapshot.py
       - scripts/310_ci_build.sh
       - scripts/309_apply_gki_clamp_release_latch.py
@@ -58,6 +59,7 @@ jobs:
           python3 -m py_compile scripts/308_apply_pll_lock_clamp_observer.py
           python3 -m py_compile scripts/309_apply_gki_clamp_release_latch.py
           python3 -m py_compile scripts/310_apply_gki_link_clock_lifecycle.py
+          python3 -m py_compile scripts/310_sanitize_passive_clock_snapshot.py
           python3 -m py_compile scripts/310_apply_gki_dispcc_snapshot.py
           bash -n scripts/308_ci_build.sh
           bash -n scripts/309_ci_build.sh

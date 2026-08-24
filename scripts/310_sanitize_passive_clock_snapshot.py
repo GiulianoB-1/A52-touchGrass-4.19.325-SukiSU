@@ -10,7 +10,7 @@ START = 'static int a52_p310_clk_chain_has(struct clk *clk, const char *expected
 END = 'static int _get_clk_mngr_index(struct dsi_clk_mngr *mngr,\n'
 
 SAFE_HELPER = r'''/* A52_PHASE310_PASSIVE_CLOCK_SNAPSHOT_SANITIZER_V1
- * Do not call clk_get_rate()/clk_get_parent() from the exact-F0 observer.
+ * Do not perform provider rate or parent queries from the exact-F0 observer.
  * On this tree those queries can enter provider recalc/get-parent callbacks;
  * the 10nm VCO recalc path can itself establish handoff_resources. Keep the
  * exact-F0 CCF view limited to software prepare/enable refcount predicates.

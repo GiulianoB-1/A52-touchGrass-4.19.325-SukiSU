@@ -1,0 +1,115 @@
+name: 311 - A52 GKI v3 DCTRL3 handoff repair A/B
+run-name: Phase 311 - GKI v3 lane3 TX_DCTRL bit2 handoff repair A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase311-gki-v3-dctrl3-handoff-repair-ab-v1
+    paths:
+      - .github/workflows/311-a52-gki-v3-dctrl3-handoff-repair.yml
+      - scripts/311_apply_v3_dctrl3_handoff_repair.py
+      - scripts/311_ci_build.sh
+      - .github/workflows/310-a52-gki-link-clock-lifecycle.yml
+      - scripts/310_apply_gki_link_clock_lifecycle.py
+      - scripts/310_sanitize_passive_clock_snapshot.py
+      - scripts/310_apply_gki_dispcc_snapshot.py
+      - scripts/310_ci_build.sh
+  pull_request:
+    branches:
+      - agent/a52-phase310-gki-lagoon-dispcc-link-clock-lifecycle-v1
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase311-dctrl3-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+
+jobs:
+  build:
+    name: Build Phase310-based v3 lane3 DCTRL handoff A/B
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Phase311 branch
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/311_apply_v3_dctrl3_handoff_repair.py
+          bash -n scripts/311_ci_build.sh
+          bash -n scripts/310_ci_build.sh
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build and audit Phase311 A/B
+        run: bash scripts/311_ci_build.sh
+
+      - name: Upload complete Phase311 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase311-GKI-V3-DCTRL3-HANDOFF-AB-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase311-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase311 boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase311-GKI-V3-DCTRL3-HANDOFF-AB-${{ github.run_number }}-BOOT-IMG
+          path: phase311-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase311-GKI-V3-DCTRL3-HANDOFF-AB-${{ github.run_number }}-FAILED
+          path: phase311-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

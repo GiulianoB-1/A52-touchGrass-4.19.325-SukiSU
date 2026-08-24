@@ -10,18 +10,30 @@ PHY="$ROOT/drivers/a52_display/msm/dsi/dsi_phy.c"
 fail_report() {
   set +e
   rm -rf phase311-gki-failure
-  mkdir -p phase311-gki-failure/{logs,audit,source}
+  mkdir -p phase311-gki-failure/{logs,audit,source,nested}
   cp phase311-gki-compile.log phase311-gki-olddefconfig.log phase311-gki-failure/logs/ 2>/dev/null || true
   cp /tmp/p311-* phase311-gki-failure/audit/ 2>/dev/null || true
   cp scripts/311_apply_v3_dctrl3_handoff_repair.py phase311-gki-failure/audit/ 2>/dev/null || true
   [ -f "$HW" ] && cp "$HW" phase311-gki-failure/source/ || true
   [ -f "$PHY" ] && cp "$PHY" phase311-gki-failure/source/ || true
+  for d in phase*-gki-failure; do
+    [ -d "$d" ] || continue
+    [ "$d" = "phase311-gki-failure" ] && continue
+    cp -a "$d" phase311-gki-failure/nested/ || true
+  done
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
 # Reconstruct the exact hardware-tested Phase310 lineage first. This also
 # leaves the fully instrumented source tree and build directory in place.
-bash scripts/310_ci_build.sh
+set +e
+bash scripts/310_ci_build.sh 2>&1 | tee /tmp/p311-phase310.log
+phase310_rc=${PIPESTATUS[0]}
+set -e
+if [ "$phase310_rc" -ne 0 ]; then
+  echo "ERROR: Phase310 reconstruction failed rc=$phase310_rc" >&2
+  exit "$phase310_rc"
+fi
 
 test -s phase310-gki-out/package/boot.img
 test -s phase310-gki-out/compile/Image

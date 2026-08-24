@@ -67,6 +67,14 @@ void a52_p310_clk_snapshot(unsigned int index, unsigned int point)
 '''
 
 
+def observer_region(text: str) -> str:
+    a = text.find(MARK)
+    b = text.find(END, a if a >= 0 else 0)
+    if a < 0 or b < 0 or b <= a:
+        raise SystemExit('Phase310 passive sanitizer: final helper bounds missing')
+    return text[a:b]
+
+
 def sanitize(text: str) -> str:
     if MARK in text:
         return text
@@ -77,10 +85,10 @@ def sanitize(text: str) -> str:
     if b < 0:
         raise SystemExit('Phase310 passive sanitizer: helper end missing')
     out = text[:a] + SAFE_HELPER + text[b:]
-    if 'clk_get_rate(' in out[text.find('A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2'):]:
-        raise SystemExit('Phase310 passive sanitizer: clk_get_rate remained in injected observer')
-    if 'clk_get_parent(' in out[text.find('A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2'):]:
-        raise SystemExit('Phase310 passive sanitizer: clk_get_parent remained in injected observer')
+    region = observer_region(out)
+    for forbidden in ('clk_get_rate(', 'clk_get_parent(', 'a52_p310_clk_chain_has('):
+        if forbidden in region:
+            raise SystemExit('Phase310 passive sanitizer forbidden helper token remains: ' + forbidden)
     return out
 
 
@@ -95,10 +103,10 @@ def validate(text: str) -> None:
     for token in required:
         if token not in text:
             raise SystemExit('Phase310 passive sanitizer required token missing: ' + token)
-    injected = text[text.find('A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2'):]
+    region = observer_region(text)
     for forbidden in ('clk_get_rate(', 'clk_get_parent(', 'a52_p310_clk_chain_has('):
-        if forbidden in injected:
-            raise SystemExit('Phase310 passive sanitizer forbidden observer token remains: ' + forbidden)
+        if forbidden in region:
+            raise SystemExit('Phase310 passive sanitizer forbidden helper token remains: ' + forbidden)
 
 
 def main() -> None:

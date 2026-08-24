@@ -41,7 +41,7 @@ test -s phase310-gki-out/config/final.config
 test -s "$HW"
 test -s "$PHY"
 test "$(stat -c '%s' phase310-gki-out/package/boot.img)" -eq 100663296
-grep -Fq 'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2' "$PHY"
+grep -Fq 'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2' "$ROOT/drivers/a52_display/msm/dsi/dsi_clk_manager.c"
 grep -Fq 'u8 tx_dctrl[] = {0x00, 0x00, 0x00, 0x04, 0x01};' "$HW"
 
 cp phase310-gki-out/config/final.config /tmp/p311-phase310.config

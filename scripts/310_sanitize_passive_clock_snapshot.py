@@ -11,27 +11,32 @@ END = 'static int _get_clk_mngr_index(struct dsi_clk_mngr *mngr,\n'
 
 SAFE_HELPER = r'''/* A52_PHASE310_PASSIVE_CLOCK_SNAPSHOT_SANITIZER_V1
  * Do not perform provider rate or parent queries from the exact-F0 observer.
- * On this tree those queries can enter provider recalc/get-parent callbacks;
- * the 10nm VCO recalc path can itself establish handoff_resources. Keep the
- * exact-F0 CCF view limited to software prepare/enable refcount predicates.
- * Physical source/mux/branch state is captured separately from Lagoon DISP_CC.
+ * On this tree those queries can enter provider callbacks and the 10nm VCO
+ * recalc path can itself establish handoff_resources. The masks below are
+ * derived only from Phase310 observer-owned lifecycle latches. Independent
+ * physical source/mux/branch state is captured from Lagoon DISP_CC.
  */
 static u32 a52_p310_clk_mask(struct dsi_link_hs_clk_info *hs,
 		struct dsi_link_lp_clk_info *lp, bool prepared)
 {
 	u32 mask = 0;
+	int hs_on;
+	int lp_on = atomic_read(&a52_p310_lp_enabled);
 
-	if (hs && hs->byte_clk &&
-	    (prepared ? __clk_is_prepared(hs->byte_clk) : __clk_is_enabled(hs->byte_clk)))
-		mask |= BIT(0);
-	if (hs && hs->pixel_clk &&
-	    (prepared ? __clk_is_prepared(hs->pixel_clk) : __clk_is_enabled(hs->pixel_clk)))
-		mask |= BIT(1);
-	if (hs && hs->byte_intf_clk &&
-	    (prepared ? __clk_is_prepared(hs->byte_intf_clk) : __clk_is_enabled(hs->byte_intf_clk)))
-		mask |= BIT(2);
-	if (lp && lp->esc_clk &&
-	    (prepared ? __clk_is_prepared(lp->esc_clk) : __clk_is_enabled(lp->esc_clk)))
+	if (prepared)
+		hs_on = atomic_read(&a52_p310_hs_prepared);
+	else
+		hs_on = atomic_read(&a52_p310_hs_enabled);
+
+	if (hs_on && hs) {
+		if (hs->byte_clk)
+			mask |= BIT(0);
+		if (hs->pixel_clk)
+			mask |= BIT(1);
+		if (hs->byte_intf_clk)
+			mask |= BIT(2);
+	}
+	if (lp_on && lp && lp->esc_clk)
 		mask |= BIT(3);
 	return mask;
 }
@@ -86,7 +91,7 @@ def sanitize(text: str) -> str:
         raise SystemExit('Phase310 passive sanitizer: helper end missing')
     out = text[:a] + SAFE_HELPER + text[b:]
     region = observer_region(out)
-    for forbidden in ('clk_get_rate(', 'clk_get_parent(', 'a52_p310_clk_chain_has('):
+    for forbidden in ('clk_get_rate(', 'clk_get_parent(', '__clk_is_enabled(', '__clk_is_prepared(', 'a52_p310_clk_chain_has('):
         if forbidden in region:
             raise SystemExit('Phase310 passive sanitizer forbidden helper token remains: ' + forbidden)
     return out
@@ -96,15 +101,16 @@ def validate(text: str) -> None:
     required = [
         MARK,
         'P276 310E q=%u em=%x pm=%x',
-        '__clk_is_enabled(hs->byte_clk)',
-        '__clk_is_prepared(hs->byte_clk)',
+        'atomic_read(&a52_p310_hs_enabled)',
+        'atomic_read(&a52_p310_hs_prepared)',
+        'atomic_read(&a52_p310_lp_enabled)',
         'A52_PHASE310_GKI_LINK_CLOCK_LIFECYCLE_V2',
     ]
     for token in required:
         if token not in text:
             raise SystemExit('Phase310 passive sanitizer required token missing: ' + token)
     region = observer_region(text)
-    for forbidden in ('clk_get_rate(', 'clk_get_parent(', 'a52_p310_clk_chain_has('):
+    for forbidden in ('clk_get_rate(', 'clk_get_parent(', '__clk_is_enabled(', '__clk_is_prepared(', 'a52_p310_clk_chain_has('):
         if forbidden in region:
             raise SystemExit('Phase310 passive sanitizer forbidden helper token remains: ' + forbidden)
 

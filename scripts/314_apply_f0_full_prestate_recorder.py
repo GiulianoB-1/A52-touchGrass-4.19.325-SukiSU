@@ -192,6 +192,15 @@ def patch_display_callback(text: str, name: str, event: int,
         f"l_type, {state_name});\n"
     )
     end = pos + len(needle)
+    # Keep the recorder call after any callback-local declarations that
+    # immediately follow the display assignment. This tree builds as GNU89
+    # with declaration-after-statement promoted to an error.
+    for decl in (
+        "\tstruct dsi_display_ctrl *ctrl;\n",
+        "\tbool mmss_clamp = false;\n",
+    ):
+        if text.startswith(decl, end):
+            end += len(decl)
     return text[:end] + call + text[end:]
 
 

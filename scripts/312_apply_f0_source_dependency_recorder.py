@@ -63,7 +63,6 @@ extern void a52_p308_pll_snapshot(unsigned int index, unsigned int point);
 \t\treadl_relaxed(base + A52_P308_V3_LNX_TX_DCTRL(2)),
 \t\treadl_relaxed(base + A52_P308_V3_LNX_TX_DCTRL(3)),
 \t\treadl_relaxed(base + A52_P308_V3_LNX_TX_DCTRL(4)));
-\ta52_p308_pll_snapshot(index, point);
 '''
     new = '''\ta52_ackfr_record("P276 308T q=%u %x %x %x %x %x", point,
 \t\treadl_relaxed(base + A52_P308_V3_LNX_TX_DCTRL(0)),
@@ -121,7 +120,6 @@ extern void a52_p308_pll_snapshot(unsigned int index, unsigned int point);
 \t\t\t\tphy->cfg.strength.lane[lane][1]);
 \t\t}
 \t}
-\ta52_p308_pll_snapshot(index, point);
 '''
     return replace_once(text, old, new, 'exact-F0 source dependency snapshot')
 

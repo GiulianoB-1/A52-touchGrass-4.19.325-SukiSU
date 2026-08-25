@@ -269,8 +269,8 @@ set_stage "checksums"
 (
   cd "$OUT"
   find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+  sha256sum -c SHA256SUMS
 )
-sha256sum -c "$OUT/SHA256SUMS"
 
 set_stage "complete"
 echo 'Phase313 V3 TIMING_CTRL_9 handoff repair A/B: PASS'

@@ -37,15 +37,14 @@ def patch_ctrl(text: str) -> str:
     for required in (
         "P276 303 S00p p=%02x%02x%02x",
         "P276 303 S03b ln=%x ck=%x",
-        "P276 303 S05b tr=%x sw=%x cc=%x",
         "P276 303 S09e ack=%x to=%x phy=%x ctl=%x",
     ):
         if required not in text:
             raise SystemExit("Phase314 CTRL inherited observer missing: " + required)
 
-    kickoff = "static void dsi_kickoff_msg_tx(struct dsi_ctrl *dsi_ctrl,"
-    if kickoff not in text:
-        raise SystemExit("Phase314 CTRL kickoff function anchor missing")
+    arm = "static void a52_p293_gdm_try_arm(struct dsi_ctrl *dsi_ctrl,"
+    if arm not in text:
+        raise SystemExit("Phase314 CTRL exact-F0 arm function anchor missing")
 
     helper = r'''
 /* A52_PHASE314_GKI_F0_FULL_CTRL_PRESTATE_RECORDER_V1
@@ -124,13 +123,9 @@ static void a52_p314_ctrl_prestate(struct dsi_ctrl *dsi_ctrl)
 }
 
 '''
-    text = replace_once(text, kickoff, helper + kickoff, "CTRL helper insertion")
+    text = replace_once(text, arm, helper + arm, "CTRL helper insertion")
 
     s00p = "P276 303 S00p p=%02x%02x%02x"
-    marker_pos = text.find(s00p)
-    kickoff_pos = text.find(kickoff)
-    if marker_pos < kickoff_pos:
-        raise SystemExit("Phase314 CTRL F0 marker is not inside kickoff path")
     text = inject_after_call_containing(
         text, s00p, "\n\ta52_p314_ctrl_prestate(dsi_ctrl);",
         "CTRL first-F0 call")
@@ -179,31 +174,25 @@ def patch_phy(text: str) -> str:
     return replace_once(text, anchor, block + anchor, "PHY q0 prestate insertion")
 
 
-def function_slice(text: str, name: str, next_name: str | None) -> tuple[int, int, str]:
+def patch_display_callback(text: str, name: str, event: int,
+                           clk_name: str, state_name: str) -> str:
     start = text.find(f"int {name}(")
     if start < 0:
         raise SystemExit(f"Phase314 display function missing: {name}")
-    if next_name:
-        end = text.find(f"int {next_name}(", start + 1)
-        if end < 0:
-            raise SystemExit(f"Phase314 display next function missing: {next_name}")
-    else:
-        end = len(text)
-    return start, end, text[start:end]
-
-
-def patch_display_callback(text: str, name: str, next_name: str, event: int,
-                           clk_name: str, state_name: str) -> str:
-    start, end, fn = function_slice(text, name, next_name)
     needle = "\tstruct dsi_display *display = priv;\n"
-    if needle not in fn:
+    pos = text.find(needle, start)
+    if pos < 0:
         raise SystemExit(f"Phase314 {name}: display assignment anchor missing")
+    # The assignment must belong to this callback, before its first return.
+    ret = text.find("\n\treturn ", start)
+    if ret >= 0 and pos > ret:
+        raise SystemExit(f"Phase314 {name}: display assignment escaped function")
     call = (
         f"\ta52_p314_display_history({event}, display, {clk_name}, "
         f"l_type, {state_name});\n"
     )
-    fn = fn.replace(needle, needle + call, 1)
-    return text[:start] + fn + text[end:]
+    end = pos + len(needle)
+    return text[:end] + call + text[end:]
 
 
 def patch_display(text: str) -> str:
@@ -240,28 +229,13 @@ static void a52_p314_display_history(unsigned int event,
     text = replace_once(text, anchor, anchor + helper, "display history helper")
 
     text = patch_display_callback(
-        text, "dsi_pre_clkon_cb", "dsi_post_clkon_cb", 1,
-        "clk_type", "new_state")
+        text, "dsi_pre_clkon_cb", 1, "clk_type", "new_state")
     text = patch_display_callback(
-        text, "dsi_post_clkon_cb", "dsi_post_clkoff_cb", 2,
-        "clk", "curr_state")
+        text, "dsi_post_clkon_cb", 2, "clk", "curr_state")
     text = patch_display_callback(
-        text, "dsi_post_clkoff_cb", "dsi_pre_clkoff_cb", 4,
-        "clk_type", "curr_state")
-
-    start = text.find("int dsi_pre_clkoff_cb(")
-    if start < 0:
-        raise SystemExit("Phase314 dsi_pre_clkoff_cb missing")
-    end = text.find("\nint ", start + 1)
-    if end < 0:
-        end = len(text)
-    fn = text[start:end]
-    needle = "\tstruct dsi_display *display = priv;\n"
-    if needle not in fn:
-        raise SystemExit("Phase314 pre_clkoff display assignment missing")
-    fn = fn.replace(
-        needle, needle + "\ta52_p314_display_history(3, display, clk, l_type, new_state);\n", 1)
-    text = text[:start] + fn + text[end:]
+        text, "dsi_pre_clkoff_cb", 3, "clk", "new_state")
+    text = patch_display_callback(
+        text, "dsi_post_clkoff_cb", 4, "clk_type", "curr_state")
 
     host_anchor = (
         '\tif (display->is_cont_splash_enabled) {\n'
@@ -310,6 +284,8 @@ def validate(ctrl: str, phy: str, display: str) -> None:
             raise SystemExit("Phase314 required token missing: " + token)
     if ctrl.count(CTRL_MARK) != 1:
         raise SystemExit(f"Phase314 CTRL marker count {ctrl.count(CTRL_MARK)} != 1")
+    if ctrl.count("a52_p314_ctrl_prestate(dsi_ctrl);") != 1:
+        raise SystemExit("Phase314 exact-F0 CTRL snapshot call missing/not unique")
     if phy.count(PHY_MARK) != 1:
         raise SystemExit(f"Phase314 PHY marker count {phy.count(PHY_MARK)} != 1")
     if display.count(DISPLAY_MARK) != 1:

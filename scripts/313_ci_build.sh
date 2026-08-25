@@ -11,14 +11,25 @@ HW="$ROOT/drivers/a52_display/msm/dsi/dsi_phy_hw_v3_0.c"
 GKITIM="$ROOT/drivers/a52_display/msm/dsi/dsi_phy_timing_v3_0.c"
 TGPHYV3="$TG/techpack/display/msm/dsi/dsi_phy_hw_v3_0.c"
 TGTIM="$TG/techpack/display/msm/dsi/dsi_phy_timing_v3_0.c"
+PHASE313_STAGE="startup"
+
+set_stage() {
+  PHASE313_STAGE="$1"
+  echo "== Phase313 stage: $PHASE313_STAGE =="
+}
 
 fail_report() {
   set +e
   rm -rf phase313-gki-failure
-  mkdir -p phase313-gki-failure/{logs,audit,source,nested}
+  mkdir -p phase313-gki-failure/{logs,audit,source,nested,compile,package-meta}
+  printf '%s\n' "$PHASE313_STAGE" > phase313-gki-failure/FAILED-STAGE.txt
   cp phase313-gki-compile.log phase313-gki-olddefconfig.log phase313-gki-failure/logs/ 2>/dev/null || true
   cp /tmp/p313-* phase313-gki-failure/audit/ 2>/dev/null || true
   cp scripts/313_apply_v3_timing9_handoff_repair.py phase313-gki-failure/audit/ 2>/dev/null || true
+  [ -s "$BUILD/arch/arm64/boot/Image" ] && cp "$BUILD/arch/arm64/boot/Image" phase313-gki-failure/compile/Image || true
+  [ -f "$OUT/package/repack-report.json" ] && cp "$OUT/package/repack-report.json" phase313-gki-failure/package-meta/ || true
+  [ -f "$OUT/BUILD-IDENTITY.json" ] && cp "$OUT/BUILD-IDENTITY.json" phase313-gki-failure/package-meta/ || true
+  [ -f "$OUT/SHA256SUMS" ] && cp "$OUT/SHA256SUMS" phase313-gki-failure/package-meta/ || true
   [ -f "$HW" ] && cp "$HW" phase313-gki-failure/source/ || true
   [ -f "$PHY" ] && cp "$PHY" phase313-gki-failure/source/ || true
   [ -f "$DISP" ] && cp "$DISP" phase313-gki-failure/source/ || true
@@ -30,6 +41,7 @@ fail_report() {
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
+set_stage "reconstruct Phase312"
 # Reconstruct the exact successful Phase312 tree first. Phase313 changes one
 # source-proven inherited v3 PHY register and nothing else.
 set +e
@@ -53,6 +65,7 @@ grep -Fq 'A52_PHASE311_V3_DCTRL3_HANDOFF_REPAIR_AB_V1' "$HW"
 grep -Fq 'A52_PHASE312_GKI_F0_PHY_DEPENDENCY_RECORDER_V1' "$PHY"
 grep -Fq 'A52_PHASE312_GKI_DISPCC_MISC_CMD_RECORDER_V1' "$DISP"
 
+set_stage "source provenance"
 # Source provenance: both reconstructed GKI and pinned TouchGrass define
 # TIMING_CTRL_9 at 0x0d0, calculate lane_v3[9] as 0x02, and normal v3 enable
 # writes that timing value directly to the hardware register.
@@ -88,6 +101,7 @@ cp "$HW" /tmp/p313-hw-before.c
 cp "$PHY" /tmp/p313-phy-before.c
 cp "$DISP" /tmp/p313-disp-before.c
 
+set_stage "apply Phase313 repair"
 python3 -m py_compile scripts/313_apply_v3_timing9_handoff_repair.py
 python3 scripts/313_apply_v3_timing9_handoff_repair.py --root "$ROOT"
 python3 scripts/313_apply_v3_timing9_handoff_repair.py --root "$ROOT" --check-only
@@ -99,6 +113,7 @@ diff -u /tmp/p313-hw-before.c /tmp/p313-hw-after.c > /tmp/p313-hw.diff || true
 cmp -s /tmp/p313-phy-before.c /tmp/p313-phy-after.c
 cmp -s /tmp/p313-disp-before.c /tmp/p313-disp-after.c
 
+set_stage "scope audit"
 # One-variable hardware A/B. Exactly one DSI write is added. Existing barrier
 # count/order and every other protected primitive must remain unchanged.
 python3 - "$HW" <<'PY'
@@ -149,12 +164,14 @@ for token in required:
 print('Phase313 one-write TIMING9 A/B scope audit: PASS')
 PY
 
+set_stage "config invariant"
 cp /tmp/p313-phase312.config "$BUILD/.config"
 make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig \
   > phase313-gki-olddefconfig.log 2>&1
 cmp -s /tmp/p313-phase312.config "$BUILD/.config"
 
+set_stage "compile Phase313 Image"
 set +e
 make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image \
@@ -168,17 +185,31 @@ fi
 
 IMAGE="$BUILD/arch/arm64/boot/Image"
 test -s "$IMAGE"
-# Retain the phone-visible Phase312 discriminator and inherited F0 observers.
-for marker in \
-  'P276 312T1 %x %x %x %x %x %x' \
-  'P276 312TE1 %x %x %x %x %x %x' \
-  'P276 312D q=%u rc=%d m=%x b0=%u b5=%u b7=%u b9=%u' \
-  'P276 308T q=%u %x %x %x %x %x' \
-  'P276 307C q=%u st=%x ln=%x ck=%x cc=%x in=%x' \
-  'P276 303 S00p p=%02x%02x%02x'; do
-  grep -aFq "$marker" "$IMAGE"
-done
 
+require_image_marker() {
+  local marker="$1"
+  local label="$2"
+  printf 'Phase313 Image audit %-8s : ' "$label"
+  if grep -aFq -- "$marker" "$IMAGE"; then
+    echo 'PASS'
+  else
+    echo 'FAIL'
+    printf '%s\n' "$marker" > /tmp/p313-missing-image-marker.txt
+    echo "::error::Phase313 Image audit missing marker $label" >&2
+    return 1
+  fi
+}
+
+set_stage "Image marker audit"
+# Retain the phone-visible Phase312 discriminator and inherited F0 observers.
+require_image_marker 'P276 312T1 %x %x %x %x %x %x' '312T1'
+require_image_marker 'P276 312TE1 %x %x %x %x %x %x' '312TE1'
+require_image_marker 'P276 312D q=%u rc=%d m=%x b0=%u b5=%u b7=%u b9=%u' '312D'
+require_image_marker 'P276 308T q=%u %x %x %x %x %x' '308T'
+require_image_marker 'P276 307C q=%u st=%x ln=%x ck=%x cc=%x in=%x' '307C'
+require_image_marker 'P276 303 S00p p=%02x%02x%02x' '303S00p'
+
+set_stage "assemble Phase313 evidence"
 rm -rf "$OUT"
 mkdir -p "$OUT"/{compile,config,package,audit,source}
 cp "$IMAGE" "$OUT/compile/Image"
@@ -192,6 +223,7 @@ cp "$DISP" "$OUT/source/dispcc-lagoon.c"
 cp "$GKITIM" "$OUT/source/dsi_phy_timing_v3_0.c"
 cp phase312-gki-out/BUILD-IDENTITY.json "$OUT/audit/PHASE312-BASE-BUILD-IDENTITY.json"
 
+set_stage "repack boot image"
 gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
 python3 scripts/38_repack_a52_p1_boot.py \
   --source phase312-gki-out/package/boot.img \
@@ -200,6 +232,7 @@ python3 scripts/38_repack_a52_p1_boot.py \
   --report "$OUT/package/repack-report.json"
 test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
 
+set_stage "write build identity"
 python3 - <<'PY'
 import hashlib, json, os
 from pathlib import Path
@@ -232,10 +265,12 @@ identity = {
 (r/'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2, sort_keys=True) + '\n')
 PY
 
+set_stage "checksums"
 (
   cd "$OUT"
   find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 )
 sha256sum -c "$OUT/SHA256SUMS"
 
+set_stage "complete"
 echo 'Phase313 V3 TIMING_CTRL_9 handoff repair A/B: PASS'

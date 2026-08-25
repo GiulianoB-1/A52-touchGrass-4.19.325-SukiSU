@@ -9,7 +9,7 @@ MARK = 'A52_PHASE313_V3_TIMING9_HANDOFF_REPAIR_AB_V1'
 
 OLD = '''\treg |= BIT(2);\n\tDSI_W32(phy, DSIPHY_LNX_TX_DCTRL(3), reg | BIT(0));\n\twmb(); /* Ensure that the freezeio bit is toggled */\n'''
 
-NEW = '''\treg |= BIT(2);\n\t/* A52_PHASE313_V3_TIMING9_HANDOFF_REPAIR_AB_V1\n\t * Phase312 recorded DSIPHY_CMN_TIMING_CTRL_9=0x12 at the exact first\n\t * Samsung F0 transfer while the already-calculated v3 timing cfg was\n\t * 0x02. Pinned TouchGrass hard-codes lane_v3[9]=0x02 and normal v3 PHY\n\t * enable writes that value directly. Continuous splash skips that normal\n\t * hardware programming, so repair this one inherited field before the\n\t * existing FreezeIO release sequence. The existing following wmb() orders\n\t * this write; do not add a new barrier or change release timing/order.\n\t */\n\tDSI_W32(phy, DSIPHY_CMN_TIMING_CTRL_9, 0x02);\n\tDSI_W32(phy, DSIPHY_LNX_TX_DCTRL(3), reg | BIT(0));\n\twmb(); /* Ensure that the freezeio bit is toggled */\n'''
+NEW = '''\treg |= BIT(2);\n\t/* A52_PHASE313_V3_TIMING9_HANDOFF_REPAIR_AB_V1\n\t * Phase312 recorded DSIPHY_CMN_TIMING_CTRL_9=0x12 at the exact first\n\t * Samsung F0 transfer while the already-calculated v3 timing cfg was\n\t * 0x02. Pinned TouchGrass hard-codes lane_v3[9]=0x02 and normal v3 PHY\n\t * enable writes that value directly. Continuous splash skips that normal\n\t * hardware programming, so repair this one inherited field before the\n\t * existing FreezeIO release sequence. The existing following write\n\t * barrier orders this write; do not change release timing/order.\n\t */\n\tDSI_W32(phy, DSIPHY_CMN_TIMING_CTRL_9, 0x02);\n\tDSI_W32(phy, DSIPHY_LNX_TX_DCTRL(3), reg | BIT(0));\n\twmb(); /* Ensure that the freezeio bit is toggled */\n'''
 
 
 def patch(text: str) -> str:

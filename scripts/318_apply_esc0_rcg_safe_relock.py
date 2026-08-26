@@ -57,13 +57,14 @@ static int a52_p318_rcg_set_force_enable(struct clk_hw *hw)
 
 	for (count = 500; count > 0; count--) {
 		if (clk_rcg2_is_enabled(hw))
-			return 0;
+			return ret;
 		udelay(1);
 	}
 
 	WARN(1, "%s: Phase318 RCG force-enable timed out\n",
 	     clk_hw_get_name(hw));
-	return -EBUSY;
+	/* Match TouchGrass: warn, then continue with the regmap result. */
+	return ret;
 }
 
 static int a52_p318_rcg_clear_force_enable(struct clk_hw *hw)

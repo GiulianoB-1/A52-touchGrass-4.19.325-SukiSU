@@ -61,6 +61,7 @@ cmp -s /tmp/p318-phyv3-before.c "$PHYV3"
 
 stage "scope and Golden-semantics audit"
 python3 - <<'PY'
+import re
 from pathlib import Path
 bh=Path('/tmp/p318-rcgh-before.h').read_text(); ah=Path('/tmp/p318-rcgh-after.h').read_text()
 br=Path('/tmp/p318-rcg2-before.c').read_text(); ar=Path('/tmp/p318-rcg2-after.c').read_text()
@@ -78,9 +79,17 @@ for name in ('disp_cc_mdss_byte0_clk_src','disp_cc_mdss_pclk0_clk_src'):
 # false for every pre-existing RCG, so only ESC0 reaches these writes.
 if ar.count('regmap_update_bits(')-br.count('regmap_update_bits(')!=2: raise SystemExit('Phase318 expected two new force-enable regmap_update_bits call sites')
 if ar.count('udelay(')-br.count('udelay(')!=1: raise SystemExit('Phase318 expected one new force-enable poll delay call site')
+# Functional-delta guards operate on code, not explanatory comments. Without
+# stripping comments, the Phase318 rationale text itself contains names such as
+# clk_set_rate() and clk_prepare_enable() and creates a false-positive audit.
+def code_only(s):
+ s=re.sub(r'/\*.*?\*/', '', s, flags=re.S)
+ s=re.sub(r'//[^\n]*', '', s)
+ return s
+brc=code_only(br); arc=code_only(ar); bdc=code_only(bd); adc=code_only(ad)
 for token in ('clk_set_rate(','clk_set_parent(','clk_prepare_enable(','clk_disable_unprepare(',
               'regulator_enable(','regulator_disable(','reset_control_assert(','reset_control_deassert('):
- if ar.count(token)!=br.count(token) or ad.count(token)!=bd.count(token): raise SystemExit('Phase318 forbidden unrelated functional delta: '+token)
+ if arc.count(token)!=brc.count(token) or adc.count(token)!=bdc.count(token): raise SystemExit('Phase318 forbidden unrelated functional delta: '+token)
 # No VDD or broad downstream clock-framework port is allowed in this A/B.
 for token in ('vdd-level-lagoon.h','DEFINE_VDD_REGULATORS','.vdd_class =','.num_rate_max =','.rate_max ='):
  if ad.count(token)!=bd.count(token): raise SystemExit('Phase318 must not alter VDD machinery: '+token)

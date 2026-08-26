@@ -33,7 +33,7 @@ stage "reconstruct exact successful Phase316 baseline"
 bash scripts/316_ci_build.sh 2>&1 | tee phase318-phase316.log
 for f in phase316-gki-out/package/boot.img phase316-gki-out/compile/Image phase316-gki-out/config/final.config \
          "$RCGH" "$RCG2" "$DISP" "$CTRL" "$HWC" "$PHY" "$PHYV3"; do test -s "$f"; done
-grep -Fq 'A52_PHASE316_GKI_F0_LAUNCH_FAULT_WINDOW_RECORDER_V1' "$CTRL"
+grep -Fq 'A52_PHASE316_GKI_F0_LAUNCH_FAULT_WINDOW_RECORDER_V1' "$HWC"
 ! grep -Fq 'A52_PHASE318_ESC0_RCG_SAFE_RELOCK_AB_V1' "$RCG2"
 cp "$RCGH" /tmp/p318-rcgh-before.h
 cp "$RCG2" /tmp/p318-rcg2-before.c

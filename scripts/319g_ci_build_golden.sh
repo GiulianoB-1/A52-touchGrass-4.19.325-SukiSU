@@ -76,7 +76,8 @@ combined=actrl+ahw
 for token in (
     'A52_PHASE319_DSI_SIXPOINT_TEMPORAL_OBSERVER_V1',
     '0x0171, 0x0181, 0x0191, 0x01a1, 0x01e1, 0x0211',
-    'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x',
+    'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x',
+    'restored_ctl = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);',
     'a52_g319_debugbus_snapshot(&dsi_ctrl->hw, 2);',
 ):
     if token not in combined:
@@ -97,7 +98,7 @@ IMAGE="$ROOT/artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe"
 CONFIG="$ROOT/artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe"
 test -s "$IMAGE" -a -s "$CONFIG"
 for marker in \
-  'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x' \
+  'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x' \
   'TG315 DONE ret=%d irq=%d'; do
   grep -aFq "$marker" "$IMAGE"
 done
@@ -119,6 +120,7 @@ hooks=q0-immediately-before-trigger,q1-immediately-after-trigger,q2-after-comple
 selectors=0x0171,0x0181,0x0191,0x01a1,0x01e1,0x0211
 phase317_basis=all-six-are-members-of-measured-Golden-GKI-q2-raw-delta-set
 writes=DSI_DEBUG_BUS_CTL-only-plus-exact-original-selector-restore-at-each-snapshot
+restore_validation=DSI_DEBUG_BUS_CTL-readback-recorded-as-r-and-must-equal-saved-c
 runtime_selector_writes_per_snapshot=7
 phase317_full_sweep_inherited=no
 functional_clock_phy_reset_regulator_delay_retry_changes=none

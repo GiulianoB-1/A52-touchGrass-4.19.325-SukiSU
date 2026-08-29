@@ -126,6 +126,44 @@ path.write_text(text, encoding="utf-8")
 print("Phase319 regeneration: Probe143 local-mask audit compatibility PASS")
 PY
 
+# The branch-head 123 wrapper accumulated later 141/154 calls after Workflow123
+# had already produced its source boundary. Replaying that wrapper directly
+# therefore jumps from the old 124 recorder into 154 without materializing the
+# intervening unified 140 recorder. Restore the historical dependency ordering:
+# let 143 first patch the 140 generator for early-mirrored operation, then execute
+# that generator before the parameter and failure-window stages inspect live
+# recorder source. This changes only hydrated replay orchestration.
+python3 - "$R32/141_apply_a52xq_ack_secure_parameter_probe.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    if not early_report_path.is_file():
+        raise SystemExit(f"missing early mirrored boot report: {early_report_path}")
+
+    ion = patch_ion(root)
+'''
+new = '''    if not early_report_path.is_file():
+        raise SystemExit(f"missing early mirrored boot report: {early_report_path}")
+
+    # Phase319 historical replay compatibility: Probe142/143 patch the unified
+    # generator, so materialize that patched generator before Probe154 consumes
+    # the live A52_USR2 recorder source.
+    run_stage_script(GENERATOR_NAME, root, output)
+
+    ion = patch_ion(root)
+'''
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"Probe141 unified-recorder ordering anchor expected 1, found {count}")
+text = text.replace(old, new, 1)
+if old in text or text.count('run_stage_script(GENERATOR_NAME, root, output)') != 1:
+    raise SystemExit("Probe141 unified-recorder ordering compatibility rewrite failed")
+path.write_text(text, encoding="utf-8")
+print("Phase319 regeneration: Probe141 unified-recorder ordering compatibility PASS")
+PY
+
 for spec in \
   drivers/interconnect/qcom/sm6350.c \
   drivers/interconnect/qcom/sm6350.h \

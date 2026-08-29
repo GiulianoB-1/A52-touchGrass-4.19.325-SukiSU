@@ -112,6 +112,24 @@ EOF
 git -C "$ROOT" reset --hard "$GKI_COMMON_SHA"
 git -C "$ROOT" clean -fd
 
+# Historical Run29/30/31 wrappers use Workflow68's integrated config only as a
+# deterministic mutation target for compile-only quarantine symbols. Recreate
+# exactly one entry for each symbol before replaying 94b. This config never
+# becomes the Phase319 build config; exact Phase175 patch identity and the later
+# Phase316 source/config oracle still reject any source drift.
+WF68_CONFIG="$PWD/workflow68/extracted/integrated.config"
+mkdir -p "$(dirname "$WF68_CONFIG")"
+cat > "$WF68_CONFIG" <<'EOF'
+CONFIG_CAM_CC_LAGOON=y
+CONFIG_DISP_CC_LAGOON=y
+CONFIG_GPU_CC_LAGOON=y
+CONFIG_VIDEO_CC_LAGOON=y
+CONFIG_KASAN=y
+CONFIG_NPU_CC_LAGOON=y
+CONFIG_QCOM_CLK_DEBUG=y
+CONFIG_DEBUG_CC_LAGOON=y
+EOF
+
 export PYTHONPATH="$HIST${PYTHONPATH:+:$PYTHONPATH}"
 python3 "$HIST/53_probe_a52xq_lagoon_phase1.py" stage --gki "$ROOT" --touchgrass "$TG" --seed-config "$WORK/workflow52-resolved.config" --output "$STAGE/53"
 python3 "$HIST/54_probe_a52xq_lagoon_clocks_phase2.py" stage --gki "$ROOT" --touchgrass "$TG" --output "$STAGE/54"

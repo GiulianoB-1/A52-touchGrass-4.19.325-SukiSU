@@ -26,7 +26,7 @@ if text.count(anchor) != 1:
         f"Phase319 Run32 compatibility insertion anchor expected 1, found {text.count(anchor)}"
     )
 
-block = r'''
+block = r"""
 # The branch-head 123 wrapper also accumulated a later compile-cleanup rule for
 # a generated legacy GDSC provider. That provider does not exist at the pinned
 # Run32 source boundary, so treating its absence as fatal is anachronistic. Skip
@@ -39,17 +39,16 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-old = '''    if not path.is_file():
-        raise SystemExit(f"{label}: missing generated source: {path}")
-'''
-new = '''    if not path.is_file():
-        if (
-            path.name == "a52-legacy-gdsc-regulator.c"
-            and label == "legacy GDSC disable status local"
-        ):
-            return 0
-        raise SystemExit(f"{label}: missing generated source: {path}")
-'''
+old = "    if not path.is_file():\n        raise SystemExit(f\"{label}: missing generated source: {path}\")\n"
+new = (
+    "    if not path.is_file():\n"
+    "        if (\n"
+    "            path.name == \"a52-legacy-gdsc-regulator.c\"\n"
+    "            and label == \"legacy GDSC disable status local\"\n"
+    "        ):\n"
+    "            return 0\n"
+    "        raise SystemExit(f\"{label}: missing generated source: {path}\")\n"
+)
 count = text.count(old)
 if count != 1:
     raise SystemExit(f"Run32 GDSC cleanup compatibility anchor expected 1, found {count}")
@@ -60,7 +59,7 @@ path.write_text(text, encoding="utf-8")
 print("Phase319 regeneration: future GDSC cleanup compatibility PASS")
 PY123
 
-'''
+"""
 text = text.replace(anchor, "\n" + block + anchor.lstrip("\n"), 1)
 path.write_text(text, encoding="utf-8")
 PY

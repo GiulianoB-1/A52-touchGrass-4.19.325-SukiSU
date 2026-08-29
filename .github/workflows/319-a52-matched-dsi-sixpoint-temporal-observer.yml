@@ -1,0 +1,188 @@
+name: 319 - A52 matched DSI sixpoint temporal observer
+run-name: Phase 319 - Golden vs GKI six-selector q0 q1 q2 temporal observer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase319-gki-dsi-sixpoint-temporal-observer-v1
+    paths:
+      - .github/workflows/319-a52-matched-dsi-sixpoint-temporal-observer.yml
+      - scripts/319_apply_dsi_sixpoint_temporal_observer.py
+      - scripts/319_ci_build_gki.sh
+      - scripts/319g_ci_build_golden.sh
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase319-temporal-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE315G_COMMIT: a82b49ec1c0227611d8dc9a26a7249dae0a8c938
+  GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+jobs:
+  gki:
+    name: Build Phase319 GKI sixpoint temporal observer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare GKI runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py
+          bash -n scripts/319_ci_build_gki.sh
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq; mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Build and audit Phase319 GKI
+        run: bash scripts/319_ci_build_gki.sh
+      - name: Upload Phase319 GKI evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase319-GKI-DSI-SIXPOINT-TEMPORAL-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase319-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Phase319 GKI boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase319-GKI-DSI-SIXPOINT-TEMPORAL-${{ github.run_number }}-BOOT-IMG
+          path: phase319-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Upload GKI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase319-GKI-DSI-SIXPOINT-TEMPORAL-${{ github.run_number }}-FAILED
+          path: phase319-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30
+
+  golden:
+    name: Build Phase319 Golden sixpoint temporal observer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: '4'
+      CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+      CCACHE_MAXSIZE: 5G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Golden runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py
+          bash -n scripts/319g_ci_build_golden.sh
+      - name: Create exact Golden-control workspace and hydrate observers
+        run: |
+          set -Eeuo pipefail
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+          git -C golden-work fetch --depth=1 origin "$PHASE315G_COMMIT"
+          git -C golden-work show FETCH_HEAD:scripts/315g_apply_golden_f0_full_prestate_reference.py > golden-work/scripts/315g_apply_golden_f0_full_prestate_reference.py
+          git -C golden-work show FETCH_HEAD:scripts/315g_ci_build.sh > golden-work/scripts/315g_ci_build.sh
+          cp scripts/319_apply_dsi_sixpoint_temporal_observer.py golden-work/scripts/
+          cp scripts/319g_ci_build_golden.sh golden-work/scripts/
+          python3 -m py_compile golden-work/scripts/315g_apply_golden_f0_full_prestate_reference.py golden-work/scripts/319_apply_dsi_sixpoint_temporal_observer.py
+          bash -n golden-work/scripts/315g_ci_build.sh
+          bash -n golden-work/scripts/319g_ci_build_golden.sh
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase319-golden-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase317-golden-${{ runner.os }}-
+            a52xq-phase315g-golden-${{ runner.os }}-
+            a52xq-phase307-golden-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+      - name: Build and audit Phase319 Golden
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          bash scripts/319g_ci_build_golden.sh
+      - name: Hydrate FDR repack helpers
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          mkdir -p golden-work/scripts golden-work/projects/a52-p1-boot-image
+          fetch_file() { local ref="$1" path="$2" out="golden-work/$2"; gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq '.content' | tr -d '\n' | base64 --decode > "$out"; test -s "$out"; }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x golden-work/scripts/37_validate_a52_p1_boot_source.py golden-work/scripts/38_repack_a52_p1_boot.py
+      - name: Repack Golden with known-good FDR container
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          OUT=phase319-golden-out
+          mkdir -p intake "$OUT/package"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img --lock projects/a52-p1-boot-image/boot-source.lock --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py --source intake/boot.img --kernel "$OUT/package/Image.gz" --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
+          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' "$OUT/BUILD-IDENTITY.txt"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+      - name: Upload Phase319 Golden evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase319-GOLDEN-DSI-SIXPOINT-TEMPORAL-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase319-golden-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Golden failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-Phase319-GOLDEN-DSI-SIXPOINT-TEMPORAL-${{ github.run_number }}-FAILED
+          path: golden-work/phase319-golden-failure/
+          if-no-files-found: warn
+          retention-days: 30

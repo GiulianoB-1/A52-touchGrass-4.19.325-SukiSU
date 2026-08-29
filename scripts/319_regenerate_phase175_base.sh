@@ -102,6 +102,30 @@ for name in \
   fetch_script "$RUN32_REF" "$name" "$R32"
 done
 
+# The Run32 branch intentionally moved the ION secure retry gate away from the
+# vendor msm_ion.h macros and onto the equivalent local constants. Probe143's
+# combined audit predates that later 149 wrapper change and still checks the old
+# source spelling. Repair only the hydrated audit token, never the kernel source.
+# The exact Phase175 patch hash below remains the authoritative source-identity
+# gate and will fail if this compatibility repair masks any real source drift.
+python3 - "$R32/143_run_a52xq_early_mirrored_boot_probe.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '("ion", "ION_FLAGS_CP_MASK | ION_FLAG_SECURE"),'
+new = '("ion", "0x6FFE0000U | (1U << 31)"),'
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"Probe143 stale secure-mask audit anchor expected 1, found {count}")
+text = text.replace(old, new, 1)
+if old in text or text.count(new) != 1:
+    raise SystemExit("Probe143 local-mask audit compatibility rewrite failed")
+path.write_text(text, encoding="utf-8")
+print("Phase319 regeneration: Probe143 local-mask audit compatibility PASS")
+PY
+
 for spec in \
   drivers/interconnect/qcom/sm6350.c \
   drivers/interconnect/qcom/sm6350.h \

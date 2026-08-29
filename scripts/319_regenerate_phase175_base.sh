@@ -65,7 +65,9 @@ done
 
 # Run32 complete-source producer scripts, pinned to the surviving historical
 # a52-keymaster-real-ion branch head whose final commit changed evidence-session
-# tooling only and explicitly left kernel source unchanged.
+# tooling only and explicitly left kernel source unchanged. Keep the full local
+# dependency closure for the secure startup stages because the wrappers execute
+# sibling scripts by filename.
 for name in \
   a52xq_downstream_port_probe_v3.py \
   103_apply_a52xq_phase1_compat.py \
@@ -86,7 +88,15 @@ for name in \
   116_apply_a52xq_final_residuals.py \
   123_apply_a52xq_legacy_ion_free_compat.py \
   124_apply_a52xq_ion_qsee_runtime_trace.py \
-  141_apply_a52xq_ack_secure_parameter_probe.py; do
+  140_apply_a52xq_unified_secure_startup_recorder.py \
+  141_apply_a52xq_ack_secure_parameter_probe.py \
+  143_run_a52xq_early_mirrored_boot_probe.py \
+  144_apply_a52xq_qseecom_reserved_mem_shmbridge.py \
+  146_apply_a52xq_legacy_system_heap_mask.py \
+  148_apply_a52xq_ion_dmabuf_contract.py \
+  149_apply_a52xq_ion_system_heap_secure_gate.py \
+  153_apply_a52xq_qseecom_ion_heaps.py \
+  154_apply_a52xq_failure_window_probe.py; do
   fetch_script "$RUN32_REF" "$name" "$R32"
 done
 

@@ -13,6 +13,7 @@ on:
       - scripts/319_reconstruct_phase206_from_verified_artifact.sh
       - scripts/319_regenerate_phase175_base.sh
       - scripts/319g_ci_build_golden.sh
+      - workflow68/extracted/integrated.config
 
 permissions:
   contents: read
@@ -170,7 +171,7 @@ jobs:
           printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
           python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img --lock projects/a52-p1-boot-image/boot-source.lock --output "$OUT/package/source-validation.json"
           python3 scripts/38_repack_a52_p1_boot.py --source intake/boot.img --kernel "$OUT/package/Image.gz" --output "$OUT/package/boot.img" --report "$OUT/package/repack-report.json"
-          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          test "$(stat -c %s "$OUT/package/boot.img")" -eq 100663296
           sed -i 's/^flashable=.*/flashable=yes-known-good-96MiB-container-repacked/' "$OUT/BUILD-IDENTITY.txt"
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
       - name: Upload Phase319 Golden evidence

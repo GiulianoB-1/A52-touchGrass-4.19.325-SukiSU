@@ -33,13 +33,13 @@ GKI_RE = re.compile(
     r'171=(?P<171>[0-9a-fA-F]+) 181=(?P<181>[0-9a-fA-F]+) '
     r'191=(?P<191>[0-9a-fA-F]+) 1a1=(?P<1a1>[0-9a-fA-F]+) '
     r'1e1=(?P<1e1>[0-9a-fA-F]+) 211=(?P<211>[0-9a-fA-F]+) '
-    r'z=(?P<z>[0-9a-fA-F]+)')
+    r'z=(?P<z>[0-9a-fA-F]+) r=(?P<r>[0-9a-fA-F]+)')
 GOLDEN_RE = re.compile(
     r'TG319 B q=(?P<q>[012]) c=(?P<c>[0-9a-fA-F]+) '
     r'171=(?P<171>[0-9a-fA-F]+) 181=(?P<181>[0-9a-fA-F]+) '
     r'191=(?P<191>[0-9a-fA-F]+) 1a1=(?P<1a1>[0-9a-fA-F]+) '
     r'1e1=(?P<1e1>[0-9a-fA-F]+) 211=(?P<211>[0-9a-fA-F]+) '
-    r'z=(?P<z>[0-9a-fA-F]+)')
+    r'z=(?P<z>[0-9a-fA-F]+) r=(?P<r>[0-9a-fA-F]+)')
 
 
 def parse(path: Path, rx: re.Pattern[str], label: str) -> dict[int, dict[str, int]]:
@@ -49,7 +49,7 @@ def parse(path: Path, rx: re.Pattern[str], label: str) -> dict[int, dict[str, in
     for m in rx.finditer(text):
         q = int(m.group('q'))
         counts[q] += 1
-        out[q] = {k: int(m.group(k), 16) for k in ('c', *SELECTORS, 'z')}
+        out[q] = {k: int(m.group(k), 16) for k in ('c', *SELECTORS, 'z', 'r')}
     missing = [q for q in (0, 1, 2) if q not in out]
     if missing:
         raise SystemExit(f'{label}: missing Phase319 q points: {missing}')
@@ -73,6 +73,18 @@ def baseline_check(label: str, observed: dict[int, dict[str, int]], baseline: di
         same = now == old
         ok &= same
         print(f'0x0{s}   {hx(now)}   {hx(old)}   {hx(now ^ old)}   {"yes" if same else "NO"}')
+    print()
+    return ok
+
+
+def restore_check(label: str, observed: dict[int, dict[str, int]]) -> bool:
+    ok = True
+    print(f'{label} debug-selector restore readback')
+    print('q       saved    readback   match')
+    for q in (0, 1, 2):
+        same = observed[q]['c'] == observed[q]['r']
+        ok &= same
+        print(f'{q}  {hx(observed[q]["c"])}  {hx(observed[q]["r"])}   {"yes" if same else "NO"}')
     print()
     return ok
 
@@ -122,6 +134,14 @@ def main() -> None:
         print(f'0x0{s}: {state}')
 
     print()
+    gki_restore_ok = restore_check('GKI', gki)
+    golden_restore_ok = restore_check('Golden', golden)
+    if gki_restore_ok and golden_restore_ok:
+        print('Selector restore readback: PASS')
+    else:
+        print('Selector restore readback: FAIL - do not interpret temporal values as controlled')
+    print()
+
     gki_baseline_ok = baseline_check('GKI', gki, PHASE317_Q2['gki'])
     golden_baseline_ok = baseline_check('Golden', golden, PHASE317_Q2['golden'])
     if gki_baseline_ok and golden_baseline_ok:

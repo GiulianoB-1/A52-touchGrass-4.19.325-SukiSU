@@ -89,7 +89,9 @@ for name in \
   123_apply_a52xq_legacy_ion_free_compat.py \
   124_apply_a52xq_ion_qsee_runtime_trace.py \
   140_apply_a52xq_unified_secure_startup_recorder.py \
+  140_decode_a52xq_unified_secure_recorder.py \
   141_apply_a52xq_ack_secure_parameter_probe.py \
+  142_apply_a52xq_early_mirrored_boot_probe.py \
   143_run_a52xq_early_mirrored_boot_probe.py \
   144_apply_a52xq_qseecom_reserved_mem_shmbridge.py \
   146_apply_a52xq_legacy_system_heap_mask.py \

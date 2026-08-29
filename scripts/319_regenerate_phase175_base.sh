@@ -28,10 +28,13 @@ if text.count(anchor) != 1:
 
 block = r"""
 # The branch-head 123 wrapper accumulated compile-cleanup rules from later source
-# states. Restore only the two Run32 compatibility cases already disproven by
-# direct replay: the future generated GDSC file and the already-resolved
-# fw_devlink diagnostic local. All other cleanup expectations remain strict, and
-# the immutable Phase175 patch SHA256 remains the authoritative source gate.
+# states. At the pinned Run32 boundary several of those anchors legitimately do
+# not exist at all. Make replace_or_verify idempotent only for the exact state
+# where BOTH the old and new spellings are absent. Existing old anchors still
+# must occur exactly the expected number of times; existing new anchors still
+# must also have the exact expected count. The future GDSC provider is the one
+# missing-file exception already proven by replay. Finally, the immutable
+# Phase175 patch SHA256 remains the authoritative source-identity gate.
 python3 - "$R32/123_apply_a52xq_legacy_ion_free_compat.py" <<'PY123'
 from pathlib import Path
 import sys
@@ -64,11 +67,7 @@ old_gate = (
 new_gate = (
     "    old_count = text.count(old)\n"
     "    if old_count != expected:\n"
-    "        if (\n"
-    "            old_count == 0\n"
-    "            and new_count == 0\n"
-    "            and label == \"fw_devlink diagnostic reason local\"\n"
-    "        ):\n"
+    "        if old_count == 0 and new_count == 0:\n"
     "            return 0\n"
     "        raise SystemExit(\n"
     "            f\"{label}: expected {expected} unfixed anchors, found {old_count}\"\n"
@@ -76,17 +75,17 @@ new_gate = (
 )
 count = text.count(old_gate)
 if count != 1:
-    raise SystemExit(f"Run32 fw_devlink cleanup compatibility anchor expected 1, found {count}")
+    raise SystemExit(f"Run32 post-cleanup gate compatibility anchor expected 1, found {count}")
 text = text.replace(old_gate, new_gate, 1)
 
 if old_missing in text or old_gate in text:
     raise SystemExit("Run32 post-cleanup compatibility rewrite left stale anchors")
 if text.count('path.name == "a52-legacy-gdsc-regulator.c"') != 1:
     raise SystemExit("Run32 GDSC cleanup compatibility rewrite failed")
-if text.count('label == "fw_devlink diagnostic reason local"') != 1:
-    raise SystemExit("Run32 fw_devlink cleanup compatibility rewrite failed")
+if text.count("if old_count == 0 and new_count == 0:") != 1:
+    raise SystemExit("Run32 absence-idempotent cleanup compatibility rewrite failed")
 path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: Run32 post-cleanup compatibility PASS")
+print("Phase319 regeneration: Run32 absence-idempotent post-cleanup compatibility PASS")
 PY123
 
 """

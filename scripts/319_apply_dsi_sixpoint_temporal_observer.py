@@ -34,7 +34,7 @@ static const u32 a52_p319_selectors[6] = {
 
 void a52_p319_debugbus_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 {
-	u32 saved, restored, i;
+	u32 saved, restored_ctl, restored_status, i;
 	u32 v[6];
 
 	if (!a52_p293_gdm_trace_active() || !ctrl || !ctrl->base)
@@ -48,10 +48,12 @@ void a52_p319_debugbus_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 	}
 	DSI_W32(ctrl, DSI_DEBUG_BUS_CTL, saved);
 	wmb();
-	restored = DSI_R32(ctrl, DSI_DEBUG_BUS_STATUS);
+	restored_ctl = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);
+	restored_status = DSI_R32(ctrl, DSI_DEBUG_BUS_STATUS);
 
-	a52_ackfr_record("P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x",
-		point, saved, v[0], v[1], v[2], v[3], v[4], v[5], restored);
+	a52_ackfr_record("P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x",
+		point, saved, v[0], v[1], v[2], v[3], v[4], v[5], restored_status,
+		restored_ctl);
 }
 
 '''
@@ -69,7 +71,7 @@ static const u32 a52_g319_selectors[6] = {
 
 void a52_g319_debugbus_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 {
-	u32 saved, restored, i;
+	u32 saved, restored_ctl, restored_status, i;
 	u32 v[6];
 
 	if (!a52_g315_trace_active() || !ctrl || !ctrl->base)
@@ -83,10 +85,12 @@ void a52_g319_debugbus_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 	}
 	DSI_W32(ctrl, DSI_DEBUG_BUS_CTL, saved);
 	wmb();
-	restored = DSI_R32(ctrl, DSI_DEBUG_BUS_STATUS);
+	restored_ctl = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);
+	restored_status = DSI_R32(ctrl, DSI_DEBUG_BUS_STATUS);
 
-	pr_info("TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x\n",
-		point, saved, v[0], v[1], v[2], v[3], v[4], v[5], restored);
+	pr_info("TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x\n",
+		point, saved, v[0], v[1], v[2], v[3], v[4], v[5], restored_status,
+		restored_ctl);
 }
 
 '''
@@ -153,17 +157,18 @@ def patch_ctrl_golden(text: str) -> str:
 def validate(ctrl: str, hwc: str, flavor: str) -> None:
     both = ctrl + hwc
     required = [MARK, 'DSI_DEBUG_BUS_CTL', 'DSI_DEBUG_BUS_STATUS',
-                '0x0171, 0x0181, 0x0191, 0x01a1, 0x01e1, 0x0211']
+                '0x0171, 0x0181, 0x0191, 0x01a1, 0x01e1, 0x0211',
+                'restored_ctl = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);']
     if flavor == 'gki':
         required += [
-            'P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x',
+            'P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x',
             'a52_p319_debugbus_snapshot(ctrl, 0);',
             'a52_p319_debugbus_snapshot(ctrl, 1);',
             'a52_p319_debugbus_snapshot(&dsi_ctrl->hw, 2);',
         ]
     else:
         required += [
-            'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x',
+            'TG319 B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x',
             'a52_g319_debugbus_snapshot(ctrl, 0);',
             'a52_g319_debugbus_snapshot(ctrl, 1);',
             'a52_g319_debugbus_snapshot(&dsi_ctrl->hw, 2);',

@@ -140,13 +140,11 @@ if old_marker_gates in text or text.count(
 ) != 1:
     raise SystemExit("Phase319 Run32 marker-gate compatibility rewrite failed")
 
-path.write_text(text, encoding="utf-8")
-PY
-
-# Phase171's branch-head semantic audit requires the -EOPNOTSUPP return to be
-# immediately adjacent to the missing heap callback test. The reconstructed ACK
-# exporter preserves the same behavior but may contain braces or diagnostics in
-# that branch. Audit the behavior in order instead of its exact formatting.
+phase171_call = 'python3 scripts/171_audit_touchgrass_qseecom_contract.py --gki "$ROOT" --touchgrass "$TGREF" --output "$STAGE/171"\n'
+phase171_block = r'''# Phase171's hydrated historical audit requires -EOPNOTSUPP to be textually
+# adjacent to the missing heap callback test. The reconstructed exporter keeps
+# the same control flow but includes branch-local diagnostics. Patch the audit
+# after all historical script hydration, immediately before it executes.
 python3 - scripts/171_audit_touchgrass_qseecom_contract.py <<'PY171'
 from pathlib import Path
 import sys
@@ -164,14 +162,25 @@ new = (
 )
 count = text.count(old)
 if count != 1:
-    raise SystemExit(f"Phase171 get_flags semantic-audit anchor expected 1, found {count}")
+    raise SystemExit(f"Phase171 hydrated get_flags audit anchor expected 1, found {count}")
 text = text.replace(old, new, 1)
 if old in text or text.count(
     'r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)"'
 ) != 1:
-    raise SystemExit("Phase171 get_flags semantic-audit compatibility rewrite failed")
+    raise SystemExit("Phase171 hydrated get_flags audit compatibility rewrite failed")
 path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: Phase171 get_flags semantic audit compatibility PASS")
+print("Phase319 regeneration: hydrated Phase171 get_flags audit compatibility PASS")
 PY171
+python3 scripts/171_audit_touchgrass_qseecom_contract.py --gki "$ROOT" --touchgrass "$TGREF" --output "$STAGE/171"
+'''
+count = text.count(phase171_call)
+if count != 1:
+    raise SystemExit(f"Phase319 Phase171 execution anchor expected 1, found {count}")
+text = text.replace(phase171_call, phase171_block, 1)
+if text.count("hydrated Phase171 get_flags audit compatibility PASS") != 1:
+    raise SystemExit("Phase319 Phase171 in-replay compatibility insertion failed")
+
+path.write_text(text, encoding="utf-8")
+PY
 
 bash "$TMP" "$@"

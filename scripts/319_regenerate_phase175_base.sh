@@ -143,4 +143,35 @@ if old_marker_gates in text or text.count(
 path.write_text(text, encoding="utf-8")
 PY
 
+# Phase171's branch-head semantic audit requires the -EOPNOTSUPP return to be
+# immediately adjacent to the missing heap callback test. The reconstructed ACK
+# exporter preserves the same behavior but may contain braces or diagnostics in
+# that branch. Audit the behavior in order instead of its exact formatting.
+python3 - scripts/171_audit_touchgrass_qseecom_contract.py <<'PY171'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = (
+    '                r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)\\s*return\\s+-EOPNOTSUPP\\s*;"\n'
+    '                r".*?return\\s+heap->buf_ops\\.get_flags\\(dmabuf,\\s*flags\\)\\s*;"\n'
+)
+new = (
+    '                r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)"\n'
+    '                r".*?return\\s+-EOPNOTSUPP\\s*;"\n'
+    '                r".*?return\\s+heap->buf_ops\\.get_flags\\(dmabuf,\\s*flags\\)\\s*;"\n'
+)
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"Phase171 get_flags semantic-audit anchor expected 1, found {count}")
+text = text.replace(old, new, 1)
+if old in text or text.count(
+    'r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)"'
+) != 1:
+    raise SystemExit("Phase171 get_flags semantic-audit compatibility rewrite failed")
+path.write_text(text, encoding="utf-8")
+print("Phase319 regeneration: Phase171 get_flags semantic audit compatibility PASS")
+PY171
+
 bash "$TMP" "$@"

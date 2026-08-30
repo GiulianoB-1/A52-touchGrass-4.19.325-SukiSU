@@ -33,8 +33,15 @@ block = r"""
 # where BOTH the old and new spellings are absent. Existing old anchors still
 # must occur exactly the expected number of times; existing new anchors still
 # must also have the exact expected count. The future GDSC provider is the one
-# missing-file exception already proven by replay. Finally, the immutable
-# Phase175 patch SHA256 remains the authoritative source-identity gate.
+# missing-file exception already proven by replay.
+#
+# The same branch-head wrapper also audits a retained ACK build identifier that
+# belongs specifically to the older delayed-work recorder init path. Require the
+# identifier whenever that delayed-work path exists, but do not reject a later
+# historical recorder shape where the delayed-work call itself is absent.
+#
+# The immutable Phase175 patch SHA256 remains the authoritative source-identity
+# gate after these replay-only compatibility transformations.
 python3 - "$R32/123_apply_a52xq_legacy_ion_free_compat.py" <<'PY123'
 from pathlib import Path
 import sys
@@ -78,14 +85,34 @@ if count != 1:
     raise SystemExit(f"Run32 post-cleanup gate compatibility anchor expected 1, found {count}")
 text = text.replace(old_gate, new_gate, 1)
 
-if old_missing in text or old_gate in text:
+old_build_id = (
+    '        "build_identifier": (\n'
+    '            \'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\\\n");\'\n'
+    '            in recorder\n'
+    '        ),\n'
+)
+new_build_id = (
+    '        "build_identifier": (\n'
+    '            \'pr_info("A52 ACK 5.10 secure-startup flight recorder enabled\\\\n");\'\n'
+    '            in recorder\n'
+    '            or "schedule_delayed_work(&a52_ackfr_dump_work" not in recorder\n'
+    '        ),\n'
+)
+count = text.count(old_build_id)
+if count != 1:
+    raise SystemExit(f"Run32 ACK build-id audit compatibility anchor expected 1, found {count}")
+text = text.replace(old_build_id, new_build_id, 1)
+
+if old_missing in text or old_gate in text or old_build_id in text:
     raise SystemExit("Run32 post-cleanup compatibility rewrite left stale anchors")
 if text.count('path.name == "a52-legacy-gdsc-regulator.c"') != 1:
     raise SystemExit("Run32 GDSC cleanup compatibility rewrite failed")
 if text.count("if old_count == 0 and new_count == 0:") != 1:
     raise SystemExit("Run32 absence-idempotent cleanup compatibility rewrite failed")
+if text.count('or "schedule_delayed_work(&a52_ackfr_dump_work" not in recorder') != 1:
+    raise SystemExit("Run32 ACK build-id audit compatibility rewrite failed")
 path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: Run32 absence-idempotent post-cleanup compatibility PASS")
+print("Phase319 regeneration: Run32 post-cleanup + ACK audit compatibility PASS")
 PY123
 
 """

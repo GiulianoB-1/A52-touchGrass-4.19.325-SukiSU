@@ -177,17 +177,8 @@ count = text.count(old)
 if count != 1:
     raise SystemExit(f"Phase171 stale pre-Phase148 flags audit anchor expected 1, found {count}")
 text = text.replace(old, new, 1)
-if old in text:
-    raise SystemExit("Phase171 stale pre-Phase148 flags audit remains")
-for marker in (
-    'get_flags_prefers_heap_callback_then_buffer_fallback',
-    'A52_ION_DMABUF_FLAGS_FALLBACK',
-    r'if\\s*\\(heap->buf_ops\\.get_flags\\)',
-    r'\\*flags\\s*=\\s*buffer->flags\\s*;',
-    r'return\\s+0\\s*;',
-):
-    if text.count(marker) != 1:
-        raise SystemExit(f"Phase171 Phase148 flags-fallback audit rewrite failed: {marker}")
+if old in text or text.count(new) != 1:
+    raise SystemExit("Phase171 Phase148 flags-fallback audit exact-block verification failed")
 path.write_text(text, encoding="utf-8")
 print("Phase319 regeneration: hydrated Phase171 Phase148 flags-fallback audit compatibility PASS")
 PY171

@@ -141,10 +141,13 @@ if old_marker_gates in text or text.count(
     raise SystemExit("Phase319 Run32 marker-gate compatibility rewrite failed")
 
 phase171_call = 'python3 scripts/171_audit_touchgrass_qseecom_contract.py --gki "$ROOT" --touchgrass "$TGREF" --output "$STAGE/171"\n'
-phase171_block = r'''# Phase171's hydrated historical audit requires -EOPNOTSUPP to be textually
-# adjacent to the missing heap callback test. The reconstructed exporter keeps
-# the same control flow but includes branch-local diagnostics. Patch the audit
-# after all historical script hydration, immediately before it executes.
+phase171_block = r'''# Run32 Phase148 deliberately changed the ACK global ION exporter from the
+# upstream "missing heap callback => -EOPNOTSUPP" contract to a TouchGrass-style
+# buffer-flags fallback while preserving a heap-specific override when present.
+# Phase169 then adds the heap-19 override. The later Phase171 audit retained the
+# pre-Phase148 missing-callback assertion, so repair only that hydrated audit to
+# require the exact Phase148 semantics. Kernel source is never modified here;
+# the immutable Phase175 patch SHA256 remains the authoritative identity gate.
 python3 - scripts/171_audit_touchgrass_qseecom_contract.py <<'PY171'
 from pathlib import Path
 import sys
@@ -152,24 +155,41 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 old = (
+    '            "get_flags_requires_heap_callback": (\n'
+    '                r"static\\s+int\\s+ion_dma_buf_get_flags\\s*\\([^)]*\\)\\s*\\{"\n'
     '                r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)\\s*return\\s+-EOPNOTSUPP\\s*;"\n'
     '                r".*?return\\s+heap->buf_ops\\.get_flags\\(dmabuf,\\s*flags\\)\\s*;"\n'
+    '            ),\n'
 )
 new = (
-    '                r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)"\n'
-    '                r".*?return\\s+-EOPNOTSUPP\\s*;"\n'
+    '            "get_flags_prefers_heap_callback_then_buffer_fallback": (\n'
+    '                r"A52_ION_DMABUF_FLAGS_FALLBACK.*?"\n'
+    '                r"static\\s+int\\s+ion_dma_buf_get_flags\\s*\\([^)]*\\)\\s*\\{"\n'
+    '                r".*?struct\\s+ion_buffer\\s*\\*\\s*buffer\\s*=\\s*dmabuf->priv\\s*;"\n'
+    '                r".*?struct\\s+ion_heap\\s*\\*\\s*heap\\s*=\\s*buffer->heap\\s*;"\n'
+    '                r".*?if\\s*\\(heap->buf_ops\\.get_flags\\)"\n'
     '                r".*?return\\s+heap->buf_ops\\.get_flags\\(dmabuf,\\s*flags\\)\\s*;"\n'
+    '                r".*?\\*flags\\s*=\\s*buffer->flags\\s*;"\n'
+    '                r".*?return\\s+0\\s*;"\n'
+    '            ),\n'
 )
 count = text.count(old)
 if count != 1:
-    raise SystemExit(f"Phase171 hydrated get_flags audit anchor expected 1, found {count}")
+    raise SystemExit(f"Phase171 stale pre-Phase148 flags audit anchor expected 1, found {count}")
 text = text.replace(old, new, 1)
-if old in text or text.count(
-    'r".*?if\\s*\\(!heap->buf_ops\\.get_flags\\)"'
-) != 1:
-    raise SystemExit("Phase171 hydrated get_flags audit compatibility rewrite failed")
+if old in text:
+    raise SystemExit("Phase171 stale pre-Phase148 flags audit remains")
+for marker in (
+    'get_flags_prefers_heap_callback_then_buffer_fallback',
+    'A52_ION_DMABUF_FLAGS_FALLBACK',
+    r'if\\s*\\(heap->buf_ops\\.get_flags\\)',
+    r'\\*flags\\s*=\\s*buffer->flags\\s*;',
+    r'return\\s+0\\s*;',
+):
+    if text.count(marker) != 1:
+        raise SystemExit(f"Phase171 Phase148 flags-fallback audit rewrite failed: {marker}")
 path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: hydrated Phase171 get_flags audit compatibility PASS")
+print("Phase319 regeneration: hydrated Phase171 Phase148 flags-fallback audit compatibility PASS")
 PY171
 python3 scripts/171_audit_touchgrass_qseecom_contract.py --gki "$ROOT" --touchgrass "$TGREF" --output "$STAGE/171"
 '''
@@ -177,7 +197,7 @@ count = text.count(phase171_call)
 if count != 1:
     raise SystemExit(f"Phase319 Phase171 execution anchor expected 1, found {count}")
 text = text.replace(phase171_call, phase171_block, 1)
-if text.count("hydrated Phase171 get_flags audit compatibility PASS") != 1:
+if text.count("hydrated Phase171 Phase148 flags-fallback audit compatibility PASS") != 1:
     raise SystemExit("Phase319 Phase171 in-replay compatibility insertion failed")
 
 path.write_text(text, encoding="utf-8")

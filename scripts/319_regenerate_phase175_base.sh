@@ -215,7 +215,7 @@ count = text.count(old)
 if count != 1:
     raise SystemExit(f"Phase175 diagnostic gate anchor expected 1, found {count}")
 text = text.replace(old, new, 1)
-if old in text or text.count('p319gki-phase175-regenerated.patch') != 1:
+if old in text or text.count('cp "$OUT" /tmp/p319gki-phase175-regenerated.patch') != 1:
     raise SystemExit("Phase175 mismatch diagnostic insertion failed")
 path.write_text(text, encoding="utf-8")
 PYDIAG

@@ -194,4 +194,30 @@ if text.count("hydrated Phase171 Phase148 flags-fallback audit compatibility PAS
 path.write_text(text, encoding="utf-8")
 PY
 
+# Preserve the regenerated Phase175 patch and print its actual identity before
+# the immutable expected-hash check. The existing check remains authoritative.
+python3 - "$TMP" <<'PYDIAG'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''printf '%s  %s\\n' "$EXPECTED_PHASE175_SHA256" "$OUT" | sha256sum -c -
+printf 'Phase319 regeneration: exact Phase175 patch PASS sha256=%s\\n' "$EXPECTED_PHASE175_SHA256"
+'''
+new = '''ACTUAL_PHASE175_SHA256="$(sha256sum "$OUT" | awk '{print $1}')"
+printf 'Phase319 regeneration: Phase175 patch identity expected=%s actual=%s\\n' "$EXPECTED_PHASE175_SHA256" "$ACTUAL_PHASE175_SHA256"
+cp "$OUT" /tmp/p319gki-phase175-regenerated.patch
+printf '%s  %s\\n' "$EXPECTED_PHASE175_SHA256" "$OUT" | sha256sum -c -
+printf 'Phase319 regeneration: exact Phase175 patch PASS sha256=%s\\n' "$EXPECTED_PHASE175_SHA256"
+'''
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"Phase175 diagnostic gate anchor expected 1, found {count}")
+text = text.replace(old, new, 1)
+if old in text or text.count('p319gki-phase175-regenerated.patch') != 1:
+    raise SystemExit("Phase175 mismatch diagnostic insertion failed")
+path.write_text(text, encoding="utf-8")
+PYDIAG
+
 bash "$TMP" "$@"

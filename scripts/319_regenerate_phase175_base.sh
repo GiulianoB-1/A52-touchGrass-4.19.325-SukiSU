@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 
 # Preserve the reviewed 26f37f3d replay repair and fix only the Python string
-# delimiter collision in its nested Workflow99 insertion block. The inner block
-# legitimately contains triple-single-quoted strings, so its outer raw string
-# must use triple-double quotes instead.
+# delimiter collision in its nested Workflow99 insertion block. Use ordinary
+# escaped strings here so the repair wrapper itself cannot collide with the
+# triple-quoted strings intentionally embedded in the target script.
 BASE_REF=26f37f3d80e015331e29f7e1803119cbeac50217
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
@@ -23,16 +23,9 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 old_start = "block = r'''# Historical Workflow123 consumed Workflow99 artifact 8590238316. Its exact\n"
 new_start = 'block = r"""# Historical Workflow123 consumed Workflow99 artifact 8590238316. Its exact\n'
-old_end = '''bash "$TMP" "$@"
-'''
+old_end = "bash \"$TMP\" \"$@\"\n'''\n\ntext = text.replace(anchor, block, 1)\n"
+new_end = "bash \"$TMP\" \"$@\"\n\"\"\"\n\ntext = text.replace(anchor, block, 1)\n"
 
-text = text.replace(anchor, block, 1)
-'''
-new_end = '''bash "$TMP" "$@"
-"""
-
-text = text.replace(anchor, block, 1)
-'''
 if text.count(old_start) != 1:
     raise SystemExit(f"Workflow99 outer-string start delimiter expected 1, found {text.count(old_start)}")
 if text.count(old_end) != 1:

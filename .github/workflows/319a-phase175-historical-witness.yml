@@ -27,26 +27,36 @@ jobs:
           printf '%s  %s\n' 9412b28da19c71e7bc97e767e83ce717e146313d32321c7429e6d4050a4f0d00 /tmp/phase177.patch | sha256sum -c -
           tr -d '\r\n' < scripts/179_payloads/patch.gz.b64 | base64 --decode | gzip -dc > /tmp/phase179.patch
           printf '%s  %s\n' 81bc17510b643274dba9652baa5edf52e9c2127af02a77eb1597637be0c3c59f /tmp/phase179.patch | sha256sum -c -
-      - name: Print historical preimage witnesses
+      - name: Print historical preimage witnesses and drift hunks
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
           import re
           from pathlib import Path
 
-          def rows(path):
+          def blocks(path):
               text = Path(path).read_text(errors='replace')
               for block in re.split(r'(?=^diff --git )', text, flags=re.M):
                   m = re.match(r'diff --git a/(.*?) b/(.*?)\n', block)
                   if not m:
                       continue
                   idx = re.search(r'^index ([0-9a-f]+)\.\.([0-9a-f]+)(?: \d+)?$', block, re.M)
-                  if idx:
-                      yield m.group(2), idx.group(1), idx.group(2)
+                  yield m.group(2), idx.groups() if idx else None, block
 
           for phase, path in ((177, '/tmp/phase177.patch'), (179, '/tmp/phase179.patch')):
               print(f'PHASE{phase}_WITNESS_BEGIN')
-              for name, old, new in rows(path):
-                  print(f'{name}\t{old}\t{new}')
+              for name, idx, block in blocks(path):
+                  if idx:
+                      print(f'{name}\t{idx[0]}\t{idx[1]}')
               print(f'PHASE{phase}_WITNESS_END')
+
+          targets = {
+              'drivers/a52_display/msm/sde/sde_crtc.c',
+              'drivers/a52_display/msm/sde/sde_encoder.c',
+          }
+          for name, idx, block in blocks('/tmp/phase179.patch'):
+              if name in targets:
+                  print(f'HISTORICAL_DRIFT_BLOCK_BEGIN {name}')
+                  print(block, end='' if block.endswith('\n') else '\n')
+                  print(f'HISTORICAL_DRIFT_BLOCK_END {name}')
           PY

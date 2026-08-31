@@ -1,4 +1,4 @@
-name: 319b - Phase175 artifact lineage witness
+name: 319b - Phase176-179 lineage witness
 
 on:
   workflow_dispatch:
@@ -17,108 +17,63 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve historical workflow and artifact lineage
+      - name: Resolve Phase176 through Phase179 workflow lineage
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-          hdr=(-H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
-
           python3 - <<'PY'
-          import json, os, subprocess
-          from pathlib import Path
-
-          api = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
-          token = os.environ['GH_TOKEN']
-          headers = ['-H', f'Authorization: Bearer {token}', '-H', 'Accept: application/vnd.github+json', '-H', 'X-GitHub-Api-Version: 2022-11-28']
-
-          def get(url):
-              p = subprocess.run(['curl','--silent','--show-error','--location','--fail-with-body',*headers,url], text=True, capture_output=True)
-              return p.returncode, p.stdout, p.stderr
-
-          workflows=[]
-          for page in range(1,8):
-              rc,out,err=get(f'{api}/actions/workflows?per_page=100&page={page}')
-              if rc:
-                  print('WORKFLOW_LIST_ERROR', page, rc, err.strip())
-                  break
-              data=json.loads(out)
-              batch=data.get('workflows',[])
-              workflows.extend(batch)
-              if len(batch)<100:
-                  break
-
-          print('TARGET_WORKFLOWS_BEGIN')
-          targets=[]
-          for w in workflows:
-              path=w.get('path','')
-              name=w.get('name','')
-              base=path.rsplit('/',1)[-1]
-              if base.startswith(('99-','165-','174-','175-')) or name.startswith(('99 ','99 -','165 ','165 -','174 ','174 -','175 ','175 -')):
-                  targets.append(w)
-                  print('\t'.join(str(x) for x in (w.get('id'),name,path,w.get('state'))))
-          print('TARGET_WORKFLOWS_END')
-
-          wanted_prefixes=('99-','165-','174-','175-')
-          for w in targets:
-              base=w.get('path','').rsplit('/',1)[-1]
-              if not base.startswith(wanted_prefixes):
-                  continue
-              wid=w['id']
-              rc,out,err=get(f'{api}/actions/workflows/{wid}/runs?per_page=100')
-              print(f'RUNS_BEGIN {base} id={wid}')
-              if rc:
-                  print('RUNS_ERROR', rc, err.strip())
-                  print(f'RUNS_END {base}')
-                  continue
-              runs=json.loads(out).get('workflow_runs',[])
-              for r in sorted(runs,key=lambda x:(x.get('run_number',0),x.get('created_at',''))):
-                  if r.get('conclusion')=='success':
-                      print('\t'.join(str(x) for x in (r.get('run_number'),r.get('id'),r.get('created_at'),r.get('head_sha'),r.get('head_branch'),r.get('event'),r.get('display_title'))))
-                      arc,aout,aerr=get(f"{api}/actions/runs/{r['id']}/artifacts?per_page=100")
-                      if not arc:
-                          for a in json.loads(aout).get('artifacts',[]):
-                              print('ARTIFACT\t'+'\t'.join(str(x) for x in (a.get('id'),a.get('name'),a.get('size_in_bytes'),a.get('expired'),a.get('created_at'),a.get('expires_at'))))
-              print(f'RUNS_END {base}')
-
-          for aid in (8590238316,8669625459):
-              rc,out,err=get(f'{api}/actions/artifacts/{aid}')
-              print(f'ARTIFACT_META_BEGIN {aid}')
-              if rc:
-                  print('ARTIFACT_META_ERROR',rc,err.strip(),out.strip())
-              else:
-                  a=json.loads(out)
-                  print(json.dumps({k:a.get(k) for k in ('id','name','size_in_bytes','expired','created_at','updated_at','expires_at','workflow_run')},sort_keys=True))
-              print(f'ARTIFACT_META_END {aid}')
-          PY
-
-      - name: Compare producer script blobs at successful lineage heads
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-          # Query only the known 165/174/175 workflow paths and print successful HEAD script blobs.
-          python3 - <<'PY' > /tmp/heads.txt
           import json, os, subprocess
           api=f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
           token=os.environ['GH_TOKEN']
           h=['-H',f'Authorization: Bearer {token}','-H','Accept: application/vnd.github+json','-H','X-GitHub-Api-Version: 2022-11-28']
-          for path in ('165-a52-active-display-scopes.yml','174-a52-heap19-display-lifecycle.yml','175-a52-display-bindcore.yml'):
-              p=subprocess.run(['curl','--silent','--show-error','--location','--fail',*h,f'{api}/actions/workflows/{path}/runs?per_page=100'],text=True,capture_output=True)
-              if p.returncode: continue
-              for r in json.loads(p.stdout).get('workflow_runs',[]):
-                  if r.get('conclusion')=='success' and r.get('head_sha'):
-                      print(path, r['head_sha'])
+          def get(url):
+              p=subprocess.run(['curl','--silent','--show-error','--location','--fail-with-body',*h,url],text=True,capture_output=True)
+              return p.returncode,p.stdout,p.stderr
+
+          workflows=[]
+          for page in range(1,10):
+              rc,out,err=get(f'{api}/actions/workflows?per_page=100&page={page}')
+              if rc:
+                  print('LIST_ERROR',page,err.strip()); break
+              batch=json.loads(out).get('workflows',[])
+              workflows.extend(batch)
+              if len(batch)<100: break
+
+          targets=[]
+          print('PHASE176_179_WORKFLOWS_BEGIN')
+          for w in workflows:
+              path=w.get('path','')
+              base=path.rsplit('/',1)[-1]
+              name=w.get('name','')
+              if any(base.startswith(f'{n}-') or name.startswith(f'{n} ') or name.startswith(f'{n} -') for n in (176,177,178,179)):
+                  targets.append(w)
+                  print('\t'.join(str(x) for x in (w.get('id'),name,path,w.get('state'))))
+          print('PHASE176_179_WORKFLOWS_END')
+
+          for w in targets:
+              wid=w['id']; base=w.get('path','').rsplit('/',1)[-1]
+              rc,out,err=get(f'{api}/actions/workflows/{wid}/runs?per_page=100')
+              print(f'RUNS_BEGIN {base} id={wid}')
+              if rc:
+                  print('RUNS_ERROR',err.strip()); print(f'RUNS_END {base}'); continue
+              for r in sorted(json.loads(out).get('workflow_runs',[]),key=lambda x:(x.get('run_number',0),x.get('created_at',''))):
+                  print('\t'.join(str(x) for x in (r.get('run_number'),r.get('id'),r.get('created_at'),r.get('conclusion'),r.get('head_sha'),r.get('head_branch'),r.get('event'),r.get('display_title'))))
+                  arc,aout,aerr=get(f"{api}/actions/runs/{r['id']}/artifacts?per_page=100")
+                  if not arc:
+                      for a in json.loads(aout).get('artifacts',[]):
+                          print('ARTIFACT\t'+'\t'.join(str(x) for x in (a.get('id'),a.get('name'),a.get('size_in_bytes'),a.get('expired'),a.get('created_at'))))
+              print(f'RUNS_END {base}')
           PY
-          echo LINEAGE_SCRIPT_BLOBS_BEGIN
-          while read -r wf sha; do
-            [ -n "$sha" ] || continue
-            git fetch --no-tags --depth=1 origin "$sha"
-            printf 'HEAD\t%s\t%s\n' "$wf" "$sha"
-            for p in scripts/160_apply_a52xq_refgen_regulator.py scripts/164_apply_a52_refgen_critical_retention.py scripts/165_apply_a52_active_display_scopes.py scripts/166_apply_a52_qseecom_ta_heap19.py scripts/169_apply_a52_heap19_kernel_map.py scripts/171_audit_touchgrass_qseecom_contract.py scripts/174_apply_a52_combined_display_lifecycle.py scripts/175_apply_a52_display_bindcore.py; do
-              b="$(git rev-parse "FETCH_HEAD:$p" 2>/dev/null || true)"
-              printf '%s\t%s\n' "$p" "${b:-MISSING}"
-            done
-          done < /tmp/heads.txt
-          echo LINEAGE_SCRIPT_BLOBS_END
+
+      - name: Search repository history around Phase178
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags --unshallow origin || git fetch --no-tags --depth=1200 origin
+          echo PHASE178_COMMIT_MESSAGES_BEGIN
+          git log --all --format='%H%x09%aI%x09%s' --grep='Phase 178\|Phase178\|phase 178\|phase178\|178 -' -i || true
+          echo PHASE178_COMMIT_MESSAGES_END
+          echo SDE_HISTORY_175_179_WINDOW_BEGIN
+          git log --all --format='%H%x09%aI%x09%s' --since='2026-07-27T00:00:00Z' --until='2026-08-01T23:59:59Z' -- \
+            scripts drivers/a52_display/msm/sde/sde_crtc.c drivers/a52_display/msm/sde/sde_encoder.c || true
+          echo SDE_HISTORY_175_179_WINDOW_END

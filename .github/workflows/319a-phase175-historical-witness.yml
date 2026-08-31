@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   witness:
@@ -67,7 +68,7 @@ jobs:
           git show FETCH_HEAD:scripts/115_apply_a52xq_secondary_compat.py > /tmp/115-secondary.py
           git show FETCH_HEAD:scripts/123_apply_a52xq_legacy_ion_free_compat.py > /tmp/123.py
           python3 - <<'PY'
-          import ast, base64, re, zlib
+          import ast, base64, zlib
           from pathlib import Path
           src = Path('/tmp/115-secondary.py').read_text()
           tree = ast.parse(src)
@@ -96,3 +97,64 @@ jobs:
                   print('\n'.join(lines123[lo:hi]))
           print('RUN32_123_SDE_END')
           PY
+      - name: Resolve exact historical Workflow123 producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/123-a52-gki-5.10-legacy-ion-free-candidate.yml/runs?per_page=100"
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$api" > /tmp/workflow123-runs.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/workflow123-runs.json').read_text())
+          runs = data.get('workflow_runs', [])
+          print('WORKFLOW123_RUNS_BEGIN')
+          for r in sorted(runs, key=lambda x: (x.get('run_number', 0), x.get('created_at', ''))):
+              print('\t'.join(str(x) for x in (
+                  r.get('run_number'), r.get('id'), r.get('created_at'), r.get('event'),
+                  r.get('status'), r.get('conclusion'), r.get('head_sha'), r.get('head_branch'),
+                  r.get('display_title'),
+              )))
+          print('WORKFLOW123_RUNS_END')
+          successes = [r for r in runs if r.get('conclusion') == 'success']
+          Path('/tmp/workflow123-success-shas.txt').write_text(
+              ''.join(r['head_sha'] + '\n' for r in successes if r.get('head_sha'))
+          )
+          PY
+          echo WORKFLOW123_PRODUCER_SCRIPT_BLOBS_BEGIN
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            git fetch --no-tags --depth=1 origin "$sha"
+            printf 'HEAD\t%s\n' "$sha"
+            for p in \
+              scripts/a52xq_downstream_port_probe_v3.py \
+              scripts/103_apply_a52xq_phase1_compat.py \
+              scripts/105_apply_a52xq_display_contract.py \
+              scripts/114_apply_a52xq_drm_legacy_fields.py \
+              scripts/115_apply_a52xq_all_known_compat.py \
+              scripts/115_apply_a52xq_all_known_compat_base.py \
+              scripts/115_apply_a52xq_secondary_compat.py \
+              scripts/116_apply_a52xq_final_residuals.py \
+              scripts/123_apply_a52xq_legacy_ion_free_compat.py; do
+              blob="$(git rev-parse "FETCH_HEAD:$p" 2>/dev/null || true)"
+              printf '%s\t%s\n' "$p" "${blob:-MISSING}"
+            done
+          done < /tmp/workflow123-success-shas.txt
+          echo WORKFLOW123_PRODUCER_SCRIPT_BLOBS_END
+
+          git fetch --no-tags --depth=200 origin a51d9b5107821176950cb9a235ba953b95cd6e7c
+          echo SDE_PRODUCER_HISTORY_BEGIN
+          git log --format='%H%x09%aI%x09%s' -- \
+            scripts/a52xq_downstream_port_probe_v3.py \
+            scripts/105_apply_a52xq_display_contract.py \
+            scripts/114_apply_a52xq_drm_legacy_fields.py \
+            scripts/115_apply_a52xq_all_known_compat.py \
+            scripts/115_apply_a52xq_all_known_compat_base.py \
+            scripts/115_apply_a52xq_secondary_compat.py \
+            scripts/116_apply_a52xq_final_residuals.py
+          echo SDE_PRODUCER_HISTORY_END

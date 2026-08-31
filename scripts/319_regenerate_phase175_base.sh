@@ -39,15 +39,25 @@ path.write_text(text, encoding="utf-8")
 print("Phase319 regeneration: Phase175 diagnostic postcheck repair PASS")
 PYDIAGVERIFY
 
-# Historical Workflow123 consumed Workflow99 artifact 8590238316. Its exact
-# successful producer was HEAD 657612e0, and that source artifact includes the
-# Workflow96 legacy-GDSC provider, Workflow97 UFS ICE-safe bringup, Workflow98
-# UFS dependency instrumentation and Workflow99 RPMh mode-ABI correction.
-# The reviewed reconstruction currently stops after 94b (which internally
-# materializes Workflow95), so hydrate and execute only the four proven missing
-# source stages here. This is reconstruction fidelity only; Phase319 observer
-# source and the authoritative Phase175 SHA gate are untouched.
-python3 - "$TMP" <<'PYWF99'
+# 2da61048 is itself a wrapper around the immutable f27 replay. Insert the
+# Workflow99 fidelity repair at that inner layer, after all existing replay
+# compatibility transformations and before the inner replay is executed.
+python3 - "$TMP" <<'PYINSERTWF99'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+anchor = 'bash "$TMP" "$@"\n'
+if text.count(anchor) != 1:
+    raise SystemExit(f"inner replay launch anchor expected 1, found {text.count(anchor)}")
+
+block = r'''# Historical Workflow123 consumed Workflow99 artifact 8590238316. Its exact
+# successful producer was HEAD 657612e0, and that artifact includes Workflow96
+# legacy-GDSC, Workflow97 UFS ICE-safe, Workflow98 UFS dependency instrumentation
+# and Workflow99 RPMh mode-ABI source stages. The immutable replay currently
+# stops after 94b/95, so restore only those four proven missing stages.
+python3 - "$TMP" <<'PYWF99INNER'
 from pathlib import Path
 import sys
 
@@ -120,6 +130,16 @@ for token in checks:
 
 path.write_text(text, encoding="utf-8")
 print("Phase319 regeneration: exact Workflow96-99 replay insertion PASS")
-PYWF99
+PYWF99INNER
+
+bash "$TMP" "$@"
+'''
+
+text = text.replace(anchor, block, 1)
+if text.count("PYWF99INNER") != 2 or text.count("exact Workflow96-99 replay insertion PASS") != 1:
+    raise SystemExit("inner Workflow99 repair block insertion failed")
+path.write_text(text, encoding="utf-8")
+print("Phase319 regeneration: inner Workflow99 repair wrapper insertion PASS")
+PYINSERTWF99
 
 bash "$TMP" "$@"

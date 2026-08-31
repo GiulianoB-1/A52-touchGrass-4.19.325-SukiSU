@@ -60,3 +60,39 @@ jobs:
                   print(block, end='' if block.endswith('\n') else '\n')
                   print(f'HISTORICAL_DRIFT_BLOCK_END {name}')
           PY
+      - name: Decode exact Run32 secondary SDE transforms
+        run: |
+          set -Eeuo pipefail
+          git fetch --depth=1 origin a51d9b5107821176950cb9a235ba953b95cd6e7c
+          git show FETCH_HEAD:scripts/115_apply_a52xq_secondary_compat.py > /tmp/115-secondary.py
+          git show FETCH_HEAD:scripts/123_apply_a52xq_legacy_ion_free_compat.py > /tmp/123.py
+          python3 - <<'PY'
+          import ast, base64, re, zlib
+          from pathlib import Path
+          src = Path('/tmp/115-secondary.py').read_text()
+          tree = ast.parse(src)
+          payload = None
+          for node in tree.body:
+              if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '_PAYLOAD' for t in node.targets):
+                  payload = ast.literal_eval(node.value)
+                  break
+          if payload is None:
+              raise SystemExit('secondary payload literal not found')
+          decoded = zlib.decompress(base64.b85decode(payload)).decode()
+          print('RUN32_115_SECONDARY_SDE_BEGIN')
+          lines = decoded.splitlines()
+          for i, line in enumerate(lines):
+              if 'sde_crtc' in line or 'sde_encoder' in line:
+                  lo=max(0,i-8); hi=min(len(lines),i+28)
+                  print(f'--- lines {lo+1}-{hi} ---')
+                  print('\n'.join(lines[lo:hi]))
+          print('RUN32_115_SECONDARY_SDE_END')
+          text123 = Path('/tmp/123.py').read_text()
+          print('RUN32_123_SDE_BEGIN')
+          for i, line in enumerate(text123.splitlines()):
+              if 'sde_crtc' in line or 'sde_encoder' in line:
+                  lines123=text123.splitlines(); lo=max(0,i-8); hi=min(len(lines123),i+28)
+                  print(f'--- lines {lo+1}-{hi} ---')
+                  print('\n'.join(lines123[lo:hi]))
+          print('RUN32_123_SDE_END')
+          PY

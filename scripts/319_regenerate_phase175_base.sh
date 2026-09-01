@@ -1,51 +1,100 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Preserve the reviewed exact-Run32 reconstruction at 7fc51cf, but repair its
-# access path for the two PR-merge script blobs. GitHub's raw endpoint returns
-# 410 for that old ephemeral merge commit even though the repository Contents
-# API still serves the exact blobs. Keep the historical bytes and all identity
-# gates unchanged; only route RUN32_EXEC_REF fetches through the Contents API.
+# Historical Phase319 replay wrappers recursively fetch pinned scripts from this
+# repository through raw.githubusercontent.com. GitHub Actions now returns 410
+# for some old commit-backed raw URLs even though the exact Git objects remain
+# available through the authenticated Contents API. Route only current-repo raw
+# URLs whose ref is an exact 40-hex commit through that API. All other curl use,
+# including external TouchGrass and Actions artifact downloads, remains unchanged.
+#
+# This is transport-only reconstruction compatibility. It does not change any
+# historical script bytes, kernel source semantics, Phase319 observer behavior,
+# or the authoritative Phase175 SHA256 identity gate.
+
+P319_REPO_RAW_PREFIX="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/"
+
+curl() {
+  local args=("$@")
+  local url="" out=""
+  local i next
+
+  for ((i=0; i<${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      -o|--output)
+        next=$((i + 1))
+        if (( next < ${#args[@]} )); then
+          out="${args[$next]}"
+        fi
+        ;;
+      http://*|https://*)
+        url="${args[$i]}"
+        ;;
+    esac
+  done
+
+  if [[ "$url" == "${P319_REPO_RAW_PREFIX}"* ]]; then
+    local rest="${url#${P319_REPO_RAW_PREFIX}}"
+    local ref="${rest%%/*}"
+    local rel="${rest#*/}"
+    if [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && [[ "$rel" != "$rest" ]]; then
+      local api="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${rel}?ref=${ref}"
+      local json
+      json="$(mktemp)"
+      if ! command curl -fL --retry 5 --retry-all-errors --silent --show-error \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H 'Accept: application/vnd.github+json' \
+          "$api" -o "$json"; then
+        rm -f "$json"
+        return 1
+      fi
+      if [[ -n "$out" ]]; then
+        python3 - "$json" "$out" <<'PY'
+import base64
+import json
+from pathlib import Path
+import sys
+
+meta = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+content = meta.get("content")
+encoding = meta.get("encoding")
+if encoding != "base64" or not isinstance(content, str):
+    raise SystemExit("GitHub Contents API did not return inline base64 content")
+Path(sys.argv[2]).write_bytes(base64.b64decode(content))
+PY
+      else
+        python3 - "$json" <<'PY'
+import base64
+import json
+from pathlib import Path
+import sys
+
+meta = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+content = meta.get("content")
+encoding = meta.get("encoding")
+if encoding != "base64" or not isinstance(content, str):
+    raise SystemExit("GitHub Contents API did not return inline base64 content")
+sys.stdout.buffer.write(base64.b64decode(content))
+PY
+      fi
+      rm -f "$json"
+      return 0
+    fi
+  fi
+
+  command curl "${args[@]}"
+}
+export -f curl
+export P319_REPO_RAW_PREFIX
+
 BASE_REF=7fc51cf40eb04a98da81d5da619160c4fbaa3a90
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-: "${GITHUB_REPOSITORY:?}"
 curl -fL --retry 5 --retry-all-errors --silent --show-error \
-  "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BASE_REF}/scripts/319_regenerate_phase175_base.sh" \
+  "${P319_REPO_RAW_PREFIX}${BASE_REF}/scripts/319_regenerate_phase175_base.sh" \
   -o "$TMP"
 test -s "$TMP"
-
-python3 - "$TMP" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-anchor = '    "\\n# Exact Workflow140 run32 producer scripts from PR merge 46c95749.\\n"\n'
-insertion = r'''    'eval "$(declare -f fetch_script | sed \'1s/^fetch_script /fetch_script_raw /\')"\n'
-    'fetch_script() {\n'
-    '  if [[ "$1" != "$RUN32_EXEC_REF" ]]; then fetch_script_raw "$@"; return; fi\n'
-    '  local ref="$1" name="$2" out_dir="$3"\n'
-    '  mkdir -p "$out_dir"\n'
-    '  curl -fL --retry 5 --retry-all-errors --silent --show-error \\\n'
-    '    -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \\\n'
-    '    "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/${name}?ref=${ref}" \\\n'
-    '    | python3 -c \'import base64,json,pathlib,sys; j=json.load(sys.stdin); pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(j["content"]))\' "$out_dir/$name"\n'
-    '  test -s "$out_dir/$name"\n'
-    '}\n'
-'''
-if text.count(anchor) != 1:
-    raise SystemExit(f"Run32 exact-fetch insertion anchor expected 1, found {text.count(anchor)}")
-text = text.replace(anchor, anchor + insertion, 1)
-if text.count('api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/${name}?ref=${ref}') != 1:
-    raise SystemExit("Run32 Contents-API route insertion failed")
-if text.count('fetch_script "$RUN32_EXEC_REF" "141_apply_a52xq_ack_secure_parameter_probe.py" "$R32"') != 2:
-    raise SystemExit("Run32 141 exact-fetch call/check identity changed unexpectedly")
-if text.count('fetch_script "$RUN32_EXEC_REF" "143_run_a52xq_early_mirrored_boot_probe.py" "$R32"') != 2:
-    raise SystemExit("Run32 143 exact-fetch call/check identity changed unexpectedly")
-path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: old PR-merge exact blobs routed through Contents API")
-PY
+printf '%s\n' 'Phase319 regeneration: historical current-repo raw transport routed through Contents API'
 
 bash "$TMP" "$@"

@@ -1,0 +1,116 @@
+name: 35 - A52 P0 boot probe (NON-FLASHABLE)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - rebase/resukisu-linux-4.19.325
+    paths:
+      - '.github/workflows/35-a52-p0-boot-probe.yml'
+      - 'scripts/35_build_a52_p0_boot_probe.sh'
+      - 'scripts/36_patch_a52_p0_optional_callbacks.py'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/04_apply_linux_4.19.154.sh'
+      - 'scripts/05_merge_linux_4.19.325.sh'
+      - 'scripts/06*_linux_4.19.325*.sh'
+      - 'projects/a52-p0-boot-probe/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-p0-boot-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+
+jobs:
+  p0-build:
+    name: Build minimal Lagoon/A52 early-boot kernel
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out probe branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-p0-boot-probe-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-linux-4.19.325-ccache-${{ runner.os }}-
+            a52xq-gki-full-compat-${{ runner.os }}-
+            a52xq-p0-boot-probe-${{ runner.os }}-
+
+      - name: Prepare verified touchGrass 4.19.325 source
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05_merge_linux_4.19.325.sh
+          for repair in scripts/06*_linux_4.19.325*.sh; do
+            printf 'Running %s\n' "$repair"
+            "$repair"
+          done
+
+      - name: Remove optional P0 callbacks
+        run: ./scripts/36_patch_a52_p0_optional_callbacks.py
+
+      - name: Build and audit P0 probe
+        run: ./scripts/35_build_a52_p0_boot_probe.sh
+
+      - name: Preserve build diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts/p0-boot-probe/diagnostics
+          cp -a artifacts/logs/. artifacts/p0-boot-probe/diagnostics/ 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/.config \
+            artifacts/p0-boot-probe/diagnostics/resolved.config 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/include/config/auto.conf \
+            artifacts/p0-boot-probe/diagnostics/auto.conf 2>/dev/null || true
+          cp workspace/touchgrass-a52xq/out/.config.old \
+            artifacts/p0-boot-probe/diagnostics/config.old 2>/dev/null || true
+          find workspace/touchgrass-a52xq/out -maxdepth 3 -type f \
+            \( -name '*.cmd' -o -name '*.o' \) -printf '%P\n' \
+            | sort > artifacts/p0-boot-probe/diagnostics/partial-build-files.txt || true
+
+      - name: Record runner state
+        if: always()
+        run: |
+          mkdir -p artifacts/p0-boot-probe/runner
+          df -h > artifacts/p0-boot-probe/runner/disk.txt
+          free -h > artifacts/p0-boot-probe/runner/memory.txt
+          uname -a > artifacts/p0-boot-probe/runner/uname.txt
+          ccache --show-stats > artifacts/p0-boot-probe/runner/ccache.txt 2>&1 || true
+
+      - name: Upload non-flashable probe artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-p0-boot-probe-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/p0-boot-probe/
+          if-no-files-found: error
+          retention-days: 14

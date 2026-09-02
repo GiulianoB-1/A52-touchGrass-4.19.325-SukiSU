@@ -1,0 +1,7 @@
+UN1CA_REPO=https://github.com/matei9/UN1CA_SM7125.git
+UN1CA_BRANCH=sm7225
+UN1CA_COMMIT=49ec9fa5481808a9906d850297a69e029356dfeb
+UN1CA_PLATFORM=sm7225
+UN1CA_TARGET=a52xq
+UN1CA_KERNEL_ZIP=https://github.com/matei9/samsung_android_kernel_a52xq/releases/download/un1ca-update/TouchGrass-a52xq-20260502.zip
+UN1CA_KERNEL_MEMBER=Image.gz

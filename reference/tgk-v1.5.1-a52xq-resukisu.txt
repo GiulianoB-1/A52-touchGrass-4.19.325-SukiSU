@@ -1,0 +1,26 @@
+release_asset=tgk_v1.5.1_a52xq_sukisu.zip
+release_zip_sha256=bd4781192c1ab3c141866701ae9b4e074f3770e30db9d5928ddc8b5ab7e1cc84
+release_image_sha256=4a66bc998144fd7f0f481a37050826161618a2a8bd10bc1bc9b7237e1069580f
+release_image_bytes=50845712
+release_config_sha256=2fa16fcf6174c35ac6e705d9cccd08850588df540c0b350bdc7c6f038c52292a
+release_kernel_version=4.19.152-touchGrassKernel+
+release_compiler=Android clang version 11.0.1 based on r383902
+release_resukisu_version=v4.1.0-2206a7dd@ReSukiSU
+
+# KSU-related configuration extracted from the released Image via IKCONFIG.
+CONFIG_KSU=y
+# CONFIG_KSU_DEBUG is not set
+# CONFIG_KSU_TOOLKIT_SUPPORT is not set
+CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%"
+# CONFIG_KSU_DISABLE_MANAGER is not set
+# CONFIG_KSU_DISABLE_POLICY is not set
+CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
+# CONFIG_KSU_TRACEPOINT_HOOK is not set
+CONFIG_KSU_MANUAL_HOOK=y
+# CONFIG_KSU_SUSFS is not set
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+# CONFIG_KPROBES is not set
+CONFIG_MODULES=y
+CONFIG_EXT4_FS=y

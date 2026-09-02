@@ -51,6 +51,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
           python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py
           bash -n scripts/209_prepare_phase206.sh
+          grep -Fq 'PASS via retained Phase227 seed' scripts/209_prepare_phase206.sh
           bash -n scripts/319_ci_build_gki.sh
           bash -n scripts/319_reconstruct_phase206_from_verified_artifact.sh
           bash -n scripts/319_regenerate_phase175_base.sh

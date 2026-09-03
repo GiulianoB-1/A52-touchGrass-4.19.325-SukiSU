@@ -143,35 +143,4 @@ curl -fL --retry 5 --retry-all-errors --silent --show-error \
 test -s "$TMP"
 printf '%s\n' 'Phase319 regeneration: historical current-repo raw transport routed through Contents API'
 
-# The 7fc51cf replay reconstructs Workflow99 manually. It fetched the historical
-# Phase95 producer script but omitted its execution, jumping from Phase94b to
-# Phase96. Workflow95 is source-mutating: it adds the Lagoon RPMh clock provider
-# and Samsung downstream RPMh regulator bridge. Restore that exact stage at the
-# historical boundary before Phase96. Keep all downstream identity checks intact.
-python3 - "$TMP" <<'PYPHASE95'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = (
-    "    'python3 \"$HIST/94b_stage_a52xq_ufs_phy_bridge.py\" --gki \"$ROOT\" --output \"$STAGE/94b\"\\n'\n"
-    "    'python3 \"$WF99/96_stage_a52xq_legacy_gdsc_regulator.py\" --gki \"$ROOT\" --output \"$STAGE/96\"\\n'\n"
-)
-new = (
-    "    'python3 \"$HIST/94b_stage_a52xq_ufs_phy_bridge.py\" --gki \"$ROOT\" --output \"$STAGE/94b\"\\n'\n"
-    "    'python3 \"$HIST/95_stage_a52xq_rpmh_provider_bridge.py\" --gki \"$ROOT\" --output \"$STAGE/95\"\\n'\n"
-    "    'python3 \"$WF99/96_stage_a52xq_legacy_gdsc_regulator.py\" --gki \"$ROOT\" --output \"$STAGE/96\"\\n'\n"
-)
-if text.count(old) != 1:
-    raise SystemExit(f"Workflow95 execution insertion anchor expected 1, found {text.count(old)}")
-if 'python3 "$HIST/95_stage_a52xq_rpmh_provider_bridge.py" --gki "$ROOT" --output "$STAGE/95"' in text:
-    raise SystemExit("Workflow95 execution unexpectedly already present")
-text = text.replace(old, new, 1)
-if text.count('95_stage_a52xq_rpmh_provider_bridge.py') != 1:
-    raise SystemExit("Workflow95 execution insertion verification failed")
-path.write_text(text, encoding="utf-8")
-print("Phase319 regeneration: restored exact historical Workflow95 RPMh provider stage")
-PYPHASE95
-
 bash "$TMP" "$@"

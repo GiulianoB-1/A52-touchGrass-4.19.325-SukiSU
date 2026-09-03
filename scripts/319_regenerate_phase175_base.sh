@@ -1,65 +1,39 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Phase319 needs the exact historical Phase175 cumulative source patch. Replaying
-# every pre-175 mutator from later checkout revisions proved semantically correct
-# but byte-inexact. Reconstruct from the immutable Phase174 lifecycle artifact
-# that the original successful Phase175 workflow consumed, then execute the exact
-# Phase175 producer mutator and retain the authoritative final SHA256 gate.
+# Phase319 retention-safe Phase175 reconstruction.
+#
+# The direct Phase174 and Phase175 Actions artifacts have expired. Reuse the
+# already-reviewed full historical replay from 00a36a2, but correct its only
+# known late-producer mistake: it hydrated the Phase154-175 mutation window from
+# 188f775, which belongs to failed Phase175 attempts. The successful Phase175
+# producer was run 30347373944 at head 040a2fabae74dc24c95c37eda4d2aed29edad916.
+# That successful revision deliberately removed the private driver_find() audit
+# which changes the cumulative source patch bytes.
+#
+# The historical replay below still owns the immutable Phase175 SHA256 identity
+# gate. This wrapper changes producer provenance only and does not weaken any
+# source identity check or alter the Phase319 observer.
 
-ROOT="$PWD/gki/common"
-OUT="${1:?usage: 319_regenerate_phase175_base.sh OUTPUT_PATCH}"
-WORK="$(mktemp -d)"
-ARTIFACT_ZIP="$WORK/phase174.zip"
-EXTRACTED="$WORK/phase174"
-STAGE="$WORK/phase175-stage"
-P175_SCRIPT="$WORK/175_apply_a52_display_bindcore.py"
-
-LIFECYCLE_ARTIFACT_ID=8669625459
-LIFECYCLE_ARTIFACT_SHA256=e6b0e8223a061e379b2e98deba3937b1f68d0360b89206776e595b68cd411826
-PHASE175_PRODUCER_REF=188f775518c298021339791de7bcea5f5ce94d76
-PHASE175_PATCH_SHA256=8604330234635526495004951ac27a9dd6d091f5c7dc19cf6ece90425a5a6b1f
-
-cleanup() {
-  rm -rf "$WORK"
-}
-trap cleanup EXIT
+REPLAY_REF=00a36a285627e293cb4a3f9813717fa136d5deda
+FAILED_PHASE175_REF=188f775518c298021339791de7bcea5f5ce94d76
+SUCCESS_PHASE175_REF=040a2fabae74dc24c95c37eda4d2aed29edad916
+TMP="$(mktemp)"
+META="$(mktemp)"
+trap 'rm -f "$TMP" "$META"' EXIT
 
 : "${GITHUB_REPOSITORY:?}"
 : "${GH_TOKEN:?}"
-: "${GKI_COMMON_SHA:?}"
-test -d "$ROOT/.git"
-test "$(git -C "$ROOT" rev-parse HEAD)" = "$GKI_COMMON_SHA"
-mkdir -p "$EXTRACTED" "$STAGE" "$(dirname "$OUT")"
 
-printf '%s\n' "Phase319 regeneration: downloading exact Phase174 artifact ${LIFECYCLE_ARTIFACT_ID}"
+# Fetch the reviewed replay through the authenticated Contents API so old raw
+# commit URLs are not themselves subject to the historical 410 behavior.
 curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
   -H "Authorization: Bearer ${GH_TOKEN}" \
   -H 'Accept: application/vnd.github+json' \
-  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${LIFECYCLE_ARTIFACT_ID}/zip" \
-  --output "$ARTIFACT_ZIP"
-printf '%s  %s\n' "$LIFECYCLE_ARTIFACT_SHA256" "$ARTIFACT_ZIP" | sha256sum -c -
-unzip -q "$ARTIFACT_ZIP" -d "$EXTRACTED"
-(
-  cd "$EXTRACTED"
-  sha256sum -c SHA256SUMS
-)
-
-P174="$EXTRACTED/stage/heap19-display-lifecycle-source.patch"
-test -s "$P174"
-grep -Fq '"persistent_profile": "heap19-bufops-display-lifecycle-v1"' "$EXTRACTED/final-audit.json"
-test "$(tr -d '\r\n' < "$EXTRACTED/compile/make-return-code.txt")" = 0
-printf '%s\n' 'Phase319 regeneration: exact Phase174 lifecycle artifact verified'
-
-# Fetch the exact Phase175 producer script through the authenticated Contents API.
-# This avoids raw.githubusercontent.com retention/410 behavior for old commit refs.
-META="$WORK/phase175-script.json"
-curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
-  -H "Authorization: Bearer ${GH_TOKEN}" \
-  -H 'Accept: application/vnd.github+json' \
-  "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/175_apply_a52_display_bindcore.py?ref=${PHASE175_PRODUCER_REF}" \
+  "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/319_regenerate_phase175_base.sh?ref=${REPLAY_REF}" \
   --output "$META"
-python3 - "$META" "$P175_SCRIPT" <<'PY'
+
+python3 - "$META" "$TMP" "$FAILED_PHASE175_REF" "$SUCCESS_PHASE175_REF" <<'PY'
 import base64
 import json
 from pathlib import Path
@@ -67,43 +41,47 @@ import sys
 
 meta = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
 if meta.get('encoding') != 'base64' or not isinstance(meta.get('content'), str):
-    raise SystemExit('Phase175 producer script fetch did not return inline base64 content')
-Path(sys.argv[2]).write_bytes(base64.b64decode(meta['content']))
+    raise SystemExit('Phase319 replay fetch did not return inline base64 content')
+
+text = base64.b64decode(meta['content']).decode('utf-8')
+failed_ref = sys.argv[3]
+success_ref = sys.argv[4]
+
+old_ref = f'PHASE175_PRODUCER_REF={failed_ref}'
+new_ref = f'PHASE175_PRODUCER_REF={success_ref}'
+if text.count(old_ref) != 1:
+    raise SystemExit(f'Phase175 producer ref anchor expected 1, found {text.count(old_ref)}')
+text = text.replace(old_ref, new_ref, 1)
+
+old_check = "grep -Fq 'driver_find(name, &platform_bus_type)' scripts/175_apply_a52_display_bindcore.py"
+new_check = "grep -Fq 'driver_find(name, &platform_bus_type) is deliberately not used here' scripts/175_apply_a52_display_bindcore.py"
+if text.count(old_check) != 1:
+    raise SystemExit(f'Phase175 producer semantic check anchor expected 1, found {text.count(old_check)}')
+text = text.replace(old_check, new_check, 1)
+
+# Keep the wrapper diagnostics truthful. These comment replacements are not
+# semantic, but make any future failure log unambiguous about producer history.
+text = text.replace(
+    'mutators that existed together at commit 188f775. Several of those scripts',
+    'mutators present at the successful Phase175 producer commit. Several scripts',
+    1,
+)
+text = text.replace(
+    'execute the historical reconstruction, then restore the checkout.',
+    'execute the historical reconstruction, then restore the checkout.',
+    1,
+)
+
+Path(sys.argv[2]).write_text(text, encoding='utf-8')
 PY
-test -s "$P175_SCRIPT"
-python3 -m py_compile "$P175_SCRIPT"
-python3 "$P175_SCRIPT" --self-test >/dev/null
-grep -Fq 'driver_find(name, &platform_bus_type)' "$P175_SCRIPT"
-printf 'Phase319 regeneration: exact Phase175 producer script sha256=%s\n' \
-  "$(sha256sum "$P175_SCRIPT" | awk '{print $1}')"
 
-# Reproduce the original Phase175 source construction exactly from its proven
-# Phase174 input boundary.
-git -C "$ROOT" reset --hard "$GKI_COMMON_SHA"
-git -C "$ROOT" clean -fd
-git -C "$ROOT" apply --check "$P174"
-git -C "$ROOT" apply "$P174"
-python3 "$P175_SCRIPT" --gki "$ROOT" --output "$STAGE"
+test -s "$TMP"
+grep -Fq "PHASE175_PRODUCER_REF=${SUCCESS_PHASE175_REF}" "$TMP"
+! grep -Fq "PHASE175_PRODUCER_REF=${FAILED_PHASE175_REF}" "$TMP"
+grep -Fq "driver_find(name, &platform_bus_type) is deliberately not used here" "$TMP"
 
-grep -Fq '"status": "a52-display-bindcore-v1-staged"' "$STAGE/phase33-a52-display-bindcore-report.json"
-grep -Fq 'profile=heap19-bufops-display-bindcore-v1' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
-grep -Fq 'DISP bind reg=msm_drm rc=%d' "$ROOT/drivers/a52_display/msm/msm_drv.c"
-grep -Fq 'DISP bind reg=dsi_display rc=%d' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
-grep -Fq 'late_initcall(a52_display_bind_audit_init);' "$ROOT/drivers/a52_secure/a52_display_bind_audit.c"
-git -C "$ROOT" diff --check
-git -C "$ROOT" add -N .
-git -C "$ROOT" diff --binary --no-ext-diff > "$OUT"
-test -s "$OUT"
+printf '%s\n' "Phase319 regeneration: retention-safe historical replay ${REPLAY_REF}"
+printf '%s\n' "Phase319 regeneration: successful Phase175 producer ${SUCCESS_PHASE175_REF}"
+printf '%s\n' 'Phase319 regeneration: immutable expected Phase175 SHA256 remains fail-closed in historical replay'
 
-ACTUAL="$(sha256sum "$OUT" | awk '{print $1}')"
-printf 'Phase319 regeneration: Phase175 patch identity expected=%s actual=%s\n' \
-  "$PHASE175_PATCH_SHA256" "$ACTUAL"
-if [[ "$ACTUAL" != "$PHASE175_PATCH_SHA256" ]]; then
-  cp "$OUT" /tmp/p319gki-phase175-regenerated.patch
-  printf '%s\n' 'Phase319 regeneration: exact Phase174 -> Phase175 identity mismatch' >&2
-  exit 1
-fi
-
-printf '%s  %s\n' "$PHASE175_PATCH_SHA256" "$OUT" | sha256sum -c -
-cp "$OUT" /tmp/p319gki-phase175-regenerated.patch
-printf '%s\n' 'Phase319 regeneration: exact historical Phase174 -> Phase175 replay PASS'
+bash "$TMP" "$@"

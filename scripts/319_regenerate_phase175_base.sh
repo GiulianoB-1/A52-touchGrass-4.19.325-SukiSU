@@ -89,30 +89,53 @@ export P319_REPO_RAW_PREFIX
 
 BASE_REF=7fc51cf40eb04a98da81d5da619160c4fbaa3a90
 PHASE175_PRODUCER_REF=188f775518c298021339791de7bcea5f5ce94d76
-PHASE175_SCRIPT=scripts/175_apply_a52_display_bindcore.py
 TMP="$(mktemp)"
-PHASE175_BACKUP="$(mktemp)"
+BACKUP_DIR="$(mktemp -d)"
+
+PRODUCER_MUTATORS=(
+  scripts/154_apply_a52xq_failure_window_probe.py
+  scripts/160_apply_a52xq_refgen_regulator.py
+  scripts/164_apply_a52_refgen_critical_retention.py
+  scripts/165_apply_a52_active_display_scopes.py
+  scripts/166_apply_a52_qseecom_ta_heap19.py
+  scripts/169_apply_a52_heap19_kernel_map.py
+  scripts/171_audit_touchgrass_qseecom_contract.py
+  scripts/174_apply_a52_combined_display_lifecycle.py
+  scripts/175_apply_a52_display_bindcore.py
+)
 
 cleanup() {
-  if [[ -s "$PHASE175_BACKUP" ]]; then
-    cp "$PHASE175_BACKUP" "$PHASE175_SCRIPT"
-  fi
-  rm -f "$TMP" "$PHASE175_BACKUP"
+  local rel base
+  for rel in "${PRODUCER_MUTATORS[@]}"; do
+    base="$(basename "$rel")"
+    if [[ -f "$BACKUP_DIR/$base" ]]; then
+      cp "$BACKUP_DIR/$base" "$rel"
+    fi
+  done
+  rm -f "$TMP"
+  rm -rf "$BACKUP_DIR"
 }
 trap cleanup EXIT
 
-# The current branch carries the later no-driver_find Phase175 patcher. The
-# original Phase175 workflow that produced the authoritative bindcore source
-# patch required driver_find(name, &platform_bus_type), and commit 188f775 is
-# the matching producer-era patcher revision. Replay that exact script only for
-# source reconstruction, then restore the checkout before returning.
-cp "$PHASE175_SCRIPT" "$PHASE175_BACKUP"
-curl -fL --retry 5 --retry-all-errors --silent --show-error \
-  "${P319_REPO_RAW_PREFIX}${PHASE175_PRODUCER_REF}/${PHASE175_SCRIPT}" \
-  -o "$PHASE175_SCRIPT"
-test -s "$PHASE175_SCRIPT"
-grep -Fq 'driver_find(name, &platform_bus_type)' "$PHASE175_SCRIPT"
-printf '%s\n' "Phase319 regeneration: replaying producer-era Phase175 patcher ${PHASE175_PRODUCER_REF}"
+# The authoritative Phase175 full-source patch was produced by a coherent set
+# of mutators that existed together at commit 188f775. Several of those scripts
+# were revised later, so replaying current-branch bytes cannot reproduce the
+# historical patch identity. Hydrate the complete producer-era mutation window,
+# execute the historical reconstruction, then restore the checkout.
+for rel in "${PRODUCER_MUTATORS[@]}"; do
+  base="$(basename "$rel")"
+  test -f "$rel"
+  cp "$rel" "$BACKUP_DIR/$base"
+  curl -fL --retry 5 --retry-all-errors --silent --show-error \
+    "${P319_REPO_RAW_PREFIX}${PHASE175_PRODUCER_REF}/${rel}" \
+    -o "$rel"
+  test -s "$rel"
+  printf 'Phase319 regeneration: producer mutator %s sha256=%s\n' \
+    "$rel" "$(sha256sum "$rel" | awk '{print $1}')"
+done
+
+grep -Fq 'driver_find(name, &platform_bus_type)' scripts/175_apply_a52_display_bindcore.py
+printf '%s\n' "Phase319 regeneration: replaying complete producer-era Phase154-175 mutator set ${PHASE175_PRODUCER_REF}"
 
 curl -fL --retry 5 --retry-all-errors --silent --show-error \
   "${P319_REPO_RAW_PREFIX}${BASE_REF}/scripts/319_regenerate_phase175_base.sh" \

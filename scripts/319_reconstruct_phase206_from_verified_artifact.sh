@@ -41,7 +41,9 @@ for f in \
   test -s "$f"
 done
 
-for cfg in before-phase200.config before-phase201.config before-phase202.config before-phase203.config before-phase204.config before-phase206.config final.config; do
+# Phase199 through Phase206 share the same build config. final.config is
+# intentionally different and is installed only after the Phase206 replay.
+for cfg in before-phase200.config before-phase201.config before-phase202.config before-phase203.config before-phase204.config before-phase206.config; do
   cmp -s "$BASE/config/before-phase199.config" "$BASE/config/$cfg"
 done
 printf '%s  %s\n' f9d08b3ce41d6a5a71ddea5699046983e0a5deddb9b6504bc1b5b30894c0a049 "$P199_REF" | sha256sum -c -

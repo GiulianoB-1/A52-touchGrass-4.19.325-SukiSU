@@ -121,6 +121,41 @@ cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.
 cmp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$STAGE/sde-kms-before-phase200.c"
 echo 'Phase319 hybrid: exact retained untracked Phase199 boundary PASS'
 
+# The upstream GKI index does not own the imported A52 display/secure trees.
+# Preserve their complete Phase199 working-tree state before reset so later
+# historical phases see the same vendor tree, not a hand-picked subset.
+P199_A52_SNAPSHOT="$PWD/workspace/phase319-phase199-a52-snapshot"
+P199_A52_MANIFEST="$PWD/workspace/phase319-phase199-a52-snapshot.sha256"
+P199_A52_MODES="$PWD/workspace/phase319-phase199-a52-snapshot.modes"
+rm -rf "$P199_A52_SNAPSHOT"
+mkdir -p "$P199_A52_SNAPSHOT/drivers"
+for tree in a52_display a52_secure; do
+  test -d "$ROOT/drivers/$tree"
+  cp -a "$ROOT/drivers/$tree" "$P199_A52_SNAPSHOT/drivers/"
+done
+
+# These imported trees must remain outside the upstream GKI index and outside
+# the retained tracked Phase199 patch. Otherwise restoring them wholesale would
+# risk overwriting tracked state instead of reconstructing the untracked tree.
+test -z "$(git -C "$ROOT" ls-files -- drivers/a52_display drivers/a52_secure)"
+if grep -Eq '^diff --git a/drivers/a52_(display|secure)/' "$P199_REF"; then
+  echo 'Phase319 repair: retained Phase199 patch unexpectedly owns imported A52 tree path' >&2
+  exit 1
+fi
+(
+  cd "$P199_A52_SNAPSHOT"
+  find drivers/a52_display drivers/a52_secure -type f -print0 |
+    LC_ALL=C sort -z | xargs -0 sha256sum
+) > "$P199_A52_MANIFEST"
+(
+  cd "$P199_A52_SNAPSHOT"
+  find drivers/a52_display drivers/a52_secure -type f -printf '%m  %p\n' |
+    LC_ALL=C sort
+) > "$P199_A52_MODES"
+test -s "$P199_A52_MANIFEST"
+test -s "$P199_A52_MODES"
+echo "Phase319 repair: snapshotted complete untracked Phase199 A52 trees files=$(wc -l < "$P199_A52_MANIFEST")"
+
 # Reset tracked files only. Do not clean: the exact hydrated A52 sources above
 # are intentionally untracked in the upstream GKI repository. Install the
 # retained Phase199 tracked patch and prove its byte identity independently.
@@ -135,26 +170,22 @@ git -C "$ROOT" diff --binary --no-ext-diff > "$P199_REPLAY"
 printf '%s  %s\n' f9d08b3ce41d6a5a71ddea5699046983e0a5deddb9b6504bc1b5b30894c0a049 "$P199_REPLAY" | sha256sum -c -
 cmp "$P199_REPLAY" "$P199_REF"
 
-# git reset --hard above is intentionally limited to tracked-state recovery,
-# but the imported A52 display/secure boundary can contain paths that disappear
-# when the tracked Phase199 baseline is reinstalled. Restore only a missing
-# path, and only from the retained Phase227 seed snapshots whose SHA256 was
-# verified at script entry and whose content matched the regenerated Phase199
-# boundary immediately before the reset. Existing paths must already match.
-restore_verified_phase199_boundary() {
-  local rel="$1" stage_name="$2" dst="$ROOT/$1" src="$STAGE/$2"
-  if [ -e "$dst" ]; then
-    cmp "$dst" "$src"
-  else
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-  fi
-  cmp "$dst" "$src"
-}
-restore_verified_phase199_boundary drivers/a52_secure/a52_ack_secure_flight_recorder.c recorder-after-phase199.c
-restore_verified_phase199_boundary drivers/a52_display/msm/msm_smmu.c msm-smmu-before-phase200.c
-restore_verified_phase199_boundary drivers/a52_display/msm/sde/sde_kms.c sde-kms-before-phase200.c
-echo 'Phase319 repair: verified untracked Phase199 boundary restored after tracked reset'
+# Restore the complete imported Phase199 A52 working-tree snapshot. Fail closed
+# if the reset/retained patch unexpectedly made any of these paths tracked.
+test -z "$(git -C "$ROOT" ls-files -- drivers/a52_display drivers/a52_secure)"
+rm -rf "$ROOT/drivers/a52_display" "$ROOT/drivers/a52_secure"
+cp -a "$P199_A52_SNAPSHOT/drivers/a52_display" "$ROOT/drivers/"
+cp -a "$P199_A52_SNAPSHOT/drivers/a52_secure" "$ROOT/drivers/"
+(cd "$ROOT" && sha256sum -c "$P199_A52_MANIFEST")
+(
+  cd "$ROOT"
+  find drivers/a52_display drivers/a52_secure -type f -printf '%m  %p\n' |
+    LC_ALL=C sort
+) > /tmp/p319-phase199-a52-restored.modes
+cmp "$P199_A52_MODES" /tmp/p319-phase199-a52-restored.modes
+diff -qr "$P199_A52_SNAPSHOT/drivers/a52_display" "$ROOT/drivers/a52_display"
+diff -qr "$P199_A52_SNAPSHOT/drivers/a52_secure" "$ROOT/drivers/a52_secure"
+echo 'Phase319 repair: complete untracked Phase199 A52 trees restored + SHA256/mode verified'
 
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"
 cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.c"

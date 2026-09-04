@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
@@ -21,25 +22,27 @@ def patch_core(path: Path) -> None:
         "                                  unsigned int *kept,\n"
         "                                  unsigned int *dropped);\n"
     )
-    link_def = (
-        "void a52_device_links_force_probe(struct device *dev,\n"
-        "                                  unsigned int *kept,\n"
-        "                                  unsigned int *dropped)\n"
-        "{\n"
-    )
 
     if text.count(recorder_decl + link_decl) == 1:
         pass
     elif text.count(link_decl) == 1:
         text = text.replace(link_decl, recorder_decl + link_decl, 1)
-    elif text.count(link_decl) == 0 and text.count(link_def) == 1:
-        text = text.replace(link_def, recorder_decl + link_decl + link_def, 1)
     else:
-        raise SystemExit(
-            "link declaration: unsupported preimage "
-            f"rec+decl={text.count(recorder_decl + link_decl)} "
-            f"decl={text.count(link_decl)} def={text.count(link_def)}"
+        definition = re.compile(
+            r"(?m)^void\s+a52_device_links_force_probe\s*\(\s*"
+            r"struct\s+device\s*\*\s*dev\s*,\s*"
+            r"unsigned\s+int\s*\*\s*kept\s*,\s*"
+            r"unsigned\s+int\s*\*\s*dropped\s*\)\s*\n\s*\{"
         )
+        matches = list(definition.finditer(text))
+        if len(matches) != 1:
+            raise SystemExit(
+                "link declaration: unsupported preimage "
+                f"rec+decl={text.count(recorder_decl + link_decl)} "
+                f"decl={text.count(link_decl)} definitions={len(matches)} "
+                f"name_count={text.count('a52_device_links_force_probe')}"
+            )
+        text = text[:matches[0].start()] + recorder_decl + link_decl + text[matches[0].start():]
 
     text = one(text,
         "\tunsigned int local_dropped = 0;\n",

@@ -14,7 +14,8 @@ set -Eeuo pipefail
 # The historical replay below still owns the immutable Phase175 SHA256 identity
 # gate. This wrapper changes producer provenance only and does not weaken any
 # source identity check or alter the Phase319 observer.
-# Phase181 is replayed by the caller with clean/RSCC-compatible dd.c anchors.
+# Phase181 is replayed by the caller using invariant sysfs/probe-completion
+# operation anchors so intervening historical recorder blocks are preserved.
 
 REPLAY_REF=00a36a285627e293cb4a3f9813717fa136d5deda
 FAILED_PHASE175_REF=188f775518c298021339791de7bcea5f5ce94d76

@@ -1,0 +1,2 @@
+Phase319 CI rerun trigger after staging msm-drv-before-phase201.c from the retained Phase227 seed.
+This file is not consumed by the Phase177 payload reconstruction, which reads only 00.txt through 07.txt explicitly.

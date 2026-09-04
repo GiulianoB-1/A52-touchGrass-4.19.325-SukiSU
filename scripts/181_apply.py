@@ -22,14 +22,47 @@ def replace_one_of(
 ) -> str:
     clean_count = text.count(clean_old)
     compat_count = text.count(compat_old)
-    if clean_count + compat_count != 1:
-        raise SystemExit(
-            f"{label}: expected exactly one clean/compat match, "
-            f"found clean={clean_count} compat={compat_count}"
+    if clean_count + compat_count == 1:
+        if clean_count == 1:
+            return text.replace(clean_old, clean_new, 1)
+        return text.replace(compat_old, compat_new, 1)
+
+    # Retention-safe Phase319 replays can contain additional historical
+    # recorder blocks between the operation Phase181 observes and the next
+    # statement. Anchor on the invariant operation itself instead of assuming
+    # adjacency, while still requiring an exact single semantic site.
+    if clean_count == 0 and compat_count == 0 and label == "sysfs stage":
+        anchor = "\tret = driver_sysfs_add(dev);\n"
+        if text.count(anchor) != 1:
+            raise SystemExit(
+                f"{label}: invariant driver_sysfs_add anchor expected one match, "
+                f"found {text.count(anchor)}"
+            )
+        addition = (
+            "\tif (a52_display_probe_device(dev))\n"
+            "\t\ta52_ackfr_record(\"DISP RP sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
         )
-    if clean_count == 1:
-        return text.replace(clean_old, clean_new, 1)
-    return text.replace(compat_old, compat_new, 1)
+        return text.replace(anchor, anchor + addition, 1)
+
+    if clean_count == 0 and compat_count == 0 and label == "really_probe completion":
+        anchor = "\tatomic_dec(&probe_count);\n\twake_up_all(&probe_waitqueue);\n"
+        if text.count(anchor) != 1:
+            raise SystemExit(
+                f"{label}: invariant probe completion anchor expected one match, "
+                f"found {text.count(anchor)}"
+            )
+        addition = (
+            "\tif (a52_display_probe_device(dev))\n"
+            "\t\ta52_ackfr_record(\"DISP RP done dev=%s rc=%d bound=%s\",\n"
+            "\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n"
+            "\t\t\tdev->driver->name : \"-\");\n"
+        )
+        return text.replace(anchor, addition + anchor, 1)
+
+    raise SystemExit(
+        f"{label}: expected exactly one clean/compat match, "
+        f"found clean={clean_count} compat={compat_count}"
+    )
 
 
 def main() -> int:

@@ -26,7 +26,8 @@ for f in \
   "$STAGE/recorder-after-phase199.c" "$STAGE/recorder-before-phase200.c" \
   "$STAGE/msm-smmu-before-phase200.c" "$STAGE/sde-kms-before-phase200.c" \
   "$STAGE/msm-smmu-after-phase200.c" "$STAGE/sde-kms-after-phase200.c" "$STAGE/recorder-after-phase200.c" \
-  "$STAGE/msm-drv-after-phase201.c" "$STAGE/msm-smmu-after-phase201.c" "$STAGE/recorder-after-phase201.c" \
+  "$STAGE/msm-drv-before-phase201.c" "$STAGE/msm-drv-after-phase201.c" \
+  "$STAGE/msm-smmu-after-phase201.c" "$STAGE/recorder-after-phase201.c" \
   "$STAGE/drivers-base-dd-after-phase202.c" "$STAGE/drivers-base-core-after-phase202.c" \
   "$STAGE/drivers-base-platform-after-phase202.c" "$STAGE/drivers-of-device-after-phase202.c" \
   "$STAGE/drivers-iommu-of_iommu-after-phase202.c" \
@@ -134,10 +135,9 @@ for tree in a52_display a52_secure; do
   cp -a "$ROOT/drivers/$tree" "$P199_A52_SNAPSHOT/drivers/"
 done
 
-# These imported trees must remain outside the upstream GKI index and outside
-# the retained tracked Phase199 patch. Otherwise restoring them wholesale would
-# risk overwriting tracked state instead of reconstructing the untracked tree.
-test -z "$(git -C "$ROOT" ls-files -- drivers/a52_display drivers/a52_secure)"
+# The retained tracked Phase199 patch must not own any imported A52 tree path.
+# The upstream index may still contain vendor paths, so do not assume the whole
+# tree is untracked. After reset we restore only snapshot files that disappeared.
 if grep -Eq '^diff --git a/drivers/a52_(display|secure)/' "$P199_REF"; then
   echo 'Phase319 repair: retained Phase199 patch unexpectedly owns imported A52 tree path' >&2
   exit 1
@@ -170,22 +170,31 @@ git -C "$ROOT" diff --binary --no-ext-diff > "$P199_REPLAY"
 printf '%s  %s\n' f9d08b3ce41d6a5a71ddea5699046983e0a5deddb9b6504bc1b5b30894c0a049 "$P199_REPLAY" | sha256sum -c -
 cmp "$P199_REPLAY" "$P199_REF"
 
-# Restore the complete imported Phase199 A52 working-tree snapshot. Fail closed
-# if the reset/retained patch unexpectedly made any of these paths tracked.
-test -z "$(git -C "$ROOT" ls-files -- drivers/a52_display drivers/a52_secure)"
-rm -rf "$ROOT/drivers/a52_display" "$ROOT/drivers/a52_secure"
-cp -a "$P199_A52_SNAPSHOT/drivers/a52_display" "$ROOT/drivers/"
-cp -a "$P199_A52_SNAPSHOT/drivers/a52_secure" "$ROOT/drivers/"
-(cd "$ROOT" && sha256sum -c "$P199_A52_MANIFEST")
-(
-  cd "$ROOT"
-  find drivers/a52_display drivers/a52_secure -type f -printf '%m  %p\n' |
-    LC_ALL=C sort
-) > /tmp/p319-phase199-a52-restored.modes
-cmp "$P199_A52_MODES" /tmp/p319-phase199-a52-restored.modes
-diff -qr "$P199_A52_SNAPSHOT/drivers/a52_display" "$ROOT/drivers/a52_display"
-diff -qr "$P199_A52_SNAPSHOT/drivers/a52_secure" "$ROOT/drivers/a52_secure"
-echo 'Phase319 repair: complete untracked Phase199 A52 trees restored + SHA256/mode verified'
+# Restore only imported Phase199 snapshot files that disappeared across the
+# tracked reset. Never overwrite a path that survived reset/P199 replay, because
+# such a path may legitimately belong to the upstream index. The retained P199
+# patch was already proven above not to own any A52 path.
+P199_A52_RESTORED="$PWD/workspace/phase319-phase199-a52-restored.list"
+: > "$P199_A52_RESTORED"
+while IFS= read -r rel; do
+  src="$P199_A52_SNAPSHOT/$rel"
+  dst="$ROOT/$rel"
+  if [ ! -e "$dst" ]; then
+    mkdir -p "$(dirname "$dst")"
+    cp -a "$src" "$dst"
+    printf '%s\n' "$rel" >> "$P199_A52_RESTORED"
+  fi
+done < <(
+  cd "$P199_A52_SNAPSHOT"
+  find drivers/a52_display drivers/a52_secure -type f -print | LC_ALL=C sort
+)
+
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  cmp "$P199_A52_SNAPSHOT/$rel" "$ROOT/$rel"
+  test "$(stat -c '%a' "$P199_A52_SNAPSHOT/$rel")" = "$(stat -c '%a' "$ROOT/$rel")"
+done < "$P199_A52_RESTORED"
+echo "Phase319 repair: restored missing Phase199 A52 snapshot files=$(wc -l < "$P199_A52_RESTORED")"
 
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"
 cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.c"
@@ -201,6 +210,7 @@ python3 scripts/200_apply_smmu_defer_trace.py --root "$ROOT"
 cmp_stage drivers/a52_display/msm/msm_smmu.c msm-smmu-after-phase200.c
 cmp_stage drivers/a52_display/msm/sde/sde_kms.c sde-kms-after-phase200.c
 cmp_stage drivers/a52_secure/a52_ack_secure_flight_recorder.c recorder-after-phase200.c
+cmp_stage drivers/a52_display/msm/msm_drv.c msm-drv-before-phase201.c
 cmp -s "$BUILD/.config" "$BASE/config/before-phase200.config"
 
 python3 scripts/201_apply_smmu_component_dependency.py --root "$ROOT"

@@ -18,6 +18,28 @@ on:
       - agent/a52-phase319-gki-dsi-sixpoint-temporal-observer-v1
     paths:
       - .github/workflows/319-a52-matched-dsi-sixpoint-temporal-observer.yml
+      - scripts/177_patch_payload_chunks/**
+      - scripts/179_payloads/**
+      - scripts/180_apply.py
+      - scripts/180_a52_display_bind_audit.c
+      - scripts/181_apply.py
+      - scripts/182_apply.py
+      - scripts/183_apply.py
+      - scripts/185_apply.py
+      - scripts/186_apply.py
+      - scripts/187_apply.py
+      - scripts/188_apply.py
+      - scripts/189_apply.py
+      - scripts/190_apply.py
+      - scripts/191_apply.py
+      - scripts/192_apply.py
+      - scripts/193_apply.py
+      - scripts/194_apply.py
+      - scripts/195_apply.py
+      - scripts/196_apply.py
+      - scripts/197_apply_triple_rs.py
+      - scripts/198_apply_catalog_trace.py
+      - scripts/199_apply_recorder_crc32c.py
       - scripts/209_prepare_phase206.sh
       - scripts/319_apply_dsi_sixpoint_temporal_observer.py
       - scripts/319_ci_build_gki.sh
@@ -58,7 +80,27 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
-          python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py
+          python3 -m py_compile \
+            scripts/180_apply.py \
+            scripts/181_apply.py \
+            scripts/182_apply.py \
+            scripts/183_apply.py \
+            scripts/185_apply.py \
+            scripts/186_apply.py \
+            scripts/187_apply.py \
+            scripts/188_apply.py \
+            scripts/189_apply.py \
+            scripts/190_apply.py \
+            scripts/191_apply.py \
+            scripts/192_apply.py \
+            scripts/193_apply.py \
+            scripts/194_apply.py \
+            scripts/195_apply.py \
+            scripts/196_apply.py \
+            scripts/197_apply_triple_rs.py \
+            scripts/198_apply_catalog_trace.py \
+            scripts/199_apply_recorder_crc32c.py \
+            scripts/319_apply_dsi_sixpoint_temporal_observer.py
           bash -n scripts/209_prepare_phase206.sh
           grep -Fq 'PASS via retained Phase227 seed' scripts/209_prepare_phase206.sh
           bash -n scripts/319_ci_build_gki.sh

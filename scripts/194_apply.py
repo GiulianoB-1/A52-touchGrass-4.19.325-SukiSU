@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
+
+REGENERATED_PHASE175_GDSC_SHA256 = "c1e17f8f21e138403c33711fc06b3c91ab400249b49a347f9c44129f31086aa6"
 
 DRIVER_SOURCE = r'''// SPDX-License-Identifier: GPL-2.0-only
 /*
@@ -365,13 +368,25 @@ def main() -> int:
         raise SystemExit(f"legacy GDSC bridge missing: {path}")
 
     old = path.read_text(encoding="utf-8")
-    for marker in (
-        'strcmp(name, "gcc_ufs_phy_gdsc")',
-        "A52GDSC DISABLE_KEEP_ON",
-        "a52-legacy-gdsc-regulator",
-    ):
-        if marker not in old:
-            raise SystemExit(f"unexpected inherited GDSC bridge, missing: {marker}")
+    old_sha = hashlib.sha256(old.encode("utf-8")).hexdigest()
+    original_markers = (
+        'strcmp(name, "gcc_ufs_phy_gdsc")' in old
+        and "A52GDSC DISABLE_KEEP_ON" in old
+        and "a52-legacy-gdsc-regulator" in old
+    )
+    regenerated_exact = old_sha == REGENERATED_PHASE175_GDSC_SHA256
+    if original_markers:
+        print("phase194 preimage: original marker-bearing UFS GDSC bridge accepted")
+    elif regenerated_exact:
+        print(
+            "phase194 preimage: exact regenerated Phase175 UFS GDSC bridge accepted "
+            f"sha256={old_sha}"
+        )
+    else:
+        raise SystemExit(
+            "unexpected inherited GDSC bridge: neither original marker-bearing "
+            f"preimage nor exact regenerated Phase175 preimage sha256={old_sha}"
+        )
     if '"mdss_core_gdsc"' in old:
         raise SystemExit("mdss_core_gdsc support already present")
 

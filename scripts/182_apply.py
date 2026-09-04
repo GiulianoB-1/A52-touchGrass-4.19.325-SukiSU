@@ -14,14 +14,33 @@ def one(text: str, old: str, new: str, label: str) -> str:
 
 def patch_core(path: Path) -> None:
     text = path.read_text()
-    text = one(text,
+
+    recorder_decl = "extern void a52_ackfr_record(const char *fmt, ...);\n"
+    link_decl = (
         "void a52_device_links_force_probe(struct device *dev,\n"
         "                                  unsigned int *kept,\n"
-        "                                  unsigned int *dropped);\n",
-        "extern void a52_ackfr_record(const char *fmt, ...);\n"
+        "                                  unsigned int *dropped);\n"
+    )
+    link_def = (
         "void a52_device_links_force_probe(struct device *dev,\n"
         "                                  unsigned int *kept,\n"
-        "                                  unsigned int *dropped);\n", "link declaration")
+        "                                  unsigned int *dropped)\n"
+        "{\n"
+    )
+
+    if text.count(recorder_decl + link_decl) == 1:
+        pass
+    elif text.count(link_decl) == 1:
+        text = text.replace(link_decl, recorder_decl + link_decl, 1)
+    elif text.count(link_decl) == 0 and text.count(link_def) == 1:
+        text = text.replace(link_def, recorder_decl + link_decl + link_def, 1)
+    else:
+        raise SystemExit(
+            "link declaration: unsupported preimage "
+            f"rec+decl={text.count(recorder_decl + link_decl)} "
+            f"decl={text.count(link_decl)} def={text.count(link_def)}"
+        )
+
     text = one(text,
         "\tunsigned int local_dropped = 0;\n",
         "\tunsigned int local_dropped = 0;\n\tunsigned int link_index = 0;\n",

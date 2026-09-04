@@ -60,22 +60,21 @@ def fetch_exact_source(ref: str, expected_blob: str) -> str:
     return base64.b64decode(meta["content"]).decode("utf-8")
 
 
-def restore_exact_run37_and_run40_preimage(root: Path) -> None:
+def restore_exact_run37_and_run40_driver_core(root: Path) -> None:
     core = root / "drivers/base/core.c"
     dd = root / "drivers/base/dd.c"
-    ufs = root / "drivers/scsi/ufs/ufs-qcom.c"
-    printk = root / "kernel/printk/printk.c"
-
     core_text = core.read_text(encoding="utf-8")
     dd_text = dd.read_text(encoding="utf-8")
+
     run40_ready = (
         "a52_device_links_force_probe" in core_text
         and "static bool a52_legacy_fw_devlink_consumer" in dd_text
         and "static bool a52_run40_preprobe_target" in dd_text
         and "A52_UFS_PINCTRL_DEFER_BYPASS copy=1" in dd_text
+        and 'strcmp(name, "f100000.pinctrl")' in dd_text
     )
     if run40_ready:
-        print("phase180 preimage: exact Run37+Run40 bridge already present")
+        print("phase180 preimage: exact Run37+Run40 driver-core state already present")
         return
 
     core_has = "a52_device_links_force_probe" in core_text
@@ -90,11 +89,9 @@ def restore_exact_run37_and_run40_preimage(root: Path) -> None:
 
     if not core_has:
         source37 = fetch_exact_source(RUN37_REF, RUN37_BLOB_SHA)
-        # The Run37 mutation is still the required historical preimage. Its
-        # audit also required a Run36-only A52DEV CALL diagnostic marker. That
-        # marker is absent from this reconstructed lineage and is not consumed
-        # by the bridge mutation or by Phases180-199. Patch only that predicate
-        # in memory, with an exact one-match guard.
+        # The Run37 mutation itself is required, but one historical audit bit
+        # depended on a Run36-only A52DEV CALL marker that is absent from this
+        # reconstructed lineage. Neutralize only that audit predicate in memory.
         if source37.count(RUN37_OBSOLETE_AUDIT) != 1:
             raise SystemExit("phase180 preimage: Run37 obsolete audit predicate drifted")
         source37 = source37.replace(RUN37_OBSOLETE_AUDIT, RUN37_COMPAT_AUDIT, 1)
@@ -111,35 +108,31 @@ def restore_exact_run37_and_run40_preimage(root: Path) -> None:
             if not isinstance(report37, dict) or report37.get("status") != "bridged-safely":
                 raise SystemExit("phase180 preimage: exact Run37 bridge report failed")
 
-    # Historical Phase174/175 source had subsequently passed through Run40.
-    # Restore that exact successor state before Phase180 so later Phase187 can
-    # remove the temporary TLMM bypass from the same preimage it originally saw.
+    # Phase187 consumes the Run40 DRIVER-CORE shape specifically: Run40 renamed
+    # the legacy selector, added the temporary TLMM target, and inserted the
+    # pre-probe/pinctrl instrumentation which Phase187 later narrows back to UFS.
+    #
+    # Do not replay Run40's independent ufs-qcom/printk diagnostics here. Their
+    # original preimages no longer exist at this reconstructed Phase179 boundary,
+    # and they are not consumed by Phases180-199. The exact retained Phase199
+    # tracked patch later resets/reinstalls those tracked files authoritatively.
     source40 = fetch_exact_source(RUN40_REF, RUN40_BLOB_SHA)
     ns40: dict[str, object] = {
         "__name__": "phase319_exact_run40_bridge",
         "__file__": BRIDGE_PATH,
     }
     exec(compile(source40, BRIDGE_PATH, "exec"), ns40)
-    funcs = (
-        "patch_driver_core",
-        "patch_ufs_reset_diagnostics",
-        "patch_printk_filter",
-    )
-    missing = [name for name in funcs if not callable(ns40.get(name))]
-    if missing:
-        raise SystemExit("phase180 preimage: exact Run40 functions missing: " + ", ".join(missing))
+    patch40 = ns40.get("patch_driver_core")
+    if not callable(patch40):
+        raise SystemExit("phase180 preimage: exact Run40 driver-core function missing")
 
-    with tempfile.TemporaryDirectory(prefix="phase319-run40-bridge-") as tmp:
-        out = Path(tmp)
-        for name in funcs:
-            report = ns40[name](root, out)  # type: ignore[index,operator]
-            if not isinstance(report, dict) or report.get("status") != "patched":
-                raise SystemExit(f"phase180 preimage: exact Run40 {name} report failed")
+    with tempfile.TemporaryDirectory(prefix="phase319-run40-driver-core-") as tmp:
+        report40 = patch40(root, Path(tmp))
+        if not isinstance(report40, dict) or report40.get("status") != "patched":
+            raise SystemExit("phase180 preimage: exact Run40 driver-core report failed")
 
     core_text = core.read_text(encoding="utf-8")
     dd_text = dd.read_text(encoding="utf-8")
-    ufs_text = ufs.read_text(encoding="utf-8")
-    printk_text = printk.read_text(encoding="utf-8")
     checks = {
         "core_helper": "void a52_device_links_force_probe(struct device *dev," in core_text,
         "run40_selector": "static bool a52_legacy_fw_devlink_consumer" in dd_text,
@@ -149,14 +142,15 @@ def restore_exact_run37_and_run40_preimage(root: Path) -> None:
         "run40_pinctrl_marker": "A52_UFS_PINCTRL_DEFER_BYPASS copy=1" in dd_text,
         "consumer_probe_state": "DL_STATE_CONSUMER_PROBE" in core_text,
         "normal_defer_retained": "driver_deferred_probe_add_trigger(dev, local_trigger_count);" in dd_text,
-        "ufs_reset_diag": "DEVICE_RESET stage=pinctrl_get" in ufs_text,
-        "printk_pinctrl_filter": 'strstr(line, "f100000")' in printk_text,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        raise SystemExit("phase180 preimage: exact Run37+Run40 verification failed: " + ", ".join(failed))
+        raise SystemExit(
+            "phase180 preimage: exact Run37+Run40 driver-core verification failed: "
+            + ", ".join(failed)
+        )
     print(
-        "phase180 preimage: exact Run37 mutation + exact Run40 successor restored "
+        "phase180 preimage: exact Run37 mutation + exact Run40 driver-core successor restored "
         f"run37={RUN37_REF}:{RUN37_BLOB_SHA} run40={RUN40_REF}:{RUN40_BLOB_SHA}"
     )
 
@@ -168,7 +162,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = args.root
-    restore_exact_run37_and_run40_preimage(root)
+    restore_exact_run37_and_run40_driver_core(root)
 
     audit = root / "drivers/a52_secure/a52_display_bind_audit.c"
     ctrl = root / "drivers/a52_display/msm/dsi/dsi_ctrl.c"

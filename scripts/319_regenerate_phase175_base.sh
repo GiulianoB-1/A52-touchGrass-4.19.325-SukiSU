@@ -17,7 +17,7 @@ set -Eeuo pipefail
 # Phase181 is replayed by the caller with sysfs/probe-completion anchors scoped
 # specifically to really_probe(), preserving other driver_sysfs_add call sites.
 # Phase182 is replayed by the caller with the historical link declaration
-# restored when the retained hybrid preimage contains only the function body.
+# restored from a unique C function signature, independent of whitespace.
 
 REPLAY_REF=00a36a285627e293cb4a3f9813717fa136d5deda
 FAILED_PHASE175_REF=188f775518c298021339791de7bcea5f5ce94d76

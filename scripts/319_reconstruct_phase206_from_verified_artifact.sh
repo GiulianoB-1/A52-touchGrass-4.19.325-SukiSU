@@ -134,6 +134,28 @@ git -C "$ROOT" apply "$P199_REF"
 git -C "$ROOT" diff --binary --no-ext-diff > "$P199_REPLAY"
 printf '%s  %s\n' f9d08b3ce41d6a5a71ddea5699046983e0a5deddb9b6504bc1b5b30894c0a049 "$P199_REPLAY" | sha256sum -c -
 cmp "$P199_REPLAY" "$P199_REF"
+
+# git reset --hard above is intentionally limited to tracked-state recovery,
+# but the imported A52 display/secure boundary can contain paths that disappear
+# when the tracked Phase199 baseline is reinstalled. Restore only a missing
+# path, and only from the retained Phase227 seed snapshots whose SHA256 was
+# verified at script entry and whose content matched the regenerated Phase199
+# boundary immediately before the reset. Existing paths must already match.
+restore_verified_phase199_boundary() {
+  local rel="$1" stage_name="$2" dst="$ROOT/$1" src="$STAGE/$2"
+  if [ -e "$dst" ]; then
+    cmp "$dst" "$src"
+  else
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+  fi
+  cmp "$dst" "$src"
+}
+restore_verified_phase199_boundary drivers/a52_secure/a52_ack_secure_flight_recorder.c recorder-after-phase199.c
+restore_verified_phase199_boundary drivers/a52_display/msm/msm_smmu.c msm-smmu-before-phase200.c
+restore_verified_phase199_boundary drivers/a52_display/msm/sde/sde_kms.c sde-kms-before-phase200.c
+echo 'Phase319 repair: verified untracked Phase199 boundary restored after tracked reset'
+
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"
 cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.c"
 cmp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$STAGE/sde-kms-before-phase200.c"

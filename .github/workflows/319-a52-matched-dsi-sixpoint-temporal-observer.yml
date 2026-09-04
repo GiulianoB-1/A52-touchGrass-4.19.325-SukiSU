@@ -1,8 +1,18 @@
-name: 319 - A52 matched DSI sixpoint temporal observer
-run-name: Phase 319 - Golden vs GKI six-selector q0 q1 q2 temporal observer
+name: 319 - A52 DSI sixpoint temporal observer
+run-name: Phase 319 - DSI six-selector q0 q1 q2 temporal observer
 
 on:
   workflow_dispatch:
+    inputs:
+      build_target:
+        description: Phase319 side to build
+        required: true
+        default: gki
+        type: choice
+        options:
+          - gki
+          - golden
+          - both
   push:
     branches:
       - agent/a52-phase319-gki-dsi-sixpoint-temporal-observer-v1
@@ -13,8 +23,6 @@ on:
       - scripts/319_ci_build_gki.sh
       - scripts/319_reconstruct_phase206_from_verified_artifact.sh
       - scripts/319_regenerate_phase175_base.sh
-      - scripts/319g_ci_build_golden.sh
-      - workflow68/extracted/integrated.config
 
 permissions:
   contents: read
@@ -36,6 +44,7 @@ env:
 
 jobs:
   gki:
+    if: ${{ github.event_name == 'push' || inputs.build_target == 'gki' || inputs.build_target == 'both' }}
     name: Build Phase319 GKI sixpoint temporal observer
     runs-on: ubuntu-22.04
     timeout-minutes: 300
@@ -106,6 +115,7 @@ jobs:
           retention-days: 30
 
   golden:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.build_target == 'golden' || inputs.build_target == 'both') }}
     name: Build Phase319 Golden sixpoint temporal observer
     runs-on: ubuntu-22.04
     timeout-minutes: 300

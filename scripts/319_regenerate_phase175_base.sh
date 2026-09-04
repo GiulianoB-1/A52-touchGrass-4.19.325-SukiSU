@@ -18,12 +18,19 @@ set -Eeuo pipefail
 REPLAY_REF=00a36a285627e293cb4a3f9813717fa136d5deda
 FAILED_PHASE175_REF=188f775518c298021339791de7bcea5f5ce94d76
 SUCCESS_PHASE175_REF=040a2fabae74dc24c95c37eda4d2aed29edad916
+PHASE180_AUDIT_SHA256=e4102aa4d0a98a18f5c689e5b9e515c01ad0dce39f0692323157ded4f6417043
 TMP="$(mktemp)"
 META="$(mktemp)"
 trap 'rm -f "$TMP" "$META"' EXIT
 
 : "${GITHUB_REPOSITORY:?}"
 : "${GH_TOKEN:?}"
+
+# Phase319's retained replay advances through Phase180 after the known Phase175
+# mismatch is reproduced. Fail closed here unless the recovered historical
+# public-API audit source is byte-exact before spending time on the replay.
+test -s scripts/180_a52_display_bind_audit.c
+printf '%s  %s\n' "$PHASE180_AUDIT_SHA256" scripts/180_a52_display_bind_audit.c | sha256sum -c -
 
 # Fetch the reviewed replay through the authenticated Contents API so old raw
 # commit URLs are not themselves subject to the historical 410 behavior.

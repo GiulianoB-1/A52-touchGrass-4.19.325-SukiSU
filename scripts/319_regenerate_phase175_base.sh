@@ -6,22 +6,23 @@ set -Eeuo pipefail
 # The direct Phase174 and Phase175 Actions artifacts have expired. Reuse the
 # already-reviewed full historical replay from 00a36a2, but correct its only
 # known late-producer mistake: it hydrated the Phase154-175 mutation window from
-# 188f775, which belongs to failed Phase175 attempts. The successful Phase175
-# producer was run 30347373944 at head 040a2fabae74dc24c95c37eda4d2aed29edad916.
-# That successful revision deliberately removed the private driver_find() audit
-# which changes the cumulative source patch bytes.
+# 188f775, which belongs to failed Phase175 attempts. The exact source artifact
+# consumed by historical Phase177/179 was artifact 8681171875, produced by
+# successful Phase175 run 30339754488 at head
+# f910b4784ca0e6fe2282d5c474ec3b018b4ab6be. That revision deliberately
+# removed the private driver_find() audit which changes cumulative patch bytes.
 #
 # The historical replay below still owns the immutable Phase175 SHA256 identity
 # gate. This wrapper changes producer provenance only and does not weaken any
 # source identity check or alter the Phase319 observer.
 # Phase181 is replayed by the caller with sysfs/probe-completion anchors scoped
 # specifically to really_probe(), preserving other driver_sysfs_add call sites.
-# Phase182 is replayed by the caller with the historical link declaration
-# restored from a unique C function signature, independent of whitespace.
+# Phase182 is replayed by the caller after the exact historical Run37 devlink
+# bridge is restored at the Phase179->180 boundary.
 
 REPLAY_REF=00a36a285627e293cb4a3f9813717fa136d5deda
 FAILED_PHASE175_REF=188f775518c298021339791de7bcea5f5ce94d76
-SUCCESS_PHASE175_REF=040a2fabae74dc24c95c37eda4d2aed29edad916
+SUCCESS_PHASE175_REF=f910b4784ca0e6fe2282d5c474ec3b018b4ab6be
 PHASE180_AUDIT_SHA256=e4102aa4d0a98a18f5c689e5b9e515c01ad0dce39f0692323157ded4f6417043
 TMP="$(mktemp)"
 META="$(mktemp)"
@@ -74,7 +75,7 @@ text = text.replace(old_check, new_check, 1)
 # semantic, but make any future failure log unambiguous about producer history.
 text = text.replace(
     'mutators that existed together at commit 188f775. Several of those scripts',
-    'mutators present at the successful Phase175 producer commit. Several scripts',
+    'mutators present at the exact Run12 Phase175 producer commit. Several scripts',
     1,
 )
 text = text.replace(
@@ -92,7 +93,7 @@ grep -Fq "PHASE175_PRODUCER_REF=${SUCCESS_PHASE175_REF}" "$TMP"
 grep -Fq "driver_find(name, &platform_bus_type) is deliberately not used here" "$TMP"
 
 printf '%s\n' "Phase319 regeneration: retention-safe historical replay ${REPLAY_REF}"
-printf '%s\n' "Phase319 regeneration: successful Phase175 producer ${SUCCESS_PHASE175_REF}"
+printf '%s\n' "Phase319 regeneration: exact Run12 Phase175 producer ${SUCCESS_PHASE175_REF}"
 printf '%s\n' 'Phase319 regeneration: immutable expected Phase175 SHA256 remains fail-closed in historical replay'
 
 bash "$TMP" "$@"

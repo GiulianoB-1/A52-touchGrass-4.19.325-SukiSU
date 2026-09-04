@@ -69,6 +69,7 @@ PY
     msm-smmu-after-phase200.c \
     sde-kms-after-phase200.c \
     recorder-after-phase200.c \
+    msm-drv-before-phase201.c \
     msm-drv-after-phase201.c \
     msm-smmu-after-phase201.c \
     recorder-after-phase201.c \

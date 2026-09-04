@@ -13,6 +13,73 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def optional_transition(
+    text: str,
+    old: str,
+    new: str,
+    symbol: str,
+    label: str,
+) -> str:
+    old_count = text.count(old)
+    new_count = text.count(new)
+    if old_count == 1 and new_count == 0:
+        return text.replace(old, new, 1)
+    if old_count == 0 and new_count == 1:
+        print(f"{label}: already in Phase187 state")
+        return text
+    if old_count == 0 and new_count == 0 and symbol not in text:
+        print(f"{label}: Run37 preimage has no Run40-only helper; already compliant")
+        return text
+    raise SystemExit(
+        f"{label}: unsupported preimage old={old_count} new={new_count} "
+        f"symbol_count={text.count(symbol)}"
+    )
+
+
+def remove_display_bypass(text: str) -> str:
+    old_run40 = (
+        "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev) &&\n"
+        "\t    !(dev->of_node && of_device_is_compatible(dev->of_node,\n"
+        "\t\t\t\t\t\t \"qcom,dsi-ctrl-hw-v2.4\"))) {\n"
+        "\t\tunsigned int kept = 0;\n"
+        "\t\tunsigned int dropped = 0;\n\n"
+        "\t\ta52_device_links_force_probe(dev, &kept, &dropped);\n"
+        "\t\ta52_ackfr_record(\"DISP RP bypass dev=%s kept=%u drop=%u\",\n"
+        "\t\t\tdev_name(dev), kept, dropped);\n"
+        "\t\tret = 0;\n"
+        "\t}\n"
+    )
+    old_phase181 = (
+        "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev)) {\n"
+        "\t\tunsigned int kept = 0;\n"
+        "\t\tunsigned int dropped = 0;\n\n"
+        "\t\ta52_device_links_force_probe(dev, &kept, &dropped);\n"
+        "\t\ta52_ackfr_record(\"DISP RP bypass dev=%s kept=%u drop=%u\",\n"
+        "\t\t\tdev_name(dev), kept, dropped);\n"
+        "\t\tret = 0;\n"
+        "\t}\n"
+    )
+    new = (
+        "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"DISP RP defer-normal dev=%s rc=%d\",\n"
+        "\t\t\tdev_name(dev), ret);\n"
+    )
+    counts = {
+        "run40": text.count(old_run40),
+        "phase181": text.count(old_phase181),
+        "new": text.count(new),
+    }
+    if counts == {"run40": 1, "phase181": 0, "new": 0}:
+        return text.replace(old_run40, new, 1)
+    if counts == {"run40": 0, "phase181": 1, "new": 0}:
+        print("remove display supplier bypass: accepted Phase181 preimage")
+        return text.replace(old_phase181, new, 1)
+    if counts == {"run40": 0, "phase181": 0, "new": 1}:
+        print("remove display supplier bypass: already in Phase187 state")
+        return text
+    raise SystemExit(f"remove display supplier bypass: unsupported preimage {counts}")
+
+
 def add_recorder_decl(text: str, label: str) -> str:
     declaration = "extern void a52_ackfr_record(const char *fmt, ...);\n"
     if declaration in text:
@@ -27,8 +94,7 @@ def add_recorder_decl(text: str, label: str) -> str:
 def patch_driver_core(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
-    text = one(
-        text,
+    old_legacy = (
         "static bool a52_legacy_fw_devlink_consumer(const struct device *dev)\n"
         "{\n"
         "\tconst char *name;\n\n"
@@ -37,7 +103,9 @@ def patch_driver_core(path: Path) -> None:
         "\tname = dev_name(dev);\n"
         "\treturn name && (!strcmp(name, \"1d84000.ufshc\") ||\n"
         "\t\t\t!strcmp(name, \"f100000.pinctrl\"));\n"
-        "}\n",
+        "}\n"
+    )
+    new_legacy = (
         "static bool a52_legacy_fw_devlink_consumer(const struct device *dev)\n"
         "{\n"
         "\tconst char *name;\n\n"
@@ -45,44 +113,40 @@ def patch_driver_core(path: Path) -> None:
         "\t\treturn false;\n"
         "\tname = dev_name(dev);\n"
         "\treturn name && !strcmp(name, \"1d84000.ufshc\");\n"
-        "}\n",
+        "}\n"
+    )
+    text = optional_transition(
+        text,
+        old_legacy,
+        new_legacy,
+        "a52_legacy_fw_devlink_consumer",
         "remove TLMM from legacy supplier bypass",
     )
 
-    text = one(
-        text,
+    old_preprobe = (
         "static bool a52_run40_preprobe_target(const struct device *dev)\n"
         "{\n"
         "\tconst char *name = dev ? dev_name(dev) : NULL;\n\n"
         "\treturn name && (!strcmp(name, \"1d84000.ufshc\") ||\n"
         "\t\t\t!strcmp(name, \"f100000.pinctrl\"));\n"
-        "}\n",
+        "}\n"
+    )
+    new_preprobe = (
         "static bool a52_run40_preprobe_target(const struct device *dev)\n"
         "{\n"
         "\tconst char *name = dev ? dev_name(dev) : NULL;\n\n"
         "\treturn name && !strcmp(name, \"1d84000.ufshc\");\n"
-        "}\n",
+        "}\n"
+    )
+    text = optional_transition(
+        text,
+        old_preprobe,
+        new_preprobe,
+        "a52_run40_preprobe_target",
         "remove TLMM from legacy preprobe tracing target",
     )
 
-    text = one(
-        text,
-        "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev) &&\n"
-        "\t    !(dev->of_node && of_device_is_compatible(dev->of_node,\n"
-        "\t\t\t\t\t\t \"qcom,dsi-ctrl-hw-v2.4\"))) {\n"
-        "\t\tunsigned int kept = 0;\n"
-        "\t\tunsigned int dropped = 0;\n\n"
-        "\t\ta52_device_links_force_probe(dev, &kept, &dropped);\n"
-        "\t\ta52_ackfr_record(\"DISP RP bypass dev=%s kept=%u drop=%u\",\n"
-        "\t\t\tdev_name(dev), kept, dropped);\n"
-        "\t\tret = 0;\n"
-        "\t}\n",
-        "\tif (ret == -EPROBE_DEFER && a52_display_probe_device(dev))\n"
-        "\t\ta52_ackfr_record(\"DISP RP defer-normal dev=%s rc=%d\",\n"
-        "\t\t\tdev_name(dev), ret);\n",
-        "remove display supplier bypass",
-    )
-
+    text = remove_display_bypass(text)
     path.write_text(text, encoding="utf-8")
 
 

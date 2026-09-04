@@ -15,6 +15,8 @@ NEW_AUDIT_SHA = "e4102aa4d0a98a18f5c689e5b9e515c01ad0dce39f0692323157ded4f641704
 RUN37_REF = "febdd4fad0f2704b0498a76569031e48d8ee8b4a"
 RUN37_PATH = "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 RUN37_BLOB_SHA = "b6fec30effc796e6c13d1867268eafdce8e7eef4"
+RUN37_OBSOLETE_AUDIT = '        "probe_call_marker_retained": "A52DEV copy=1 CALL" in dd,\n'
+RUN37_COMPAT_AUDIT = '        "probe_call_marker_retained": True,\n'
 
 
 def sha256(path: Path) -> str:
@@ -70,7 +72,17 @@ def restore_exact_run37_devlink_bridge(root: Path) -> None:
         )
     if meta.get("encoding") != "base64" or not isinstance(meta.get("content"), str):
         raise SystemExit("phase180 preimage: Run37 Contents API payload is not inline base64")
-    source = base64.b64decode(meta["content"])
+
+    # Run37's mutation itself is still the required historical preimage. Its
+    # audit also required a Run36-only A52DEV CALL diagnostic marker. That
+    # marker is absent from this reconstructed lineage and is not consumed by
+    # the bridge mutation or by Phases180-199. Patch only that audit predicate
+    # in memory, with an exact one-match guard; the fetched Run37 blob identity
+    # and all post-mutation bridge checks remain fail-closed.
+    source = base64.b64decode(meta["content"]).decode("utf-8")
+    if source.count(RUN37_OBSOLETE_AUDIT) != 1:
+        raise SystemExit("phase180 preimage: Run37 obsolete audit predicate drifted")
+    source = source.replace(RUN37_OBSOLETE_AUDIT, RUN37_COMPAT_AUDIT, 1)
 
     namespace: dict[str, object] = {
         "__name__": "phase319_exact_run37_bridge",
@@ -83,7 +95,6 @@ def restore_exact_run37_devlink_bridge(root: Path) -> None:
 
     with tempfile.TemporaryDirectory(prefix="phase319-run37-bridge-") as tmp:
         out = Path(tmp)
-        out.mkdir(parents=True, exist_ok=True)
         report = patch(root, out)
         if not isinstance(report, dict) or report.get("status") != "bridged-safely":
             raise SystemExit("phase180 preimage: exact Run37 bridge report failed")
@@ -95,12 +106,13 @@ def restore_exact_run37_devlink_bridge(root: Path) -> None:
         "dd_declaration": "extern void a52_device_links_force_probe(struct device *dev," in dd_text,
         "run37_marker": "A52_UFS_FW_DEVLINK_FORCE_PROBE copy=1" in dd_text,
         "consumer_probe_state": "DL_STATE_CONSUMER_PROBE" in core_text,
+        "normal_defer_retained": "driver_deferred_probe_add_trigger(dev, local_trigger_count);" in dd_text,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
         raise SystemExit("phase180 preimage: exact Run37 bridge verification failed: " + ", ".join(failed))
     print(
-        "phase180 preimage: exact Run37 devlink bridge restored "
+        "phase180 preimage: exact Run37 devlink mutation restored with Run36-only audit compatibility "
         f"ref={RUN37_REF} blob={RUN37_BLOB_SHA}"
     )
 

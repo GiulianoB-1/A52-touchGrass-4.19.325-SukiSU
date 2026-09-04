@@ -12,9 +12,11 @@ from pathlib import Path
 
 EXPECTED_AUDIT_SHA = "7b7adb4a0847086fb3bcfaadcebfdd667e7d610a62923429c93997ca90fc050c"
 NEW_AUDIT_SHA = "e4102aa4d0a98a18f5c689e5b9e515c01ad0dce39f0692323157ded4f6417043"
+BRIDGE_PATH = "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 RUN37_REF = "febdd4fad0f2704b0498a76569031e48d8ee8b4a"
-RUN37_PATH = "scripts/94b_stage_a52xq_ufs_phy_bridge.py"
 RUN37_BLOB_SHA = "b6fec30effc796e6c13d1867268eafdce8e7eef4"
+RUN40_REF = "9ae69a960acb645120683f1c56ca9bd94ce3263e"
+RUN40_BLOB_SHA = "84735ebb7688785f5fae2750ee3ac54bb440a346"
 RUN37_OBSOLETE_AUDIT = '        "probe_call_marker_retained": "A52DEV copy=1 CALL" in dd,\n'
 RUN37_COMPAT_AUDIT = '        "probe_call_marker_retained": True,\n'
 
@@ -30,90 +32,132 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def restore_exact_run37_devlink_bridge(root: Path) -> None:
-    core = root / "drivers/base/core.c"
-    dd = root / "drivers/base/dd.c"
-    core_text = core.read_text(encoding="utf-8")
-    dd_text = dd.read_text(encoding="utf-8")
-
-    core_has = "a52_device_links_force_probe" in core_text
-    dd_has = (
-        "A52_UFS_FW_DEVLINK_FORCE_PROBE" in dd_text
-        and "extern void a52_device_links_force_probe" in dd_text
-    )
-    if core_has and dd_has:
-        print("phase180 preimage: exact Run37 devlink bridge already present")
-        return
-    if core_has or dd_has:
-        raise SystemExit(
-            f"phase180 preimage: partial Run37 bridge core={int(core_has)} dd={int(dd_has)}"
-        )
-
+def fetch_exact_source(ref: str, expected_blob: str) -> str:
     repo = os.environ.get("GITHUB_REPOSITORY")
     token = os.environ.get("GH_TOKEN")
     if not repo or not token:
         raise SystemExit("phase180 preimage: GITHUB_REPOSITORY/GH_TOKEN unavailable")
 
-    api = f"https://api.github.com/repos/{repo}/contents/{RUN37_PATH}?ref={RUN37_REF}"
+    api = f"https://api.github.com/repos/{repo}/contents/{BRIDGE_PATH}?ref={ref}"
     req = urllib.request.Request(
         api,
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
-            "User-Agent": "a52-phase319-run37-preimage-repair",
+            "User-Agent": "a52-phase319-run37-run40-preimage-repair",
         },
     )
     with urllib.request.urlopen(req, timeout=90) as response:
         meta = json.loads(response.read().decode("utf-8"))
 
-    if meta.get("sha") != RUN37_BLOB_SHA:
+    if meta.get("sha") != expected_blob:
         raise SystemExit(
-            f"phase180 preimage: Run37 blob mismatch expected={RUN37_BLOB_SHA} actual={meta.get('sha')}"
+            f"phase180 preimage: bridge blob mismatch ref={ref} "
+            f"expected={expected_blob} actual={meta.get('sha')}"
         )
     if meta.get("encoding") != "base64" or not isinstance(meta.get("content"), str):
-        raise SystemExit("phase180 preimage: Run37 Contents API payload is not inline base64")
+        raise SystemExit("phase180 preimage: Contents API payload is not inline base64")
+    return base64.b64decode(meta["content"]).decode("utf-8")
 
-    # Run37's mutation itself is still the required historical preimage. Its
-    # audit also required a Run36-only A52DEV CALL diagnostic marker. That
-    # marker is absent from this reconstructed lineage and is not consumed by
-    # the bridge mutation or by Phases180-199. Patch only that audit predicate
-    # in memory, with an exact one-match guard; the fetched Run37 blob identity
-    # and all post-mutation bridge checks remain fail-closed.
-    source = base64.b64decode(meta["content"]).decode("utf-8")
-    if source.count(RUN37_OBSOLETE_AUDIT) != 1:
-        raise SystemExit("phase180 preimage: Run37 obsolete audit predicate drifted")
-    source = source.replace(RUN37_OBSOLETE_AUDIT, RUN37_COMPAT_AUDIT, 1)
 
-    namespace: dict[str, object] = {
-        "__name__": "phase319_exact_run37_bridge",
-        "__file__": RUN37_PATH,
-    }
-    exec(compile(source, RUN37_PATH, "exec"), namespace)
-    patch = namespace.get("patch_a52_ufs_fw_devlink_gate")
-    if not callable(patch):
-        raise SystemExit("phase180 preimage: exact Run37 patch function missing")
-
-    with tempfile.TemporaryDirectory(prefix="phase319-run37-bridge-") as tmp:
-        out = Path(tmp)
-        report = patch(root, out)
-        if not isinstance(report, dict) or report.get("status") != "bridged-safely":
-            raise SystemExit("phase180 preimage: exact Run37 bridge report failed")
+def restore_exact_run37_and_run40_preimage(root: Path) -> None:
+    core = root / "drivers/base/core.c"
+    dd = root / "drivers/base/dd.c"
+    ufs = root / "drivers/scsi/ufs/ufs-qcom.c"
+    printk = root / "kernel/printk/printk.c"
 
     core_text = core.read_text(encoding="utf-8")
     dd_text = dd.read_text(encoding="utf-8")
+    run40_ready = (
+        "a52_device_links_force_probe" in core_text
+        and "static bool a52_legacy_fw_devlink_consumer" in dd_text
+        and "static bool a52_run40_preprobe_target" in dd_text
+        and "A52_UFS_PINCTRL_DEFER_BYPASS copy=1" in dd_text
+    )
+    if run40_ready:
+        print("phase180 preimage: exact Run37+Run40 bridge already present")
+        return
+
+    core_has = "a52_device_links_force_probe" in core_text
+    dd_run37_has = (
+        "A52_UFS_FW_DEVLINK_FORCE_PROBE" in dd_text
+        and "extern void a52_device_links_force_probe" in dd_text
+    )
+    if core_has != dd_run37_has:
+        raise SystemExit(
+            f"phase180 preimage: partial Run37 bridge core={int(core_has)} dd={int(dd_run37_has)}"
+        )
+
+    if not core_has:
+        source37 = fetch_exact_source(RUN37_REF, RUN37_BLOB_SHA)
+        # The Run37 mutation is still the required historical preimage. Its
+        # audit also required a Run36-only A52DEV CALL diagnostic marker. That
+        # marker is absent from this reconstructed lineage and is not consumed
+        # by the bridge mutation or by Phases180-199. Patch only that predicate
+        # in memory, with an exact one-match guard.
+        if source37.count(RUN37_OBSOLETE_AUDIT) != 1:
+            raise SystemExit("phase180 preimage: Run37 obsolete audit predicate drifted")
+        source37 = source37.replace(RUN37_OBSOLETE_AUDIT, RUN37_COMPAT_AUDIT, 1)
+        ns37: dict[str, object] = {
+            "__name__": "phase319_exact_run37_bridge",
+            "__file__": BRIDGE_PATH,
+        }
+        exec(compile(source37, BRIDGE_PATH, "exec"), ns37)
+        patch37 = ns37.get("patch_a52_ufs_fw_devlink_gate")
+        if not callable(patch37):
+            raise SystemExit("phase180 preimage: exact Run37 patch function missing")
+        with tempfile.TemporaryDirectory(prefix="phase319-run37-bridge-") as tmp:
+            report37 = patch37(root, Path(tmp))
+            if not isinstance(report37, dict) or report37.get("status") != "bridged-safely":
+                raise SystemExit("phase180 preimage: exact Run37 bridge report failed")
+
+    # Historical Phase174/175 source had subsequently passed through Run40.
+    # Restore that exact successor state before Phase180 so later Phase187 can
+    # remove the temporary TLMM bypass from the same preimage it originally saw.
+    source40 = fetch_exact_source(RUN40_REF, RUN40_BLOB_SHA)
+    ns40: dict[str, object] = {
+        "__name__": "phase319_exact_run40_bridge",
+        "__file__": BRIDGE_PATH,
+    }
+    exec(compile(source40, BRIDGE_PATH, "exec"), ns40)
+    funcs = (
+        "patch_driver_core",
+        "patch_ufs_reset_diagnostics",
+        "patch_printk_filter",
+    )
+    missing = [name for name in funcs if not callable(ns40.get(name))]
+    if missing:
+        raise SystemExit("phase180 preimage: exact Run40 functions missing: " + ", ".join(missing))
+
+    with tempfile.TemporaryDirectory(prefix="phase319-run40-bridge-") as tmp:
+        out = Path(tmp)
+        for name in funcs:
+            report = ns40[name](root, out)  # type: ignore[index,operator]
+            if not isinstance(report, dict) or report.get("status") != "patched":
+                raise SystemExit(f"phase180 preimage: exact Run40 {name} report failed")
+
+    core_text = core.read_text(encoding="utf-8")
+    dd_text = dd.read_text(encoding="utf-8")
+    ufs_text = ufs.read_text(encoding="utf-8")
+    printk_text = printk.read_text(encoding="utf-8")
     checks = {
         "core_helper": "void a52_device_links_force_probe(struct device *dev," in core_text,
-        "dd_declaration": "extern void a52_device_links_force_probe(struct device *dev," in dd_text,
-        "run37_marker": "A52_UFS_FW_DEVLINK_FORCE_PROBE copy=1" in dd_text,
+        "run40_selector": "static bool a52_legacy_fw_devlink_consumer" in dd_text,
+        "run40_preprobe_target": "static bool a52_run40_preprobe_target" in dd_text,
+        "tlmm_temporarily_in_selector": 'strcmp(name, "f100000.pinctrl")' in dd_text,
+        "run37_force_probe_marker": "A52_UFS_FW_DEVLINK_FORCE_PROBE copy=1" in dd_text,
+        "run40_pinctrl_marker": "A52_UFS_PINCTRL_DEFER_BYPASS copy=1" in dd_text,
         "consumer_probe_state": "DL_STATE_CONSUMER_PROBE" in core_text,
         "normal_defer_retained": "driver_deferred_probe_add_trigger(dev, local_trigger_count);" in dd_text,
+        "ufs_reset_diag": "DEVICE_RESET stage=pinctrl_get" in ufs_text,
+        "printk_pinctrl_filter": 'strstr(line, "f100000")' in printk_text,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        raise SystemExit("phase180 preimage: exact Run37 bridge verification failed: " + ", ".join(failed))
+        raise SystemExit("phase180 preimage: exact Run37+Run40 verification failed: " + ", ".join(failed))
     print(
-        "phase180 preimage: exact Run37 devlink mutation restored with Run36-only audit compatibility "
-        f"ref={RUN37_REF} blob={RUN37_BLOB_SHA}"
+        "phase180 preimage: exact Run37 mutation + exact Run40 successor restored "
+        f"run37={RUN37_REF}:{RUN37_BLOB_SHA} run40={RUN40_REF}:{RUN40_BLOB_SHA}"
     )
 
 
@@ -124,7 +168,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = args.root
-    restore_exact_run37_devlink_bridge(root)
+    restore_exact_run37_and_run40_preimage(root)
 
     audit = root / "drivers/a52_secure/a52_display_bind_audit.c"
     ctrl = root / "drivers/a52_display/msm/dsi/dsi_ctrl.c"

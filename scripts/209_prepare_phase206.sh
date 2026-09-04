@@ -63,6 +63,9 @@ PY
   for name in \
     phase199-post-kms-crc32c.patch \
     recorder-after-phase199.c \
+    recorder-before-phase200.c \
+    msm-smmu-before-phase200.c \
+    sde-kms-before-phase200.c \
     msm-smmu-after-phase200.c \
     sde-kms-after-phase200.c \
     recorder-after-phase200.c \

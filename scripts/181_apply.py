@@ -12,6 +12,26 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_one_of(
+    text: str,
+    clean_old: str,
+    clean_new: str,
+    compat_old: str,
+    compat_new: str,
+    label: str,
+) -> str:
+    clean_count = text.count(clean_old)
+    compat_count = text.count(compat_old)
+    if clean_count + compat_count != 1:
+        raise SystemExit(
+            f"{label}: expected exactly one clean/compat match, "
+            f"found clean={clean_count} compat={compat_count}"
+        )
+    if clean_count == 1:
+        return text.replace(clean_old, clean_new, 1)
+    return text.replace(compat_old, compat_new, 1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -104,11 +124,21 @@ def main() -> int:
         "dma stage",
     )
 
-    text = replace_once(
+    text = replace_one_of(
         text,
         "\tret = driver_sysfs_add(dev);\n"
         "\tif (a52_run40_preprobe_target(dev)) {\n",
         "\tret = driver_sysfs_add(dev);\n"
+        "\tif (a52_display_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"DISP RP sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
+        "\tif (a52_run40_preprobe_target(dev)) {\n",
+        "\tret = driver_sysfs_add(dev);\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
+        "\tif (a52_run40_preprobe_target(dev)) {\n",
+        "\tret = driver_sysfs_add(dev);\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
         "\tif (a52_display_probe_device(dev))\n"
         "\t\ta52_ackfr_record(\"DISP RP sysfs dev=%s rc=%d\", dev_name(dev), ret);\n"
         "\tif (a52_run40_preprobe_target(dev)) {\n",
@@ -150,10 +180,26 @@ def main() -> int:
         "driver probe stage",
     )
 
-    text = replace_once(
+    text = replace_one_of(
         text,
         "done:\n\tatomic_dec(&probe_count);\n",
         "done:\n"
+        "\tif (a52_display_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"DISP RP done dev=%s rc=%d bound=%s\",\n"
+        "\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n"
+        "\t\t\tdev->driver->name : \"-\");\n"
+        "\tatomic_dec(&probe_count);\n",
+        "done:\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE really-probe done dev=%s rc=%d bound=%s\",\n"
+        "\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n"
+        "\t\t\tdev->driver->name : \"-\");\n"
+        "\tatomic_dec(&probe_count);\n",
+        "done:\n"
+        "\tif (a52_rscc_probe_device(dev))\n"
+        "\t\ta52_ackfr_record(\"RSCCCORE really-probe done dev=%s rc=%d bound=%s\",\n"
+        "\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n"
+        "\t\t\tdev->driver->name : \"-\");\n"
         "\tif (a52_display_probe_device(dev))\n"
         "\t\ta52_ackfr_record(\"DISP RP done dev=%s rc=%d bound=%s\",\n"
         "\t\t\tdev_name(dev), ret, dev->driver && dev->driver->name ?\n"

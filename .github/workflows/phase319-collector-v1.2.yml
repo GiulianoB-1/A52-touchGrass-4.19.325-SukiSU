@@ -1,0 +1,55 @@
+name: Build Phase319 Golden Collector v1.2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase319-collector-v1.2
+    paths:
+      - 'scripts/phase319_collector_v1_2/**'
+      - '.github/workflows/phase319-collector-v1.2.yml'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate collector scripts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT=scripts/phase319_collector_v1_2
+          test -f "$ROOT/module.prop"
+          test -f "$ROOT/post-fs-data.sh"
+          test -f "$ROOT/action.sh"
+          grep -q 'cat /dev/kmsg' "$ROOT/post-fs-data.sh"
+          grep -q "grep -a 'TG319F'" "$ROOT/action.sh"
+          grep -q 'display-context.txt' "$ROOT/action.sh"
+          bash -n "$ROOT/post-fs-data.sh"
+          bash -n "$ROOT/action.sh"
+
+      - name: Package KernelSU module
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT=scripts/phase319_collector_v1_2
+          OUT="$PWD/out"
+          STAGE="$PWD/stage"
+          mkdir -p "$OUT" "$STAGE"
+          cp "$ROOT/module.prop" "$STAGE/"
+          cp "$ROOT/post-fs-data.sh" "$STAGE/"
+          cp "$ROOT/action.sh" "$STAGE/"
+          cp "$ROOT/README.md" "$STAGE/"
+          chmod 0755 "$STAGE/post-fs-data.sh" "$STAGE/action.sh"
+          chmod 0644 "$STAGE/module.prop" "$STAGE/README.md"
+          (cd "$STAGE" && zip -r "$OUT/A52_PHASE319_GOLDEN_COLLECTOR_V1.2.zip" .)
+          unzip -l "$OUT/A52_PHASE319_GOLDEN_COLLECTOR_V1.2.zip"
+          sha256sum "$OUT/A52_PHASE319_GOLDEN_COLLECTOR_V1.2.zip" | tee "$OUT/SHA256SUMS.txt"
+
+      - name: Upload collector module
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-PHASE319-GOLDEN-COLLECTOR-V1.2
+          path: out/*
+          if-no-files-found: error

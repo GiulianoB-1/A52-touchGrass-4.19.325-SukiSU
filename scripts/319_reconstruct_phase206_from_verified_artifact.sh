@@ -143,16 +143,17 @@ mkdir -p "$P199_SRC_SNAPSHOT"
 # untracked paths. Do not apply ignore filtering: historical vendor imports may
 # live under ignored paths.
 LC_ALL=C git -C "$ROOT" diff --name-only --diff-filter=A -z "$GKI_COMMON_SHA" -- \
-  arch drivers include techpack a52-compat > "$P199_SRC_DIFF_LIST"
+  arch drivers include techpack a52-compat a52-port-compat.h > "$P199_SRC_DIFF_LIST"
 LC_ALL=C git -C "$ROOT" ls-files --others -z -- \
-  arch drivers include techpack a52-compat > "$P199_SRC_OTHER_LIST"
+  arch drivers include techpack a52-compat a52-port-compat.h > "$P199_SRC_OTHER_LIST"
 cat "$P199_SRC_DIFF_LIST" "$P199_SRC_OTHER_LIST" | LC_ALL=C sort -zu > "$P199_SRC_LIST"
 test -s "$P199_SRC_LIST"
 for required in \
   drivers/a52_secure/a52_ack_secure_flight_recorder.c \
   drivers/a52_display/msm/sde/sde_kms.c \
   drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c \
-  a52-compat/include/soc/qcom/secure_buffer.h; do
+  a52-compat/include/soc/qcom/secure_buffer.h \
+  a52-port-compat.h; do
   grep -Fzxq "$required" "$P199_SRC_LIST"
 done
 P199_SRC_COUNT=0
@@ -223,14 +224,16 @@ while IFS= read -r -d '' rel; do
   P199_SRC_RESTORED_COUNT=$((P199_SRC_RESTORED_COUNT + 1))
 done < "$P199_SRC_RESTORED"
 
-# Phase213's heap19 source and the top-level a52-compat tree are known
-# reset victims. Keep explicit fail-closed identity proofs in addition to the
-# generic set, because later SMMU compilation includes secure_buffer.h from
-# a52-compat directly.
+# Phase213's heap19 source, the top-level a52-compat tree, and the root-level
+# a52-port-compat.h are known reset victims. Keep explicit fail-closed identity
+# proofs in addition to the generic set, because later SMMU/KGSL compilation
+# consumes both compatibility headers directly.
 cmp "$P199_SRC_SNAPSHOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c" \
     "$ROOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c"
 cmp "$P199_SRC_SNAPSHOT/a52-compat/include/soc/qcom/secure_buffer.h" \
     "$ROOT/a52-compat/include/soc/qcom/secure_buffer.h"
+cmp "$P199_SRC_SNAPSHOT/a52-port-compat.h" \
+    "$ROOT/a52-port-compat.h"
 echo "Phase319 repair: restored missing reset-vulnerable Phase199 source files=$P199_SRC_RESTORED_COUNT"
 
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"

@@ -25,73 +25,74 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore exact pinned GKI source
-        id: gki-cache
         uses: actions/cache/restore@v4
         with:
           path: gki
           key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
           fail-on-cache-miss: true
 
-      - name: Restore exact TouchGrass source
-        id: tg-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: workspace/touchgrass-a52xq
-          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
-          fail-on-cache-miss: true
+      - name: Fetch only pinned Golden clock reference files
+        run: |
+          set -Eeuo pipefail
+          TG=phase320-touchgrass-reference/drivers/clk/qcom
+          mkdir -p "$TG"
+          BASE="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/${TOUCHGRASS_COMMIT}/drivers/clk/qcom"
+          for f in clk-rcg.h clk-rcg2.c dispcc-lagoon.c; do
+            curl -fL --retry 3 --retry-all-errors "$BASE/$f" -o "$TG/$f"
+            test -s "$TG/$f"
+          done
 
       - name: Verify identities and export exact API evidence
         run: |
           set -Eeuo pipefail
           test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
           test "$(make -s -C gki/common kernelversion)" = 5.10.252
-          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
-          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
 
+          TG=phase320-touchgrass-reference/drivers/clk/qcom
           OUT=phase320-source-audit
           mkdir -p "$OUT/gki" "$OUT/touchgrass"
           cp gki/common/drivers/clk/qcom/clk-rcg.h "$OUT/gki/"
           cp gki/common/drivers/clk/qcom/clk-rcg2.c "$OUT/gki/"
           cp gki/common/drivers/clk/qcom/clk-regmap.h "$OUT/gki/"
           cp gki/common/include/linux/clk-provider.h "$OUT/gki/"
-          cp workspace/touchgrass-a52xq/drivers/clk/qcom/clk-rcg.h "$OUT/touchgrass/"
-          cp workspace/touchgrass-a52xq/drivers/clk/qcom/clk-rcg2.c "$OUT/touchgrass/"
-          cp workspace/touchgrass-a52xq/drivers/clk/qcom/dispcc-lagoon.c "$OUT/touchgrass/"
+          cp "$TG/clk-rcg.h" "$OUT/touchgrass/"
+          cp "$TG/clk-rcg2.c" "$OUT/touchgrass/"
+          cp "$TG/dispcc-lagoon.c" "$OUT/touchgrass/"
 
           {
             echo "phase=320"
             echo "experiment=DISPCC-SAFE-CONFIG-SOURCE-AUDIT"
             echo "gki_sha=$(git -C gki/common rev-parse HEAD)"
             echo "gki_version=$(make -s -C gki/common kernelversion)"
-            echo "touchgrass_sha=$(git -C workspace/touchgrass-a52xq rev-parse HEAD)"
-            echo "touchgrass_version=$(make -s -C workspace/touchgrass-a52xq kernelversion)"
+            echo "touchgrass_sha=$TOUCHGRASS_COMMIT"
             echo "gki_clk_rcg_has_enable_safe_config=$(grep -q 'enable_safe_config' gki/common/drivers/clk/qcom/clk-rcg.h && echo yes || echo no)"
             echo "gki_clk_rcg2_has_safe_logic=$(grep -q 'enable_safe_config' gki/common/drivers/clk/qcom/clk-rcg2.c && echo yes || echo no)"
+            echo "gki_clk_rcg_has_parked_cfg=$(grep -q 'parked_cfg' gki/common/drivers/clk/qcom/clk-rcg.h && echo yes || echo no)"
+            echo "gki_clk_rcg2_has_park_logic=$(grep -q 'parked_cfg' gki/common/drivers/clk/qcom/clk-rcg2.c && echo yes || echo no)"
             echo "gki_clk_provider_has_vdd_class=$(grep -q 'vdd_class' gki/common/include/linux/clk-provider.h && echo yes || echo no)"
             echo "gki_tree_has_define_vdd_regulators=$(grep -Rqs 'DEFINE_VDD_REGULATORS' gki/common/drivers/clk/qcom && echo yes || echo no)"
-            echo "tg_clk_rcg_has_enable_safe_config=$(grep -q 'enable_safe_config' workspace/touchgrass-a52xq/drivers/clk/qcom/clk-rcg.h && echo yes || echo no)"
-            echo "tg_clk_rcg2_has_safe_logic=$(grep -q 'enable_safe_config' workspace/touchgrass-a52xq/drivers/clk/qcom/clk-rcg2.c && echo yes || echo no)"
-            echo "tg_dispcc_has_vdd_cx=$(grep -q 'vdd_cx' workspace/touchgrass-a52xq/drivers/clk/qcom/dispcc-lagoon.c && echo yes || echo no)"
-            echo "tg_dispcc_has_safe_config=$(grep -q 'enable_safe_config' workspace/touchgrass-a52xq/drivers/clk/qcom/dispcc-lagoon.c && echo yes || echo no)"
+            echo "tg_clk_rcg_has_enable_safe_config=$(grep -q 'enable_safe_config' "$TG/clk-rcg.h" && echo yes || echo no)"
+            echo "tg_clk_rcg2_has_safe_logic=$(grep -q 'enable_safe_config' "$TG/clk-rcg2.c" && echo yes || echo no)"
+            echo "tg_dispcc_has_vdd_cx=$(grep -q 'vdd_cx' "$TG/dispcc-lagoon.c" && echo yes || echo no)"
+            echo "tg_dispcc_has_safe_config=$(grep -q 'enable_safe_config' "$TG/dispcc-lagoon.c" && echo yes || echo no)"
           } | tee "$OUT/RESULTS.txt"
 
           diff -u "$OUT/gki/clk-rcg.h" "$OUT/touchgrass/clk-rcg.h" > "$OUT/clk-rcg.diff" || true
           diff -u "$OUT/gki/clk-rcg2.c" "$OUT/touchgrass/clk-rcg2.c" > "$OUT/clk-rcg2.diff" || true
-
+          grep -n -C 10 -E 'enable_safe_config|parked_cfg' "$OUT/gki/clk-rcg.h" > "$OUT/gki-rcg-state-fields.txt" || true
+          grep -n -C 20 -E 'enable_safe_config|parked_cfg' "$OUT/gki/clk-rcg2.c" > "$OUT/gki-rcg-state-logic.txt" || true
           grep -n -C 8 'enable_safe_config' "$OUT/touchgrass/clk-rcg.h" > "$OUT/touchgrass-safe-struct.txt"
           grep -n -C 18 'enable_safe_config' "$OUT/touchgrass/clk-rcg2.c" > "$OUT/touchgrass-safe-logic.txt"
           grep -n -E 'enable_safe_config|vdd_class|num_rate_max|rate_max|devm_regulator_get|DEFINE_VDD' "$OUT/touchgrass/dispcc-lagoon.c" > "$OUT/touchgrass-dispcc-features.txt"
-
           sha256sum "$OUT"/gki/* "$OUT"/touchgrass/* > "$OUT/SHA256SUMS.txt"
 
-      - name: Enforce expected port-gap facts
+      - name: Enforce reference facts
         run: |
           set -Eeuo pipefail
           OUT=phase320-source-audit
           grep -Fxq 'gki_sha=f960ed27302b1ff8e61e152fc202554d778deccd' "$OUT/RESULTS.txt"
           grep -Fxq 'gki_version=5.10.252' "$OUT/RESULTS.txt"
           grep -Fxq 'touchgrass_sha=6bf351bdf18bdb228db79e66f14a7a9c0178e5d7' "$OUT/RESULTS.txt"
-          grep -Fxq 'touchgrass_version=4.19.200' "$OUT/RESULTS.txt"
           grep -Fxq 'tg_clk_rcg_has_enable_safe_config=yes' "$OUT/RESULTS.txt"
           grep -Fxq 'tg_clk_rcg2_has_safe_logic=yes' "$OUT/RESULTS.txt"
           grep -Fxq 'tg_dispcc_has_vdd_cx=yes' "$OUT/RESULTS.txt"

@@ -1,0 +1,150 @@
+name: 319 - A52 Golden FDR sixpoint temporal observer
+run-name: Phase319 Golden FDR six-selector q0 q1 q2 observer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase319-golden-fdr-sixpoint-v1
+    paths:
+      - .github/workflows/319-a52-golden-fdr-sixpoint.yml
+      - scripts/golden_fdr_phase319_observer.py
+      - scripts/golden_fdr_phase319_build.sh
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase319-golden-fdr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+  WORKING_GOLDEN_BOOT_SHA256: '7c61a4fa58679c955391eedad666b3cb38e0eb5e49bc69ac87f1edd862a79f12'
+  WORKING_GOLDEN_CONTAINER_SHA256: '50683df47b3f74fd3dd4ca7ff96bc114a6b7339955670b4c555fecaeda07e8c0'
+  WORKING_GOLDEN_RAMDISK_SHA256: '54f7891881a755536e908acd66fa2cf48bb24ed5f9f8d2fc4b0bf259f395a4c1'
+  WORKING_GOLDEN_DTB_SHA256: '93612e8e1c49cff5660b733e5ff75e53dfca6511c79c00eee4d0355b5bb92d94'
+
+jobs:
+  build:
+    name: Build Phase319 on hardware-proven Golden FDR
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/golden_touchgrass_dma_done_reference.py scripts/golden_fdr_phase319_observer.py
+          bash -n scripts/golden_touchgrass_dma_done_reference_build.sh
+          bash -n scripts/golden_fdr_phase319_build.sh
+
+      - name: Hydrate proven Golden FDR repack helpers
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1" path="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$path"
+            test -s "$path"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-phase319-golden-fdr-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-golden-dma-ref-${{ runner.os }}-
+            a52xq-golden-clock-ref-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+
+      - name: Build Phase319 Golden FDR kernel
+        run: bash scripts/golden_fdr_phase319_build.sh
+
+      - name: Repack into locked hardware-proven FDR boot structure
+        run: |
+          set -Eeuo pipefail
+          OUT=golden-fdr-phase319-out
+          mkdir -p intake "$OUT/package"
+          test -s "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c %s "$OUT/package/boot.img")" = 100663296
+          python3 - "$OUT/package/repack-report.json" <<'PY'
+          import json, os, sys
+          r=json.load(open(sys.argv[1]))
+          assert r['status']=='repacked-audited', r
+          assert r['source_sha256']==os.environ['BOOT_SOURCE_SHA256'], r
+          assert r['ramdisk_sha256']==os.environ['WORKING_GOLDEN_RAMDISK_SHA256'], r
+          assert r['dtb_sha256']==os.environ['WORKING_GOLDEN_DTB_SHA256'], r
+          for key, val in r['invariants'].items():
+              assert val, (key,val)
+          print('Phase319 Golden FDR non-kernel boot-component identity audit: PASS')
+          PY
+          grep -Fq "hardware_proven_golden_boot_sha256=${WORKING_GOLDEN_BOOT_SHA256}" "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq "hardware_proven_golden_container_sha256=${WORKING_GOLDEN_CONTAINER_SHA256}" "$OUT/BUILD-IDENTITY.txt"
+          grep -Fq 'phase315g_reconstruction_used=no' "$OUT/BUILD-IDENTITY.txt"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Verify Phase319 FDR markers
+        run: |
+          set -Eeuo pipefail
+          OUT=golden-fdr-phase319-out
+          grep -Fq 'GDM DONE' "$OUT/audit/Image.strings.txt"
+          grep -Fq 'TG319F ARM c=0' "$OUT/audit/Image.strings.txt"
+          grep -Fq 'TG319F B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x' "$OUT/audit/Image.strings.txt"
+          test -s "$OUT/package/boot.img"
+          sha256sum "$OUT/package/boot.img" | tee "$OUT/package/boot-sha256.txt"
+
+      - name: Upload Phase319 Golden FDR boot image and audit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE319-GOLDEN-FDR-SIXPOINT-${{ github.run_number }}-BOOT-IMG
+          path: golden-fdr-phase319-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE319-GOLDEN-FDR-SIXPOINT-${{ github.run_number }}-FAILED
+          path: |
+            golden-fdr-phase319-failure/
+            golden-dma-done-ref-failure/
+            golden-clock-ref-failure/
+          if-no-files-found: warn
+          retention-days: 30

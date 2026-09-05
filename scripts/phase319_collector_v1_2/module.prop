@@ -1,0 +1,6 @@
+id=a52_phase319_golden_collector
+name=A52 Phase319 Golden Collector v1.2
+version=1.2
+versionCode=12
+author=Giuliano Francesco Basso / OpenAI
+summary=Preserves early TG319F kernel evidence before printk ring-buffer rollover and exports a clean Phase319 capture archive.

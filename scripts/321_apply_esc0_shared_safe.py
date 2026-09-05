@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 MARKER = "A52_PHASE321_ESC0_SHARED_SAFE_LIFECYCLE_AB_V1"
+# Phase321 CI trigger: no functional source change.
 
 
 def esc0_span(text: str):

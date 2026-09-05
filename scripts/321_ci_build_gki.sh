@@ -38,13 +38,22 @@ anchor='stage "config invariant"\n'
 if s.count(anchor) != 1:
     raise SystemExit(f'Phase321: expected one config-invariant anchor, found {s.count(anchor)}')
 insert=r'''stage "Phase321 isolated ESC0 native safe-lifecycle A/B"
+printf 'Phase321 runtime PWD=%s\n' "$PWD" | tee /tmp/p321-runtime-source.txt
+printf 'Phase321 runtime ROOT=%s\n' "$ROOT" | tee -a /tmp/p321-runtime-source.txt
+printf 'Phase321 runtime DISP=%s\n' "$DISP" | tee -a /tmp/p321-runtime-source.txt
+readlink -f "$ROOT" | sed 's/^/Phase321 real ROOT=/' | tee -a /tmp/p321-runtime-source.txt
+readlink -f "$DISP" | sed 's/^/Phase321 real DISP=/' | tee -a /tmp/p321-runtime-source.txt
+sha256sum "$DISP" | tee -a /tmp/p321-runtime-source.txt
+stat -c 'Phase321 DISP inode=%i size=%s mtime=%y' "$DISP" | tee -a /tmp/p321-runtime-source.txt
+grep -n -m1 'struct parent_map disp_cc_parent_map_1' "$DISP" | tee -a /tmp/p321-runtime-source.txt
+grep -n -m1 'static struct clk_rcg2 disp_cc_mdss_esc0_clk_src' "$DISP" | tee -a /tmp/p321-runtime-source.txt
 cp "$DISP" /tmp/p321-disp-before.c
 cp "$CTRL" /tmp/p321-ctrl-before.c
 cp "$HWC" /tmp/p321-hwc-before.c
 cp "$PHY" /tmp/p321-phy-before.c
 cp "$PHYV3" /tmp/p321-phyv3-before.c
-python3 scripts/321_apply_esc0_shared_safe.py --root "$ROOT" | tee /tmp/p321-apply.log
-python3 scripts/321_apply_esc0_shared_safe.py --root "$ROOT" --check-only
+python3 scripts/321_apply_esc0_shared_safe.py --file "$DISP" | tee /tmp/p321-apply.log
+python3 scripts/321_apply_esc0_shared_safe.py --file "$DISP" --check-only
 git -C "$ROOT" diff --check -- drivers/clk/qcom/dispcc-lagoon.c
 cp "$DISP" /tmp/p321-disp-after.c
 diff -u /tmp/p321-disp-before.c /tmp/p321-disp-after.c > /tmp/p321-disp.diff || true

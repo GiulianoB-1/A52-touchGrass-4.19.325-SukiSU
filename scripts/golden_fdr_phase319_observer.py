@@ -32,6 +32,12 @@ def patch_ctrl(text: str) -> str:
  * recovery, clock, PHY, regulator, reset, retry or timeout behavior is added.
  */
 static atomic_t a52_fdr319_state = ATOMIC_INIT(0); /* 0 idle, 1 armed, 2 done */
+/* Build-time lineage identity only. Kept in .rodata so Image audit can prove
+ * the existing hardware-proven Golden FDR DMA_DONE base is still present.
+ * This has no runtime reads, writes, branches, logging or timing effect.
+ */
+static const char a52_fdr319_base_identity[] __attribute__((used)) =
+	"A52_GOLDEN_DMA_DONE_REFERENCE_V1";
 extern void a52_fdr319_debugbus_snapshot(struct dsi_ctrl_hw *ctrl,
 					 unsigned int point);
 

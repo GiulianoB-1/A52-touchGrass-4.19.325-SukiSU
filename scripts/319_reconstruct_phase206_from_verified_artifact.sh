@@ -122,20 +122,31 @@ cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.
 cmp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$STAGE/sde-kms-before-phase200.c"
 echo 'Phase319 hybrid: exact retained untracked Phase199 boundary PASS'
 
-# Preserve Git's actual untracked source-file set at the Phase199 boundary.
+# Preserve Git's actual reset-vulnerable source-file set at the Phase199 boundary.
 # The historical producer creates vendor sources outside drivers/a52_* too,
 # including the heap19 exporter consumed by Phase213. Snapshot source roots
 # rather than a hand-picked directory list, then restore only paths that vanish
 # across reset so retained/upstream tracked files are never overwritten.
 P199_SRC_SNAPSHOT="$PWD/workspace/phase319-phase199-untracked-source-snapshot"
-P199_SRC_LIST="$PWD/workspace/phase319-phase199-untracked-source.list0"
-P199_SRC_MANIFEST="$PWD/workspace/phase319-phase199-untracked-source.sha256"
-P199_SRC_MODES="$PWD/workspace/phase319-phase199-untracked-source.modes"
-P199_SRC_RESTORED="$PWD/workspace/phase319-phase199-untracked-source-restored.list0"
+P199_SRC_LIST="$PWD/workspace/phase319-phase199-new-source.list0"
+P199_SRC_DIFF_LIST="$PWD/workspace/phase319-phase199-added-source.list0"
+P199_SRC_OTHER_LIST="$PWD/workspace/phase319-phase199-other-source.list0"
+P199_SRC_MANIFEST="$PWD/workspace/phase319-phase199-new-source.sha256"
+P199_SRC_MODES="$PWD/workspace/phase319-phase199-new-source.modes"
+P199_SRC_RESTORED="$PWD/workspace/phase319-phase199-new-source-restored.list0"
 rm -rf "$P199_SRC_SNAPSHOT"
 mkdir -p "$P199_SRC_SNAPSHOT"
-LC_ALL=C git -C "$ROOT" ls-files --others --exclude-standard -z -- \
-  arch drivers include techpack > "$P199_SRC_LIST"
+# New vendor files created by the historical producer are commonly represented
+# as intent-to-add entries. They are absent from the pristine GKI commit and
+# therefore disappear on reset --hard, but `ls-files --others` does not report
+# them. Build the preservation set from both added-vs-base paths and ordinary
+# untracked paths. Do not apply ignore filtering: historical vendor imports may
+# live under ignored paths.
+LC_ALL=C git -C "$ROOT" diff --name-only --diff-filter=A -z "$GKI_COMMON_SHA" -- \
+  arch drivers include techpack > "$P199_SRC_DIFF_LIST"
+LC_ALL=C git -C "$ROOT" ls-files --others -z -- \
+  arch drivers include techpack > "$P199_SRC_OTHER_LIST"
+cat "$P199_SRC_DIFF_LIST" "$P199_SRC_OTHER_LIST" | LC_ALL=C sort -zu > "$P199_SRC_LIST"
 test -s "$P199_SRC_LIST"
 for required in \
   drivers/a52_secure/a52_ack_secure_flight_recorder.c \
@@ -150,7 +161,7 @@ while IFS= read -r -d '' rel; do
   src="$ROOT/$rel"
   dst="$P199_SRC_SNAPSHOT/$rel"
   if [ ! -f "$src" ] && [ ! -L "$src" ]; then
-    echo "Phase319 repair: unexpected non-file untracked source path: $rel" >&2
+    echo "Phase319 repair: unexpected non-file reset-vulnerable source path: $rel" >&2
     exit 1
   fi
   mkdir -p "$(dirname "$dst")"
@@ -166,11 +177,11 @@ done < "$P199_SRC_LIST"
 test "$P199_SRC_COUNT" -gt 0
 test -s "$P199_SRC_MANIFEST"
 test -s "$P199_SRC_MODES"
-echo "Phase319 repair: snapshotted untracked Phase199 source files=$P199_SRC_COUNT"
+echo "Phase319 repair: snapshotted reset-vulnerable Phase199 source files=$P199_SRC_COUNT"
 
 # Reset tracked files only. Do not clean: the historical vendor sources above
-# are intentionally untracked in the upstream GKI repository. Install the
-# retained Phase199 tracked patch and prove its byte identity independently.
+# include intent-to-add paths that reset --hard removes. Install the retained
+# Phase199 tracked patch and prove its byte identity independently.
 git -C "$ROOT" reset --hard "$GKI_COMMON_SHA"
 git -C "$ROOT" apply --check "$P199_REF"
 git -C "$ROOT" apply "$P199_REF"
@@ -215,14 +226,14 @@ done < "$P199_SRC_RESTORED"
 # Keep an explicit fail-closed identity proof in addition to the generic set.
 cmp "$P199_SRC_SNAPSHOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c" \
     "$ROOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c"
-echo "Phase319 repair: restored missing Phase199 untracked source files=$P199_SRC_RESTORED_COUNT"
+echo "Phase319 repair: restored missing reset-vulnerable Phase199 source files=$P199_SRC_RESTORED_COUNT"
 
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"
 cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.c"
 cmp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$STAGE/sde-kms-before-phase200.c"
 mkdir -p "$BUILD"
 cp "$BASE/config/before-phase199.config" "$BUILD/.config"
-echo 'Phase319 repair: exact hybrid Phase199 tracked + untracked boundary PASS'
+echo 'Phase319 repair: exact hybrid Phase199 tracked + reset-vulnerable boundary PASS'
 
 cmp_stage() { cmp "$ROOT/$1" "$STAGE/$2"; }
 

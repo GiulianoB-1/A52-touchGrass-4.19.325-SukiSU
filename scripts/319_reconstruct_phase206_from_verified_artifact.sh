@@ -122,41 +122,53 @@ cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.
 cmp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$STAGE/sde-kms-before-phase200.c"
 echo 'Phase319 hybrid: exact retained untracked Phase199 boundary PASS'
 
-# The upstream GKI index does not own the imported A52 display/secure trees.
-# Preserve their complete Phase199 working-tree state before reset so later
-# historical phases see the same vendor tree, not a hand-picked subset.
-P199_A52_SNAPSHOT="$PWD/workspace/phase319-phase199-a52-snapshot"
-P199_A52_MANIFEST="$PWD/workspace/phase319-phase199-a52-snapshot.sha256"
-P199_A52_MODES="$PWD/workspace/phase319-phase199-a52-snapshot.modes"
-rm -rf "$P199_A52_SNAPSHOT"
-mkdir -p "$P199_A52_SNAPSHOT/drivers"
-for tree in a52_display a52_secure; do
-  test -d "$ROOT/drivers/$tree"
-  cp -a "$ROOT/drivers/$tree" "$P199_A52_SNAPSHOT/drivers/"
+# Preserve Git's actual untracked source-file set at the Phase199 boundary.
+# The historical producer creates vendor sources outside drivers/a52_* too,
+# including the heap19 exporter consumed by Phase213. Snapshot source roots
+# rather than a hand-picked directory list, then restore only paths that vanish
+# across reset so retained/upstream tracked files are never overwritten.
+P199_SRC_SNAPSHOT="$PWD/workspace/phase319-phase199-untracked-source-snapshot"
+P199_SRC_LIST="$PWD/workspace/phase319-phase199-untracked-source.list0"
+P199_SRC_MANIFEST="$PWD/workspace/phase319-phase199-untracked-source.sha256"
+P199_SRC_MODES="$PWD/workspace/phase319-phase199-untracked-source.modes"
+P199_SRC_RESTORED="$PWD/workspace/phase319-phase199-untracked-source-restored.list0"
+rm -rf "$P199_SRC_SNAPSHOT"
+mkdir -p "$P199_SRC_SNAPSHOT"
+LC_ALL=C git -C "$ROOT" ls-files --others --exclude-standard -z -- \
+  arch drivers include techpack > "$P199_SRC_LIST"
+test -s "$P199_SRC_LIST"
+for required in \
+  drivers/a52_secure/a52_ack_secure_flight_recorder.c \
+  drivers/a52_display/msm/sde/sde_kms.c \
+  drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c; do
+  grep -Fzxq "$required" "$P199_SRC_LIST"
 done
+P199_SRC_COUNT=0
+: > "$P199_SRC_MANIFEST"
+: > "$P199_SRC_MODES"
+while IFS= read -r -d '' rel; do
+  src="$ROOT/$rel"
+  dst="$P199_SRC_SNAPSHOT/$rel"
+  if [ ! -f "$src" ] && [ ! -L "$src" ]; then
+    echo "Phase319 repair: unexpected non-file untracked source path: $rel" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$dst")"
+  cp -a "$src" "$dst"
+  if [ -L "$dst" ]; then
+    printf 'SYMLINK  %s  %s\n' "$(readlink "$dst")" "$rel" >> "$P199_SRC_MANIFEST"
+  else
+    (cd "$P199_SRC_SNAPSHOT" && sha256sum "$rel") >> "$P199_SRC_MANIFEST"
+  fi
+  printf '%s  %s\n' "$(stat -c '%a' "$dst")" "$rel" >> "$P199_SRC_MODES"
+  P199_SRC_COUNT=$((P199_SRC_COUNT + 1))
+done < "$P199_SRC_LIST"
+test "$P199_SRC_COUNT" -gt 0
+test -s "$P199_SRC_MANIFEST"
+test -s "$P199_SRC_MODES"
+echo "Phase319 repair: snapshotted untracked Phase199 source files=$P199_SRC_COUNT"
 
-# The retained tracked Phase199 patch must not own any imported A52 tree path.
-# The upstream index may still contain vendor paths, so do not assume the whole
-# tree is untracked. After reset we restore only snapshot files that disappeared.
-if grep -Eq '^diff --git a/drivers/a52_(display|secure)/' "$P199_REF"; then
-  echo 'Phase319 repair: retained Phase199 patch unexpectedly owns imported A52 tree path' >&2
-  exit 1
-fi
-(
-  cd "$P199_A52_SNAPSHOT"
-  find drivers/a52_display drivers/a52_secure -type f -print0 |
-    LC_ALL=C sort -z | xargs -0 sha256sum
-) > "$P199_A52_MANIFEST"
-(
-  cd "$P199_A52_SNAPSHOT"
-  find drivers/a52_display drivers/a52_secure -type f -printf '%m  %p\n' |
-    LC_ALL=C sort
-) > "$P199_A52_MODES"
-test -s "$P199_A52_MANIFEST"
-test -s "$P199_A52_MODES"
-echo "Phase319 repair: snapshotted complete untracked Phase199 A52 trees files=$(wc -l < "$P199_A52_MANIFEST")"
-
-# Reset tracked files only. Do not clean: the exact hydrated A52 sources above
+# Reset tracked files only. Do not clean: the historical vendor sources above
 # are intentionally untracked in the upstream GKI repository. Install the
 # retained Phase199 tracked patch and prove its byte identity independently.
 git -C "$ROOT" reset --hard "$GKI_COMMON_SHA"
@@ -170,31 +182,40 @@ git -C "$ROOT" diff --binary --no-ext-diff > "$P199_REPLAY"
 printf '%s  %s\n' f9d08b3ce41d6a5a71ddea5699046983e0a5deddb9b6504bc1b5b30894c0a049 "$P199_REPLAY" | sha256sum -c -
 cmp "$P199_REPLAY" "$P199_REF"
 
-# Restore only imported Phase199 snapshot files that disappeared across the
-# tracked reset. Never overwrite a path that survived reset/P199 replay, because
-# such a path may legitimately belong to the upstream index. The retained P199
-# patch was already proven above not to own any A52 path.
-P199_A52_RESTORED="$PWD/workspace/phase319-phase199-a52-restored.list"
-: > "$P199_A52_RESTORED"
-while IFS= read -r rel; do
-  src="$P199_A52_SNAPSHOT/$rel"
+# Restore only snapshot paths that disappeared across reset/P199 replay. A path
+# that survived is left untouched because it may legitimately belong to the
+# upstream index or retained tracked patch. Every restored path is then checked
+# byte-for-byte (or symlink-target-for-target) and mode-for-mode.
+: > "$P199_SRC_RESTORED"
+while IFS= read -r -d '' rel; do
+  src="$P199_SRC_SNAPSHOT/$rel"
   dst="$ROOT/$rel"
-  if [ ! -e "$dst" ]; then
+  if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
     mkdir -p "$(dirname "$dst")"
     cp -a "$src" "$dst"
-    printf '%s\n' "$rel" >> "$P199_A52_RESTORED"
+    printf '%s\0' "$rel" >> "$P199_SRC_RESTORED"
   fi
-done < <(
-  cd "$P199_A52_SNAPSHOT"
-  find drivers/a52_display drivers/a52_secure -type f -print | LC_ALL=C sort
-)
+done < "$P199_SRC_LIST"
 
-while IFS= read -r rel; do
-  [ -n "$rel" ] || continue
-  cmp "$P199_A52_SNAPSHOT/$rel" "$ROOT/$rel"
-  test "$(stat -c '%a' "$P199_A52_SNAPSHOT/$rel")" = "$(stat -c '%a' "$ROOT/$rel")"
-done < "$P199_A52_RESTORED"
-echo "Phase319 repair: restored missing Phase199 A52 snapshot files=$(wc -l < "$P199_A52_RESTORED")"
+P199_SRC_RESTORED_COUNT=0
+while IFS= read -r -d '' rel; do
+  src="$P199_SRC_SNAPSHOT/$rel"
+  dst="$ROOT/$rel"
+  if [ -L "$src" ]; then
+    test -L "$dst"
+    test "$(readlink "$src")" = "$(readlink "$dst")"
+  else
+    cmp "$src" "$dst"
+  fi
+  test "$(stat -c '%a' "$src")" = "$(stat -c '%a' "$dst")"
+  P199_SRC_RESTORED_COUNT=$((P199_SRC_RESTORED_COUNT + 1))
+done < "$P199_SRC_RESTORED"
+
+# Phase213's heap19 source is the first known non-a52_* victim of the reset.
+# Keep an explicit fail-closed identity proof in addition to the generic set.
+cmp "$P199_SRC_SNAPSHOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c" \
+    "$ROOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c"
+echo "Phase319 repair: restored missing Phase199 untracked source files=$P199_SRC_RESTORED_COUNT"
 
 cmp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$STAGE/recorder-after-phase199.c"
 cmp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$STAGE/msm-smmu-before-phase200.c"

@@ -28,6 +28,7 @@ env:
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
 
 jobs:
   gki:
@@ -50,6 +51,25 @@ jobs:
           bash -n scripts/321_ci_build_gki.sh
           bash -n scripts/319_reconstruct_phase206_from_verified_artifact.sh
           bash -n scripts/319_regenerate_phase175_base.sh
+
+      - name: Restore exact successful Phase319 reconstruction helper
+        run: |
+          set -Eeuo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/319_reconstruct_phase206_from_verified_artifact.sh?ref=${PHASE319_GOOD_HEAD}"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "$API" \
+            --output /tmp/p321-phase319-reconstruct-good.sh
+          test -s /tmp/p321-phase319-reconstruct-good.sh
+          grep -Fq 'arch drivers include techpack a52-compat a52-port-compat.h' /tmp/p321-phase319-reconstruct-good.sh
+          grep -Fq 'a52-port-compat.h; do' /tmp/p321-phase319-reconstruct-good.sh
+          grep -Fq '$P199_SRC_SNAPSHOT/a52-port-compat.h' /tmp/p321-phase319-reconstruct-good.sh
+          bash -n /tmp/p321-phase319-reconstruct-good.sh
+          cp /tmp/p321-phase319-reconstruct-good.sh scripts/319_reconstruct_phase206_from_verified_artifact.sh
+          chmod +x scripts/319_reconstruct_phase206_from_verified_artifact.sh
+          echo "Phase321 CI repair: pinned successful Phase319 reconstructor ${PHASE319_GOOD_HEAD}"
+          sha256sum scripts/319_reconstruct_phase206_from_verified_artifact.sh
 
       - name: Restore pinned GKI source
         uses: actions/cache/restore@v4

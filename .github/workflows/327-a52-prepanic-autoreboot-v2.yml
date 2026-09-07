@@ -1,0 +1,125 @@
+name: 327 - A52 pre-panic autoreboot v2
+run-name: Phase327 - retained-q2 route to Phase326 autoreboot before Samsung panic path
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase327-prepanic-autoreboot-v2
+    paths:
+      - .github/workflows/327-a52-prepanic-autoreboot-v2.yml
+      - scripts/327_apply_prepanic_autoreboot_route.py
+      - scripts/327_ci_build_gki.sh
+      - scripts/326_apply_recorder_finalize_autoreboot.py
+      - scripts/326_ci_build_gki.sh
+      - scripts/325_apply_touchgrass_rcg_current_config.py
+      - scripts/325_ci_build_gki.sh
+      - scripts/319_apply_dsi_sixpoint_temporal_observer.py
+      - scripts/319_ci_build_gki.sh
+      - scripts/319_reconstruct_phase206_from_verified_artifact.sh
+      - scripts/319_regenerate_phase175_base.sh
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
+
+concurrency:
+  group: a52-phase327-prepanic-autoreboot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    name: Build Phase327 pre-panic autoreboot v2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Phase327 runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py scripts/325_apply_touchgrass_rcg_current_config.py scripts/326_apply_recorder_finalize_autoreboot.py scripts/327_apply_prepanic_autoreboot_route.py
+          bash -n scripts/319_ci_build_gki.sh scripts/325_ci_build_gki.sh scripts/326_ci_build_gki.sh scripts/327_ci_build_gki.sh scripts/319_regenerate_phase175_base.sh
+
+      - name: Restore exact successful Phase319 reconstruction helper
+        run: |
+          set -Eeuo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/319_reconstruct_phase206_from_verified_artifact.sh?ref=${PHASE319_GOOD_HEAD}"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "$API" --output /tmp/p327-phase319-reconstruct-good.sh
+          test -s /tmp/p327-phase319-reconstruct-good.sh
+          grep -Fq 'a52-port-compat.h' /tmp/p327-phase319-reconstruct-good.sh
+          bash -n /tmp/p327-phase319-reconstruct-good.sh
+          cp /tmp/p327-phase319-reconstruct-good.sh scripts/319_reconstruct_phase206_from_verified_artifact.sh
+          chmod +x scripts/319_reconstruct_phase206_from_verified_artifact.sh
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build and audit Phase327 GKI
+        run: bash scripts/327_ci_build_gki.sh
+
+      - name: Upload Phase327 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE327-GKI-PREPANIC-AUTOREBOOT-V2-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase327-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase327 boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE327-GKI-PREPANIC-AUTOREBOOT-V2-${{ github.run_number }}-BOOT-IMG
+          path: phase327-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Phase327 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE327-GKI-PREPANIC-AUTOREBOOT-V2-${{ github.run_number }}-FAILED
+          path: phase327-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

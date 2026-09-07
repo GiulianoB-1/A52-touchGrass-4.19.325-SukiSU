@@ -5,8 +5,8 @@ from pathlib import Path
 MARKER = "A52_PHASE325_TOUCHGRASS_RCG_CURRENT_CONFIG_V1"
 
 HELPER = r'''/* A52_PHASE325_TOUCHGRASS_RCG_CURRENT_CONFIG_V1
- * Port the TouchGrass redundant-RCG-update suppression used by clk_byte2_ops
- * and clk_pixel_ops onto GKI's cfg_off-aware register accessors.
+ * Port the TouchGrass redundant-RCG-update suppression used by the specialized
+ * BYTE2 and PIXEL set-rate paths onto GKI's cfg_off-aware register accessors.
  */
 static bool clk_rcg2_current_config(struct clk_rcg2 *rcg,
 				    const struct freq_tbl *f)

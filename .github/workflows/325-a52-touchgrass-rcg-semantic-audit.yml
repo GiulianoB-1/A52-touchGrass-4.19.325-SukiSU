@@ -70,14 +70,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           R=phase325-source-audit/REPORT.txt
+          grep -Fxq 'gki_pristine_has_dispcc_lagoon=no' "$R"
           grep -Fxq 'tg_byte2_calls_current_config=yes' "$R"
           grep -Fxq 'tg_pixel_calls_current_config=yes' "$R"
           grep -Fxq 'gki_byte2_calls_current_config=no' "$R"
           grep -Fxq 'gki_pixel_calls_current_config=no' "$R"
           grep -Fxq 'tg_struct_enable_safe_config=yes' "$R"
           grep -Fxq 'gki_struct_enable_safe_config=no' "$R"
-          grep -Fxq 'gki_byte0_parent_enable=no' "$R"
-          grep -Fxq 'gki_pclk0_parent_enable=no' "$R"
+          grep -Fxq 'tg_byte0_safe_config=yes' "$R"
+          grep -Fxq 'tg_pclk0_safe_config=yes' "$R"
+          grep -Fxq 'tg_esc0_safe_config=yes' "$R"
           grep -F 'PROVEN_DELTA_BYTE2=' "$R"
           grep -F 'PROVEN_DELTA_PIXEL=' "$R"
           grep -F 'PROVEN_DELTA_SAFE_LIFECYCLE=' "$R"

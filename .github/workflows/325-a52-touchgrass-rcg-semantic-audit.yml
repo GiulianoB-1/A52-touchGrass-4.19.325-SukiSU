@@ -1,0 +1,92 @@
+name: 325 - A52 TouchGrass RCG semantic audit
+run-name: Phase325 - exact TouchGrass vs GKI RCG semantic audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase325-touchgrass-rcg-semantic-port-v1
+    paths:
+      - .github/workflows/325-a52-touchgrass-rcg-semantic-audit.yml
+      - scripts/325_audit_touchgrass_rcg_semantics.py
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+jobs:
+  audit:
+    name: Audit exact pinned clock semantics
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore exact pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Fetch exact TouchGrass clock sources
+        run: |
+          set -Eeuo pipefail
+          TG="$PWD/phase325-touchgrass"
+          mkdir -p "$TG/drivers/clk/qcom"
+          BASE="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/${TOUCHGRASS_COMMIT}/drivers/clk/qcom"
+          for f in clk-rcg.h clk-rcg2.c dispcc-lagoon.c; do
+            curl --fail --location --retry 4 --retry-all-errors --silent --show-error \
+              "$BASE/$f" -o "$TG/drivers/clk/qcom/$f"
+            test -s "$TG/drivers/clk/qcom/$f"
+          done
+
+      - name: Verify exact identities
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          test "$(make -s -C gki/common kernelversion)" = 5.10.252
+          python3 -m py_compile scripts/325_audit_touchgrass_rcg_semantics.py
+
+      - name: Run Phase325 semantic audit
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase325-source-audit
+          python3 scripts/325_audit_touchgrass_rcg_semantics.py \
+            --gki gki/common \
+            --tg phase325-touchgrass \
+            --out phase325-source-audit
+          {
+            echo "gki_sha=$(git -C gki/common rev-parse HEAD)"
+            echo "gki_version=$(make -s -C gki/common kernelversion)"
+            echo "touchgrass_sha=${TOUCHGRASS_COMMIT}"
+            sha256sum phase325-source-audit/*
+          } | tee phase325-source-audit/IDENTITY.txt
+
+      - name: Enforce decision-grade facts
+        run: |
+          set -Eeuo pipefail
+          R=phase325-source-audit/REPORT.txt
+          grep -Fxq 'tg_byte2_calls_current_config=yes' "$R"
+          grep -Fxq 'tg_pixel_calls_current_config=yes' "$R"
+          grep -Fxq 'gki_byte2_calls_current_config=no' "$R"
+          grep -Fxq 'gki_pixel_calls_current_config=no' "$R"
+          grep -Fxq 'tg_struct_enable_safe_config=yes' "$R"
+          grep -Fxq 'gki_struct_enable_safe_config=no' "$R"
+          grep -Fxq 'gki_byte0_parent_enable=no' "$R"
+          grep -Fxq 'gki_pclk0_parent_enable=no' "$R"
+          grep -F 'PROVEN_DELTA_BYTE2=' "$R"
+          grep -F 'PROVEN_DELTA_PIXEL=' "$R"
+          grep -F 'PROVEN_DELTA_SAFE_LIFECYCLE=' "$R"
+
+      - name: Upload Phase325 source audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-PHASE325-TOUCHGRASS-RCG-SEMANTIC-AUDIT
+          path: phase325-source-audit/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

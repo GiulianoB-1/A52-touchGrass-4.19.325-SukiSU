@@ -88,6 +88,32 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
+      - name: Adapt Phase328 port to pinned GKI helper layout
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/328_apply_full_touchgrass_display_clock_port.py')
+          s = p.read_text()
+          start = '    a="static u8 clk_rcg2_get_parent(struct clk_hw *hw)\\n"\n    s=one(s,a,r\'\'\'static int clk_rcg2_set_force_enable(struct clk_hw *hw)'
+          end = '\'\'\'+a,"force")\n'
+          i = s.find(start)
+          if i < 0:
+              raise SystemExit('Phase328 helper-adaptation start anchor missing')
+          j = s.find(end, i)
+          if j < 0:
+              raise SystemExit('Phase328 helper-adaptation end anchor missing')
+          j += len(end)
+          replacement = '''    # Pinned GKI already provides clk_rcg2_set_force_enable() and
+              # clk_rcg2_clear_force_enable() for shared RCG ops. Reuse those helpers
+              # for the TouchGrass safe-config lifecycle instead of redefining them.
+          '''
+          s = s[:i] + replacement + s[j:]
+          p.write_text(s)
+          PY
+          python3 -m py_compile scripts/328_apply_full_touchgrass_display_clock_port.py
+          test "$(grep -c '^static int clk_rcg2_set_force_enable' scripts/328_apply_full_touchgrass_display_clock_port.py || true)" -eq 0
+
       - name: Build and audit Phase328 GKI
         run: bash scripts/328_ci_build_gki.sh
 

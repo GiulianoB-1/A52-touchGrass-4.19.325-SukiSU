@@ -98,7 +98,7 @@ test "$(grep -F 'clk_rcg2_current_config(rcg, &f)' "$RCG2" | wc -l)" -eq 2
 grep -Fq $'\t.enable = clk_rcg2_enable,' "$RCG2"
 grep -Fq $'\t.disable = clk_rcg2_disable,' "$RCG2"
 grep -Fq 'RCG_D_OFFSET(rcg), mask, ~f->n' "$RCG2"
-grep -Fq $'\t.cal_l = 0x31,' "$DISP"
+! grep -Fq $'\t.cal_l = ' "$DISP"
 grep -Fq 'RPMH_REGULATOR_LEVEL_NOM' "$DISP"
 ! sed -n '/frac_table_pixel/,/};/p' "$RCG2" | grep -Fq '{ 2, 3 }'
 
@@ -145,7 +145,7 @@ idn={
     'HW_CLK_CTRL flag behavior',
     'TouchGrass pixel fraction table (remove GKI-only 2/3)',
     'enable_safe_config on all 11 Lagoon RCGs',
-    'Lagoon PLL cal_l=0x31',
+    'Lagoon PLL config adapted to GKI alpha_pll_config layout (legacy cal_l omitted)',
     'persistent VDD_CX NOMINAL compatibility vote'
   ],
   'vdd_note':'GKI 5.10 lacks Samsung downstream clk_init_data vdd_class/rate_max; persistent NOMINAL is the upper-bound compatibility equivalent for this boot experiment',

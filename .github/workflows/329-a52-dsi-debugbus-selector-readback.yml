@@ -1,0 +1,155 @@
+name: 329 - A52 DSI debugbus selector readback
+run-name: Phase329 - DSI debug-bus selector CTL readback observer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase328-full-touchgrass-display-clock-port-v1
+    paths:
+      - .github/workflows/329-a52-dsi-debugbus-selector-readback.yml
+      - scripts/329_apply_dsi_debugbus_selector_readback.py
+      - scripts/329_ci_build_gki.sh
+      - scripts/328_apply_full_touchgrass_display_clock_port.py
+      - scripts/328_ci_build_gki.sh
+      - scripts/319_apply_dsi_sixpoint_temporal_observer.py
+      - scripts/319_ci_build_gki.sh
+      - scripts/319_reconstruct_phase206_from_verified_artifact.sh
+      - scripts/319_regenerate_phase175_base.sh
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
+
+concurrency:
+  group: a52-phase329-dsi-debugbus-selector-readback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    name: Build Phase329 DSI debugbus selector readback
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Phase329 runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/319_apply_dsi_sixpoint_temporal_observer.py scripts/328_apply_full_touchgrass_display_clock_port.py scripts/329_apply_dsi_debugbus_selector_readback.py
+          bash -n scripts/319_ci_build_gki.sh scripts/328_ci_build_gki.sh scripts/329_ci_build_gki.sh scripts/319_regenerate_phase175_base.sh
+
+      - name: Restore exact successful Phase319 reconstruction helper
+        run: |
+          set -Eeuo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/319_reconstruct_phase206_from_verified_artifact.sh?ref=${PHASE319_GOOD_HEAD}"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "$API" --output /tmp/p329-phase319-reconstruct-good.sh
+          test -s /tmp/p329-phase319-reconstruct-good.sh
+          grep -Fq 'a52-port-compat.h' /tmp/p329-phase319-reconstruct-good.sh
+          bash -n /tmp/p329-phase319-reconstruct-good.sh
+          cp /tmp/p329-phase319-reconstruct-good.sh scripts/319_reconstruct_phase206_from_verified_artifact.sh
+          chmod +x scripts/319_reconstruct_phase206_from_verified_artifact.sh
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Adapt Phase328 port to pinned GKI helper layout
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/328_apply_full_touchgrass_display_clock_port.py')
+          s = p.read_text()
+          start = '    a="static u8 clk_rcg2_get_parent(struct clk_hw *hw)\\n"\n    s=one(s,a,r\'\'\'static int clk_rcg2_set_force_enable(struct clk_hw *hw)'
+          end = '\'\'\'+a,"force")\n'
+          i = s.find(start)
+          if i < 0:
+              raise SystemExit('Phase329 Phase328 helper-adaptation start anchor missing')
+          j = s.find(end, i)
+          if j < 0:
+              raise SystemExit('Phase329 Phase328 helper-adaptation end anchor missing')
+          j += len(end)
+          replacement = '''    # Pinned GKI already provides clk_rcg2_set_force_enable() and
+              # clk_rcg2_clear_force_enable() for shared RCG ops. Reuse those helpers.
+          '''
+          s = s[:i] + replacement + s[j:]
+          life = "    life=r'''static int clk_rcg2_enable(struct clk_hw *hw)\n"
+          protos = "    life=r'''static int clk_rcg2_set_force_enable(struct clk_hw *hw);\nstatic int clk_rcg2_clear_force_enable(struct clk_hw *hw);\n\nstatic int clk_rcg2_enable(struct clk_hw *hw)\n"
+          if s.count(life) != 1:
+              raise SystemExit(f'Phase329 Phase328 lifecycle anchor count {s.count(life)}')
+          s = s.replace(life, protos, 1)
+          p.write_text(s)
+          PY
+          python3 -m py_compile scripts/328_apply_full_touchgrass_display_clock_port.py
+          test "$(grep -c '^static int clk_rcg2_set_force_enable' scripts/328_apply_full_touchgrass_display_clock_port.py || true)" -eq 0
+          grep -Fq "static int clk_rcg2_set_force_enable(struct clk_hw *hw);" scripts/328_apply_full_touchgrass_display_clock_port.py
+          grep -Fq "static int clk_rcg2_clear_force_enable(struct clk_hw *hw);" scripts/328_apply_full_touchgrass_display_clock_port.py
+
+      - name: Build and audit Phase329 GKI
+        run: bash scripts/329_ci_build_gki.sh
+
+      - name: Upload Phase329 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE329-GKI-DSI-DEBUGBUS-SELECTOR-READBACK-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase329-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase329 boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE329-GKI-DSI-DEBUGBUS-SELECTOR-READBACK-${{ github.run_number }}-BOOT-IMG
+          path: phase329-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Phase329 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE329-GKI-DSI-DEBUGBUS-SELECTOR-READBACK-${{ github.run_number }}-FAILED
+          path: phase329-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

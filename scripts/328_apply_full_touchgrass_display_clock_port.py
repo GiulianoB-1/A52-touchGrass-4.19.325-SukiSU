@@ -241,8 +241,6 @@ static void clk_rcg2_disable(struct clk_hw *hw)
     return s
 
 def patch_d(s):
-    a="static const struct alpha_pll_config disp_cc_pll0_config = {\n\t.l = 0x3A,\n"
-    s=one(s,a,a+"\t.cal_l = 0x31,\n","pll")
     for x in SAFE:
         n="disp_cc_mdss_"+x+"_clk_src"; p=s.find("static struct clk_rcg2 "+n+" = {")
         if p<0: raise SystemExit("Phase328 missing "+n)
@@ -255,7 +253,23 @@ def patch_d(s):
     a="static int disp_cc_lagoon_probe(struct platform_device *pdev)\n{\n\tstruct regmap *regmap;\n\tint ret;\n"
     s=one(s,a,"static int disp_cc_lagoon_probe(struct platform_device *pdev)\n{\n\tstruct regmap *regmap;\n\tstruct regulator *vdd_cx;\n\tint ret;\n\tint vdd_rc;\n","probe")
     a='\ta52_ackfr_record("DISPCC probe enter dev=%s node=%s",\n'
-    v='''\t/* A52_PHASE328_FULL_TOUCHGRASS_DISPLAY_CLOCK_PORT_V1\n\t * GKI lacks Samsung per-clock vdd_class/rate_max. Hold NOMINAL as the\n\t * upper-bound compatibility vote while the full display-clock port runs.\n\t */\n\ta52_ackfr_record("P276 328V s=0");\n\tvdd_cx = devm_regulator_get(&pdev->dev, "vdd_cx");\n\tvdd_rc = IS_ERR(vdd_cx) ? PTR_ERR(vdd_cx) : 0;\n\ta52_ackfr_record("P276 328V s=1 rc=%d", vdd_rc);\n\tif (IS_ERR(vdd_cx)) return PTR_ERR(vdd_cx);\n\tvdd_rc = regulator_set_voltage(vdd_cx, RPMH_REGULATOR_LEVEL_NOM, INT_MAX);\n\ta52_ackfr_record("P276 328V s=2 rc=%d", vdd_rc);\n\tif (vdd_rc) return vdd_rc;\n\tvdd_rc = regulator_enable(vdd_cx);\n\ta52_ackfr_record("P276 328V s=3 rc=%d", vdd_rc);\n\tif (vdd_rc) return vdd_rc;\n\n'''
+    v='''\t/* A52_PHASE328_FULL_TOUCHGRASS_DISPLAY_CLOCK_PORT_V1
+\t * GKI lacks Samsung per-clock vdd_class/rate_max. Hold NOMINAL as the
+\t * upper-bound compatibility vote while the full display-clock port runs.
+\t */
+\ta52_ackfr_record("P276 328V s=0");
+\tvdd_cx = devm_regulator_get(&pdev->dev, "vdd_cx");
+\tvdd_rc = IS_ERR(vdd_cx) ? PTR_ERR(vdd_cx) : 0;
+\ta52_ackfr_record("P276 328V s=1 rc=%d", vdd_rc);
+\tif (IS_ERR(vdd_cx)) return PTR_ERR(vdd_cx);
+\tvdd_rc = regulator_set_voltage(vdd_cx, RPMH_REGULATOR_LEVEL_NOM, INT_MAX);
+\ta52_ackfr_record("P276 328V s=2 rc=%d", vdd_rc);
+\tif (vdd_rc) return vdd_rc;
+\tvdd_rc = regulator_enable(vdd_cx);
+\ta52_ackfr_record("P276 328V s=3 rc=%d", vdd_rc);
+\tif (vdd_rc) return vdd_rc;
+
+'''
     return one(s,a,v+a,"vdd")
 
 def check(h,r,d):
@@ -268,7 +282,7 @@ def check(h,r,d):
         if x not in r: raise SystemExit("Phase328 missing "+x)
     t=r[r.find("static const struct frac_entry frac_table_pixel[]"):]; t=t[:t.find("};")]
     if "{ 2, 3 }" in t: raise SystemExit("Phase328 pixel 2/3 remains")
-    for x in ("\t.cal_l = 0x31,","P276 328V s=3 rc=%d","RPMH_REGULATOR_LEVEL_NOM"):
+    for x in ("P276 328V s=3 rc=%d","RPMH_REGULATOR_LEVEL_NOM"):
         if x not in d: raise SystemExit("Phase328 missing "+x)
 
 def main():

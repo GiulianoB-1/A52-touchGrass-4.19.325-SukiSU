@@ -44,7 +44,7 @@ s = p.read_text()
 anchor = 'stage "config invariant"\n'
 if s.count(anchor) != 1:
     raise SystemExit(f'Phase328: expected one config-invariant anchor, found {s.count(anchor)}')
-insert = rf'''stage "Phase328 full TouchGrass Lagoon display-clock semantic port"
+insert = r'''stage "Phase328 full TouchGrass Lagoon display-clock semantic port"
 RCGH="$ROOT/drivers/clk/qcom/clk-rcg.h"
 RCG2="$ROOT/drivers/clk/qcom/clk-rcg2.c"
 cp "$RCGH" /tmp/p328-rcgh-before.h
@@ -57,9 +57,9 @@ cp "$PHYV3" /tmp/p328-phyv3-before.c
 
 # Prove that the broad port starts from the exact clean Phase319 source, not
 # from Phase321-327 experimental runtime deltas.
-printf '%s  %s\n' '{hsha}' "$RCGH" | sha256sum -c -
-printf '%s  %s\n' '{rsha}' "$RCG2" | sha256sum -c -
-printf '%s  %s\n' '{dsha}' "$DISP" | sha256sum -c -
+printf '%s  %s\n' '__H_SHA__' "$RCGH" | sha256sum -c -
+printf '%s  %s\n' '__R_SHA__' "$RCG2" | sha256sum -c -
+printf '%s  %s\n' '__D_SHA__' "$DISP" | sha256sum -c -
 for marker in \
   A52_PHASE321_ESC0_SHARED_SAFE_LIFECYCLE_AB_V1 \
   A52_PHASE322_DISPCC_VDD_CX_NOMINAL_VOTE_AB_V1 \
@@ -103,6 +103,7 @@ grep -Fq 'RPMH_REGULATOR_LEVEL_NOM' "$DISP"
 ! sed -n '/frac_table_pixel/,/};/p' "$RCG2" | grep -Fq '{ 2, 3 }'
 
 '''
+insert = insert.replace('__H_SHA__', hsha).replace('__R_SHA__', rsha).replace('__D_SHA__', dsha)
 p.write_text(s.replace(anchor, insert + anchor))
 PY
 

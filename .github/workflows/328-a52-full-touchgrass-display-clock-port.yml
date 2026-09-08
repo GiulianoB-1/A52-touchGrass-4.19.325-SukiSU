@@ -109,10 +109,21 @@ jobs:
               # for the TouchGrass safe-config lifecycle instead of redefining them.
           '''
           s = s[:i] + replacement + s[j:]
+
+          # The reused GKI helpers are defined later in clk-rcg2.c. The new
+          # TouchGrass lifecycle is inserted earlier, so add only static forward
+          # declarations here. This changes no helper implementation or behavior.
+          life = "    life=r'''static int clk_rcg2_enable(struct clk_hw *hw)\\n"
+          protos = "    life=r'''static int clk_rcg2_set_force_enable(struct clk_hw *hw);\\nstatic int clk_rcg2_clear_force_enable(struct clk_hw *hw);\\n\\nstatic int clk_rcg2_enable(struct clk_hw *hw)\\n"
+          if s.count(life) != 1:
+              raise SystemExit(f'Phase328 lifecycle anchor count {s.count(life)}')
+          s = s.replace(life, protos, 1)
           p.write_text(s)
           PY
           python3 -m py_compile scripts/328_apply_full_touchgrass_display_clock_port.py
           test "$(grep -c '^static int clk_rcg2_set_force_enable' scripts/328_apply_full_touchgrass_display_clock_port.py || true)" -eq 0
+          grep -Fq "static int clk_rcg2_set_force_enable(struct clk_hw *hw);" scripts/328_apply_full_touchgrass_display_clock_port.py
+          grep -Fq "static int clk_rcg2_clear_force_enable(struct clk_hw *hw);" scripts/328_apply_full_touchgrass_display_clock_port.py
 
       - name: Build and audit Phase328 GKI
         run: bash scripts/328_ci_build_gki.sh

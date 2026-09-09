@@ -33,17 +33,20 @@ python3 -m py_compile scripts/329_apply_dsi_debugbus_selector_readback.py
 bash -n scripts/328_ci_build_gki.sh
 cp scripts/328_ci_build_gki.sh "$TMP"
 
-# Inject Phase329 only after Phase328 has completed its own byte-identity and
-# display-clock scope audits, but before the inherited Phase319 config/build.
+# Phase328 itself generates a temporary Phase319 builder and injects its display-
+# clock port immediately before Phase319's config-invariant stage. Append the
+# Phase329 observer to that same injected block, after all Phase328 source/scope
+# audits and before config/build. Do not look for the runtime stage directly in
+# the Phase328 wrapper because that line exists only in its generated builder.
 python3 - "$TMP" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 s = p.read_text()
-anchor = 'stage "config invariant"\n'
-if s.count(anchor) != 1:
-    raise SystemExit(f"Phase329: expected one inherited config-invariant anchor, found {s.count(anchor)}")
-insert = r'''stage "Phase329 DSI debug-bus selector CTL readback observer"
+needle = 'p.write_text(s.replace(anchor, insert + anchor))\n'
+if s.count(needle) != 1:
+    raise SystemExit(f"Phase329: expected one Phase328 generated-builder write anchor, found {s.count(needle)}")
+phase329 = r'''stage "Phase329 DSI debug-bus selector CTL readback observer"
 cp "$CTRL" /tmp/p329-ctrl-before.c
 cp "$HWC" /tmp/p329-hwc-before.c
 cp "$PHY" /tmp/p329-phy-before.c
@@ -67,10 +70,10 @@ grep -Fq 'ctl[i] = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);' "$HWC"
 grep -Fq 'P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x' "$HWC"
 grep -Fq 'P276 329C q=%u a=%x b=%x c=%x d=%x e=%x f=%x' "$HWC"
 
-stage "config invariant"
 '''
-s = s.replace(anchor, insert, 1)
-p.write_text(s)
+replacement = "insert += r'''" + phase329 + "'''\n" + needle
+assert "'''" not in phase329
+p.write_text(s.replace(needle, replacement, 1))
 PY
 
 bash -n "$TMP"

@@ -1,4 +1,4 @@
-name: 329 - A52 DSI debugbus selector readback
+name: Phase330 - DSI early breadcrumb recorder
 run-name: Phase329 - DSI debug-bus selector CTL readback observer
 
 on:

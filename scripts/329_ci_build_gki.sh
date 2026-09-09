@@ -33,19 +33,17 @@ python3 -m py_compile scripts/329_apply_dsi_debugbus_selector_readback.py
 bash -n scripts/328_ci_build_gki.sh
 cp scripts/328_ci_build_gki.sh "$TMP"
 
-# Inject the Phase329 observer only after the complete Phase328 semantic port and
-# its audits have passed, but before the inherited Phase319 config/build stages.
+# Inject Phase329 only after Phase328 has completed its own byte-identity and
+# display-clock scope audits, but before the inherited Phase319 config/build.
 python3 - "$TMP" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 s = p.read_text()
-anchor = "python3 scripts/328_apply_full_touchgrass_display_clock_port.py --root \"$ROOT\" --check-only\n\ngit -C \"$ROOT\" diff --check -- \\\n"
+anchor = 'stage "config invariant"\n'
 if s.count(anchor) != 1:
-    raise SystemExit(f"Phase329: expected one Phase328 post-port anchor, found {s.count(anchor)}")
-insert = r'''python3 scripts/328_apply_full_touchgrass_display_clock_port.py --root "$ROOT" --check-only
-
-stage "Phase329 DSI debug-bus selector CTL readback observer"
+    raise SystemExit(f"Phase329: expected one inherited config-invariant anchor, found {s.count(anchor)}")
+insert = r'''stage "Phase329 DSI debug-bus selector CTL readback observer"
 cp "$CTRL" /tmp/p329-ctrl-before.c
 cp "$HWC" /tmp/p329-hwc-before.c
 cp "$PHY" /tmp/p329-phy-before.c
@@ -69,7 +67,7 @@ grep -Fq 'ctl[i] = DSI_R32(ctrl, DSI_DEBUG_BUS_CTL);' "$HWC"
 grep -Fq 'P276 319B q=%u c=%x 171=%x 181=%x 191=%x 1a1=%x 1e1=%x 211=%x z=%x r=%x' "$HWC"
 grep -Fq 'P276 329C q=%u a=%x b=%x c=%x d=%x e=%x f=%x' "$HWC"
 
-git -C "$ROOT" diff --check -- \
+stage "config invariant"
 '''
 s = s.replace(anchor, insert, 1)
 p.write_text(s)

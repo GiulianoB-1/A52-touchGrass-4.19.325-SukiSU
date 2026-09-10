@@ -1,0 +1,125 @@
+name: Phase331 - Post-retention timeout frontier recorder
+run-name: Phase331 - Post-retention timeout frontier recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase328-full-touchgrass-display-clock-port-v1
+    paths:
+      - .github/workflows/331-a52-post-retention-timeout-frontier.yml
+      - scripts/331_apply_post_retention_frontier_recorder.py
+      - scripts/331_ci_build_gki.sh
+      - scripts/330_apply_dsi_early_breadcrumb_recorder.py
+      - scripts/330_ci_build_gki.sh
+      - scripts/329_apply_dsi_debugbus_selector_readback.py
+      - scripts/329_ci_build_gki.sh
+      - scripts/328_apply_full_touchgrass_display_clock_port.py
+      - scripts/328_ci_build_gki.sh
+      - scripts/319_apply_dsi_sixpoint_temporal_observer.py
+      - scripts/319_ci_build_gki.sh
+      - scripts/319_reconstruct_phase206_from_verified_artifact.sh
+      - scripts/319_regenerate_phase175_base.sh
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
+
+concurrency:
+  group: a52-phase331-post-retention-frontier-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    name: Build Phase331 post-retention timeout frontier recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Phase331 runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile \
+            scripts/319_apply_dsi_sixpoint_temporal_observer.py \
+            scripts/328_apply_full_touchgrass_display_clock_port.py \
+            scripts/329_apply_dsi_debugbus_selector_readback.py \
+            scripts/330_apply_dsi_early_breadcrumb_recorder.py \
+            scripts/331_apply_post_retention_frontier_recorder.py
+          bash -n \
+            scripts/319_ci_build_gki.sh \
+            scripts/328_ci_build_gki.sh \
+            scripts/329_ci_build_gki.sh \
+            scripts/330_ci_build_gki.sh \
+            scripts/331_ci_build_gki.sh \
+            scripts/319_regenerate_phase175_base.sh \
+            scripts/319_reconstruct_phase206_from_verified_artifact.sh
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build and audit Phase331 GKI
+        run: bash scripts/331_ci_build_gki.sh
+
+      - name: Upload Phase331 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE331-GKI-POST-RETENTION-TIMEOUT-FRONTIER-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          path: phase331-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase331 boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE331-GKI-POST-RETENTION-TIMEOUT-FRONTIER-${{ github.run_number }}-BOOT-IMG
+          path: phase331-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Phase331 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE331-GKI-POST-RETENTION-TIMEOUT-FRONTIER-${{ github.run_number }}-FAILED
+          path: phase331-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

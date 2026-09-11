@@ -76,7 +76,7 @@ EXPORT_SYMBOL_GPL(a52_p336_qsmmuv500_snapshot);
 		/*
 		 * Phase336: retain the Phase335 result only for apps_smmu and
 		 * map only the HF0 TBU status register used by SID 0x800.
-		 * devm_ioremap() creates a read-only-observer mapping here; no
+		 * The managed MMIO helper creates a read-only-observer mapping here; no
 		 * write, power vote, reset, delay or transaction is issued.
 		 */
 		{

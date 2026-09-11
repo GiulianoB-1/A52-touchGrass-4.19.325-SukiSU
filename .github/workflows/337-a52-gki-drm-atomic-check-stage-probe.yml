@@ -9,7 +9,10 @@ on:
     paths:
       - .github/workflows/337-a52-gki-drm-atomic-check-stage-probe.yml
       - scripts/337_apply_atomic_check_stage_probe.py
+      - scripts/337_reconstruct_phase206_artifact_free.sh
       - scripts/337_ci_build_gki.sh
+      - scripts/331_ci_build_gki.sh
+      - scripts/268_ci_build.sh
       - scripts/336_apply_qsmmuv500_hf0_tbu_state_recorder.py
       - scripts/336_ci_build_gki.sh
       - scripts/335_apply_qsmmuv500_sacr_cache_lock_parity.py
@@ -86,6 +89,7 @@ jobs:
             scripts/335_ci_build_gki.sh \
             scripts/336_ci_build_gki.sh \
             scripts/337_ci_build_gki.sh \
+            scripts/337_reconstruct_phase206_artifact_free.sh \
             scripts/319_regenerate_phase175_base.sh \
             scripts/319_reconstruct_phase206_from_verified_artifact.sh
 

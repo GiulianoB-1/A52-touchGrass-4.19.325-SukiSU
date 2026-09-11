@@ -43,9 +43,49 @@ static inline u64 eevdf_min_deadline_compute(struct sched_entity *se)
 	return min;
 }
 
-RB_DECLARE_CALLBACKS(static, eevdf_min_deadline_cb,
-		     struct sched_entity, run_node,
-		     u64, min_deadline, eevdf_min_deadline_compute)
+static void eevdf_min_deadline_propagate(struct rb_node *rb,
+					 struct rb_node *stop)
+{
+	while (rb != stop) {
+		struct sched_entity *se =
+			rb_entry(rb, struct sched_entity, run_node);
+		u64 min = eevdf_min_deadline_compute(se);
+
+		if (se->min_deadline == min)
+			break;
+		se->min_deadline = min;
+		rb = rb_parent(&se->run_node);
+	}
+}
+
+static void eevdf_min_deadline_copy(struct rb_node *old,
+				    struct rb_node *new)
+{
+	struct sched_entity *old_se =
+		rb_entry(old, struct sched_entity, run_node);
+	struct sched_entity *new_se =
+		rb_entry(new, struct sched_entity, run_node);
+
+	new_se->min_deadline = old_se->min_deadline;
+}
+
+static void eevdf_min_deadline_rotate(struct rb_node *old,
+				      struct rb_node *new)
+{
+	struct sched_entity *old_se =
+		rb_entry(old, struct sched_entity, run_node);
+	struct sched_entity *new_se =
+		rb_entry(new, struct sched_entity, run_node);
+
+	new_se->min_deadline = old_se->min_deadline;
+	old_se->min_deadline = eevdf_min_deadline_compute(old_se);
+}
+
+static const struct rb_augment_callbacks eevdf_min_deadline_cb = {
+	.propagate = eevdf_min_deadline_propagate,
+	.copy = eevdf_min_deadline_copy,
+	.rotate = eevdf_min_deadline_rotate,
+};
 
 """
     if fc.count(anchor) != 1:

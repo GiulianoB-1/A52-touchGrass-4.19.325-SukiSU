@@ -26,17 +26,16 @@ fail_report() {
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
-stage "restore exact successful Phase319 reconstruction helper"
-API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/scripts/319_reconstruct_phase206_from_verified_artifact.sh?ref=${PHASE319_GOOD_HEAD}"
-curl --fail --location --retry 3 --silent --show-error \
-  -H "Authorization: Bearer ${GH_TOKEN}" \
-  -H 'Accept: application/vnd.github.raw+json' \
-  "$API" --output /tmp/p331-phase319-reconstruct-good.sh
-test -s /tmp/p331-phase319-reconstruct-good.sh
-grep -Fq 'a52-port-compat.h' /tmp/p331-phase319-reconstruct-good.sh
-bash -n /tmp/p331-phase319-reconstruct-good.sh
-cp /tmp/p331-phase319-reconstruct-good.sh scripts/319_reconstruct_phase206_from_verified_artifact.sh
+stage "install Phase337 retention-safe Phase206 reconstruction helper"
+test -s scripts/337_reconstruct_phase206_artifact_free.sh
+grep -Fq 'A52_PHASE337_ARTIFACT_FREE_PHASE206_REPLAY_V1' \
+  scripts/337_reconstruct_phase206_artifact_free.sh
+bash -n scripts/337_reconstruct_phase206_artifact_free.sh
+cp scripts/337_reconstruct_phase206_artifact_free.sh \
+  scripts/319_reconstruct_phase206_from_verified_artifact.sh
 chmod +x scripts/319_reconstruct_phase206_from_verified_artifact.sh
+cmp -s scripts/337_reconstruct_phase206_artifact_free.sh \
+  scripts/319_reconstruct_phase206_from_verified_artifact.sh
 
 stage "adapt Phase328 helper to pinned GKI"
 python3 - <<'PY'

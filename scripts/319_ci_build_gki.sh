@@ -59,6 +59,12 @@ grep -Fq 'P276 316S q=2' "$CTRL"
 ! grep -Fq 'A52_PHASE317_DSI_INTERNAL_DEBUGBUS_DELTA_V1' "$CTRL"
 ! grep -Fq 'A52_PHASE317_DSI_INTERNAL_DEBUGBUS_DELTA_V1' "$HWC"
 
+# Phase337 retention repair: fail closed on the complete compiled Phase316
+# identity before layering Phase319 or any later observer.
+printf '%s  %s\n' "$PHASE316_IMAGE_SHA256" phase316-gki-out/compile/Image | sha256sum -c -
+printf '%s  %s\n' "$PHASE316_BOOT_SHA256" phase316-gki-out/package/boot.img | sha256sum -c -
+echo 'Phase319 reconstructed Phase316 complete Image/boot identity: PASS'
+
 stage "verify reconstructed Phase316 against live successful oracle"
 rm -rf "$P316"
 mkdir -p "$P316"

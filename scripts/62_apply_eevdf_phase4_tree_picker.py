@@ -9,6 +9,14 @@ kernel = Path(sys.argv[1]).resolve()
 fair_c = kernel / "kernel/sched/fair.c"
 fc = fair_c.read_text()
 
+if "#include <linux/rbtree_augmented.h>" not in fc:
+    include_anchor = '#include "sched.h"\n'
+    if include_anchor not in fc:
+        raise SystemExit("sched.h include anchor mismatch")
+    fc = fc.replace(include_anchor,
+                    include_anchor + '#include <linux/rbtree_augmented.h>\n',
+                    1)
+
 if "EEVDF phase 4 augmented deadline tree" not in fc:
     anchor = """static inline int entity_before(struct sched_entity *a,
 				struct sched_entity *b)

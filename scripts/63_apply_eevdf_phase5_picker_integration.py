@@ -26,7 +26,7 @@ static int __init sched_eevdf_setup(char *str)
 		return 0;
 
 	sched_eevdf_enabled = enable;
-	pr_info("EEVDF phase 5 picker %s\\n",
+	pr_info("EEVDF phase 5 picker %s\\\\n",
 		enable ? "enabled" : "disabled");
 	return 1;
 }

@@ -97,6 +97,73 @@ unzip -q /tmp/phase319-retained.zip -d /tmp/phase319-retained
 cp /tmp/phase319-retained/package/boot.img "$SEED/package/boot.img"
 cp /tmp/phase319-retained/compile/Image "$SEED/compile/Image"
 cp /tmp/phase319-retained/config/final.config "$SEED/config/before-phase216.config"
+
+# Phase337 retention repair: Phase319 final.config is a valid retained config
+# carrier, but it contains ten options enabled much later than the historical
+# pre-217 boundary. The original successful Phase233 run proves that only
+# CAM_CC/GPU_CC/NPU_CC/QCOM_MDT_LOADER/VIDEO_CC changed across its final
+# olddefconfig comparison. Roll these ten late Phase319 options back before
+# using the config as the synthetic before-phase216 boundary. Do not widen the
+# Phase233 drift allowlist: if Kconfig reintroduces any of these later, the
+# inherited Phase233 guard must still fail closed.
+python3 - "$SEED/config/before-phase216.config" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+bools = (
+    "DEVFREQ_GOV_QCOM_ADRENO_TZ",
+    "DEVFREQ_GOV_QCOM_GPUBW_MON",
+    "MSM_PIL",
+    "MSM_PIL_SSR_GENERIC",
+    "MSM_SUBSYSTEM_RESTART",
+    "QCOM_BUS_CONFIG_RPMH",
+    "QCOM_BUS_SCALING",
+    "QCOM_KGSL",
+    "QCOM_KGSL_IOMMU",
+)
+string_sym = "QCOM_ADRENO_DEFAULT_GOVERNOR"
+
+lines = text.splitlines()
+out = []
+seen = set()
+for line in lines:
+    handled = False
+    for sym in bools:
+        if line.startswith(f"CONFIG_{sym}=") or line == f"# CONFIG_{sym} is not set":
+            if sym not in seen:
+                out.append(f"# CONFIG_{sym} is not set")
+                seen.add(sym)
+            handled = True
+            break
+    if handled:
+        continue
+    if (line.startswith(f"CONFIG_{string_sym}=") or
+            line == f"# CONFIG_{string_sym} is not set"):
+        continue
+    out.append(line)
+
+for sym in bools:
+    if sym not in seen:
+        out.append(f"# CONFIG_{sym} is not set")
+
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+check = path.read_text(encoding="utf-8")
+for sym in bools:
+    token = f"# CONFIG_{sym} is not set"
+    if check.count(token) != 1:
+        raise SystemExit(f"Phase337 synthetic pre217 rollback failed: {sym}")
+    if re.search(rf"^CONFIG_{re.escape(sym)}=", check, re.M):
+        raise SystemExit(f"Phase337 late enable survived rollback: {sym}")
+if re.search(rf"^(?:CONFIG_|# CONFIG_){re.escape(string_sym)}", check, re.M):
+    raise SystemExit("Phase337 late Adreno default-governor string survived rollback")
+
+print("Phase337 synthetic pre217 late-config rollback: PASS")
+PY
 curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
   -H "Authorization: Bearer ${GH_TOKEN}" \
   -H 'Accept: application/vnd.github.raw+json' \
@@ -109,7 +176,7 @@ for path in \
   "$SEED/stage/phase209-splash-takeover-trace.patch"; do
   test -s "$path"
 done
-printf '%s  %s\n' de5d637d0b7fa088f3dfd1cce40401c5cb9b334413669787168fd2f4352c8b20 \
+printf '%s  %s\n' ae0ab1e4d8e53bd734bb19f6fe675c916a6698c05299a29169e3d812fdcb9d80 \
   "$SEED/config/before-phase216.config" | sha256sum -c -
 printf '%s  %s\n' 3e9728e45bfcaaced602f93c15d25dc438131619ca7259a9352315d412979a69 \
   "$SEED/package/boot.img" | sha256sum -c -

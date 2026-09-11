@@ -197,8 +197,24 @@ jobs:
             sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
           done
 
-          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=1";' scripts/.package-eevdf-enabled.sh
-          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-eevdf-rollback.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          for name, value in (
+              ("scripts/.package-eevdf-enabled.sh", "1"),
+              ("scripts/.package-eevdf-rollback.sh", "0"),
+          ):
+              p = Path(name)
+              s = p.read_text()
+              anchor = "dump_boot;\nwrite_boot;"
+              if s.count(anchor) != 1:
+                  raise SystemExit(f"unexpected AnyKernel boot-write anchor count in {name}: {s.count(anchor)}")
+              s = s.replace(
+                  anchor,
+                  f'dump_boot;\npatch_cmdline "sched_eevdf" "sched_eevdf={value}";\nwrite_boot;',
+                  1,
+              )
+              p.write_text(s)
+          PY
 
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF TEST/' scripts/.package-eevdf-enabled.sh
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF ROLLBACK/' scripts/.package-eevdf-rollback.sh

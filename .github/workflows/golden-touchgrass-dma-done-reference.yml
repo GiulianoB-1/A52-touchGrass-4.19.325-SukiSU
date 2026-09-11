@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - agent/a52-golden-fdr-dma-done-reference-v1
+      - agent/a52-golden-fdr-dma-done-reference-refresh-v1
     paths:
       - .github/workflows/golden-touchgrass-dma-done-reference.yml
       - scripts/golden_touchgrass_dma_done_reference.py

@@ -1,0 +1,93 @@
+name: Phase334 - TouchGrass pre-trigger static audit
+run-name: Phase334 - TouchGrass pre-trigger static audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase328-full-touchgrass-display-clock-port-v1
+    paths:
+      - .github/workflows/334-a52-touchgrass-pretrigger-static-audit.yml
+      - scripts/334_touchgrass_pretrigger_static_audit.py
+      - scripts/334_ci_touchgrass_pretrigger_static_audit.sh
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  PHASE227_SEED_ARTIFACT_ID: '9160764832'
+  PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
+
+concurrency:
+  group: a52-phase334-touchgrass-static-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Compare current GKI pre-trigger contracts to TouchGrass
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Phase334 runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates unzip make gcc g++ python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
+          python3 -m py_compile scripts/334_touchgrass_pretrigger_static_audit.py
+          bash -n scripts/334_ci_touchgrass_pretrigger_static_audit.sh
+
+      - name: Restore pinned GKI source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Restore exact TouchGrass source
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone exact TouchGrass source on cache miss
+        if: steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Run Phase334 static TouchGrass audit
+        run: bash scripts/334_ci_touchgrass_pretrigger_static_audit.sh
+
+      - name: Upload Phase334 static audit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE334-TOUCHGRASS-PRETRIGGER-STATIC-AUDIT-${{ github.run_number }}
+          path: phase334-static-audit/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase334 audit failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE334-TOUCHGRASS-PRETRIGGER-STATIC-AUDIT-${{ github.run_number }}-FAILED
+          path: phase334-static-audit-failure/
+          if-no-files-found: warn
+          retention-days: 30

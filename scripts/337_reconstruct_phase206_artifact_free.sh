@@ -101,7 +101,7 @@ python3 scripts/206_apply_smmu_display_contracts.py --root "$ROOT"
 for token in \
   'qcom,iommu-earlymap' \
   'a52_iommu_get_dma_window' \
-  'A52_PHASE203' \
+  'SMMU parent-qcom scm=%d' \
   'SMMU secure-streams faulted dev=%s'; do
   grep -RFlq "$token" "$ROOT/drivers" "$ROOT/include" || {
     echo "Phase337 replay required Phase206-lineage token missing: $token" >&2

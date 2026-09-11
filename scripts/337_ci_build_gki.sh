@@ -188,7 +188,7 @@ set +e
 make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image \
   2>&1 | tee phase337-compile.log
-rc=\${PIPESTATUS[0]}
+rc=${PIPESTATUS[0]}
 set -e
 test "$rc" -eq 0
 

@@ -102,7 +102,7 @@ cp /tmp/phase319-retained/config/final.config "$SEED/config/before-phase216.conf
 # carrier, but it contains ten options enabled much later than the historical
 # pre-217 boundary. The original successful Phase233 run proves that only
 # CAM_CC/GPU_CC/NPU_CC/QCOM_MDT_LOADER/VIDEO_CC changed across its final
-# olddefconfig comparison. Roll these ten late Phase319 options back before
+# olddefconfig comparison. Roll these twelve late Phase319 options back before
 # using the config as the synthetic before-phase216 boundary. Do not widen the
 # Phase233 drift allowlist: if Kconfig reintroduces any of these later, the
 # inherited Phase233 guard must still fail closed.
@@ -115,6 +115,8 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 
 bools = (
+    "TMPFS_POSIX_ACL",
+    "TMPFS_XATTR",
     "DEVFREQ_GOV_QCOM_ADRENO_TZ",
     "DEVFREQ_GOV_QCOM_GPUBW_MON",
     "MSM_PIL",
@@ -176,7 +178,7 @@ for path in \
   "$SEED/stage/phase209-splash-takeover-trace.patch"; do
   test -s "$path"
 done
-printf '%s  %s\n' ae0ab1e4d8e53bd734bb19f6fe675c916a6698c05299a29169e3d812fdcb9d80 \
+printf '%s  %s\n' d698dea506375ed96c0fc447151681268228b0494747f4cb5ad1a340b9362c2f \
   "$SEED/config/before-phase216.config" | sha256sum -c -
 printf '%s  %s\n' 3e9728e45bfcaaced602f93c15d25dc438131619ca7259a9352315d412979a69 \
   "$SEED/package/boot.img" | sha256sum -c -

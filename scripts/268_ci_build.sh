@@ -77,36 +77,49 @@ test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 test -d workspace/touchgrass-a52xq/.git
 test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
 
-# Restore the proven Phase227 seed and Phase206 reconstruction inputs.
-rm -rf "$SEED" /tmp/phase227-seed.zip
-mkdir -p "$SEED"
-curl -fL \
+# Phase337 retention repair: the historical Phase227/206 artifacts expired.
+# Recreate the four seed inputs consumed by this one-compile path from the
+# still-retained successful Phase319 evidence plus the exact successful Phase209
+# Git patch. Kernel source is NOT taken from Phase319: it is regenerated below.
+PHASE319_RETAINED_ARTIFACT_ID=9966129085
+PHASE319_RETAINED_ZIP_SHA256=0a7f06e332d580b2b2548783685ecc28a10ee261109db189d446fca18b5ad423
+PHASE209_PATCH_REF=b0b2c73eea4ce59abed7cf3b70d236613a9b5e85
+rm -rf "$SEED" /tmp/phase319-retained /tmp/phase319-retained.zip
+mkdir -p "$SEED"/{package,compile,config,stage} /tmp/phase319-retained
+curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
   -H "Authorization: Bearer ${GH_TOKEN}" \
   -H 'Accept: application/vnd.github+json' \
-  -H 'X-GitHub-Api-Version: 2022-11-28' \
-  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE227_SEED_ARTIFACT_ID}/zip" \
-  -o /tmp/phase227-seed.zip
-unzip -q /tmp/phase227-seed.zip -d "$SEED"
-python3 - <<'PY'
-import json
-from pathlib import Path
-root = Path('/tmp/phase227-seed')
-ident = json.loads((root / 'BUILD-IDENTITY.json').read_text())
-assert ident['phase'] == 227, ident
-assert str(ident['run_id']) == '31644392197', ident
-for path in (
-    root / 'package/boot.img',
-    root / 'compile/Image',
-    root / 'config/before-phase216.config',
-    root / 'stage/phase209-splash-takeover-trace.patch',
-):
-    assert path.is_file() and path.stat().st_size > 0, path
-print('Phase227 seed identity: PASS')
-PY
+  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE319_RETAINED_ARTIFACT_ID}/zip" \
+  --output /tmp/phase319-retained.zip
+printf '%s  %s\n' "$PHASE319_RETAINED_ZIP_SHA256" /tmp/phase319-retained.zip | sha256sum -c -
+unzip -q /tmp/phase319-retained.zip -d /tmp/phase319-retained
+(cd /tmp/phase319-retained && sha256sum -c SHA256SUMS)
+cp /tmp/phase319-retained/package/boot.img "$SEED/package/boot.img"
+cp /tmp/phase319-retained/compile/Image "$SEED/compile/Image"
+cp /tmp/phase319-retained/config/final.config "$SEED/config/before-phase216.config"
+curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+  -H "Authorization: Bearer ${GH_TOKEN}" \
+  -H 'Accept: application/vnd.github.raw+json' \
+  "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/patches/209-splash-takeover-trace.patch?ref=${PHASE209_PATCH_REF}" \
+  --output "$SEED/stage/phase209-splash-takeover-trace.patch"
+for path in \
+  "$SEED/package/boot.img" \
+  "$SEED/compile/Image" \
+  "$SEED/config/before-phase216.config" \
+  "$SEED/stage/phase209-splash-takeover-trace.patch"; do
+  test -s "$path"
+done
+printf '%s  %s\n' de5d637d0b7fa088f3dfd1cce40401c5cb9b334413669787168fd2f4352c8b20 \
+  "$SEED/config/before-phase216.config" | sha256sum -c -
+printf '%s  %s\n' 3e9728e45bfcaaced602f93c15d25dc438131619ca7259a9352315d412979a69 \
+  "$SEED/package/boot.img" | sha256sum -c -
+grep -Fq 'SPLCFG209 enter kms=%d' "$SEED/stage/phase209-splash-takeover-trace.patch"
+echo 'Phase337 retained seed bridge: PASS'
 
 python3 scripts/199_runtime_fix_crc_anchor_v2.py
 python3 scripts/199_runtime_fix_binary_audit.py
-bash scripts/209_prepare_phase206.sh
+# Phase337's replacement 208 helper regenerates Phase175-206 directly and no
+# longer needs the expired historical Phase206 artifact prepared by script 209.
 bash scripts/208_reconstruct_phase206_source.sh
 test -f "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
 test -f "$OUT/.config"

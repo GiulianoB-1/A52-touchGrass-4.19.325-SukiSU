@@ -229,6 +229,19 @@ def main():
         "writel_relaxed(val, reg + ARM_SMMU_GR0_sACR);" in tg_arch
     )
 
+    tg_reset=extract_function(tg_smmu,"arm_smmu_device_reset") or ""
+    tg_skip_init_narrow=(
+        "if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT))" in tg_reset and
+        "ARM_SMMU_GR0_TLBIALLH" in tg_reset and
+        "ARM_SMMU_GR0_TLBIALLNSNH" in tg_reset and
+        "ARM_SMMU_GR0_sCR0" in tg_reset
+    )
+    gki_skip_impl_reset=(
+        "!smmu->skip_init" in gki_smmu and
+        "smmu->impl" in gki_smmu and
+        "impl->reset" in gki_smmu
+    )
+
     dt_gki=scan_dt(ns.gki/"arch/arm64/boot/dts")
     dt_tg=scan_dt(ns.touchgrass/"arch/arm64/boot/dts/vendor/qcom")
 
@@ -254,6 +267,12 @@ def main():
             "TouchGrass clears MMU-500 sACR CACHE_LOCK during QSMMUv500 init; current GKI does not",
             "TouchGrass qsmmuv500_arch_init reads ARM_SMMU_GR0_sACR, clears ARM_MMU500_ACR_CACHE_LOCK, writes it back and verifies the bit cleared. No equivalent token exists in current GKI SMMU source.",
             "Treat this as a new pre-trigger SMMU contract candidate. Audit the A52 sACR reset/firmware value and, if safe, make the next A/B test only this initialization semantic.")
+
+    if tg_skip_init_narrow and gki_skip_impl_reset:
+        add("HIGH","qsmmuv500-skip-init-semantic-drift",
+            "Our qcom,skip-init handoff preserves more implementation state than TouchGrass",
+            "TouchGrass arm_smmu_device_reset uses SKIP_INIT only to avoid resetting stream mappings/context banks; it still invalidates global TLBs and reprograms sCR0, while qsmmuv500_arch_init independently performs the sACR CACHE_LOCK release. Current GKI additionally suppresses its implementation reset when smmu->skip_init is set. That extra preservation decision is not a direct TouchGrass semantic match.",
+            "Before another phone flash, inspect the pinned GKI implementation-reset body and split out only the TouchGrass-equivalent MMU-500 initialization effects instead of keeping or porting the whole reset.")
 
     if smmu["touchgrass"]["tbu_compatible"] and not smmu["gki"]["tbu_compatible"]:
         add("MEDIUM","qsmmuv500-tbu-backend-unported",
@@ -290,6 +309,8 @@ def main():
         "smmu_contract":smmu,
         "touchgrass_qsmmuv500_arch_init_has_sacr_cache_unlock":tg_has_cache_unlock,
         "gki_has_equivalent_sacr_cache_unlock_tokens":gki_has_cache_unlock,
+        "touchgrass_skip_init_scope_is_narrow":tg_skip_init_narrow,
+        "gki_skip_init_suppresses_impl_reset":gki_skip_impl_reset,
         "dt_occurrences":{"gki":dt_gki,"touchgrass":dt_tg},
         "findings":findings,
     }

@@ -41,7 +41,7 @@ env:
   PHASE319_GOOD_HEAD: e466f29c784001b5f933091298162714a9181b8d
 
 concurrency:
-  group: a52-phase337-drm-atomic-check-stage-probe-\${{ github.ref }}
+  group: a52-phase337-drm-atomic-check-stage-probe-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 300
     env:
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +93,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: gki
-          key: android12-5.10-gki-source-v1-\${{ runner.os }}-android12-5.10-2026-04_r1-\${{ env.GKI_COMMON_SHA }}
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
           fail-on-cache-miss: true
 
       - name: Restore exact TouchGrass source
@@ -101,7 +101,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-touchgrass-linux-4.19.200-main-v2-\${{ runner.os }}-\${{ env.TOUCHGRASS_COMMIT }}
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
       - name: Clone exact TouchGrass source on cache miss
         if: steps.touchgrass-cache.outputs.cache-hit != 'true'
@@ -121,7 +121,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-\${{ github.run_number }}-NOT-HARDWARE-VALIDATED
+          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-${{ github.run_number }}-NOT-HARDWARE-VALIDATED
           path: phase337-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -131,7 +131,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-\${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-${{ github.run_number }}-BOOT-IMG
           path: phase337-gki-out/package/boot.img
           if-no-files-found: error
           compression-level: 0
@@ -141,7 +141,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-\${{ github.run_number }}-FAILED
+          name: A52XQ-PHASE337-GKI-DRM-ATOMIC-CHECK-STAGE-PROBE-${{ github.run_number }}-FAILED
           path: phase337-gki-failure/
           if-no-files-found: warn
           retention-days: 30

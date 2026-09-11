@@ -1,0 +1,270 @@
+name: 66 - A52 Linux 4.19.206 EEVDF phase 8 hardware test
+
+on:
+  push:
+    branches:
+      - agent/a52-eevdf-phase8-hardware-test-4.19.206-v1
+    paths:
+      - .github/workflows/66-a52-linux-4.19.206-eevdf-phase8-hardware-test.yml
+      - scripts/66_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-eevdf-phase8-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build first EEVDF hardware-test packages
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-4.19.206-eevdf-p1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-4.19.206-bpf-ringbuf-${{ runner.os }}-
+            a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+
+      - name: Update vendor tree to Linux 4.19.206
+        run: |
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+
+      - name: Restore working ReSukiSU BPF-repair baseline
+        run: |
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Apply EEVDF phase 1 sched_entity scaffold
+        run: |
+          mkdir -p artifacts
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- include/linux/sched.h \
+            | tee artifacts/eevdf-phase1-sched-entity.diff
+          grep -Fq 'EEVDF phase 1 scaffold' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'min_deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'vlag;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'slice;' workspace/touchgrass-a52xq/include/linux/sched.h
+
+      - name: Apply EEVDF phase 2 weighted virtual-time accounting
+        run: |
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/sched.h kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase2-accounting.diff
+          grep -Fq 'EEVDF phase 2 accounting' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_avg_vruntime_add' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_entity_eligible' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 3 deadline and lag bookkeeping
+        run: |
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase3-deadline-lag.diff
+          grep -Fq 'EEVDF phase 3 deadline/lag bookkeeping' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_entity_lag' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 4 augmented tree and picker scaffold
+        run: |
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase4-tree-picker.diff
+          grep -Fq 'EEVDF phase 4 augmented deadline tree' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'rb_insert_augmented_cached' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_pick_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 5 picker integration
+        run: |
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase5-picker-integration.diff
+          grep -Fq 'EEVDF phase 5 picker integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf_enabled' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf=1' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 6 wakeup and tick preemption
+        run: |
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase6-wakeup-preempt.diff
+          grep -Fq 'EEVDF phase 6 wakeup/preemption integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_should_preempt' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'curr->vruntime - curr->deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 7 placement consistency
+        run: |
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase7-placement-consistency.diff
+          grep -Fq 'EEVDF phase 7 placement consistency' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_place_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'lag *= load + weight' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'se->deadline = se->vruntime + vslice' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Build ReSukiSU, SUSFS, BPF repair and EEVDF phase 7
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/linux-4.19.206-eevdf-phase7-build.log
+
+      - name: Audit build result
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "artifacts/Image-${LABEL}"
+          test -s "$KERNEL/out/vmlinux"
+          nm -n "$KERNEL/out/vmlinux" \
+            | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
+            | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
+          {
+            echo phase=eevdf-8
+            echo kernel=4.19.206
+            echo sched_entity_scaffold=passed
+            echo weighted_virtual_time_accounting=passed
+            echo eligibility_helper=present
+            echo deadline_bookkeeping=passed
+            echo lag_capture=passed
+            echo eevdf_pick=compiled-not-active
+            echo augmented_deadline_tree=passed
+            echo task_selection=legacy-cfs-walt
+            echo eevdf_enabled=boot-cmdline-controlled
+            echo bpf_ringbuf=retained
+            echo resukisu=retained
+          } | tee artifacts/eevdf-phase1-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package EEVDF enabled and rollback ZIPs
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-enabled release-rollback
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-eevdf-enabled.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-eevdf-rollback.sh
+
+          for f in scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh; do
+            sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" "$f"
+            sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
+          done
+
+          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=1";' scripts/.package-eevdf-enabled.sh
+          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-eevdf-rollback.sh
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF TEST/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF ROLLBACK/' scripts/.package-eevdf-rollback.sh
+
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-ENABLED-TEST.zip/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-ROLLBACK.zip/' scripts/.package-eevdf-rollback.sh
+
+          chmod +x scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh
+
+          ./scripts/.package-eevdf-enabled.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-enabled
+
+          ./scripts/.package-eevdf-rollback.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-rollback
+
+          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=1"' release-enabled -n || true
+          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=0"' release-rollback -n || true
+
+          rm -f scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh
+
+      - name: Verify packaged EEVDF boot toggles
+        run: |
+          set -Eeuo pipefail
+          ENABLED_ZIP="$(find release-enabled -maxdepth 1 -name '*.zip' -type f | head -1)"
+          ROLLBACK_ZIP="$(find release-rollback -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ENABLED_ZIP"
+          test -s "$ROLLBACK_ZIP"
+          unzip -p "$ENABLED_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
+          {
+            echo 'hardware_test_package=passed'
+            echo 'enabled_cmdline=sched_eevdf=1'
+            echo 'rollback_cmdline=sched_eevdf=0'
+            echo 'phase7_scheduler_checkpoint=fd81c29d1b6bcfe69ed9f0a8b92c1a5b0b98de72'
+          } | tee artifacts/eevdf-phase8-package-audit.txt
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+
+      - name: Upload EEVDF enabled hardware-test ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-EEVDF-ENABLED-TEST-${{ github.run_number }}
+          path: release-enabled/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload EEVDF rollback ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-EEVDF-ROLLBACK-${{ github.run_number }}
+          path: release-rollback/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload phase 8 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-4.19.206-eevdf-phase8-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

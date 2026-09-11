@@ -167,10 +167,10 @@ jobs:
             sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
           done
 
-          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-enabled.sh
-          sed -i '/dump_boot;/a patch_cmdline "sched_cass" "sched_cass=1";' scripts/.package-cass-enabled.sh
-          sed -i '/dump_boot;/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-rollback.sh
-          sed -i '/dump_boot;/a patch_cmdline "sched_cass" "sched_cass=0";' scripts/.package-cass-rollback.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-enabled.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_cass" "sched_cass=1";' scripts/.package-cass-enabled.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-rollback.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_cass" "sched_cass=0";' scripts/.package-cass-rollback.sh
 
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + CASS TEST/' scripts/.package-cass-enabled.sh
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + CASS LEGACY ROLLBACK/' scripts/.package-cass-rollback.sh

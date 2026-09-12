@@ -56,6 +56,65 @@ printf 'baseline_sha=%s\n' "$BASELINE_SHA" | tee -a "$REPORT"
 git -C "$KERNEL_DIR" remote remove "$REF_REMOTE" 2>/dev/null || true
 git -C "$KERNEL_DIR" remote add "$REF_REMOTE" "$REF_REPO"
 
+resolve_minimal_kconfig_conflict() {
+  local sha="$1"
+  local unmerged_csv
+
+  [[ "$sha" == "e9343ee8a22fe2267ac8dfd62a8e46c45d2e65e5" ]] || return 1
+
+  unmerged_csv="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U | sort | paste -sd, -)"
+  [[ "$unmerged_csv" == "mm/Kconfig" ]] || return 1
+
+  info "Resolving Samsung mm/Kconfig conflict for MGLRU minimal implementation"
+  git -C "$KERNEL_DIR" checkout --ours -- mm/Kconfig
+
+  python3 - "$KERNEL_DIR" "$ARTIFACTS_DIR/mglru-minimal-kconfig-resolution.txt" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+report = Path(sys.argv[2])
+p = root / "mm/Kconfig"
+s = p.read_text()
+
+if "config LRU_GEN\n" not in s:
+    raise SystemExit("LRU_GEN missing before minimal Kconfig resolution")
+
+if "config LRU_GEN_STATS\n" not in s:
+    anchor = """config LRU_GEN
+\tbool "Multi-Gen LRU"
+\tdepends on MMU
+\t# the following options can use up the spare bits in page flags
+\tdepends on !MAXSMP && (64BIT || !SPARSEMEM || SPARSEMEM_VMEMMAP)
+\thelp
+\t  A high performance LRU implementation to overcommit memory.
+"""
+    block = """
+config LRU_GEN_STATS
+\tbool "Full stats for debugging"
+\tdepends on LRU_GEN
+\thelp
+\t  Do not enable this option unless you plan to look at historical stats
+\t  from evicted generations for debugging purpose.
+
+\t  This option has a per-memcg and per-node memory overhead.
+"""
+    if anchor not in s:
+        raise SystemExit("Samsung LRU_GEN block shape changed unexpectedly")
+    s = s.replace(anchor, anchor + "\n" + block, 1)
+
+p.write_text(s)
+report.write_text(
+    "minimal_kconfig=preserved-samsung-layout\n"
+    "lru_gen_stats=added\n"
+)
+PY
+
+  git -C "$KERNEL_DIR" add mm/Kconfig
+  git -C "$KERNEL_DIR" diff --check --cached
+  git -C "$KERNEL_DIR" cherry-pick --continue
+}
+
 resolve_groundwork_conflicts() {
   local sha="$1"
   local unmerged_csv
@@ -144,6 +203,11 @@ for sha in "${MGLRU_COMMITS[@]}"; do
 
     if resolve_groundwork_conflicts "$sha"; then
       echo "resolved=$sha samsung-pageflags-kconfig" | tee -a "$REPORT"
+      continue
+    fi
+
+    if resolve_minimal_kconfig_conflict "$sha"; then
+      echo "resolved=$sha samsung-minimal-kconfig" | tee -a "$REPORT"
       continue
     fi
 

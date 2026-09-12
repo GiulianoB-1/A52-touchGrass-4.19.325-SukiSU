@@ -23,7 +23,7 @@ fail_report() {
   cp phase340-*.log "$FAIL/logs/" 2>/dev/null || true
   cp /tmp/p340-* "$FAIL/audit/" 2>/dev/null || true
   cp scripts/340_apply_post12_runtime_discriminator.py \
-     scripts/339_ci_build_gki.sh "$FAIL/audit/" 2>/dev/null || true
+     scripts/340_ci_build_gki.sh "$FAIL/audit/" 2>/dev/null || true
   for f in "$KMS" "$CTRL" "$DRV" "$ATOMIC" "$REC"; do
     [ -f "$f" ] && cp "$f" "$FAIL/source/$(basename "$f")" || true
   done

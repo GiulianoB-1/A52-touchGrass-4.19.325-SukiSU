@@ -1,3 +1,4 @@
+# Phase338 branch hygiene: legacy workflows removed from this branch
 name: Phase338 - atomic latch pre-retention snapshot
 run-name: Phase338 - atomic latch pre-retention snapshot
 

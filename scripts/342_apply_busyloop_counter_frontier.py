@@ -18,7 +18,9 @@ def one(text: str, old: str, new: str, label: str) -> str:
 def patch(text: str) -> str:
     anchor = """static unsigned int a52_r339_checkpoint_index;
 """
-    block = r'''/* A52_PHASE342_BUSYLOOP_COUNTER_FRONTIER_V1
+    block = r'''#include <uapi/linux/sched/types.h>
+
+/* A52_PHASE342_BUSYLOOP_COUNTER_FRONTIER_V1
  *
  * Keep one CPU continuously executing across the repeatable ~12 s frontier.
  * The thread is pinned to CPU5, promoted to a low RT FIFO priority and never
@@ -171,6 +173,7 @@ def validate(before: str, after: str) -> None:
         "A52_R342_INTERVAL_NS 250000000ULL",
         "A52_R342_LIMIT 60U",
         "A52_R342_CPU 5U",
+        "#include <uapi/linux/sched/types.h>",
         "P276 342A map=%u kt=%ld cpu=%u int=250 lim=%u",
         "sched_setscheduler_nocheck(current, SCHED_FIFO, &sp);",
         "kthread_bind(a52_r342_task, A52_R342_CPU);",

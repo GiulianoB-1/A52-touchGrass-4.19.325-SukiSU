@@ -345,37 +345,24 @@ if fc.count(dequeue_norm_anchor) != 1:
 fc = fc.replace(dequeue_norm_anchor, dequeue_norm_repl, 1)
 
 # Remote waking migration also has a legacy source-rq min_vruntime transform.
-migration_anchor = """	if (p->state == TASK_WAKING) {
-		struct cfs_rq *cfs_rq = task_cfs_rq(p);
-		u64 min_vruntime;
-
-		min_vruntime = cfs_rq->min_vruntime;
-#ifndef CONFIG_64BIT
-		u64 min_vruntime_copy = cfs_rq->min_vruntime_copy;
-		smp_rmb();
-		if (min_vruntime != min_vruntime_copy)
-			min_vruntime = cfs_rq->min_vruntime;
-#endif
-		se->vruntime -= min_vruntime;
-	}
-"""
-migration_repl = """	if (p->state == TASK_WAKING && likely(!sched_eevdf_enabled)) {
-		struct cfs_rq *cfs_rq = task_cfs_rq(p);
-		u64 min_vruntime;
-
-		min_vruntime = cfs_rq->min_vruntime;
-#ifndef CONFIG_64BIT
-		u64 min_vruntime_copy = cfs_rq->min_vruntime_copy;
-		smp_rmb();
-		if (min_vruntime != min_vruntime_copy)
-			min_vruntime = cfs_rq->min_vruntime;
-#endif
-		se->vruntime -= min_vruntime;
-	}
-"""
-if fc.count(migration_anchor) != 1:
-    raise SystemExit("migrate_task_rq_fair normalization anchor mismatch")
-fc = fc.replace(migration_anchor, migration_repl, 1)
+# Linux stable updates changed details inside this function, so scope the edit
+# to migrate_task_rq_fair() instead of matching its entire body.
+mig_start = fc.index("static void migrate_task_rq_fair(")
+mig_next = fc.index("\nstatic ", mig_start + 1)
+if mig_next < 0:
+    raise SystemExit("could not bound migrate_task_rq_fair")
+mig_chunk = fc[mig_start:mig_next]
+mig_if = "if (p->state == TASK_WAKING) {"
+if mig_chunk.count(mig_if) != 1:
+    raise SystemExit(
+        f"migrate_task_rq_fair TASK_WAKING anchor mismatch: {mig_chunk.count(mig_if)}"
+    )
+mig_chunk = mig_chunk.replace(
+    mig_if,
+    "if (p->state == TASK_WAKING && likely(!sched_eevdf_enabled)) {",
+    1,
+)
+fc = fc[:mig_start] + mig_chunk + fc[mig_next:]
 
 # ===========================================================================
 # 6. Fork lifecycle.

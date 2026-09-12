@@ -1,4 +1,4 @@
-name: 76 - A52 Phase72 replay with persistent crash recorder
+name: 76 - A52 fixed EEVDF LLVM17 BPF interpreter persistent recorder
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
       - .github/workflows/76-a52-eevdf-llvm17-bpf-interpreter-recorder.yml
       - scripts/67_*
       - scripts/72_*
+      - scripts/74_*
       - scripts/76_*
       - tools/decode-touchgrass-recorder.py
   workflow_dispatch:
@@ -16,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: a52-phase72-replay-recorder-${{ github.ref }}
+  group: a52-fixed-eevdf-llvm17-recorder-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -28,7 +29,7 @@ env:
 
 jobs:
   build:
-    name: Build exact Phase72 replay plus persistent recorder
+    name: Build fixed EEVDF LLVM17 BPF interpreter plus persistent recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -116,7 +117,7 @@ jobs:
           set -Eeuo pipefail
           python3 scripts/76_apply_touchgrass_persistent_recorder.py workspace/touchgrass-a52xq
           python3 -m py_compile tools/decode-touchgrass-recorder.py
-          grep -Fq 'TGREC_BUILD_ID          "TG72R1"' \
+          grep -Fq 'TGREC_BUILD_ID          "TG76F1"' \
             workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
           grep -Fq '0xB1B00000ULL' \
             workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
@@ -192,7 +193,19 @@ jobs:
           grep -Fq 'lag *= load + weight' workspace/touchgrass-a52xq/kernel/sched/fair.c
           grep -Fq 'se->deadline = se->vruntime + vslice' workspace/touchgrass-a52xq/kernel/sched/fair.c
 
-      - name: Build ReSukiSU, SUSFS, BPF repair and EEVDF phase 7 with LLVM17
+      - name: Apply fixed EEVDF multitask correctness
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-multitask-correctness.diff
+          grep -Fq 'static bool eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'struct sched_entity *best_left = NULL' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'return eevdf_pick_entity(cfs_rq) == se;' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'likely(!sched_eevdf_enabled)' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'if (!sched_eevdf_enabled &&' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Build ReSukiSU, SUSFS, BPF repair and fixed EEVDF with LLVM17
         run: |
           set -o pipefail
           ./scripts/57_build_resukisu_susfs_manual_detection.sh \
@@ -210,18 +223,18 @@ jobs:
           grep -Fq 'CONFIG_CGROUP_BPF=y' "$KERNEL/out/.config"
           grep -Eq 'clang version 17\.0\.6|LLVM version 17\.0\.6' artifacts/selected-clang-version.txt
           grep -aFq 'TGREC: persistent recorder ready id=%s slots=%u banks=%u' "artifacts/Image-${LABEL}"
-          grep -aFq 'TG72R1' "artifacts/Image-${LABEL}"
-          grep -aFq 'phase72-replay llvm17 eevdf=1 bpf=interpreter' "artifacts/Image-${LABEL}"
+          grep -aFq 'TG76F1' "artifacts/Image-${LABEL}"
+          grep -aFq 'phase76 llvm17 fixed-eevdf bpf=interpreter' "artifacts/Image-${LABEL}"
           cp tools/decode-touchgrass-recorder.py artifacts/
           nm -n "$KERNEL/out/vmlinux" \
             | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
             | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
           {
-            echo phase=phase72-replay-with-persistent-recorder
+            echo phase=fixed-eevdf-llvm17-bpf-interpreter-persistent-recorder
             echo kernel=4.19.206\n            echo compiler=llvm-17.0.6
             echo bpf_jit=disabled-for-diagnosis
             echo bpf_execution=interpreter-only
-            echo persistent_recorder=TG72R1
+            echo persistent_recorder=TG76F1
             echo recorder_phys=0xB1B00000
             echo recorder_banks=3
             echo sched_entity_scaffold=passed
@@ -233,6 +246,10 @@ jobs:
             echo augmented_deadline_tree=passed
             echo task_selection=legacy-cfs-walt
             echo eevdf_enabled=boot-cmdline-controlled
+            echo deadline_expiry_resched=fixed
+            echo picker_search=v6.6-style
+            echo wakeup_preempt=eevdf-exclusive
+            echo child_runs_first=legacy-only
             echo bpf_ringbuf=retained
             echo resukisu=retained
           } | tee artifacts/eevdf-phase1-audit.txt
@@ -276,11 +293,11 @@ jobs:
               p.write_text(s)
           PY
 
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF LLVM17 BPF-INTERPRETER TGREC/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + FIXED EEVDF LLVM17 BPF-INTERPRETER TGREC/' scripts/.package-eevdf-enabled.sh
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF LLVM17 BPF-INTERPRETER TGREC ROLLBACK/' scripts/.package-eevdf-rollback.sh
 
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-LLVM17-BPF-INTERPRETER-TGREC.zip/' scripts/.package-eevdf-enabled.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-LLVM17-BPF-INTERPRETER-TGREC-ROLLBACK.zip/' scripts/.package-eevdf-rollback.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FIXED-EEVDF-LLVM17-BPF-INTERPRETER-TGREC.zip/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FIXED-EEVDF-LLVM17-BPF-INTERPRETER-TGREC-ROLLBACK.zip/' scripts/.package-eevdf-rollback.sh
 
           chmod +x scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh
 
@@ -306,7 +323,7 @@ jobs:
             echo 'hardware_test_package=passed\n            compiler=llvm-17.0.6'
             echo 'enabled_cmdline=sched_eevdf=1'
             echo 'rollback_cmdline=sched_eevdf=0'
-            echo 'phase7_scheduler_checkpoint=fd81c29d1b6bcfe69ed9f0a8b92c1a5b0b98de72'
+            echo 'scheduler_fix=deadline-picker-wakeup-fork-correctness'
           } | tee artifacts/eevdf-phase8-package-audit.txt
 
       - name: Record diagnostics
@@ -323,7 +340,7 @@ jobs:
       - name: Upload EEVDF enabled hardware-test ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.206-PHASE72-REPLAY-TGREC-${{ github.run_number }}
+          name: A52XQ-4.19.206-FIXED-EEVDF-LLVM17-TGREC-${{ github.run_number }}
           path: release-enabled/
           if-no-files-found: error
           retention-days: 14
@@ -331,7 +348,7 @@ jobs:
       - name: Upload EEVDF rollback ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.206-PHASE72-REPLAY-TGREC-ROLLBACK-${{ github.run_number }}
+          name: A52XQ-4.19.206-FIXED-EEVDF-LLVM17-TGREC-ROLLBACK-${{ github.run_number }}
           path: release-rollback/
           if-no-files-found: error
           retention-days: 14
@@ -340,7 +357,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-4.19.206-phase72-replay-tgrec-${{ github.run_number }}-diagnostics
+          name: a52xq-4.19.206-fixed-eevdf-llvm17-tgrec-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14

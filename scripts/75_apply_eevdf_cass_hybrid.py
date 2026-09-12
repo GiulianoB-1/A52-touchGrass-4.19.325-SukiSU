@@ -313,7 +313,7 @@ if "CONFIG_SCHED_CASS=y" not in dc:
 
 checks = {
     cass_c: [
-        "CASS+EEVDF hybrid",
+        "A52 hybrid: fixed EEVDF task ordering + Phase 1b WALT-safe CASS placement.",
         "walt_stats.cumulative_runnable_avg_scaled",
         "util += p_util",
         "capacity_of(cpu)",

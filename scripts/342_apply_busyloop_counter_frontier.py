@@ -158,15 +158,8 @@ static void a52_r342_start(void)
 '''
     text = one(text, anchor, block + anchor, "busyloop discriminator insertion")
 
-    late_old = """	a52_r340_start();
-	a52_r341_start();
-	pr_info("phase199 triple-copy RS+CRC32C recorder enabled stored=%llu dropped=%llu\n",
-"""
-    late_new = """	a52_r340_start();
-	a52_r341_start();
-	a52_r342_start();
-	pr_info("phase199 triple-copy RS+CRC32C recorder enabled stored=%llu dropped=%llu\n",
-"""
+    late_old = "\ta52_r341_start();\n"
+    late_new = "\ta52_r341_start();\n\ta52_r342_start();\n"
     text = one(text, late_old, late_new, "late-init start")
     return text
 

@@ -117,7 +117,7 @@ jobs:
             workspace/touchgrass-a52xq/arch/arm64/net/Makefile
           grep -Fq 'bpf_x25_diag.o' \
             workspace/touchgrass-a52xq/arch/arm64/net/Makefile
-          grep -Fq 'str	x25, [x3, #8]' \
+          grep -Fq 'str	x25, [x27, #8]' \
             workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_probe.S
           grep -Fq 'A52BPF_X25' \
             workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_diag.c

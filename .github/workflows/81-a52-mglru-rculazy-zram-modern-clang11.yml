@@ -267,7 +267,9 @@ jobs:
           test -s "$KERNEL/out/vmlinux"
           grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/out/.config"
-          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/out/.config"\n          grep -Fxq 'CONFIG_RCU_LAZY=y' "$KERNEL/out/.config"\n          grep -Fxq 'CONFIG_RCU_LAZY_DEFAULT_OFF=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_RCU_LAZY=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_RCU_LAZY_DEFAULT_OFF=y' "$KERNEL/out/.config"
           grep -Fq 'lru_gen_enabled' "$KERNEL/mm/vmscan.c"
           grep -Fq 'lru_gen_enter_fault' "$KERNEL/mm/memory.c"
           nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] lru_gen_' | head -40 \
@@ -286,7 +288,9 @@ jobs:
             echo mglru=default-on-runtime-switchable-android-hardened
             echo mglru_default=enabled-from-kernel-init
             echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled
-            echo mglru_speculative_fault_integration=enabled\n            echo mglru_android_wait_priority_inversion_fix=enabled\n            echo mglru_lmkd_workingset_accounting_fix=enabled
+            echo mglru_speculative_fault_integration=enabled
+            echo mglru_android_wait_priority_inversion_fix=enabled
+            echo mglru_lmkd_workingset_accounting_fix=enabled
             echo kernel=4.19.206
             echo sched_entity_scaffold=passed
             echo weighted_virtual_time_accounting=passed
@@ -316,7 +320,12 @@ jobs:
             echo hybrid_default=sched_eevdf_1_sched_cass_1
             echo compiler=vendor-clang-r383902
             echo bpf_ringbuf=retained
-            echo rcu_lazy=compiled-default-off-boot-enabled\n            echo rcu_lazy_primary_cmdline=rcutree.enable_rcu_lazy_1\n            echo zram_entry_lock=sleepable\n            echo zcomp_streams=preemptible\n            echo zsmalloc_foundation=post-4.19.206-fixes\n            echo resukisu=retained
+            echo rcu_lazy=compiled-default-off-boot-enabled
+            echo rcu_lazy_primary_cmdline=rcutree.enable_rcu_lazy_1
+            echo zram_entry_lock=sleepable
+            echo zcomp_streams=preemptible
+            echo zsmalloc_foundation=post-4.19.206-fixes
+            echo resukisu=retained
           } | tee artifacts/eevdf-phase1-audit.txt
 
       - name: Check out pinned AnyKernel3
@@ -345,6 +354,7 @@ jobs:
               ("scripts/.package-hybrid-enabled.sh", "1", "1"),
               ("scripts/.package-hybrid-rollback.sh", "0", "0"),
           ):
+              lazy = "1" if eevdf == "1" else "0"
               p = Path(name)
               s = p.read_text()
               anchor = "dump_boot;\nwrite_boot;"
@@ -358,7 +368,7 @@ jobs:
                   f'patch_cmdline "sched_eevdf" "sched_eevdf={eevdf}";\n'
                   f'patch_cmdline "sched_cass" "sched_cass={cass}";\n'
                   f'patch_cmdline "rcu_nocbs" "rcu_nocbs=0-7";\n'
-                  f'patch_cmdline "rcutree.enable_rcu_lazy" "rcutree.enable_rcu_lazy={"1" if eevdf == "1" else "0"}";\n'
+                  f'patch_cmdline "rcutree.enable_rcu_lazy" "rcutree.enable_rcu_lazy={lazy}";\n'
                   f'write_boot;',
                   1,
               )
@@ -412,7 +422,9 @@ jobs:
             echo 'cass=phase1b-walt-safe'
             echo 'mglru=compiled-default-on'
             echo 'mglru_default=on'
-            echo 'rcu_lazy_primary=on'\n            echo 'rcu_lazy_rollback=off'\n            echo 'zram_preemptible_foundation=on'
+            echo 'rcu_lazy_primary=on'
+            echo 'rcu_lazy_rollback=off'
+            echo 'zram_preemptible_foundation=on'
           } | tee artifacts/eevdf77-cass-mglru-p3-rculazy-zram-package-audit.txt
 
           cat > artifacts/phase81-first-boot-test.txt <<'EOF'

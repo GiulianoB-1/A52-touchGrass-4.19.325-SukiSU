@@ -23,7 +23,7 @@ fail_report() {
   cp phase342-*.log "$FAIL/logs/" 2>/dev/null || true
   cp /tmp/p342-* "$FAIL/audit/" 2>/dev/null || true
   cp scripts/342_apply_busyloop_counter_frontier.py \
-     scripts/341_ci_build_gki.sh "$FAIL/audit/" 2>/dev/null || true
+     scripts/342_ci_build_gki.sh "$FAIL/audit/" 2>/dev/null || true
   for f in "$KMS" "$CTRL" "$DRV" "$ATOMIC" "$REC"; do
     [ -f "$f" ] && cp "$f" "$FAIL/source/$(basename "$f")" || true
   done
@@ -177,7 +177,7 @@ cp "$IMAGE" "$OUT/compile/Image"
 cp "$BUILD/.config" "$OUT/config/final.config"
 cp phase342-*.log "$OUT/audit/" 2>/dev/null || true
 cp scripts/342_apply_busyloop_counter_frontier.py \
-     scripts/341_ci_build_gki.sh "$OUT/audit/"
+     scripts/342_ci_build_gki.sh "$OUT/audit/"
 cp /tmp/p342-* "$OUT/audit/" 2>/dev/null || true
 cp "$KMS" "$CTRL" "$DRV" "$ATOMIC" "$REC" "$OUT/source/"
 
@@ -209,7 +209,7 @@ def sha(path: Path) -> str:
     return h.hexdigest()
 
 identity = {
-    "phase": "341",
+    "phase": "342",
     "flavor": "gki",
     "name": "BUSYLOOP-COUNTER-FRONTIER-V1",
     "git_sha": os.getenv("GITHUB_SHA"),

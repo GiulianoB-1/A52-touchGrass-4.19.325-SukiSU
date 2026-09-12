@@ -36,6 +36,8 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
+#include <linux/utsname.h>
+#include <linux/cpu.h>
 
 #include <asm/ptrace.h>
 #include <asm/sysreg.h>
@@ -229,7 +231,7 @@ static int __init tgrec_map_init(void)
 
 	tgrec_record(TGREC_TYPE_BOOT,
 		     "BOOT_READY id=%s desc=%s rel=%s",
-		     TGREC_BUILD_ID, TGREC_BUILD_DESC, UTS_RELEASE);
+		     TGREC_BUILD_ID, TGREC_BUILD_DESC, utsname()->release);
 	pr_info("TGREC: persistent recorder ready id=%s slots=%u banks=%u\n",
 		TGREC_BUILD_ID, TGREC_SLOTS, TGREC_BANKS);
 	return 0;

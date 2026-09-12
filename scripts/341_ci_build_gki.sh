@@ -210,7 +210,7 @@ def sha(path: Path) -> str:
     return h.hexdigest()
 
 identity = {
-    "phase": "339",
+    "phase": "341",
     "flavor": "gki",
     "name": "HARDIRQ-TIMER-FRONTIER-V1",
     "git_sha": os.getenv("GITHUB_SHA"),
@@ -231,7 +231,7 @@ identity = {
     "register_writes_added": 0,
     "clock_power_reset_regulator_changed": False,
     "phase280_freeze_setter_changed": False,
-    "automatic_warm_reboot_seconds": null,
+    "automatic_warm_reboot_seconds": None,
     "image_sha256": sha(r / "compile/Image"),
     "boot_img_sha256": sha(r / "package/boot.img"),
     "boot_img_size": (r / "package/boot.img").stat().st_size,

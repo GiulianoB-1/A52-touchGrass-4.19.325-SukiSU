@@ -11,6 +11,25 @@ REF_REPO=https://github.com/shinichi-c/Dynamic_kernel_4.19_oneplus_sdm845.git
 # work, followed by the Qualcomm baseline repair and Android speculative-fault
 # integration. Keep the list explicit and pinned so the experiment is reproducible.
 MGLRU_COMMITS=(
+  # Prerequisite ladder used by the Qualcomm 4.19 backport.
+  ae75c1a83c1b76c33e64c3637fda8505da86d975 # use add_page_to_lru_list_tail
+  83e2f547484ac2d588b3965640e6edf7d4b6c6d7 # arm64 cpu_has_hw_af helper
+  e13048fe51c129efddf7576fdd68da7403ac862f # update_lru_size helper use
+  d3e29959487382c0ab0b8831e070d8315dd83b5e # swapcache shadow entries
+  97be316d37b66af8f3c856ca870b7b5dd025822a # remove superfluous ClearPageActive
+  aba9c57a3ddfcfab86c25ca3f2f756911fefa61b # LRU helper macros
+  3af1140d34f4d882316264727540697f422e3b12 # vmscan add_page_to_lru_list
+  2adcdb2038a312d146d112195455b9ca67b2f545 # shuffle LRU add/del helpers
+  325424277a19b6bb12b5765f9da06c7c4b9c60c9 # drop enum lru_list from add helpers
+  f8532e3c136aea75e9cc2601df14ae09f7a8bcc6 # trace insertion API
+  4fa0c5f05a83589daab8069e77db50c6aa67ab39 # drop enum from del helper
+  2e0c5418e4196427789e691e0a73a212e08f9e20 # __clear_page_lru_flags
+  7e60a1516589069575f68fde6738dd30f0604666 # VM_BUG_ON LRU flags
+  d6c9c2a13aac9d4fb797dfff6a21ada742f270a8 # fold page_lru_base_type
+  842c6e1303445bd6c036340ef3b255cc23422b4f # arch_has_hw_pte_young
+  b7e59fa3da6b993f2d91d321a60515b3442f9d75 # ARCH_HAS_NONLEAF_PMD_YOUNG
+
+  # MGLRU v9 core and Android/Qualcomm follow-up fixes.
   67e9d5c8e0d28eb521533e0bb42771d12959d026 # groundwork
   e9343ee8a22fe2267ac8dfd62a8e46c45d2e65e5 # minimal implementation
   fba9f87f68f31973557e8ec315b177181324b670 # rmap locality
@@ -50,11 +69,21 @@ for sha in "${MGLRU_COMMITS[@]}"; do
   printf 'apply=%s %s\n' "$sha" "$subject" | tee -a "$REPORT"
 
   if ! git -C "$KERNEL_DIR" cherry-pick --no-edit "$sha"; then
+    unmerged="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U || true)"
+    if [[ -z "$unmerged" ]]; then
+      # Linux 4.19.206 may already contain individual prerequisite backports.
+      # Treat a clean empty cherry-pick as "already present" rather than a
+      # port failure.
+      echo "skip_or_empty=$sha $subject" | tee -a "$REPORT"
+      git -C "$KERNEL_DIR" cherry-pick --skip
+      continue
+    fi
+
     {
       echo "failed_commit=$sha"
       echo "subject=$subject"
       echo "unmerged_paths:"
-      git -C "$KERNEL_DIR" diff --name-only --diff-filter=U || true
+      printf '%s\n' "$unmerged"
       echo
       echo "status:"
       git -C "$KERNEL_DIR" status --short || true

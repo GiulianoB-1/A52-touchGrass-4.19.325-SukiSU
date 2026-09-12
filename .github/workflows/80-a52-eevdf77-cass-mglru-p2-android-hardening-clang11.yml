@@ -251,7 +251,7 @@ jobs:
             | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
           {
             echo phase=eevdf77-cass-mglru-p2-hardening-clang11
-            echo mglru=compiled-android-hardened-runtime-switchable-android-hardened
+            echo mglru=compiled-runtime-switchable-android-hardened
             echo mglru_default=legacy-lru
             echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled
             echo mglru_speculative_fault_integration=enabled\n            echo mglru_android_wait_priority_inversion_fix=enabled\n            echo mglru_lmkd_workingset_accounting_fix=enabled

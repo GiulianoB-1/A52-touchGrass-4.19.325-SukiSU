@@ -40,6 +40,32 @@ for sha in "${ZSMALLOC_FIXES[@]}"; do
       continue
     fi
 
+    # 638c954 only conflicts in Samsung's extended zram mm_stat_show().
+    # The upstream semantic change is a single read-side conversion because
+    # zs_pool_stats.pages_compacted becomes atomic_long_t. Preserve Samsung's
+    # dedup/LRU-writeback fields and apply only that required conversion.
+    if [[ "$sha" == "638c954653d4183549cd7b859976da6e5698184f" ]] &&
+       [[ "$unmerged" == "drivers/block/zram/zram_drv.c" ]]; then
+      info "Resolving zsmalloc compacted-page accounting against Samsung ZRAM extensions"
+      git -C "$KERNEL_DIR" checkout --ours -- drivers/block/zram/zram_drv.c
+      python3 - "$KERNEL_DIR/drivers/block/zram/zram_drv.c" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = "pool_stats.pages_compacted,"
+new = "atomic_long_read(&pool_stats.pages_compacted),"
+if s.count(old) != 1:
+    raise SystemExit(f"expected exactly one Samsung pages_compacted reader, found {s.count(old)}")
+s = s.replace(old, new, 1)
+p.write_text(s)
+PY
+      git -C "$KERNEL_DIR" add drivers/block/zram/zram_drv.c
+      GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
+      echo "resolved=$sha samsung-zram-mm-stat-atomic-accounting" | tee -a "$REPORT"
+      continue
+    fi
+
     {
       echo "failed_commit=$sha"
       echo "subject=$subject"

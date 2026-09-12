@@ -60,9 +60,10 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #define TGREC_TYPE_DIE          3U
 #define TGREC_TYPE_PANIC        4U
 #define TGREC_TYPE_REBOOT       5U
+#define TGREC_TYPE_BPF_X25      6U
 
-#define TGREC_BUILD_ID          "TG78F1"
-#define TGREC_BUILD_DESC        "phase78 llvm17 fixed-eevdf bpf-jit x25-guard"
+#define TGREC_BUILD_ID          "TG82P1"
+#define TGREC_BUILD_DESC        "phase82 llvm17 fixed-eevdf real-jit x25-probe"
 
 struct tgrec_header {
 	__le32 magic;
@@ -205,6 +206,18 @@ static void tgrec_record(unsigned int type, const char *fmt, ...)
 	}
 	wmb();
 	raw_spin_unlock_irqrestore(&tgrec_lock, flags);
+}
+
+void a52_tgrec_bpf_x25_diag(unsigned long before, unsigned long after,
+			    unsigned long func, u32 id, u32 type, u32 attach,
+			    u32 len, u32 jited_len, u32 stack_depth,
+			    u32 func_idx, u32 func_cnt, const char *name)
+{
+	tgrec_record(TGREC_TYPE_BPF_X25,
+		     "BPF_X25 id=%u type=%u att=%u len=%u jl=%u sd=%u fi=%u fc=%u pre=%016lx post=%016lx fn=%016lx name=%s",
+		     id, type, attach, len, jited_len, stack_depth,
+		     func_idx, func_cnt, before, after, func,
+		     name ? name : "-");
 }
 
 static int __init tgrec_map_init(void)
@@ -386,8 +399,8 @@ def main() -> int:
         mk.write_text(text.rstrip() + MAKE_ENTRY, encoding="utf-8")
 
     checks = {
-        "build_identity": 'TGREC_BUILD_ID          "TG78F1"' in SOURCE,
-        "phase72_identity": "phase78 llvm17 fixed-eevdf bpf-jit x25-guard" in SOURCE,
+        "build_identity": 'TGREC_BUILD_ID          "TG82P1"' in SOURCE,
+        "phase82_identity": "phase82 llvm17 fixed-eevdf real-jit x25-probe" in SOURCE,
         "fixed_phys": "0xB1B00000ULL" in SOURCE,
         "clear_stale_region": "memset(tgrec_mem, 0, TGREC_SIZE);" in SOURCE,
         "triple_bank": "TGREC_BANKS             3U" in SOURCE,
@@ -395,6 +408,7 @@ def main() -> int:
         "die_notifier": "register_die_notifier" in SOURCE,
         "panic_notifier": "panic_notifier_list" in SOURCE,
         "heartbeat": "tgrec_heartbeat_fn" in SOURCE,
+        "bpf_x25_diag": "a52_tgrec_bpf_x25_diag" in SOURCE,
         "makefile": MAKE_MARKER in mk.read_text(encoding="utf-8"),
     }
     failed = [k for k, v in checks.items() if not v]

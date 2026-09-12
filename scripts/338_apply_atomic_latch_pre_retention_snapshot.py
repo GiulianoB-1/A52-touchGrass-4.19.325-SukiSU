@@ -100,7 +100,7 @@ void a52_p338_emit_atomic_latch(void)
 '''
     text = one(text, decl_old, decl_new, "latch declarations")
 
-    old = r'''\t\tif (a52_p337_n <= 32 || (a52_p337_n & 63) == 0) {
+    old = '''\t\tif (a52_p337_n <= 32 || (a52_p337_n & 63) == 0) {
 \t\t\ta52_ackfr_record("P276 337A n=%u ms=%d zp=%d pl=%d nc=%d nd=%u",
 \t\t\t\ta52_p337_n, a52_p337_ms, a52_p337_zp, a52_p337_pl,
 \t\t\t\tstate->num_connector,
@@ -124,7 +124,7 @@ void a52_p338_emit_atomic_latch(void)
 \t\t\t}
 \t\t}
 '''
-    new = r'''\t\t{
+    new = '''\t\t{
 \t\t\tunsigned int a52_p337_cs = 0;
 \t\t\tint a52_p337_i;
 
@@ -154,7 +154,7 @@ void a52_p338_emit_atomic_latch(void)
 '''
     text = one(text, old, new, "helper latch update")
 
-    secure_old = r'''\tret = sde_kms_check_secure_transition(kms, state);
+    secure_old = '''\tret = sde_kms_check_secure_transition(kms, state);
 \t{
 \t\tunsigned int a52_p337_n =
 \t\t\t(unsigned int)atomic_read(&a52_p337_check_sequence);
@@ -164,7 +164,7 @@ void a52_p338_emit_atomic_latch(void)
 \t\t\t\ta52_p337_n, ret);
 \t}
 '''
-    secure_new = r'''\tret = sde_kms_check_secure_transition(kms, state);
+    secure_new = '''\tret = sde_kms_check_secure_transition(kms, state);
 \t{
 \t\tunsigned int a52_p337_n =
 \t\t\t(unsigned int)atomic_read(&a52_p337_check_sequence);
@@ -189,7 +189,7 @@ extern void a52_p338_emit_atomic_latch(void);
 '''
     text = one(text, decl_old, decl_new, "dsi extern")
 
-    call_old = r'''\t\tif (a52_p293_gdm_armed(dsi_ctrl)) {
+    call_old = '''\t\tif (a52_p293_gdm_armed(dsi_ctrl)) {
 \t\t\ta52_ackfr_record("P276 332A q=2 g=1 d=%u st=%x m=%x",
 \t\t\t\t(unsigned int)a52_p276r_deep_active(), status, mask);
 \t\t\ta52_ackfr_record("P276 280Z q=2");
@@ -197,7 +197,7 @@ extern void a52_p338_emit_atomic_latch(void);
 \t\t\ta52_ackfr_record("P276 332B q=2 retained=1");
 \t\t}
 '''
-    call_new = r'''\t\tif (a52_p293_gdm_armed(dsi_ctrl)) {
+    call_new = '''\t\tif (a52_p293_gdm_armed(dsi_ctrl)) {
 \t\t\ta52_ackfr_record("P276 332A q=2 g=1 d=%u st=%x m=%x",
 \t\t\t\t(unsigned int)a52_p276r_deep_active(), status, mask);
 \t\t\ta52_p338_emit_atomic_latch();

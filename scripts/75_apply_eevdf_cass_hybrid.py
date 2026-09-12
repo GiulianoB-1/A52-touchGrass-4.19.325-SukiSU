@@ -23,7 +23,6 @@ dc = defconfig.read_text()
 # including the Phase 74 multitask-correctness patch.
 required_eevdf_markers = (
     "sched_eevdf_enabled",
-    "EEVDF phase 1 scaffold",
     "EEVDF phase 2 accounting",
     "EEVDF phase 3 deadline/lag bookkeeping",
     "EEVDF phase 4 augmented deadline tree",

@@ -112,11 +112,6 @@ new_func = """static bool iterate_mm_list(struct lruvec *lruvec, struct lru_gen_
 	 * 3. It ended the current iteration: reset the mm stats counters and
 	 *    tell the caller to increment max_seq.
 	 */
-	if (*iter)
-		mmput_async(*iter);
-	else if (walk->max_seq <= READ_ONCE(mm_state->seq))
-		return false;
-
 	spin_lock(&mm_list->lock);
 
 	VM_BUG_ON(mm_state->seq + 1 < walk->max_seq);
@@ -150,13 +145,18 @@ new_func = """static bool iterate_mm_list(struct lruvec *lruvec, struct lru_gen_
 	} while (!mm);
 
 done:
-	if (mm && first)
-		reset_bloom_filter(lruvec, walk->max_seq + 1);
-
 	if (*iter || last)
 		reset_mm_stats(lruvec, walk, last);
 
 	spin_unlock(&mm_list->lock);
+
+	/* Match Android's no-wait walker ordering: potentially heavier work and
+	 * mm lifetime release happen after dropping mm_list->lock. */
+	if (mm && first)
+		reset_bloom_filter(lruvec, walk->max_seq + 1);
+
+	if (*iter)
+		mmput_async(*iter);
 
 	*iter = mm;
 
@@ -370,6 +370,8 @@ checks = [
      "mm_state->nr_walkers" not in v),
     ("walker generation race guard missing",
      "if (walk->max_seq != max_seq)" in v),
+    ("walker post-lock bloom reset marker missing",
+     "mm lifetime release happen after dropping mm_list->lock" in v),
     ("walker head reset missing",
      "mm_state->head = NULL;" in v),
     ("walker tail reset missing",

@@ -85,6 +85,11 @@ decl_anchor = "static bool sched_eevdf_enabled __read_mostly;\n\n"
 if fc.count(decl_anchor) != 1:
     raise SystemExit("sched_eevdf_enabled declaration mismatch")
 
+# Phase 4 places eevdf_pick_entity() before the Phase 3 helper block where
+# Phase 74 moved sched_eevdf_enabled. Runtime counters used by the picker must
+# therefore be declared even earlier than the picker itself.
+fc = fc.replace(decl_anchor, "", 1)
+
 stats_block = r'''static bool sched_eevdf_enabled __read_mostly;
 
 /*
@@ -181,7 +186,10 @@ static int __init eevdf_status_init(void)
 late_initcall(eevdf_status_init);
 
 '''
-fc = fc.replace(decl_anchor, stats_block, 1)
+picker_stats_anchor = "static struct sched_entity *eevdf_pick_entity(struct cfs_rq *cfs_rq)"
+if fc.count(picker_stats_anchor) != 1:
+    raise SystemExit("picker stats insertion anchor mismatch")
+fc = fc.replace(picker_stats_anchor, stats_block + picker_stats_anchor, 1)
 
 # ===========================================================================
 # 4. Correct request-size semantics.

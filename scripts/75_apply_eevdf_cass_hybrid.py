@@ -80,7 +80,7 @@ static int __init sched_cass_setup(char *str)
         return 0;
 
     sched_cass_enabled = enable;
-    pr_info("CASS phase 1b CPU placement %s\n",
+    pr_info("CASS+EEVDF hybrid CPU placement %s\n",
             enable ? "enabled" : "disabled");
     return 1;
 }
@@ -230,7 +230,7 @@ static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
         return select_task_rq_fair(p, prev_cpu, sd_flag, wake_flags,
                                    sibling_count_hint);
 
-    pr_info_once("CASS phase 1b fair CPU placement path is active\n");
+    pr_info_once("CASS+EEVDF hybrid fair CPU placement path is active\n");
 
     /* Match original CASS behavior: do not balance exec placements. */
     if (sd_flag & SD_BALANCE_EXEC)

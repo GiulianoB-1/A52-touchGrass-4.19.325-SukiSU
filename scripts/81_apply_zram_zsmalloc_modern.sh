@@ -55,9 +55,18 @@ p = Path(sys.argv[1])
 s = p.read_text()
 old = "pool_stats.pages_compacted,"
 new = "atomic_long_read(&pool_stats.pages_compacted),"
-if s.count(old) != 1:
-    raise SystemExit(f"expected exactly one Samsung pages_compacted reader, found {s.count(old)}")
-s = s.replace(old, new, 1)
+old_count = s.count(old)
+new_count = s.count(new)
+if old_count == 1 and new_count == 0:
+    s = s.replace(old, new, 1)
+elif old_count == 0 and new_count == 1:
+    # The reconstructed 4.19.206 Samsung side already carries the
+    # atomic read-side form. Keep it and only resolve the textual conflict.
+    pass
+else:
+    raise SystemExit(
+        f"unexpected Samsung pages_compacted readers: legacy={old_count} atomic={new_count}"
+    )
 p.write_text(s)
 PY
       git -C "$KERNEL_DIR" add drivers/block/zram/zram_drv.c

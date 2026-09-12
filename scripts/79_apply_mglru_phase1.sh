@@ -115,6 +115,61 @@ PY
   git -C "$KERNEL_DIR" cherry-pick --continue
 }
 
+
+resolve_killswitch_kconfig_conflict() {
+  local sha="$1"
+  local unmerged_csv
+
+  [[ "$sha" == "003eabcd2570febabe7f0466e4c915d5578835c2" ]] || return 1
+
+  unmerged_csv="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U | sort | paste -sd, -)"
+  [[ "$unmerged_csv" == "mm/Kconfig" ]] || return 1
+
+  info "Resolving Samsung mm/Kconfig conflict for MGLRU kill switch"
+  git -C "$KERNEL_DIR" checkout --ours -- mm/Kconfig
+
+  python3 - "$KERNEL_DIR" "$ARTIFACTS_DIR/mglru-killswitch-kconfig-resolution.txt" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+report = Path(sys.argv[2])
+p = root / "mm/Kconfig"
+s = p.read_text()
+
+if "config LRU_GEN\n" not in s:
+    raise SystemExit("LRU_GEN missing before kill-switch Kconfig resolution")
+if "config LRU_GEN_STATS\n" not in s:
+    raise SystemExit("LRU_GEN_STATS missing before kill-switch Kconfig resolution")
+
+if "config LRU_GEN_ENABLED\n" not in s:
+    anchor = """config LRU_GEN_STATS
+\tbool "Full stats for debugging"
+"""
+    block = """config LRU_GEN_ENABLED
+\tbool "Enable by default"
+\tdepends on LRU_GEN
+\thelp
+\t  This option enables the multi-gen LRU by default.
+
+"""
+    if anchor not in s:
+        raise SystemExit("Samsung LRU_GEN_STATS block shape changed unexpectedly")
+    s = s.replace(anchor, block + anchor, 1)
+
+p.write_text(s)
+report.write_text(
+    "killswitch_kconfig=preserved-samsung-layout\n"
+    "lru_gen_enabled=added\n"
+    "phase79_default=off-via-defconfig\n"
+)
+PY
+
+  git -C "$KERNEL_DIR" add mm/Kconfig
+  git -C "$KERNEL_DIR" diff --check --cached
+  GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
+}
+
 resolve_groundwork_conflicts() {
   local sha="$1"
   local unmerged_csv
@@ -310,6 +365,11 @@ for sha in "${MGLRU_COMMITS[@]}"; do
 
     if resolve_minimal_kconfig_conflict "$sha"; then
       echo "resolved=$sha samsung-minimal-kconfig" | tee -a "$REPORT"
+      continue
+    fi
+
+    if resolve_killswitch_kconfig_conflict "$sha"; then
+      echo "resolved=$sha samsung-killswitch-kconfig" | tee -a "$REPORT"
       continue
     fi
 

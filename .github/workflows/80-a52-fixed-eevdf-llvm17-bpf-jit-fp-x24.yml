@@ -5,7 +5,7 @@ on:
     branches:
       - agent/a52-fixed-eevdf-llvm17-bpf-jit-fp-x24-4.19.206-v1
     paths:
-      - .github/workflows/79-a52-fixed-eevdf-llvm17-bpf-jit-unguarded-control.yml
+      - .github/workflows/80-a52-fixed-eevdf-llvm17-bpf-jit-fp-x24.yml
       - scripts/67_*
       - scripts/80_*
       - scripts/74_*
@@ -118,8 +118,6 @@ jobs:
           ! grep -Fq '[BPF_REG_FP] = A64_R(25),' \
             workspace/touchgrass-a52xq/arch/arm64/net/bpf_jit_comp.c
           ! grep -Fq 'bpf_call_x25_guard.o' \
-            workspace/touchgrass-a52xq/arch/arm64/net/Makefile
-          ! grep -Fq 'bpf_abi_guard.o' \
             workspace/touchgrass-a52xq/arch/arm64/net/Makefile
           ! grep -Fq 'bpf_abi_guard.o' \
             workspace/touchgrass-a52xq/arch/arm64/net/Makefile

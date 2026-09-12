@@ -92,8 +92,7 @@ static void a52_r339_preservation_fn(struct work_struct *work)
 
 	a52_r339_checkpoint_index = index + 1;
 	if (now_s == 330U) {
-		pr_emerg("Phase339 warm reboot into recovery after preservation checkpoint
-");
+		pr_emerg("Phase339 warm reboot into recovery after preservation checkpoint\\n");
 		msleep(250);
 		kernel_restart("recovery");
 		a52_ackfr_record("P276 339E reboot_returned=1");

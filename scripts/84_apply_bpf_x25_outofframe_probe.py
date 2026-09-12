@@ -149,6 +149,7 @@ if marker not in h:
 struct a52_bpf_x25_probe_result {{
 	unsigned long before;
 	unsigned long after;
+	unsigned long saved_x27;
 }};
 
 extern unsigned int a52_bpf_call_x25_probe(

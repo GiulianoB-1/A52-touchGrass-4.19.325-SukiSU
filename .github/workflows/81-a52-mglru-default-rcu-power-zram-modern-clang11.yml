@@ -6,7 +6,7 @@ on:
       - agent/a52-phase81-mglru-default-rcunocb-zram-modern-4.19.206-v1
     paths:
       - .github/workflows/78-a52-eevdf77-cass-hybrid-clang11.yml
-      - .github/workflows/79-a52-eevdf77-cass-phase81-mglru-rcu-power-zram-modern-clang11.yml
+      - .github/workflows/79-a52-eevdf77-cass-mglru-p1-clang11.yml
       - .github/workflows/80-a52-eevdf77-cass-mglru-p2-android-hardening-clang11.yml
       - .github/workflows/81-a52-mglru-default-rcu-power-zram-modern-clang11.yml
       - scripts/74_*

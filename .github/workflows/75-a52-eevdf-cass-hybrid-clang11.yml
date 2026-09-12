@@ -6,7 +6,8 @@ on:
       - agent/a52-eevdf-cass-hybrid-clang11-4.19.206-v1
     paths:
       - .github/workflows/75-a52-eevdf-cass-hybrid-clang11.yml
-      - scripts/74_*\n      - scripts/75_*
+      - scripts/74_*
+      - scripts/75_*
   workflow_dispatch:
 
 permissions:
@@ -195,7 +196,9 @@ jobs:
           grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_KSU=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_KSU_SUSFS=y' "$KERNEL/out/.config"
-          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] cass_select_task_rq_fair \
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] cass_select_task_rq_fair$' | tee artifacts/cass-hybrid-vmlinux-symbols.txt
+          strings "$KERNEL/out/vmlinux" | grep -F 'CASS+EEVDF hybrid fair CPU placement path is active' | tee artifacts/cass-hybrid-runtime-proof-string.txt
+          nm -n "$KERNEL/out/vmlinux" \
             | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
             | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
           {
@@ -208,8 +211,11 @@ jobs:
             echo lag_capture=passed
             echo eevdf_pick=compiled-not-active
             echo augmented_deadline_tree=passed
-            echo fair_task_ordering=fixed-eevdf\n            echo fair_cpu_placement=cass-phase1b-walt-safe
-            echo eevdf_enabled=boot-cmdline-controlled\n            echo cass_enabled=boot-cmdline-controlled\n            echo hybrid_mode=sched_eevdf=1+sched_cass=1
+            echo fair_task_ordering=fixed-eevdf
+            echo fair_cpu_placement=cass-phase1b-walt-safe
+            echo eevdf_enabled=boot-cmdline-controlled
+            echo cass_enabled=boot-cmdline-controlled
+            echo hybrid_mode=sched_eevdf=1+sched_cass=1
             echo deadline_expiry_resched=fixed
             echo picker_search=v6.6-style
             echo wakeup_preempt=eevdf-exclusive
@@ -288,8 +294,10 @@ jobs:
           unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=0";'
           {
             echo 'hardware_test_package=passed'
-            echo 'enabled_eevdf=sched_eevdf=1'\n            echo 'enabled_cass=sched_cass=1'
-            echo 'rollback_eevdf=sched_eevdf=0'\n            echo 'rollback_cass=sched_cass=0'
+            echo 'enabled_eevdf=sched_eevdf=1'
+            echo 'enabled_cass=sched_cass=1'
+            echo 'rollback_eevdf=sched_eevdf=0'
+            echo 'rollback_cass=sched_cass=0'
             echo 'scheduler_fix=deadline-picker-wakeup-fork-correctness'
           } | tee artifacts/eevdf-cass-hybrid-package-audit.txt
 
@@ -325,139 +333,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: a52xq-4.19.206-eevdf-cass-hybrid-clang11-${{ github.run_number }}-diagnostics
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- | tee artifacts/cass-hybrid-vmlinux-symbols.txt
-          strings "$KERNEL/out/vmlinux" | grep -F 'CASS+EEVDF hybrid fair CPU placement path is active' | tee artifacts/cass-hybrid-runtime-proof-string.txt
-          nm -n "$KERNEL/out/vmlinux" \
-            | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
-            | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
-          {
-            echo phase=eevdf-multitask-fix-clang11
-            echo kernel=4.19.206
-            echo sched_entity_scaffold=passed
-            echo weighted_virtual_time_accounting=passed
-            echo eligibility_helper=present
-            echo deadline_bookkeeping=passed
-            echo lag_capture=passed
-            echo eevdf_pick=compiled-not-active
-            echo augmented_deadline_tree=passed
-            echo task_selection=legacy-cfs-walt
-            echo eevdf_enabled=boot-cmdline-controlled
-            echo deadline_expiry_resched=fixed
-            echo picker_search=v6.6-style
-            echo wakeup_preempt=eevdf-exclusive
-            echo child_runs_first=legacy-only
-            echo compiler=vendor-clang-r383902
-            echo bpf_ringbuf=retained
-            echo resukisu=retained
-          } | tee artifacts/eevdf-phase1-audit.txt
-
-      - name: Check out pinned AnyKernel3
-        uses: actions/checkout@v4
-        with:
-          repository: osm0sis/AnyKernel3
-          ref: ${{ env.ANYKERNEL_COMMIT }}
-          path: packaging/AnyKernel3
-          fetch-depth: 1
-
-      - name: Package EEVDF enabled and rollback ZIPs
-        run: |
-          set -Eeuo pipefail
-          mkdir -p release-enabled release-rollback
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-hybrid-enabled.sh
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-hybrid-rollback.sh
-
-          for f in scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh; do
-            sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" "$f"
-            sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
-          done
-
-          python3 - <<'PY'
-          from pathlib import Path
-          for name, value in (
-              ("scripts/.package-hybrid-enabled.sh", "1"),
-              ("scripts/.package-hybrid-rollback.sh", "0"),
-          ):
-              p = Path(name)
-              s = p.read_text()
-              anchor = "dump_boot;\nwrite_boot;"
-              if s.count(anchor) != 1:
-                  raise SystemExit(f"unexpected AnyKernel boot-write anchor count in {name}: {s.count(anchor)}")
-              s = s.replace(
-                  anchor,
-                  f'dump_boot;\npatch_cmdline "sched_eevdf" "sched_eevdf={value}";\nwrite_boot;',
-                  1,
-              )
-              p.write_text(s)
-          PY
-
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF MULTITASK FIX/' scripts/.package-hybrid-enabled.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF MULTITASK FIX ROLLBACK/' scripts/.package-hybrid-rollback.sh
-
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-MULTITASK-FIX-CLANG11.zip/' scripts/.package-hybrid-enabled.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF-MULTITASK-FIX-CLANG11-ROLLBACK.zip/' scripts/.package-hybrid-rollback.sh
-
-          chmod +x scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
-
-          ./scripts/.package-hybrid-enabled.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-enabled
-
-          ./scripts/.package-hybrid-rollback.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-rollback
-
-          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=1"' release-enabled -n || true
-          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=0"' release-rollback -n || true
-
-          rm -f scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
-
-      - name: Verify packaged EEVDF boot toggles
-        run: |
-          set -Eeuo pipefail
-          ENABLED_ZIP="$(find release-enabled -maxdepth 1 -name '*.zip' -type f | head -1)"
-          ROLLBACK_ZIP="$(find release-rollback -maxdepth 1 -name '*.zip' -type f | head -1)"
-          test -s "$ENABLED_ZIP"
-          test -s "$ROLLBACK_ZIP"
-          unzip -p "$ENABLED_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
-          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
-          {
-            echo 'hardware_test_package=passed'
-            echo 'enabled_cmdline=sched_eevdf=1'
-            echo 'rollback_cmdline=sched_eevdf=0'
-            echo 'scheduler_fix=deadline-picker-wakeup-fork-correctness'
-          } | tee artifacts/eevdf-phase8-package-audit.txt
-
-      - name: Record diagnostics
-        if: always()
-        run: |
-          mkdir -p artifacts
-          if [ -d workspace/touchgrass-a52xq/.git ]; then
-            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
-            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
-            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
-          fi
-          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
-
-      - name: Upload EEVDF enabled hardware-test ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-4.19.206-EEVDF-MULTITASK-FIX-CLANG11-${{ github.run_number }}
-          path: release-enabled/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload EEVDF rollback ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-4.19.206-EEVDF-MULTITASK-FIX-CLANG11-ROLLBACK-${{ github.run_number }}
-          path: release-rollback/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload phase 8 diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: a52xq-4.19.206-eevdf-multitask-fix-clang11-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14

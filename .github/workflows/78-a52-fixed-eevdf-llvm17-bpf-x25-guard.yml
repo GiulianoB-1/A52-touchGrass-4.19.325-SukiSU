@@ -115,7 +115,12 @@ jobs:
             workspace/touchgrass-a52xq/include/linux/filter.h
           grep -Fq 'bpf_call_x25_guard.o' \
             workspace/touchgrass-a52xq/arch/arm64/net/Makefile
-          grep -Fq       - name: Add self-identifying persistent crash recorder
+          grep -Fq 'x25, [sp, #16]' \
+            workspace/touchgrass-a52xq/arch/arm64/net/bpf_call_x25_guard.S
+          grep -Fq 'blr' \
+            workspace/touchgrass-a52xq/arch/arm64/net/bpf_call_x25_guard.S
+
+      - name: Add self-identifying persistent crash recorder
         run: |
           set -Eeuo pipefail
           python3 scripts/76_apply_touchgrass_persistent_recorder.py workspace/touchgrass-a52xq

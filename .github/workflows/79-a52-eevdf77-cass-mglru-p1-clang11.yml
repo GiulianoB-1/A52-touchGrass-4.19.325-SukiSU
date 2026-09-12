@@ -193,6 +193,7 @@ jobs:
       - name: Import MGLRU phase 1 with runtime default OFF
         run: |
           chmod +x scripts/79_apply_mglru_phase1.sh
+          bash -n scripts/79_apply_mglru_phase1.sh
           ./scripts/79_apply_mglru_phase1.sh
 
           grep -Fxq 'CONFIG_LRU_GEN=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig

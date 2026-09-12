@@ -1,0 +1,255 @@
+name: 68 - A52 Linux 4.19.206 CASS phase 1b WALT-safe hardware test
+
+on:
+  push:
+    branches:
+      - agent/a52-cass-phase1b-walt-safe-4.19.206-v1
+    paths:
+      - .github/workflows/68-a52-linux-4.19.206-cass-phase1b-walt-safe.yml
+      - scripts/68_apply_cass_phase1b_walt_safe.py
+      - scripts/01_prepare_source.sh
+      - scripts/03_apply_linux_4.19.153.sh
+      - scripts/04_apply_linux_4.19.154.sh
+      - scripts/05a_diagnose_linux_checkpoint.sh
+      - scripts/checkpoint_resolve_linux_4.19.159.sh
+      - scripts/checkpoint_resolve_linux_4.19.164.sh
+      - scripts/checkpoint_resolve_linux_4.19.180.sh
+      - scripts/checkpoint_resolve_linux_4.19.200.sh
+      - scripts/57_update_linux_4.19.200_to_4.19.206.sh
+      - scripts/58_backport_bpf_ringbuf.sh
+      - scripts/58_apply_ringbuf_overrun_fix.sh
+      - scripts/07_patch_resukisu_exec_hook.sh
+      - scripts/57_build_resukisu_susfs_manual_detection.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-cass-phase1b-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build CASS Phase 1b WALT-safe 4.19.206 packages
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-4.19.206-cass-p1b-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+            a52xq-4.19.206-bpf-ringbuf-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+
+      - name: Update vendor tree to Linux 4.19.206
+        run: |
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+
+      - name: Restore working ReSukiSU BPF-repair baseline
+        run: |
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Apply CASS phase 1b conservative A52 WALT port
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+          python3 scripts/68_apply_cass_phase1b_walt_safe.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- \
+            init/Kconfig \
+            arch/arm64/configs/a52xq_defconfig \
+            kernel/sched/fair.c \
+            kernel/sched/cass.c \
+            | tee artifacts/cass-phase1b-port.diff
+          git -C workspace/touchgrass-a52xq diff --check
+          grep -Fq 'CONFIG_SCHED_CASS=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq '#include "cass.c"' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'walt_stats.cumulative_runnable_avg_scaled' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'util += p_util' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'capacity_of(cpu)' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'for_each_cpu_and(cpu, &p->cpus_allowed, cpu_active_mask)' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'cpu_util_rt(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'cpu_util_dl(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'cpu_util_irq(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'sched_eevdf_enabled' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Build ReSukiSU SUSFS BPF repair and CASS
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/linux-4.19.206-cass-phase1b-build.log
+
+      - name: Audit CASS phase 1b build result
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "artifacts/Image-${LABEL}"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_KSU=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_KSU_SUSFS=y' "$KERNEL/out/.config"
+          ! grep -Fq 'sched_eevdf_enabled' "$KERNEL/kernel/sched/fair.c"
+          nm -n "$KERNEL/out/vmlinux" \
+            | grep -E ' [Tt] cass_select_task_rq_fair$' \
+            | tee artifacts/cass-vmlinux-symbols.txt
+          strings "$KERNEL/out/vmlinux" \
+            | grep -F 'CASS phase 1b fair CPU placement path is active' \
+            | tee artifacts/cass-runtime-proof-string.txt
+          {
+            echo phase=cass-1b
+            echo kernel=4.19.206
+            echo eevdf=absent
+            echo fair_task_ordering=legacy-cfs
+            echo fair_cpu_placement=cass
+            echo rt_cpu_placement=legacy
+            echo walt=raw-runnable-no-hard-util
+            echo cass_runtime_gate=sched_cass
+            echo bpf_ringbuf=retained
+            echo resukisu=retained
+            echo susfs=retained
+          } | tee artifacts/cass-phase1b-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package CASS enabled and legacy rollback ZIPs
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-enabled release-rollback
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-cass-enabled.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-cass-rollback.sh
+
+          for f in scripts/.package-cass-enabled.sh scripts/.package-cass-rollback.sh; do
+            sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" "$f"
+            sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
+          done
+
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-enabled.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_cass" "sched_cass=1";' scripts/.package-cass-enabled.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_eevdf" "sched_eevdf=0";' scripts/.package-cass-rollback.sh
+          sed -i '/^dump_boot;$/a patch_cmdline "sched_cass" "sched_cass=0";' scripts/.package-cass-rollback.sh
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + CASS P1B TEST/' scripts/.package-cass-enabled.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + CASS P1B LEGACY ROLLBACK/' scripts/.package-cass-rollback.sh
+
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-CASS-P1B-ENABLED-TEST.zip/' scripts/.package-cass-enabled.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-CASS-P1B-ROLLBACK.zip/' scripts/.package-cass-rollback.sh
+
+          chmod +x scripts/.package-cass-enabled.sh scripts/.package-cass-rollback.sh
+
+          ./scripts/.package-cass-enabled.sh \
+            4.19.206 \
+            "artifacts/Image-${LABEL}" \
+            packaging/AnyKernel3 \
+            release-enabled
+
+          ./scripts/.package-cass-rollback.sh \
+            4.19.206 \
+            "artifacts/Image-${LABEL}" \
+            packaging/AnyKernel3 \
+            release-rollback
+
+          rm -f scripts/.package-cass-enabled.sh scripts/.package-cass-rollback.sh
+
+      - name: Verify packaged scheduler boot toggles
+        run: |
+          set -Eeuo pipefail
+          ENABLED_ZIP="$(find release-enabled -maxdepth 1 -name '*.zip' -type f | head -1)"
+          ROLLBACK_ZIP="$(find release-rollback -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ENABLED_ZIP"
+          test -s "$ROLLBACK_ZIP"
+          unzip -p "$ENABLED_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ENABLED_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=0";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
+          {
+            echo hardware_test_package=passed
+            echo enabled_cmdline=sched_cass=1
+            echo enabled_eevdf=sched_eevdf=0
+            echo rollback_cmdline=sched_cass=0
+            echo rollback_eevdf=sched_eevdf=0
+          } | tee artifacts/cass-phase1b-package-audit.txt
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+
+      - name: Upload CASS enabled hardware-test ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-CASS-P1B-ENABLED-TEST-${{ github.run_number }}
+          path: release-enabled/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload CASS legacy rollback ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-CASS-P1B-ROLLBACK-${{ github.run_number }}
+          path: release-rollback/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload CASS phase 1b diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-4.19.206-cass-phase1b-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

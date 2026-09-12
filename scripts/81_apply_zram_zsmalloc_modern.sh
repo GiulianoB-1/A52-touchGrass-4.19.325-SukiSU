@@ -32,6 +32,19 @@ for sha in "${ZSMALLOC_FIXES[@]}"; do
   subject="$(git -C "$KERNEL_DIR" show -s --format=%s "$sha")"
   printf 'apply=%s %s\n' "$sha" "$subject" | tee -a "$REPORT"
 
+  # Linux 4.19.206 may already contain the compacted-page accounting fix.
+  # Detect the complete semantic state before attempting the donor commit,
+  # otherwise Samsung's extended mm_stat_show() creates a conflict that
+  # resolves to an empty cherry-pick.
+  if [[ "$sha" == "638c954653d4183549cd7b859976da6e5698184f" ]] &&
+     grep -Fq 'atomic_long_t pages_compacted;' "$KERNEL_DIR/include/linux/zsmalloc.h" &&
+     grep -Fq 'atomic_long_add(pages_freed, &pool->stats.pages_compacted);' "$KERNEL_DIR/mm/zsmalloc.c" &&
+     grep -Fq 'return pages_freed;' "$KERNEL_DIR/mm/zsmalloc.c" &&
+     grep -Fq 'atomic_long_read(&pool_stats.pages_compacted)' "$KERNEL_DIR/drivers/block/zram/zram_drv.c"; then
+    echo "already_present=$sha compacted-page-accounting" | tee -a "$REPORT"
+    continue
+  fi
+
   if ! git -C "$KERNEL_DIR" cherry-pick --no-edit "$sha"; then
     unmerged="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U || true)"
     if [[ -z "$unmerged" ]]; then
@@ -70,8 +83,16 @@ else:
 p.write_text(s)
 PY
       git -C "$KERNEL_DIR" add drivers/block/zram/zram_drv.c
-      GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
-      echo "resolved=$sha samsung-zram-mm-stat-atomic-accounting" | tee -a "$REPORT"
+      if git -C "$KERNEL_DIR" diff --cached --quiet; then
+        # All non-conflicting hunks are already in the 4.19.206 baseline and
+        # our Samsung-side resolution is identical too. The donor commit is
+        # therefore semantically present and the cherry-pick is empty.
+        git -C "$KERNEL_DIR" cherry-pick --skip
+        echo "already_present=$sha empty-after-samsung-resolution" | tee -a "$REPORT"
+      else
+        GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
+        echo "resolved=$sha samsung-zram-mm-stat-atomic-accounting" | tee -a "$REPORT"
+      fi
       continue
     fi
 

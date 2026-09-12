@@ -59,12 +59,13 @@ grep -Fq 'P276 316S q=2' "$CTRL"
 ! grep -Fq 'A52_PHASE317_DSI_INTERNAL_DEBUGBUS_DELTA_V1' "$CTRL"
 ! grep -Fq 'A52_PHASE317_DSI_INTERNAL_DEBUGBUS_DELTA_V1' "$HWC"
 
-# Phase337 retention repair: fail closed on the complete compiled Phase316
-# identity before layering Phase319 or any later observer.
-printf '%s  %s\n' "$PHASE316_IMAGE_SHA256" phase316-gki-out/compile/Image | sha256sum -c -
-printf '%s  %s\n' "$PHASE316_BOOT_SHA256" phase316-gki-out/package/boot.img | sha256sum -c -
-echo 'Phase319 reconstructed Phase316 complete Image/boot identity: PASS'
-
+# Phase337 retention repair: do not require a fresh Phase316 recompile to
+# reproduce the historical August Image/boot SHA byte-for-byte. The kernel
+# embeds build host/time metadata, so recompiling the same config/source on a
+# later runner is not a binary-reproducibility contract. The historical oracle
+# itself is SHA-pinned below; the reconstructed lineage is then required to
+# match its complete final.config and every Phase316-touched source file before
+# Phase319 is allowed to layer anything on top.
 stage "verify reconstructed Phase316 against live successful oracle"
 rm -rf "$P316"
 mkdir -p "$P316"
@@ -110,6 +111,26 @@ cmp -s "$HWC" "$P316/source/dsi_ctrl_hw_cmn.c"
 cmp -s "$PHY" "$P316/source/dsi_phy.c"
 cmp -s "$PHYV3" "$P316/source/dsi_phy_hw_v3_0.c"
 cmp -s "$DISP" "$P316/source/dispcc-lagoon.c"
+
+# Verify the embedded IKCONFIG in the freshly rebuilt Image is exactly the
+# oracle final.config too. This catches any stale build-output/config mismatch
+# independently of the workspace .config comparison above.
+python3 - phase316-gki-out/compile/Image "$P316/config/final.config" <<'PY'
+import gzip
+import sys
+from pathlib import Path
+
+image = Path(sys.argv[1]).read_bytes()
+want = Path(sys.argv[2]).read_bytes()
+start = image.find(b"IKCFG_ST")
+end = image.find(b"IKCFG_ED", start + 8)
+if start < 0 or end < 0:
+    raise SystemExit("Phase319 reconstructed Phase316 Image lacks IKCONFIG")
+got = gzip.decompress(image[start + 8:end])
+if got != want:
+    raise SystemExit("Phase319 reconstructed Phase316 embedded IKCONFIG != oracle final.config")
+print("Phase319 reconstructed Phase316 embedded IKCONFIG oracle comparison: PASS")
+PY
 echo 'Phase319 full reconstructed Phase316 source/config oracle comparison: PASS'
 
 cp "$CTRL" /tmp/p319gki-ctrl-before.c

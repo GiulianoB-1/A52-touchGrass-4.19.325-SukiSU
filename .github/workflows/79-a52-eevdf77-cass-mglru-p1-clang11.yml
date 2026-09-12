@@ -6,6 +6,7 @@ on:
       - agent/a52-eevdf77-cass-mglru-p1-4.19.206-v1
     paths:
       - .github/workflows/78-a52-eevdf77-cass-hybrid-clang11.yml
+      - .github/workflows/79-a52-eevdf77-cass-mglru-p1-clang11.yml
       - scripts/74_*
       - scripts/77_*
       - scripts/78_*
@@ -357,18 +358,18 @@ jobs:
           } | tee artifacts/eevdf77-cass-mglru-p1-package-audit.txt
 
           cat > artifacts/mglru-first-boot-test.txt <<'EOF'
-MGLRU Phase 1 safety policy:
-- CONFIG_LRU_GEN=y
-- CONFIG_LRU_GEN_ENABLED=n
-- The phone initially boots on the legacy LRU path.
-- After a successful boot, inspect:
-    su -c 'cat /sys/kernel/mm/lru_gen/enabled'
-    su -c 'cat /sys/kernel/mm/lru_gen/min_ttl_ms'
-- Enable MGLRU live:
-    su -c 'echo Y > /sys/kernel/mm/lru_gen/enabled'
-- Disable it live:
-    su -c 'echo 0 > /sys/kernel/mm/lru_gen/enabled'
-EOF
+          MGLRU Phase 1 safety policy:
+          - CONFIG_LRU_GEN=y
+          - CONFIG_LRU_GEN_ENABLED=n
+          - The phone initially boots on the legacy LRU path.
+          - After a successful boot, inspect:
+              su -c 'cat /sys/kernel/mm/lru_gen/enabled'
+              su -c 'cat /sys/kernel/mm/lru_gen/min_ttl_ms'
+          - Enable MGLRU live:
+              su -c 'echo Y > /sys/kernel/mm/lru_gen/enabled'
+          - Disable it live:
+              su -c 'echo 0 > /sys/kernel/mm/lru_gen/enabled'
+          EOF
 
       - name: Record diagnostics
         if: always()

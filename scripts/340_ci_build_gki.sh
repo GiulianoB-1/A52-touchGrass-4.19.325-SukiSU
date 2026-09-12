@@ -176,7 +176,7 @@ cp "$IMAGE" "$OUT/compile/Image"
 cp "$BUILD/.config" "$OUT/config/final.config"
 cp phase340-*.log "$OUT/audit/" 2>/dev/null || true
 cp scripts/340_apply_post12_runtime_discriminator.py \
-   scripts/339_ci_build_gki.sh "$OUT/audit/"
+   scripts/340_ci_build_gki.sh "$OUT/audit/"
 cp /tmp/p340-* "$OUT/audit/" 2>/dev/null || true
 cp "$KMS" "$CTRL" "$DRV" "$ATOMIC" "$REC" "$OUT/source/"
 

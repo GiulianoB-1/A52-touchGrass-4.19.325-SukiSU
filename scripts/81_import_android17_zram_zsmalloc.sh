@@ -129,7 +129,7 @@ set_n = {
     "ZRAM_DEDUP",
     "ZRAM_LRU_WRITEBACK",
 }
-set_values = {"ZSMALLOC_CHAIN_SIZE": "4"}
+set_values = {"ZSMALLOC_CHAIN_SIZE": "8"}
 
 symbols = set_y | set_n | set(set_values) | {"ZRAM_LRU_WRITEBACK_LIMIT"}
 out = []
@@ -162,8 +162,8 @@ grep -Fq 'zspage_read_lock' "$KERNEL/mm/zsmalloc.c"
 grep -Fq 'ZS_OBJ_CLASS_BITS' "$KERNEL/mm/zsmalloc.c"
 grep -Fq '__free_zspage_lockless' "$KERNEL/mm/zsmalloc.c"
 grep -Fq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
-grep -Fq 'CONFIG_ZSMALLOC_CHAIN_SIZE=4' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
-grep -Fq 'CONFIG_ZRAM_BACKEND_LZO=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+grep -Fq 'CONFIG_ZSMALLOC_CHAIN_SIZE=8' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+grep -Fq 'CONFIG_ZRAM_BACKEND_LZO=y'\ngrep -Fq 'CONFIG_ZRAM_BACKEND_LZ4=y'\ngrep -Fq 'CONFIG_ZRAM_MULTI_COMP=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
 
 cat > "$ART/phase81-zram-zsmalloc-source.txt" <<EOF
 phase=81
@@ -173,9 +173,9 @@ compatibility_donor=notkernel-oss/not_samsung.sm8250-4.19
 compatibility_donor_commit=$DONOR_COMMIT
 zram_model=modern-upstream-style
 zram_entry_lock=sleepable-bit-lock
-zram_compression_stream=preemptible
+zram_compression_stream=preemptible\nzram_multi_comp=enabled\nzram_alt_backend=lz4
 zsmalloc_object_api=modern-read-write
-zsmalloc_chain_size=4
+zsmalloc_chain_size=8
 zsmalloc_2026_lock_scalability=present
 samsung_zram_dedup=replaced
 samsung_zram_lru_writeback=replaced-by-upstream-writeback

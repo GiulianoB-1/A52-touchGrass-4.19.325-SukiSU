@@ -236,8 +236,10 @@ jobs:
           grep -Fxq 'CONFIG_ZRAM=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
           grep -Fxq 'CONFIG_ZRAM_WRITEBACK=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
           grep -Fxq 'CONFIG_ZRAM_BACKEND_LZO=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_ZRAM_BACKEND_LZ4=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_ZRAM_MULTI_COMP=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
           grep -Fxq 'CONFIG_ZRAM_DEF_COMP_LZORLE=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
-          grep -Fxq 'CONFIG_ZSMALLOC_CHAIN_SIZE=4' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_ZSMALLOC_CHAIN_SIZE=8' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
           grep -Fq 'zs_obj_read_begin' "$KERNEL/include/linux/zsmalloc.h"
           grep -Fq 'zspage_read_lock' "$KERNEL/mm/zsmalloc.c"
           grep -Fq 'ZRAM_ENTRY_LOCK' "$KERNEL/drivers/block/zram/zram_drv.h"
@@ -263,8 +265,10 @@ jobs:
           grep -Fxq 'CONFIG_ZRAM=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_ZRAM_WRITEBACK=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_ZRAM_BACKEND_LZO=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_ZRAM_BACKEND_LZ4=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_ZRAM_MULTI_COMP=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_ZRAM_DEF_COMP_LZORLE=y' "$KERNEL/out/.config"
-          grep -Fxq 'CONFIG_ZSMALLOC_CHAIN_SIZE=4' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_ZSMALLOC_CHAIN_SIZE=8' "$KERNEL/out/.config"
           grep -Fq 'lru_gen_enabled' "$KERNEL/mm/vmscan.c"
           grep -Fq 'lru_gen_enter_fault' "$KERNEL/mm/memory.c"
           nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] lru_gen_' | head -40 \
@@ -284,7 +288,7 @@ jobs:
             echo mglru_default=enabled-from-kernel-init
             echo rcu_nocb=cpus-6-7-no-poll
             echo rcu_lazy=not-ported-google-disabled-july-2026
-            echo zram=android17-style-modern
+            echo zram=android17-style-modern\n            echo zram_multi_comp=enabled\n            echo zram_alt_backend=lz4
             echo zsmalloc=modern-object-api-and-2026-lock-scalability
             echo zram_samsung_dedup=replaced
             echo zram_samsung_lru_writeback=replaced-by-upstream-writeback
@@ -413,7 +417,7 @@ jobs:
             echo 'mglru=compiled'
             echo 'mglru_default=on-from-boot'
             echo 'rcu_nocbs=6-7'
-            echo 'zram=android17-style-modern'
+            echo 'zram=android17-style-modern'\n            echo 'zram_multi_comp=enabled'\n            echo 'zram_alt_backend=lz4'
             echo 'zsmalloc=modern'
           } | tee artifacts/eevdf77-cass-mglru-p2-hardening-package-audit.txt
 
@@ -423,7 +427,7 @@ jobs:
           - CONFIG_LRU_GEN_ENABLED=y
           - /sys/kernel/mm/lru_gen/enabled should be nonzero from boot
           - cmdline should include rcu_nocbs=6-7
-          - /sys/block/zram0/comp_algorithm should expose modern ZRAM backend selection
+          - /sys/block/zram0/comp_algorithm should expose modern ZRAM backend selection\n          - CONFIG_ZRAM_MULTI_COMP should be active and recompress sysfs should exist
           - /sys/block/zram0/mm_stat and /proc/swaps must remain healthy
           EOF
 

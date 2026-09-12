@@ -1,0 +1,397 @@
+name: 85 - A52 fixed EEVDF LLVM17 BPF x25 live counters
+
+on:
+  push:
+    branches:
+      - agent/a52-phase85-bpf-x25-live-counters-4.19.206-v1
+    paths:
+      - .github/workflows/85-a52-fixed-eevdf-llvm17-bpf-x25-live-counters.yml
+      - scripts/67_*
+      - scripts/84_*
+      - scripts/85_*
+      - scripts/74_*
+      - scripts/76_*
+      - tools/decode-touchgrass-recorder.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-phase85-bpf-x25-live-counters-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build fixed EEVDF LLVM17 with real JIT x25 live counters
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Install pinned LLVM 17.0.6
+        run: |
+          set -Eeuo pipefail
+          mkdir -p toolchains/llvm17
+          curl -L --fail --retry 3 \
+            https://www.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz \
+            -o /tmp/llvm-17.0.6-x86_64.tar.xz
+          tar -xJf /tmp/llvm-17.0.6-x86_64.tar.xz -C toolchains/llvm17 --strip-components=1
+          test -x toolchains/llvm17/bin/clang
+          toolchains/llvm17/bin/clang --version
+          echo "AUTOFDO_CLANG_BIN=$GITHUB_WORKSPACE/toolchains/llvm17/bin/clang" >> "$GITHUB_ENV"
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-4.19.206-eevdf-p1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-4.19.206-bpf-ringbuf-${{ runner.os }}-
+            a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+
+      - name: Enable LLVM17 compiler override
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/67_apply_autofdo_a0_toolchain.py .
+          grep -Fq 'AUTOFDO_CLANG_BIN' scripts/common.sh
+
+      - name: Update vendor tree to Linux 4.19.206
+        run: |
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+
+      - name: Restore working ReSukiSU BPF-repair baseline
+        run: |
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Apply ARM64 BPF x25 corruption probe
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/84_apply_bpf_x25_outofframe_probe.py workspace/touchgrass-a52xq
+          grep -Fq 'CONFIG_BPF_JIT=y' \
+            workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq 'CONFIG_BPF_JIT_ALWAYS_ON=y' \
+            workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq '# CONFIG_PSTORE_RAM is not set' \
+            workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq 'A52_PHASE84_BPF_X25_OUTOFFRAME_PROBE_V1' \
+            workspace/touchgrass-a52xq/include/linux/filter.h
+          grep -Fq 'bpf_x25_probe.o' \
+            workspace/touchgrass-a52xq/arch/arm64/net/Makefile
+          grep -Fq 'bpf_x25_diag.o' \
+            workspace/touchgrass-a52xq/arch/arm64/net/Makefile
+          grep -Fq 'str	x25, [x27, #8]' \
+            workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_probe.S
+          grep -Fq 'A52BPF_X25' \
+            workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_diag.c
+
+      - name: Add self-identifying persistent crash recorder
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/84_apply_touchgrass_persistent_recorder.py workspace/touchgrass-a52xq
+          python3 -m py_compile tools/decode-touchgrass-recorder.py
+          grep -Fq 'TGREC_BUILD_ID          "TG84P1"' \
+            workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
+          grep -Fq '0xB1B00000ULL' \
+            workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
+          grep -Fq 'register_die_notifier' \
+            workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
+          grep -Fq 'panic_notifier_list' \
+            workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
+
+      - name: Apply Phase85 live BPF x25 counters
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/85_apply_bpf_x25_live_counters.py workspace/touchgrass-a52xq
+          grep -Fq 'a52_bpf_x25_note_call' workspace/touchgrass-a52xq/include/linux/filter.h
+          test "$(grep -Fc 'a52_bpf_x25_note_call(prog);' workspace/touchgrass-a52xq/include/linux/filter.h)" -eq 2
+          grep -Fq 'proc_create_single("a52_bpf_x25"' workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_diag.c
+          grep -Fq 'jit_calls=%lld' workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_diag.c
+          grep -Fq 'x25_mismatches=%lld' workspace/touchgrass-a52xq/arch/arm64/net/bpf_x25_diag.c
+          grep -Fq 'TGREC_BUILD_ID          "TG85P1"' workspace/touchgrass-a52xq/drivers/misc/a52_touchgrass_recorder.c
+
+      - name: Apply EEVDF phase 1 sched_entity scaffold
+        run: |
+          mkdir -p artifacts
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- include/linux/sched.h \
+            | tee artifacts/eevdf-phase1-sched-entity.diff
+          grep -Fq 'EEVDF phase 1 scaffold' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'min_deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'vlag;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'slice;' workspace/touchgrass-a52xq/include/linux/sched.h
+
+      - name: Apply EEVDF phase 2 weighted virtual-time accounting
+        run: |
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/sched.h kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase2-accounting.diff
+          grep -Fq 'EEVDF phase 2 accounting' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_avg_vruntime_add' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_entity_eligible' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 3 deadline and lag bookkeeping
+        run: |
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase3-deadline-lag.diff
+          grep -Fq 'EEVDF phase 3 deadline/lag bookkeeping' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_entity_lag' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 4 augmented tree and picker scaffold
+        run: |
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase4-tree-picker.diff
+          grep -Fq 'EEVDF phase 4 augmented deadline tree' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'rb_insert_augmented_cached' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_pick_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 5 picker integration
+        run: |
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase5-picker-integration.diff
+          grep -Fq 'EEVDF phase 5 picker integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf_enabled' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf=1' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 6 wakeup and tick preemption
+        run: |
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase6-wakeup-preempt.diff
+          grep -Fq 'EEVDF phase 6 wakeup/preemption integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_should_preempt' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'curr->vruntime - curr->deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 7 placement consistency
+        run: |
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase7-placement-consistency.diff
+          grep -Fq 'EEVDF phase 7 placement consistency' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_place_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'lag *= load + weight' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'se->deadline = se->vruntime + vslice' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply fixed EEVDF multitask correctness
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-multitask-correctness.diff
+          grep -Fq 'static bool eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'struct sched_entity *best_left = NULL' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'return eevdf_pick_entity(cfs_rq) == se;' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'likely(!sched_eevdf_enabled)' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'if (!sched_eevdf_enabled &&' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Build ReSukiSU, SUSFS, BPF repair and fixed EEVDF with LLVM17
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/linux-4.19.206-phase85-bpf-x25-live-counters-build.log
+
+      - name: Audit build result
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "artifacts/Image-${LABEL}"
+          test -s "$KERNEL/out/vmlinux"
+          test -s artifacts/selected-clang-version.txt
+          grep -Fq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
+          grep -Fq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
+          grep -Fq '# CONFIG_PSTORE_RAM is not set' "$KERNEL/out/.config"
+          grep -Fq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
+          grep -Fq 'CONFIG_CGROUP_BPF=y' "$KERNEL/out/.config"
+          grep -Eq 'clang version 17\.0\.6|LLVM version 17\.0\.6' artifacts/selected-clang-version.txt
+          grep -aFq 'TGREC: persistent recorder ready id=%s slots=%u banks=%u' "artifacts/Image-${LABEL}"
+          grep -aFq 'TG85P1' "artifacts/Image-${LABEL}"
+          grep -aFq 'phase85 llvm17 fixed-eevdf real-jit x25-live-counters' "artifacts/Image-${LABEL}"
+          grep -aFq 'phase=phase85-fixed-eevdf-llvm17-bpf-x25-live-counters' "artifacts/Image-${LABEL}"
+          grep -aFq 'jit_calls=%lld' "artifacts/Image-${LABEL}"
+          grep -aFq 'x25_mismatches=%lld' "artifacts/Image-${LABEL}"
+          nm -n "$KERNEL/out/vmlinux" | grep -F ' a52_bpf_x25_note_call' | tee artifacts/phase85-x25-counter-symbol.txt
+          nm -n "$KERNEL/out/vmlinux" | grep -F ' a52_bpf_x25_proc_init' | tee -a artifacts/phase85-x25-counter-symbol.txt
+          cp tools/decode-touchgrass-recorder.py artifacts/
+          nm -n "$KERNEL/out/vmlinux" \
+            | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
+            | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
+          {
+            echo phase=phase85-fixed-eevdf-llvm17-bpf-x25-live-counters
+            echo kernel=4.19.206\n            echo compiler=llvm-17.0.6
+            echo bpf_jit=enabled
+            echo bpf_jit_always_on=enabled
+            echo bpf_execution=real-arm64-jit
+            echo bpf_x25_probe=enabled-outofframe-capture-and-repair
+            echo bpf_x25_live_counters=/proc/a52_bpf_x25
+            echo bpf_x25_counter_fields=jit_calls,x25_mismatches,x25_repairs,clean_calls
+            echo persistent_recorder=TG85P1
+            echo recorder_phys=0xB1B00000
+            echo recorder_banks=3
+            echo pstore_ram=disabled-to-protect-tgrec
+            echo sched_entity_scaffold=passed
+            echo weighted_virtual_time_accounting=passed
+            echo eligibility_helper=present
+            echo deadline_bookkeeping=passed
+            echo lag_capture=passed
+            echo eevdf_pick=compiled-not-active
+            echo augmented_deadline_tree=passed
+            echo task_selection=legacy-cfs-walt
+            echo eevdf_enabled=boot-cmdline-controlled
+            echo deadline_expiry_resched=fixed
+            echo picker_search=v6.6-style
+            echo wakeup_preempt=eevdf-exclusive
+            echo child_runs_first=legacy-only
+            echo bpf_ringbuf=retained
+            echo resukisu=retained
+          } | tee artifacts/eevdf-phase1-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package EEVDF enabled and rollback ZIPs
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-enabled release-rollback
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-eevdf-enabled.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-eevdf-rollback.sh
+
+          for f in scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh; do
+            sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" "$f"
+            sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          for name, value in (
+              ("scripts/.package-eevdf-enabled.sh", "1"),
+              ("scripts/.package-eevdf-rollback.sh", "0"),
+          ):
+              p = Path(name)
+              s = p.read_text()
+              anchor = "dump_boot;\nwrite_boot;"
+              if s.count(anchor) != 1:
+                  raise SystemExit(f"unexpected AnyKernel boot-write anchor count in {name}: {s.count(anchor)}")
+              s = s.replace(
+                  anchor,
+                  f'dump_boot;\npatch_cmdline "sched_eevdf" "sched_eevdf={value}";\nwrite_boot;',
+                  1,
+              )
+              p.write_text(s)
+          PY
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + FIXED EEVDF LLVM17 BPF-X25-LIVE-COUNTERS TGREC/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF LLVM17 BPF-X25-LIVE-COUNTERS TGREC ROLLBACK/' scripts/.package-eevdf-rollback.sh
+
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FIXED-EEVDF-LLVM17-BPF-X25-LIVE-COUNTERS-TGREC.zip/' scripts/.package-eevdf-enabled.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FIXED-EEVDF-LLVM17-BPF-X25-LIVE-COUNTERS-TGREC-ROLLBACK.zip/' scripts/.package-eevdf-rollback.sh
+
+          chmod +x scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh
+
+          ./scripts/.package-eevdf-enabled.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-enabled
+
+          ./scripts/.package-eevdf-rollback.sh             4.19.206             "artifacts/Image-${LABEL}"             packaging/AnyKernel3             release-rollback
+
+          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=1"' release-enabled -n || true
+          grep -R 'patch_cmdline "sched_eevdf" "sched_eevdf=0"' release-rollback -n || true
+
+          rm -f scripts/.package-eevdf-enabled.sh scripts/.package-eevdf-rollback.sh
+
+      - name: Verify packaged EEVDF boot toggles
+        run: |
+          set -Eeuo pipefail
+          ENABLED_ZIP="$(find release-enabled -maxdepth 1 -name '*.zip' -type f | head -1)"
+          ROLLBACK_ZIP="$(find release-rollback -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ENABLED_ZIP"
+          test -s "$ROLLBACK_ZIP"
+          unzip -p "$ENABLED_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
+          {
+            echo 'hardware_test_package=passed\n            compiler=llvm-17.0.6'
+            echo 'enabled_cmdline=sched_eevdf=1'
+            echo 'rollback_cmdline=sched_eevdf=0'
+            echo 'scheduler_fix=deadline-picker-wakeup-fork-correctness'
+          } | tee artifacts/eevdf-phase8-package-audit.txt
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+
+      - name: Upload EEVDF enabled hardware-test ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-PHASE85-FIXED-EEVDF-LLVM17-X25-LIVE-COUNTERS-${{ github.run_number }}
+          path: release-enabled/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload EEVDF rollback ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-PHASE85-FIXED-EEVDF-LLVM17-X25-LIVE-COUNTERS-ROLLBACK-${{ github.run_number }}
+          path: release-rollback/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload phase 8 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-4.19.206-phase85-fixed-eevdf-llvm17-x25-live-counters-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

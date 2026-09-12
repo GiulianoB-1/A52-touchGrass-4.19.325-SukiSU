@@ -247,6 +247,82 @@ PY
   git -C "$KERNEL_DIR" cherry-pick --continue
 }
 
+
+resolve_qcom_pageflags_conflict() {
+  local sha="$1"
+  local unmerged_csv
+
+  [[ "$sha" == "59a4952e7940da5223a5c28ef8c0c348febb6e5c" ]] || return 1
+
+  unmerged_csv="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U | sort | paste -sd, -)"
+  [[ "$unmerged_csv" == "include/linux/page-flags-layout.h" ]] || return 1
+
+  info "Resolving final Qualcomm MGLRU page-flag layout with Samsung KASAN support"
+  git -C "$KERNEL_DIR" checkout --ours -- include/linux/page-flags-layout.h
+
+  python3 - "$KERNEL_DIR" "$ARTIFACTS_DIR/mglru-qcom-pageflags-resolution.txt" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+report = Path(sys.argv[2])
+p = root / "include/linux/page-flags-layout.h"
+s = p.read_text()
+
+old_last = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LAST_CPUPID_SHIFT+LRU_GEN_WIDTH+LRU_REFS_WIDTH <= BITS_PER_LONG - NR_PAGEFLAGS
+#define LAST_CPUPID_WIDTH LAST_CPUPID_SHIFT
+"""
+new_last = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_WIDTH+LAST_CPUPID_SHIFT+ \\
+\tLRU_GEN_WIDTH+LRU_REFS_WIDTH <= BITS_PER_LONG - NR_PAGEFLAGS
+#define LAST_CPUPID_WIDTH LAST_CPUPID_SHIFT
+"""
+if old_last not in s:
+    raise SystemExit("QCOM page-flags: Samsung LAST_CPUPID anchor not found")
+s = s.replace(old_last, new_last, 1)
+
+old_kasan = """#ifdef CONFIG_KASAN_SW_TAGS
+#define KASAN_TAG_WIDTH 8
+#if SECTIONS_WIDTH+NODES_WIDTH+ZONES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH+ \\
+\tLRU_GEN_WIDTH+LRU_REFS_WIDTH > BITS_PER_LONG - NR_PAGEFLAGS
+#error "KASAN: not enough bits in page flags for tag"
+#endif
+#else
+#define KASAN_TAG_WIDTH 0
+#endif
+"""
+new_kasan = """#ifdef CONFIG_KASAN_SW_TAGS
+#define KASAN_TAG_WIDTH 8
+#if SECTIONS_WIDTH+NODES_WIDTH+ZONES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH \\
+\t> BITS_PER_LONG - NR_PAGEFLAGS
+#error "KASAN: not enough bits in page flags for tag"
+#endif
+#else
+#define KASAN_TAG_WIDTH 0
+#endif
+
+#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH+ \\
+\tLRU_GEN_WIDTH+LRU_REFS_WIDTH > BITS_PER_LONG - NR_PAGEFLAGS
+#error "Not enough bits in page flags"
+#endif
+"""
+if old_kasan not in s:
+    raise SystemExit("QCOM page-flags: Samsung KASAN capacity block not found")
+s = s.replace(old_kasan, new_kasan, 1)
+
+p.write_text(s)
+report.write_text(
+    "qcom_pageflags=resolved-semantically\n"
+    "last_cpupid=uses-nodes-width\n"
+    "kasan_check=samsung-tag-capacity-preserved\n"
+    "mglru_check=separate-total-capacity\n"
+)
+PY
+
+  git -C "$KERNEL_DIR" add include/linux/page-flags-layout.h
+  git -C "$KERNEL_DIR" diff --check --cached
+  GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
+}
+
 resolve_mglru_groundwork_conflict() {
   local sha="$1"
   [[ "$sha" == "67e9d5c8e0d28eb521533e0bb42771d12959d026" ]] || return 1
@@ -370,6 +446,11 @@ for sha in "${MGLRU_COMMITS[@]}"; do
 
     if resolve_killswitch_kconfig_conflict "$sha"; then
       echo "resolved=$sha samsung-killswitch-kconfig" | tee -a "$REPORT"
+      continue
+    fi
+
+    if resolve_qcom_pageflags_conflict "$sha"; then
+      echo "resolved=$sha qcom-samsung-pageflags" | tee -a "$REPORT"
       continue
     fi
 

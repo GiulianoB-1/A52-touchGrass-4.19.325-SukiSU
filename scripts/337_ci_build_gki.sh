@@ -116,7 +116,14 @@ cmp -s /tmp/p337-atomic-before "$ATOMIC"
 cmp -s /tmp/p337-rec-before "$REC"
 
 diff -u /tmp/p337-kms-before "$KMS" > /tmp/p337-kms.diff || true
-git -C "$ROOT" diff --check -- drivers/a52_display/msm/sde/sde_kms.c
+# Check only the Phase337 delta for whitespace errors. The reconstructed
+# Phase336 sde_kms.c inherits two older space-before-tab lines outside the
+# Phase337 hunk, so repository-wide git diff --check is not a valid Phase337
+# scope check. git diff --no-index returns 1 for any content difference, so
+# inspect its diagnostic output instead.
+git diff --no-index --check /tmp/p337-kms-before "$KMS" \
+  > /tmp/p337-whitespace-check 2>&1 || true
+test ! -s /tmp/p337-whitespace-check
 
 stage "strict Phase337 diagnostic-only scope audit"
 python3 - "$KMS" <<'PY'

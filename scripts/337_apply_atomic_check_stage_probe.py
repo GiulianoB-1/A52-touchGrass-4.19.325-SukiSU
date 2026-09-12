@@ -106,7 +106,7 @@ def patch_kms(text: str) -> str:
         "\tif (ret)\n"
         "\t\tgoto end;\n"
     )
-    check_new = r'''\t{
+    check_new = '''\t{
 \t\t/* A52_PHASE337_ATOMIC_CHECK_STAGE_PROBE_V1
 \t\t * Same calls, same order, same conditions and same return value
 \t\t * as drm_atomic_helper_check(); only the intermediate results
@@ -202,6 +202,14 @@ def validate(before: str, after: str) -> None:
     for token in required:
         if token not in after:
             raise SystemExit("Phase337 required token missing: " + token)
+
+    # The generated C must not gain literal backslash-t escape text. Phase337
+    # uses actual indentation characters; introducing literal \\t would make the
+    # C source invalid even though token-count audits could still pass.
+    if after.count("\\\\t") != before.count("\\\\t"):
+        raise SystemExit(
+            "Phase337 generated C contains new literal backslash-t escape text"
+        )
 
     # Phase337 is diagnostic only: no hardware-affecting operation may change.
     behavior_tokens = (

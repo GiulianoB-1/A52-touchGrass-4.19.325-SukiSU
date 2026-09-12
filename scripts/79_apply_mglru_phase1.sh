@@ -62,6 +62,156 @@ printf 'baseline_sha=%s\n' "$BASELINE_SHA" | tee -a "$REPORT"
 git -C "$KERNEL_DIR" remote remove "$REF_REMOTE" 2>/dev/null || true
 git -C "$KERNEL_DIR" remote add "$REF_REMOTE" "$REF_REPO"
 
+resolve_groundwork_conflicts() {
+  local sha="$1"
+  local unmerged
+
+  [[ "$sha" == "67e9d5c8e0d28eb521533e0bb42771d12959d026" ]] || return 1
+  unmerged="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U | sort)"
+  [[ "$unmerged" ==   info "Fetching pinned MGLRU commit $sha"
+  git -C "$KERNEL_DIR" fetch --no-tags --depth=2 "$REF_REMOTE" "$sha"
+  subject="$(git -C "$KERNEL_DIR" show -s --format=%s "$sha")"
+  printf 'apply=%s %s\n' "$sha" "$subject" | tee -a "$REPORT"
+
+  if ! git -C "$KERNEL_DIR" cherry-pick --no-edit "$sha"; then
+    unmerged="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U || true)"
+
+    if resolve_groundwork_conflicts "$sha"; then
+      echo "resolved=$sha samsung-pageflags-kconfig" | tee -a "$REPORT"
+      continue
+    fi
+
+    if [[ -z "$unmerged" ]]; then
+      # Linux 4.19.206 may already contain individual prerequisite backports.
+      # Treat a clean empty cherry-pick as "already present" rather than a
+      # port failure.
+      echo "skip_or_empty=$sha $subject" | tee -a "$REPORT"
+      git -C "$KERNEL_DIR" cherry-pick --skip
+      continue
+    fi
+
+    {
+      echo "failed_commit=$sha"
+      echo "subject=$subject"
+      echo "unmerged_paths:"
+      printf '%s\n' "$unmerged"
+      echo
+      echo "status:"
+      git -C "$KERNEL_DIR" status --short || true
+      echo
+      echo "conflict_hunks:"
+      git -C "$KERNEL_DIR" grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . ':!*.patch' || true
+    } | tee "$CONFLICT_REPORT"
+    exit 79
+  fi
+done
+
+DEFCONFIG="$KERNEL_DIR/arch/arm64/configs/a52xq_defconfig"
+test -f "$DEFCONFIG" || fail "A52 defconfig missing"
+
+# Phase 1 safety policy:
+# Compile the full runtime-switchable implementation, but boot with legacy LRU.
+# After a successful boot MGLRU can be enabled live through:
+#   echo Y > /sys/kernel/mm/lru_gen/enabled
+"$KERNEL_DIR/scripts/config" --file "$DEFCONFIG" --enable LRU_GEN
+"$KERNEL_DIR/scripts/config" --file "$DEFCONFIG" --disable LRU_GEN_ENABLED
+"$KERNEL_DIR/scripts/config" --file "$DEFCONFIG" --disable LRU_GEN_STATS
+
+grep -Fxq 'CONFIG_LRU_GEN=y' "$DEFCONFIG"
+grep -Fxq '# CONFIG_LRU_GEN_ENABLED is not set' "$DEFCONFIG"
+
+# Structural checks for the imported implementation and the Android-specific
+# speculative-fault integration.
+grep -Fq 'struct lru_gen_struct' "$KERNEL_DIR/include/linux/mmzone.h"
+grep -Fq 'lru_gen_enabled' "$KERNEL_DIR/mm/vmscan.c"
+grep -Fq 'lru_gen_enter_fault' "$KERNEL_DIR/mm/memory.c"
+grep -Fq 'lru_gen_exit_fault' "$KERNEL_DIR/mm/memory.c"
+
+{
+  echo "mglru_compiled=y"
+  echo "mglru_default_enabled=n"
+  echo "runtime_enable=/sys/kernel/mm/lru_gen/enabled"
+  echo "runtime_min_ttl=/sys/kernel/mm/lru_gen/min_ttl_ms"
+  echo "reference_repo=$REF_REPO"
+  echo "reference_series=4.19-qcom-pinned"
+  echo "speculative_fault_integration=y"
+  echo "baseline_sha=$BASELINE_SHA"
+  echo "final_sha=$(git -C "$KERNEL_DIR" rev-parse HEAD)"
+} | tee -a "$REPORT"
+
+git -C "$KERNEL_DIR" diff --check
+info "MGLRU phase 1 import completed"
+include/linux/page-flags-layout.h\nmm/Kconfig' ]] || return 1
+
+  info "Resolving Samsung page-flags/Kconfig shape for MGLRU groundwork"
+
+  git -C "$KERNEL_DIR" checkout --ours -- include/linux/page-flags-layout.h mm/Kconfig
+
+  python3 - "$KERNEL_DIR" "$ARTIFACTS_DIR/mglru-groundwork-resolution.txt" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+report = Path(sys.argv[2])
+rows = []
+
+p = root / "include/linux/page-flags-layout.h"
+s = p.read_text()
+
+old = "#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT <= BITS_PER_LONG - NR_PAGEFLAGS"
+new = "#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LRU_GEN_WIDTH+LRU_REFS_WIDTH <= BITS_PER_LONG - NR_PAGEFLAGS"
+if old not in s:
+    raise SystemExit("Samsung NODES_WIDTH page-flags anchor missing")
+s = s.replace(old, new, 1)
+rows.append("nodes_width=preserved-samsung-plus-lrugen-bits\n")
+
+old = "#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LAST_CPUPID_SHIFT <= BITS_PER_LONG - NR_PAGEFLAGS"
+new = "#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LAST_CPUPID_SHIFT+LRU_GEN_WIDTH+LRU_REFS_WIDTH <= BITS_PER_LONG - NR_PAGEFLAGS"
+if old not in s:
+    raise SystemExit("Samsung LAST_CPUPID_WIDTH page-flags anchor missing")
+s = s.replace(old, new, 1)
+rows.append("last_cpupid_width=preserved-samsung-plus-lrugen-bits\n")
+
+old = """#if SECTIONS_WIDTH+NODES_WIDTH+ZONES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH \\
+\t> BITS_PER_LONG - NR_PAGEFLAGS"""
+new = """#if SECTIONS_WIDTH+NODES_WIDTH+ZONES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH+ \\
+\tLRU_GEN_WIDTH+LRU_REFS_WIDTH > BITS_PER_LONG - NR_PAGEFLAGS"""
+if old not in s:
+    raise SystemExit("Samsung KASAN page-flags capacity anchor missing")
+s = s.replace(old, new, 1)
+p.write_text(s)
+rows.append("kasan_capacity=includes-lrugen-bits\n")
+
+p = root / "mm/Kconfig"
+s = p.read_text()
+if "config LRU_GEN\n" not in s:
+    anchor = """config ARCH_HAS_PTE_SPECIAL
+\tbool
+"""
+    block = """
+config LRU_GEN
+\tbool "Multi-Gen LRU"
+\tdepends on MMU
+\t# the following options can use up the spare bits in page flags
+\tdepends on !MAXSMP && (64BIT || !SPARSEMEM || SPARSEMEM_VMEMMAP)
+\thelp
+\t  A high performance LRU implementation to overcommit memory.
+"""
+    if anchor not in s:
+        raise SystemExit("Samsung mm/Kconfig ARCH_HAS_PTE_SPECIAL anchor missing")
+    s = s.replace(anchor, anchor + block, 1)
+    p.write_text(s)
+rows.append("kconfig=preserved-samsung-options-added-lru-gen\n")
+
+report.write_text("".join(rows))
+PY
+
+  git -C "$KERNEL_DIR" add include/linux/page-flags-layout.h mm/Kconfig
+  git -C "$KERNEL_DIR" diff --check --cached
+  git -C "$KERNEL_DIR" cherry-pick --continue
+  return 0
+}
+
 for sha in "${MGLRU_COMMITS[@]}"; do
   info "Fetching pinned MGLRU commit $sha"
   git -C "$KERNEL_DIR" fetch --no-tags --depth=2 "$REF_REMOTE" "$sha"

@@ -61,8 +61,8 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #define TGREC_TYPE_PANIC        4U
 #define TGREC_TYPE_REBOOT       5U
 
-#define TGREC_BUILD_ID          "TG80X1"
-#define TGREC_BUILD_DESC        "phase80 llvm17 fixed-eevdf real-jit x25-guard"
+#define TGREC_BUILD_ID          "TG81F1"
+#define TGREC_BUILD_DESC        "phase81 llvm17 fixed-eevdf real-jit x29-frame"
 
 struct tgrec_header {
 	__le32 magic;
@@ -386,8 +386,8 @@ def main() -> int:
         mk.write_text(text.rstrip() + MAKE_ENTRY, encoding="utf-8")
 
     checks = {
-        "build_identity": 'TGREC_BUILD_ID          "TG80X1"' in SOURCE,
-        "phase72_identity": "phase80 llvm17 fixed-eevdf real-jit x25-guard" in SOURCE,
+        "build_identity": 'TGREC_BUILD_ID          "TG81F1"' in SOURCE,
+        "phase81_identity": "phase81 llvm17 fixed-eevdf real-jit x29-frame" in SOURCE,
         "fixed_phys": "0xB1B00000ULL" in SOURCE,
         "clear_stale_region": "memset(tgrec_mem, 0, TGREC_SIZE);" in SOURCE,
         "triple_bank": "TGREC_BANKS             3U" in SOURCE,

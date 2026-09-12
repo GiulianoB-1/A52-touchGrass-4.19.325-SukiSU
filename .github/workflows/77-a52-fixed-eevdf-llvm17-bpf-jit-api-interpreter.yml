@@ -3,11 +3,11 @@ name: 77 - A52 fixed EEVDF LLVM17 BPF JIT API interpreter backend
 on:
   push:
     branches:
-      - agent/a52-eevdf-clang17-bpf-interpreter-persistent-recorder-4.19.206-v1
+      - agent/a52-fixed-eevdf-llvm17-bpf-jit-api-interpreter-4.19.206-v1
     paths:
       - .github/workflows/77-a52-fixed-eevdf-llvm17-bpf-jit-api-interpreter.yml
       - scripts/67_*
-      - scripts/72_*
+      - scripts/77_*
       - scripts/74_*
       - scripts/76_*
       - tools/decode-touchgrass-recorder.py

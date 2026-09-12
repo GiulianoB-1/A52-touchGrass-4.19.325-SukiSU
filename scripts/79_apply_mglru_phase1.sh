@@ -192,6 +192,108 @@ PY
   git -C "$KERNEL_DIR" cherry-pick --continue
 }
 
+resolve_mglru_groundwork_conflict() {
+  local sha="$1"
+  [[ "$sha" == "67e9d5c8e0d28eb521533e0bb42771d12959d026" ]] || return 1
+
+  local conflicts
+  conflicts="$(git -C "$KERNEL_DIR" diff --name-only --diff-filter=U | sort)"
+  local expected
+  expected="$(printf '%s\n' include/linux/page-flags-layout.h mm/Kconfig | sort)"
+  [[ "$conflicts" == "$expected" ]] || return 1
+
+  info "Resolving Samsung/Qualcomm MGLRU groundwork conflicts semantically"
+  git -C "$KERNEL_DIR" checkout --ours -- include/linux/page-flags-layout.h mm/Kconfig
+
+  python3 - "$KERNEL_DIR" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+
+# Preserve Samsung's KASAN-aware page flag layout, while reserving the MGLRU
+# generation/reference bits. Use the post-Qualcomm-fix arithmetic directly so
+# the later qcom MGLRU fix does not need to undo a temporary bad layout.
+p = root / "include/linux/page-flags-layout.h"
+s = p.read_text()
+
+old = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT <= BITS_PER_LONG - NR_PAGEFLAGS
+#define NODES_WIDTH\t\tNODES_SHIFT
+"""
+new = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LRU_GEN_WIDTH+LRU_REFS_WIDTH \\\n\t<= BITS_PER_LONG - NR_PAGEFLAGS
+#define NODES_WIDTH\t\tNODES_SHIFT
+"""
+if old not in s:
+    raise SystemExit("page-flags-layout: NODES_WIDTH anchor not found")
+s = s.replace(old, new, 1)
+
+old = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_SHIFT+LAST_CPUPID_SHIFT <= BITS_PER_LONG - NR_PAGEFLAGS
+#define LAST_CPUPID_WIDTH LAST_CPUPID_SHIFT
+"""
+new = """#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_WIDTH+LAST_CPUPID_SHIFT+ \\\n\tLRU_GEN_WIDTH+LRU_REFS_WIDTH <= BITS_PER_LONG - NR_PAGEFLAGS
+#define LAST_CPUPID_WIDTH LAST_CPUPID_SHIFT
+"""
+if old not in s:
+    raise SystemExit("page-flags-layout: LAST_CPUPID_WIDTH anchor not found")
+s = s.replace(old, new, 1)
+
+kasan_tail = """#else
+#define KASAN_TAG_WIDTH 0
+#endif
+
+/*
+ * We are going to use the flags for the page to node mapping if its in
+"""
+replacement = """#else
+#define KASAN_TAG_WIDTH 0
+#endif
+
+#if SECTIONS_WIDTH+ZONES_WIDTH+NODES_WIDTH+LAST_CPUPID_WIDTH+KASAN_TAG_WIDTH+ \\\n\tLRU_GEN_WIDTH+LRU_REFS_WIDTH > BITS_PER_LONG - NR_PAGEFLAGS
+#error "Not enough bits in page flags"
+#endif
+
+/*
+ * We are going to use the flags for the page to node mapping if its in
+"""
+if kasan_tail not in s:
+    raise SystemExit("page-flags-layout: KASAN tail anchor not found")
+s = s.replace(kasan_tail, replacement, 1)
+p.write_text(s)
+
+# Preserve Samsung-specific MM options and insert only the MGLRU config stanza.
+p = root / "mm/Kconfig"
+s = p.read_text()
+anchor = """config ARCH_HAS_PTE_SPECIAL
+\tbool
+
+"""
+mglru = """config ARCH_HAS_PTE_SPECIAL
+\tbool
+
+# multi-gen LRU {
+config LRU_GEN
+\tbool "Multi-Gen LRU"
+\tdepends on MMU
+\t# the following options can use up the spare bits in page flags
+\tdepends on !MAXSMP && (64BIT || !SPARSEMEM || SPARSEMEM_VMEMMAP)
+\thelp
+\t  A high performance LRU implementation to overcommit memory.
+# }
+
+"""
+if "config LRU_GEN\n" not in s:
+    if anchor not in s:
+        raise SystemExit("mm/Kconfig: ARCH_HAS_PTE_SPECIAL anchor not found")
+    s = s.replace(anchor, mglru, 1)
+p.write_text(s)
+PY
+
+  git -C "$KERNEL_DIR" add include/linux/page-flags-layout.h mm/Kconfig
+  GIT_EDITOR=true git -C "$KERNEL_DIR" cherry-pick --continue
+  echo "resolved_semantically=$sha groundwork page-flags-layout mm/Kconfig" | tee -a "$REPORT"
+  return 0
+}
+
 for sha in "${MGLRU_COMMITS[@]}"; do
   info "Fetching pinned MGLRU commit $sha"
   git -C "$KERNEL_DIR" fetch --no-tags --depth=2 "$REF_REMOTE" "$sha"
@@ -214,6 +316,10 @@ for sha in "${MGLRU_COMMITS[@]}"; do
     if [[ -z "$unmerged" ]]; then
       echo "skip_or_empty=$sha $subject" | tee -a "$REPORT"
       git -C "$KERNEL_DIR" cherry-pick --skip
+      continue
+    fi
+
+    if resolve_mglru_groundwork_conflict "$sha"; then
       continue
     fi
 

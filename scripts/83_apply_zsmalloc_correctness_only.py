@@ -18,8 +18,7 @@ changes = []
 # b19675b6a046da6b4e160a78eedb3dd2584aa889.
 needle = """	atomic_long_dec(&pool->isolated_pages);
 """
-marker = "	smp_mb__after_atomic();
-"
+marker = "\\tsmp_mb__after_atomic();\\n"
 fn = "static inline void zs_pool_dec_isolated(struct zs_pool *pool)"
 start = s.find(fn)
 if start < 0:

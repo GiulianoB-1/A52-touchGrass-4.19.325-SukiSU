@@ -9,6 +9,21 @@
 #include <linux/security.h>
 #include <linux/spinlock.h>
 
+/* Android GKI vendor/OEM reservation macros do not exist in this 4.19 tree.
+ * They reserve opaque padding only and carry no Binder semantics. */
+#ifndef ANDROID_VENDOR_DATA
+#define ANDROID_VENDOR_DATA(_n)
+#endif
+#ifndef ANDROID_VENDOR_DATA_ARRAY
+#define ANDROID_VENDOR_DATA_ARRAY(_n, _s)
+#endif
+#ifndef ANDROID_OEM_DATA
+#define ANDROID_OEM_DATA(_n)
+#endif
+#ifndef ANDROID_OEM_DATA_ARRAY
+#define ANDROID_OEM_DATA_ARRAY(_n, _s)
+#endif
+
 #ifndef VISIBLE_IF_KUNIT
 #define VISIBLE_IF_KUNIT
 #endif

@@ -97,6 +97,8 @@ jobs:
           grep -Fq 'binder_alloc_clear_buf' "$KERNEL/drivers/android/binder_alloc.c"
           grep -Fq 'binder_ioctl_get_extended_error' "$KERNEL/drivers/android/binder.c"
           grep -Fq 'BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'Phase81_UAF_TARGET_THREAD_PIN' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'target_thread = t->to_thread;' "$KERNEL/drivers/android/binder.c"
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- drivers/android/binder.c drivers/android/binder_alloc.c drivers/android/binder_alloc.h include/uapi/linux/android/binder.h \
             | tee artifacts/android-binder-mainline-p1.diff

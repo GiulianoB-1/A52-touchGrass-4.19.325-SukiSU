@@ -1,0 +1,137 @@
+name: 82 - A52 Android17 Binder + Retained BinderFS Clang11
+
+on:
+  push:
+    branches:
+      - agent/a52-android17-binder-binderfs-4.19.206-v1
+    paths:
+      - .github/workflows/82-a52-android17-binder-binderfs-clang11.yml
+      - scripts/81_*
+      - scripts/82_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-android17-binder-binderfs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  MAKE_KEEP_GOING: '1'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-4.19.206-android17-binder-binderfs
+
+jobs:
+  build:
+    name: Rebuild Phase80 baseline and compile Android17 Binder with retained BinderFS
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-binder82-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-binder81-${{ runner.os }}-
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+            a52xq-4.19.206-bpf-ringbuf-${{ runner.os }}-
+
+      - name: Reconstruct exact Phase80 kernel baseline
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Apply successful Android17 Binder core port
+        run: |
+          set -Eeuo pipefail
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' workspace/touchgrass-a52xq/include/uapi/linux/android/binder.h
+          grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' workspace/touchgrass-a52xq/include/uapi/linux/android/binder.h
+          grep -Fq 'BR_TRANSACTION_PENDING_FROZEN' workspace/touchgrass-a52xq/include/uapi/linux/android/binder.h
+
+      - name: Re-enable retained Linux 4.19 BinderFS
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          grep -Fq 'CONFIG_ANDROID_BINDERFS=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Compile Android17 Binder plus BinderFS
+        id: binder-build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh             2>&1 | tee artifacts/android17-binder-binderfs-build.log
+
+      - name: Record Phase82 diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/binder82-kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/binder82-diff-check.txt 2>&1 || true
+            git -C workspace/touchgrass-a52xq diff -- drivers/android include/uapi/linux/android/binder.h arch/arm64/configs/a52xq_defconfig               > artifacts/binder82-full.diff || true
+          fi
+          grep -nE 'error:|undefined reference|ld.lld: error|FAILED:' artifacts/android17-binder-binderfs-build.log             > artifacts/binder82-errors.txt 2>/dev/null || true
+          ccache --show-stats > artifacts/binder82-ccache.txt 2>&1 || true
+
+      - name: Upload Phase82 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-android17-binder-binderfs-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require successful BinderFS-integrated build
+        if: always()
+        run: |
+          test -s "artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core"
+          test -s workspace/touchgrass-a52xq/out/vmlinux

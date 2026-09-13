@@ -38,4 +38,13 @@ static inline void __binder_spin_cleanup(spinlock_t **lock)
 #define guard(_name) __BINDER_JOIN(__binder_guard_, _name)
 #endif
 
+/* Android 17 Binder netlink reporting is diagnostics-only. The generated
+ * 6.18 generic-netlink family is intentionally deferred on the 4.19 probe. */
+#ifndef genl_register_family
+#define genl_register_family(...) (0)
+#endif
+#ifndef genl_unregister_family
+#define genl_unregister_family(...) do { } while (0)
+#endif
+
 #endif

@@ -559,29 +559,32 @@ elif "put_pin_sem" in s:
     raise SystemExit("segment.c leftover put_pin_sem")
 p.write_text(s)
 
-replace_once(
-    p,
-"sum_blk_addr(sbi, NR_CURSEG_TYPE, type)",
-"sum_blk_addr(sbi, NR_CURSEG_PERSIST_TYPE, type)",
-    "segment.c normal summary persistent count",
-)
-replace_once(
-    p,
-"""\tf2fs_ra_meta_pages(sbi, sum_blk_addr(sbi, NR_CURSEG_TYPE, type),
-\t\t\t\t\tNR_CURSEG_TYPE - type, META_CP, true);
-""",
-"""\tf2fs_ra_meta_pages(sbi,
-\t\t\t\tsum_blk_addr(sbi, NR_CURSEG_PERSIST_TYPE, type),
-\t\t\t\tNR_CURSEG_PERSIST_TYPE - type, META_CP, true);
-""",
-    "segment.c summary readahead persistent count",
-)
+s = p.read_text()
+old_sum_addr = "sum_blk_addr(sbi, NR_CURSEG_TYPE, type)"
+if old_sum_addr in s:
+    if s.count(old_sum_addr) != 2:
+        raise SystemExit(f"segment.c: expected two persistent-summary anchors, found {s.count(old_sum_addr)}")
+    s = s.replace(old_sum_addr, "sum_blk_addr(sbi, NR_CURSEG_PERSIST_TYPE, type)")
+elif s.count("sum_blk_addr(sbi, NR_CURSEG_PERSIST_TYPE, type)") < 2:
+    raise SystemExit("segment.c: summary count conversion is partial")
+if "NR_CURSEG_TYPE - type, META_CP, true" in s:
+    s = s.replace("NR_CURSEG_TYPE - type, META_CP, true",
+                  "NR_CURSEG_PERSIST_TYPE - type, META_CP, true", 1)
+elif "NR_CURSEG_PERSIST_TYPE - type, META_CP, true" not in s:
+    raise SystemExit("segment.c: summary readahead count conversion missing")
+p.write_text(s)
 
 # build_curseg: initialize all 7 states, but only six are persistent log types.
 replace_once(
     p,
-"\tfor (i = 0; i < NR_CURSEG_TYPE; i++) {\n",
-"\tfor (i = 0; i < NO_CHECK_TYPE; i++) {\n",
+"""\tSM_I(sbi)->curseg_array = array;
+
+\tfor (i = 0; i < NR_CURSEG_TYPE; i++) {
+""",
+"""\tSM_I(sbi)->curseg_array = array;
+
+\tfor (i = 0; i < NO_CHECK_TYPE; i++) {
+""",
     "segment.c build curseg loop",
 )
 replace_once(
@@ -606,8 +609,18 @@ replace_once(
 
 replace_once(
     p,
-"\tfor (i = 0; i < NO_CHECK_TYPE; i++) {\n",
-"\tfor (i = 0; i < NR_PERSISTENT_LOG; i++) {\n",
+"""\t/*
+\t * In LFS/SSR curseg, .next_blkoff should point to an unused blkaddr;
+\t * In LFS curseg, all blkaddr after .next_blkoff should be unused.
+\t */
+\tfor (i = 0; i < NO_CHECK_TYPE; i++) {
+""",
+"""\t/*
+\t * In LFS/SSR curseg, .next_blkoff should point to an unused blkaddr;
+\t * In LFS curseg, all blkaddr after .next_blkoff should be unused.
+\t */
+\tfor (i = 0; i < NR_PERSISTENT_LOG; i++) {
+""",
     "segment.c sanity persistent loop",
 )
 

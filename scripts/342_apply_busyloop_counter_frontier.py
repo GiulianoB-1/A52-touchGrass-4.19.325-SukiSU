@@ -109,11 +109,10 @@ static void a52_r342_sideband_write(u32 event, u32 tick)
 
 static int a52_r342_thread_fn(void *unused)
 {
-	struct sched_param sp = { .sched_priority = 1 };
 	u64 next;
 	unsigned int tick = 0;
 
-	sched_setscheduler_nocheck(current, SCHED_FIFO, &sp);
+	sched_set_fifo_low(current);
 	a52_r342_sideband_write(A52_R342_EVT_THREAD_START, 0U);
 	next = ktime_get_ns() + A52_R342_INTERVAL_NS;
 
@@ -175,7 +174,7 @@ def validate(before: str, after: str) -> None:
         "A52_R342_CPU 5U",
         "#include <uapi/linux/sched/types.h>",
         "P276 342A map=%u kt=%ld cpu=%u int=250 lim=%u",
-        "sched_setscheduler_nocheck(current, SCHED_FIFO, &sp);",
+        "sched_set_fifo_low(current);",
         "kthread_bind(a52_r342_task, A52_R342_CPU);",
         "__flush_dcache_area(dst0, sizeof(slot));",
         "__flush_dcache_area(dst1, sizeof(slot));",

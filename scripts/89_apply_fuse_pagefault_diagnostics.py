@@ -20,6 +20,14 @@ for p in (fuse, fault):
 # ---------------------------------------------------------------------------
 s = fuse.read_text()
 
+# Make diagnostic dependencies explicit on the legacy 4.19 tree.
+include_anchor = '#include <linux/uio.h>\n'
+include_block = '#include <linux/uio.h>\n#include <linux/preempt.h>\n#include <linux/smp.h>\n#include <linux/uaccess.h>\n'
+if include_block not in s:
+    if include_anchor not in s:
+        raise SystemExit('passthrough.c include anchor missing')
+    s = s.replace(include_anchor, include_block, 1)
+
 def add_entry_balance(func_sig, local_anchor, tag):
     global s
     start = s.find(func_sig)

@@ -57,10 +57,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p toolchains/llvm17
-          curl -L --fail --retry 3 \
-            https://www.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz \
-            -o /tmp/llvm-17.0.6-x86_64.tar.xz
-          tar -xJf /tmp/llvm-17.0.6-x86_64.tar.xz -C toolchains/llvm17 --strip-components=1
+          LLVM_URL=https://www.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz
+          LLVM_TARBALL=/tmp/llvm-17.0.6-x86_64.tar.xz
+          rm -f "$LLVM_TARBALL"
+          curl --http1.1 -L --fail \
+            --retry 8 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 30 --continue-at - \
+            "$LLVM_URL" -o "$LLVM_TARBALL"
+          test "$(stat -c%s "$LLVM_TARBALL")" -gt 100000000
+          tar -xJf "$LLVM_TARBALL" -C toolchains/llvm17 --strip-components=1
           test -x toolchains/llvm17/bin/clang
           toolchains/llvm17/bin/clang --version
           echo "AUTOFDO_CLANG_BIN=$GITHUB_WORKSPACE/toolchains/llvm17/bin/clang" >> "$GITHUB_ENV"

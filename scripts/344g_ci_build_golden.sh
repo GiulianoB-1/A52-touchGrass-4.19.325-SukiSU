@@ -63,14 +63,20 @@ for token in (
     if actrl.count(token) != bctrl.count(token) or ahw.count(token) != bhw.count(token):
         raise SystemExit('Phase344G forbidden functional delta: ' + token)
 
-# Trigger/completion contract must remain exactly one normal write on each
-# inherited trigger path and one normal completion wait.
-for text,label in ((bhw,'before-hw'),(ahw,'after-hw')):
-    if text.count('DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);') != 2:
-        raise SystemExit(f'Phase344G {label} unexpected SW_TRIGGER write count')
-for text,label in ((bctrl,'before-ctrl'),(actrl,'after-ctrl')):
-    if text.count('wait_for_completion_timeout(') != 1:
-        raise SystemExit(f'Phase344G {label} unexpected completion-wait count')
+# Trigger/completion contract must be unchanged by Phase344G.  Do not assume
+# a hard-coded number of trigger sites because the inherited TouchGrass tree
+# may contain additional legitimate paths outside the two hooks instrumented
+# here.  The recorder is valid iff it adds/removes none of them.
+sw = 'DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);'
+if ahw.count(sw) != bhw.count(sw):
+    raise SystemExit(
+        f'Phase344G changed SW_TRIGGER write count: {bhw.count(sw)} -> {ahw.count(sw)}'
+    )
+wait = 'wait_for_completion_timeout('
+if actrl.count(wait) != bctrl.count(wait):
+    raise SystemExit(
+        f'Phase344G changed completion-wait count: {bctrl.count(wait)} -> {actrl.count(wait)}'
+    )
 
 if ahw.count('DSI_R32(') <= bhw.count('DSI_R32('):
     raise SystemExit('Phase344G expected read-only MMIO coverage to increase')

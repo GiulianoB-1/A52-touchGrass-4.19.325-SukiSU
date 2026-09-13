@@ -292,6 +292,83 @@ save(p, s)
 # ---------------------------------------------------------------------------
 p, s = load("drivers/android/binder.c")
 
+# 2026 upstream Binder lifetime hardening:
+# 114a116aaa5f ("binder: fix UAF in binder_thread_release()")
+# f223d27a546c ("binder: fix UAF in binder_free_transaction()")
+#
+# The vendor tree has the affected lifetime pattern: binder_thread_release()
+# clears t->to_proc/t->to_thread under t->lock, while binder_free_transaction()
+# dereferences t->to_proc without pinning the target thread. Capture both under
+# t->lock and pin the thread so its proc remains alive until we are done.
+if "Phase81_UAF_TARGET_THREAD_PIN" not in s:
+    old = """static void binder_free_transaction(struct binder_transaction *t)
+{
+	struct binder_proc *target_proc = t->to_proc;
+
+	if (target_proc) {
+		binder_inner_proc_lock(target_proc);
+		target_proc->outstanding_txns--;
+		if (target_proc->outstanding_txns < 0)
+			pr_warn("%s: Unexpected outstanding_txns %d\\n",
+				__func__, target_proc->outstanding_txns);
+		if (!target_proc->outstanding_txns && target_proc->is_frozen)
+			wake_up_interruptible_all(&target_proc->freeze_wait);
+		if (t->buffer)
+			t->buffer->transaction = NULL;
+		binder_inner_proc_unlock(target_proc);
+	}
+	/*
+	 * If the transaction has no target_proc, then
+	 * t->buffer->transaction has already been cleared.
+	 */
+	kfree(t);
+	binder_stats_deleted(BINDER_STAT_TRANSACTION);
+}
+"""
+    new = """static void binder_free_transaction(struct binder_transaction *t)
+{
+	struct binder_thread *target_thread;
+	struct binder_proc *target_proc;
+
+	/* Phase81_UAF_TARGET_THREAD_PIN */
+	spin_lock(&t->lock);
+	target_proc = t->to_proc;
+	target_thread = t->to_thread;
+	/*
+	 * Pin target_thread to keep target_proc alive. Undelivered
+	 * transactions with no target thread are safe because target_proc
+	 * can only be the current context in those paths.
+	 */
+	if (target_thread)
+		atomic_inc(&target_thread->tmp_ref);
+	spin_unlock(&t->lock);
+
+	if (target_proc) {
+		binder_inner_proc_lock(target_proc);
+		target_proc->outstanding_txns--;
+		if (target_proc->outstanding_txns < 0)
+			pr_warn("%s: Unexpected outstanding_txns %d\\n",
+				__func__, target_proc->outstanding_txns);
+		if (!target_proc->outstanding_txns && target_proc->is_frozen)
+			wake_up_interruptible_all(&target_proc->freeze_wait);
+		if (t->buffer)
+			t->buffer->transaction = NULL;
+		binder_inner_proc_unlock(target_proc);
+	}
+
+	if (target_thread)
+		binder_thread_dec_tmpref(target_thread);
+
+	/*
+	 * If the transaction has no target_proc, then
+	 * t->buffer->transaction has already been cleared.
+	 */
+	kfree(t);
+	binder_stats_deleted(BINDER_STAT_TRANSACTION);
+}
+"""
+    s = replace_once(s, old, new, "binder 2026 transaction lifetime UAF fixes")
+
 if "#define binder_set_extended_error" not in s:
     anchor = "#define to_flat_binder_object(hdr)"
     require(s, anchor, "binder extended error macro anchor")
@@ -563,6 +640,8 @@ checks = {
         "BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT",
         "oneway_spam_detection_enabled",
         "binder_ioctl_get_extended_error",
+        "Phase81_UAF_TARGET_THREAD_PIN",
+        "target_thread = t->to_thread;",
         "t->buffer->clear_on_free = !!(t->flags & TF_CLEAR_BUF);",
     ],
 }

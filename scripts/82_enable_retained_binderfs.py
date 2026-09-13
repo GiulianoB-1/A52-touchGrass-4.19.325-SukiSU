@@ -3,14 +3,87 @@ from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+
 cfg = root / "arch/arm64/configs/a52xq_defconfig"
-s = cfg.read_text()
+text = cfg.read_text()
 
 disabled = "# CONFIG_ANDROID_BINDERFS is not set"
-if disabled not in s:
+if disabled not in text:
     raise SystemExit("Phase81 BinderFS-disabled anchor missing")
 
-s = s.replace(disabled, "CONFIG_ANDROID_BINDERFS=y", 1)
-cfg.write_text(s)
+text = text.replace(disabled, "CONFIG_ANDROID_BINDERFS=y", 1)
+cfg.write_text(text)
 
-print("Phase82: retained Linux 4.19 BinderFS re-enabled")
+binderfs = root / "drivers/android/binderfs.c"
+src = binderfs.read_text()
+
+signature = "static int init_binder_logs(struct super_block *sb)"
+start = src.find(signature)
+if start < 0:
+    raise SystemExit("init_binder_logs() missing from retained BinderFS")
+
+brace = src.find("{", start)
+if brace < 0:
+    raise SystemExit("init_binder_logs() opening brace missing")
+
+depth = 0
+end = None
+for pos in range(brace, len(src)):
+    if src[pos] == "{":
+        depth += 1
+    elif src[pos] == "}":
+        depth -= 1
+        if depth == 0:
+            end = pos + 1
+            break
+
+if end is None:
+    raise SystemExit("init_binder_logs() closing brace missing")
+
+body = r'''{
+	struct dentry *binder_logs_root_dir, *dentry, *proc_log_dir;
+	const struct binder_debugfs_entry *db_entry;
+	struct binderfs_info *info;
+	int ret = 0;
+
+	binder_logs_root_dir = binderfs_create_dir(sb->s_root,
+					   "binder_logs");
+	if (IS_ERR(binder_logs_root_dir)) {
+		ret = PTR_ERR(binder_logs_root_dir);
+		goto out;
+	}
+
+	/*
+	 * Android 17 Binder exports its debug/stat surfaces through
+	 * binder_debugfs_entries[] instead of the old individual
+	 * binder_*_fops globals used by the original 4.19 BinderFS.
+	 * Reuse that table while retaining the 4.19 BinderFS itself.
+	 */
+	binder_for_each_debugfs_entry(db_entry) {
+		dentry = binderfs_create_file(binder_logs_root_dir,
+					      db_entry->name,
+					      db_entry->fops,
+					      db_entry->data);
+		if (IS_ERR(dentry)) {
+			ret = PTR_ERR(dentry);
+			goto out;
+		}
+	}
+
+	proc_log_dir = binderfs_create_dir(binder_logs_root_dir, "proc");
+	if (IS_ERR(proc_log_dir)) {
+		ret = PTR_ERR(proc_log_dir);
+		goto out;
+	}
+
+	info = sb->s_fs_info;
+	info->proc_log_dir = proc_log_dir;
+
+out:
+	return ret;
+}'''
+
+src = src[:brace] + body + src[end:]
+binderfs.write_text(src)
+
+print("Phase82: retained Linux 4.19 BinderFS re-enabled with Android17 log-table bridge")

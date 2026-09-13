@@ -1,0 +1,78 @@
+name: Phase345 - DMA us
+run-name: Phase345 - DMA us frontier
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase345-dma-us-v1
+    paths:
+      - .github/workflows/345-a52-dma-us.yml
+      - scripts/345_apply_dma_us_frontier.py
+      - scripts/345_ci_build_gki.sh
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-phase345-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase345 DMA us
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: '4'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 5G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/345_apply_dma_us_frontier.py
+          bash -n scripts/345_ci_build_gki.sh
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-phase345-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase343-${{ runner.os }}-
+            a52xq-phase342-${{ runner.os }}-
+            a52xq-linux-5.10-ccache-${{ runner.os }}-
+      - name: Build
+        run: bash scripts/345_ci_build_gki.sh
+      - name: Upload
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE345-DMA-US-${{ github.run_number }}
+          path: phase345-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload boot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE345-DMA-US-${{ github.run_number }}-BOOT-IMG
+          path: phase345-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE345-DMA-US-${{ github.run_number }}-FAILED
+          path: phase345-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

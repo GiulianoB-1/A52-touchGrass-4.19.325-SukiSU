@@ -169,12 +169,12 @@ static void a52_r343_start(void)
     # If ktime freezes, Phase342 would never leave CPU5 and could starve this
     # instruction-driven probe. Disable only the Phase342 runtime start while
     # retaining its code and markers for lineage/audit. Since that removes the
-    # helper's only call site, explicitly mark the inherited helper maybe-unused
-    # so -Werror does not reject the intentionally disabled Phase342 runtime.
+    # helper's only call site, explicitly mark the inherited helper __used so the
+    # compiler both accepts it and retains its lineage/diagnostic marker in Image.
     text = one(
         text,
         "static void a52_r342_start(void)\n",
-        "static void __maybe_unused a52_r342_start(void)\n",
+        "static void __used a52_r342_start(void)\n",
         "mark disabled Phase342 start helper maybe-unused",
     )
 
@@ -200,7 +200,7 @@ def validate(before: str, after: str) -> None:
         "read_sysreg(cntvct_el0)",
         "sched_setscheduler_nocheck(current, SCHED_FIFO, &sp);",
         "kthread_bind(a52_r343_task, A52_R343_CPU);",
-        "static void __maybe_unused a52_r342_start(void)",
+        "static void __used a52_r342_start(void)",
         "__flush_dcache_area(dst0, sizeof(slot));",
         "__flush_dcache_area(dst1, sizeof(slot));",
     ):

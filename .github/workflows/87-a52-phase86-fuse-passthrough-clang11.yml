@@ -353,7 +353,7 @@ jobs:
           grep -Fq 'fuse_passthrough_mmap' "$KERNEL/fs/fuse/file.c"
           grep -Fq 'idr_init(&fc->passthrough_req);' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'fuse_features_group' "$KERNEL/fs/fuse/inode.c"
-          grep -Fq '"supported\\n"' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq '"supported\n"' "$KERNEL/fs/fuse/inode.c"
           test -s "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'prepare_creds()' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'FILESYSTEM_MAX_STACK_DEPTH' "$KERNEL/fs/fuse/passthrough.c"

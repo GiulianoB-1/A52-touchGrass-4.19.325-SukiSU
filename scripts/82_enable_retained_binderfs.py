@@ -118,6 +118,6 @@ void unload_binderfs(void)
 '''
     src = src[:init_end] + unload + src[init_end:]
 
-binderfs.write_text(src)
+binderfs.write_text(src.rstrip() + "\n")
 
 print("Phase82: retained Linux 4.19 BinderFS re-enabled with Android17 log/unload bridges")

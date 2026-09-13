@@ -13,9 +13,10 @@ Donor lineage:
 
 Samsung compatibility:
   * Preserve CONFIG_SAMSUNG_FREECESS hooks unchanged.
-  * Preserve Samsung BINDER_SET_SYSTEM_SERVER_PID at ioctl slot 17.
-  * Do not add upstream BINDER_GET_EXTENDED_ERROR at slot 17 because it
-    collides with Samsung's vendor UAPI on this tree.
+  * Preserve Samsung BINDER_SET_SYSTEM_SERVER_PID.
+  * Also expose upstream BINDER_GET_EXTENDED_ERROR. Both use ioctl number 17,
+    but their full ioctl values differ because direction and payload size are
+    encoded in the command, so they safely coexist.
 """
 
 from pathlib import Path
@@ -430,6 +431,203 @@ replace_once(
 )
 
 # ---------------------------------------------------------------------------
+# Extended Binder errors. Samsung's BINDER_SET_SYSTEM_SERVER_PID uses
+# _IOW('b', 17, __u32), while upstream BINDER_GET_EXTENDED_ERROR uses
+# _IOWR('b', 17, struct binder_extended_error). These are different full
+# ioctl values, so preserve both ABIs.
+# ---------------------------------------------------------------------------
+replace_once(
+    "include/uapi/linux/android/binder.h",
+    """struct binder_frozen_status_info {
+\t__u32 pid;
+\t__u32 sync_recv;
+\t__u32 async_recv;
+};
+""",
+    """struct binder_frozen_status_info {
+\t__u32 pid;
+\t__u32 sync_recv;
+\t__u32 async_recv;
+};
+
+struct binder_extended_error {
+\t__u32 id;
+\t__u32 command;
+\t__s32 param;
+};
+""",
+)
+
+replace_once(
+    "include/uapi/linux/android/binder.h",
+    """#define BINDER_SET_SYSTEM_SERVER_PID\t_IOW('b', 17, __u32)
+""",
+    """#define BINDER_SET_SYSTEM_SERVER_PID\t_IOW('b', 17, __u32)
+#define BINDER_GET_EXTENDED_ERROR _IOWR('b', 17, struct binder_extended_error)
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """#define to_flat_binder_object(hdr) \\
+\tcontainer_of(hdr, struct flat_binder_object, hdr)
+""",
+    """#define binder_set_extended_error(ee, _id, _command, _param) \\
+\tdo { \\
+\t\t(ee)->id = (_id); \\
+\t\t(ee)->command = (_command); \\
+\t\t(ee)->param = (_param); \\
+\t} while (0)
+
+#define to_flat_binder_object(hdr) \\
+\tcontainer_of(hdr, struct flat_binder_object, hdr)
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """\tstruct binder_error return_error;
+\tstruct binder_error reply_error;
+\twait_queue_head_t wait;
+""",
+    """\tstruct binder_error return_error;
+\tstruct binder_error reply_error;
+\tstruct binder_extended_error ee;
+\twait_queue_head_t wait;
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """#ifdef CONFIG_SAMSUNG_FREECESS
+static void freecess_async_binder_report""",
+    """static void binder_set_txn_from_error(struct binder_transaction *t, int id,
+\t\t\t\t      uint32_t command, int32_t param)
+{
+\tstruct binder_thread *from = binder_get_txn_from_and_acq_inner(t);
+
+\tif (!from) {
+\t\t/* annotation for sparse */
+\t\t__release(&from->proc->inner_lock);
+\t\treturn;
+\t}
+
+\t/* Do not override an earlier error that userspace has not consumed. */
+\tif (from->ee.command == BR_OK)
+\t\tbinder_set_extended_error(&from->ee, id, command, param);
+\tbinder_inner_proc_unlock(from->proc);
+\tbinder_thread_dec_tmpref(from);
+}
+
+#ifdef CONFIG_SAMSUNG_FREECESS
+static void freecess_async_binder_report""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """\te->context_name = proc->context->name;
+
+\tif (reply) {
+""",
+    """\te->context_name = proc->context->name;
+
+\tbinder_inner_proc_lock(proc);
+\tbinder_set_extended_error(&thread->ee, t_debug_id, BR_OK, 0);
+\tbinder_inner_proc_unlock(proc);
+
+\tif (reply) {
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """\tif (in_reply_to) {
+\t\tbinder_restore_priority(current, in_reply_to->saved_priority);
+\t\tthread->return_error.cmd = BR_TRANSACTION_COMPLETE;
+\t\tbinder_enqueue_thread_work(thread, &thread->return_error.work);
+\t\tbinder_send_failed_reply(in_reply_to, return_error);
+\t} else {
+\t\tthread->return_error.cmd = return_error;
+\t\tbinder_enqueue_thread_work(thread, &thread->return_error.work);
+\t}
+""",
+    """\tif (in_reply_to) {
+\t\tbinder_restore_priority(current, in_reply_to->saved_priority);
+\t\tbinder_set_txn_from_error(in_reply_to, t_debug_id,
+\t\t\t\t  return_error, return_error_param);
+\t\tthread->return_error.cmd = BR_TRANSACTION_COMPLETE;
+\t\tbinder_enqueue_thread_work(thread, &thread->return_error.work);
+\t\tbinder_send_failed_reply(in_reply_to, return_error);
+\t} else {
+\t\tbinder_inner_proc_lock(proc);
+\t\tbinder_set_extended_error(&thread->ee, t_debug_id,
+\t\t\t\t  return_error, return_error_param);
+\t\tbinder_inner_proc_unlock(proc);
+\t\tthread->return_error.cmd = return_error;
+\t\tbinder_enqueue_thread_work(thread, &thread->return_error.work);
+\t}
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """\tthread->reply_error.work.type = BINDER_WORK_RETURN_ERROR;
+\tthread->reply_error.cmd = BR_OK;
+\tINIT_LIST_HEAD(&new_thread->waiting_thread_node);
+""",
+    """\tthread->reply_error.work.type = BINDER_WORK_RETURN_ERROR;
+\tthread->reply_error.cmd = BR_OK;
+\tbinder_set_extended_error(&thread->ee, 0, BR_OK, 0);
+\tINIT_LIST_HEAD(&new_thread->waiting_thread_node);
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+""",
+    """static int binder_ioctl_get_extended_error(struct binder_thread *thread,
+\t\t\t\t\t   void __user *ubuf)
+{
+\tstruct binder_extended_error ee;
+
+\tbinder_inner_proc_lock(thread->proc);
+\tee = thread->ee;
+\tbinder_set_extended_error(&thread->ee, 0, BR_OK, 0);
+\tbinder_inner_proc_unlock(thread->proc);
+
+\tif (copy_to_user(ubuf, &ee, sizeof(ee)))
+\t\treturn -EFAULT;
+
+\treturn 0;
+}
+
+static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+""",
+)
+
+replace_once(
+    "drivers/android/binder.c",
+    """\t\tproc->oneway_spam_detection_enabled = (bool)enable;
+\t\tbinder_inner_proc_unlock(proc);
+\t\tbreak;
+\t}
+\tdefault:
+""",
+    """\t\tproc->oneway_spam_detection_enabled = (bool)enable;
+\t\tbinder_inner_proc_unlock(proc);
+\t\tbreak;
+\t}
+\tcase BINDER_GET_EXTENDED_ERROR:
+\t\tret = binder_ioctl_get_extended_error(thread, ubuf);
+\t\tif (ret < 0)
+\t\t\tgoto err;
+\t\tbreak;
+\tdefault:
+""",
+)
+
+# ---------------------------------------------------------------------------
 # Validation: make Samsung integration and the new ABI explicit build inputs.
 # ---------------------------------------------------------------------------
 checks = {
@@ -437,6 +635,8 @@ checks = {
         "BINDER_ENABLE_ONEWAY_SPAM_DETECTION",
         "BR_ONEWAY_SPAM_SUSPECT",
         "BINDER_SET_SYSTEM_SERVER_PID",
+        "BINDER_GET_EXTENDED_ERROR",
+        "struct binder_extended_error",
     ],
     "drivers/android/binder_alloc.h": [
         "oneway_spam_suspect",
@@ -452,6 +652,9 @@ checks = {
         "BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT",
         "oneway_spam_detection_enabled",
         "case BINDER_ENABLE_ONEWAY_SPAM_DETECTION",
+        "case BINDER_GET_EXTENDED_ERROR:",
+        "binder_ioctl_get_extended_error",
+        "binder_set_txn_from_error",
         "struct binder_thread *target_thread;",
         "atomic_inc(&target_thread->tmp_ref);",
         "binder_thread_dec_tmpref(target_thread);",
@@ -471,20 +674,15 @@ for rel, needles in checks.items():
             raise SystemExit(f"{rel}: validation failed, missing {needle!r}")
         report.append(f"OK {rel}: {needle}")
 
-# Explicitly reject the upstream slot-17 definition because Samsung owns 17.
-uapi = (ROOT / "include/uapi/linux/android/binder.h").read_text()
-if "BINDER_GET_EXTENDED_ERROR" in uapi:
-    raise SystemExit("unexpected BINDER_GET_EXTENDED_ERROR: conflicts with Samsung ioctl 17")
-
 (ART / "phase81-modern-binder-report.txt").write_text(
     "\n".join(report)
     + "\n\nDonor security fixes:\n"
     + "binder_thread_release race serialization: 1ac5be05b2854ba2329c0e52a67edd80b3ab4352\n"
     + "binder_free_transaction target pin: 1290154c48656bd1012a837076a0fbe379330eb3\n"
-    + "Samsung ioctl 17 preserved; upstream extended-error ioctl intentionally omitted.\n"
+    + "Samsung system-server ioctl and upstream extended-error ioctl both retained safely.\n"
 )
 
 print("[phase81] modern Binder compatibility slice applied")
 print("[phase81] Samsung Freecess and freezer hooks preserved")
 print("[phase81] ioctl 16 oneway spam detection enabled")
-print("[phase81] ioctl 17 left as Samsung vendor ABI")
+print("[phase81] Android extended-error ABI enabled alongside Samsung vendor ioctl")

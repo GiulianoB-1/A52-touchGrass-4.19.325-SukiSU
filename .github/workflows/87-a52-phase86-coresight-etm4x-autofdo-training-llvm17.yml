@@ -1,0 +1,524 @@
+name: 87 - A52 Phase86 stack + CoreSight ETM4X AutoFDO Training LLVM17
+
+on:
+  push:
+    branches:
+      - agent/a52-phase87-coresight-etm4x-autofdo-training-4.19.206-v1
+    paths:
+      - .github/workflows/87-a52-phase86-coresight-etm4x-autofdo-training-llvm17.yml
+      - scripts/67_*
+      - scripts/68_*
+      - scripts/70_*
+      - scripts/74_*
+      - scripts/77_*
+      - scripts/78_*
+      - scripts/79_*
+      - scripts/80_*
+      - scripts/86_*
+      - scripts/87_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-phase87-coresight-etm4x-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build Phase86 stack with CoreSight ETM4X AutoFDO training support
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Install pinned LLVM 17.0.6
+        run: |
+          set -Eeuo pipefail
+          mkdir -p toolchains/llvm17
+          LLVM_URL=https://www.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz
+          LLVM_TARBALL=/tmp/llvm-17.0.6-x86_64.tar.xz
+          rm -f "$LLVM_TARBALL"
+          curl --http1.1 -L --fail \
+            --retry 8 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 30 --continue-at - \
+            "$LLVM_URL" -o "$LLVM_TARBALL"
+          test "$(stat -c%s "$LLVM_TARBALL")" -gt 100000000
+          tar -xJf "$LLVM_TARBALL" -C toolchains/llvm17 --strip-components=1
+          test -x toolchains/llvm17/bin/clang
+          toolchains/llvm17/bin/clang --version
+          echo "AUTOFDO_CLANG_BIN=$GITHUB_WORKSPACE/toolchains/llvm17/bin/clang" >> "$GITHUB_ENV"
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-4.19.206-eevdf-p1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-4.19.206-bpf-ringbuf-${{ runner.os }}-
+            a52xq-4.19.206-manual-susfs-detection-${{ runner.os }}-
+
+      - name: Prepare exact touchGrass source
+        run: |
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+
+      - name: Select LLVM17 for the kernel build
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/67_apply_autofdo_a0_toolchain.py .
+          grep -Fq 'AUTOFDO_CLANG_BIN' scripts/common.sh
+
+      - name: Update vendor tree to Linux 4.19.206
+        run: |
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+
+      - name: Restore working ReSukiSU BPF-repair baseline
+        run: |
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Apply ARM64 BPF callee-saved ABI guard
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          python3 scripts/86_apply_bpf_abi_guard.py "$KERNEL"
+          grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'A52_PHASE86_BPF_ABI_GUARD_V1' "$KERNEL/include/linux/filter.h"
+          grep -Fq 'bpf_abi_guard.o' "$KERNEL/arch/arm64/net/Makefile"
+          grep -Fq $'stp\tx25, x26' "$KERNEL/arch/arm64/net/bpf_abi_guard.S"
+          grep -Fq $'ldp\tx25, x26' "$KERNEL/arch/arm64/net/bpf_abi_guard.S"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply EEVDF phase 1 sched_entity scaffold
+        run: |
+          mkdir -p artifacts
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- include/linux/sched.h \
+            | tee artifacts/eevdf-phase1-sched-entity.diff
+          grep -Fq 'EEVDF phase 1 scaffold' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'min_deadline;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'vlag;' workspace/touchgrass-a52xq/include/linux/sched.h
+          grep -Fq 'slice;' workspace/touchgrass-a52xq/include/linux/sched.h
+
+      - name: Apply EEVDF phase 2 weighted virtual-time accounting
+        run: |
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/sched.h kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase2-accounting.diff
+          grep -Fq 'EEVDF phase 2 accounting' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_avg_vruntime_add' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_entity_eligible' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 3 deadline and lag bookkeeping
+        run: |
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase3-deadline-lag.diff
+          grep -Fq 'EEVDF phase 3 deadline/lag bookkeeping' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_update_entity_lag' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 4 augmented tree and picker scaffold
+        run: |
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase4-tree-picker.diff
+          grep -Fq 'EEVDF phase 4 augmented deadline tree' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'rb_insert_augmented_cached' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_pick_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 5 picker integration
+        run: |
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase5-picker-integration.diff
+          grep -Fq 'EEVDF phase 5 picker integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf_enabled' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'sched_eevdf=1' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 6 wakeup and tick preemption
+        run: |
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase6-wakeup-preempt.diff
+          grep -Fq 'EEVDF phase 6 wakeup/preemption integration' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_should_preempt' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'curr->vruntime - curr->deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF phase 7 placement consistency
+        run: |
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-phase7-placement-consistency.diff
+          grep -Fq 'EEVDF phase 7 placement consistency' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'eevdf_place_entity' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'lag *= load + weight' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'se->deadline = se->vruntime + vslice' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF multitask correctness fixes
+        run: |
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c \
+            | tee artifacts/eevdf-multitask-correctness.diff
+          grep -Fq 'static bool eevdf_update_deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'struct sched_entity *best_left = NULL' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'return eevdf_pick_entity(cfs_rq) == se;' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'likely(!sched_eevdf_enabled)' workspace/touchgrass-a52xq/kernel/sched/fair.c
+
+      - name: Apply EEVDF lifecycle correctness
+        run: |
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/sched.h kernel/sched/core.c kernel/sched/fair.c \
+            | tee artifacts/eevdf-lifecycle-correctness.diff
+          grep -Fq '#define ENQUEUE_INITIAL' workspace/touchgrass-a52xq/kernel/sched/sched.h
+          grep -Fq 'ENQUEUE_NOCLOCK | ENQUEUE_INITIAL' workspace/touchgrass-a52xq/kernel/sched/core.c
+          grep -Fq 'proc_create_single("eevdf_status"' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'curr->vlag == curr->deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'walt_latency_policy_seen' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          ! grep -Fq 'slice = max_t(u64, (u64)sysctl_sched_min_granularity, TICK_NSEC)' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Apply WALT-safe CASS on Phase 77 EEVDF
+        run: |
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff -- kernel/sched/fair.c kernel/sched/cass.c init/Kconfig arch/arm64/configs/a52xq_defconfig \
+            | tee artifacts/eevdf77-cass-hybrid.diff
+          grep -Fq 'CASS+EEVDF77 hybrid fair CPU placement path is active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'walt_stats.cumulative_runnable_avg_scaled' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'util += p_util' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq '.select_task_rq		= cass_select_task_rq_fair,' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fxq 'CONFIG_SCHED_CASS=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq 'proc_create_single("eevdf_status"' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          grep -Fq 'curr->vlag == curr->deadline' workspace/touchgrass-a52xq/kernel/sched/fair.c
+          ! grep -Fq 'cpu_util_rt(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'cpu_util_dl(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          ! grep -Fq 'cpu_util_irq(' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Import MGLRU phase 1 with runtime default OFF
+        run: |
+          chmod +x scripts/79_apply_mglru_phase1.sh
+          bash -n scripts/79_apply_mglru_phase1.sh
+          ./scripts/79_apply_mglru_phase1.sh
+
+          grep -Fxq 'CONFIG_LRU_GEN=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fxq '# CONFIG_LRU_GEN_ENABLED is not set' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+          grep -Fq 'lru_gen_enabled' workspace/touchgrass-a52xq/mm/vmscan.c
+          grep -Fq 'lru_gen_enter_fault' workspace/touchgrass-a52xq/mm/memory.c
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Apply Phase80 Android MGLRU latency and LMKD hardening
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/80_apply_mglru_android_hardening.py
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+
+          KERNEL=workspace/touchgrass-a52xq
+          ! grep -Fq 'wait_event_killable(lruvec->mm_state.wait' "$KERNEL/mm/vmscan.c"
+          ! grep -Fq 'wake_up_all(&lruvec->mm_state.wait)' "$KERNEL/mm/vmscan.c"
+          ! grep -Fq 'init_waitqueue_head(&lruvec->mm_state.wait)' "$KERNEL/mm/vmscan.c"
+          ! grep -Fq 'mm_state->nr_walkers' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'if (walk->max_seq != max_seq)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'mod_lruvec_state(lruvec, WORKINGSET_REFAULT, delta);' "$KERNEL/mm/workingset.c"
+          grep -Fq 'mod_lruvec_state(lruvec, WORKINGSET_ACTIVATE, delta);' "$KERNEL/mm/workingset.c"
+          grep -Fq 'unused; kept for ABI/layout compatibility' "$KERNEL/include/linux/mmzone.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Enable MGLRU from boot
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig")
+          s = p.read_text()
+          old = "# CONFIG_LRU_GEN_ENABLED is not set\n"
+          new = "CONFIG_LRU_GEN_ENABLED=y\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit("LRU_GEN_ENABLED config state missing")
+          p.write_text(s)
+          PY
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+
+      - name: Enable CoreSight ETM4X CPU trace source
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          python3 scripts/87_enable_coresight_etm4x.py "$KERNEL"
+          grep -Fxq 'CONFIG_CORESIGHT=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_CORESIGHT_LINK_AND_SINK_TMC=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_CORESIGHT_SOURCE_ETM4X=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          git -C "$KERNEL" diff --check
+
+      - name: Enable AutoFDO training build flags
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          python3 scripts/68_apply_autofdo_a1_kbuild.py "$KERNEL"
+          grep -Fq 'config AUTOFDO_CLANG' "$KERNEL/arch/Kconfig"
+          grep -Fq 'CONFIG_AUTOFDO_CLANG=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'include scripts/Makefile.autofdo' "$KERNEL/Makefile"
+          grep -Fq 'fdebug-info-for-profiling' "$KERNEL/scripts/Makefile.autofdo"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- arch/Kconfig Makefile scripts/Makefile.lib \
+            scripts/Makefile.autofdo arch/arm64/configs/a52xq_defconfig \
+            | tee artifacts/autofdo-training-kbuild.diff
+
+      - name: Build Phase80 stack with AutoFDO training flags and LLVM17
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/linux-4.19.206-phase87-coresight-etm4x-autofdo-training-llvm17-build.log
+
+      - name: Audit build result
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "artifacts/Image-${LABEL}"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_AUTOFDO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CORESIGHT_SOURCE_ETM4X=y' "$KERNEL/out/.config"
+          test -s "$KERNEL/out/drivers/hwtracing/coresight/coresight-etm4x.o"
+          grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
+          nm -n "$KERNEL/out/vmlinux" | grep -F 'a52_bpf_call_abi_guard' | tee artifacts/bpf-abi-guard-vmlinux-symbol.txt
+          test -s artifacts/selected-clang-version.txt
+          grep -Eq 'clang version 17\.0\.6|LLVM version 17\.0\.6' artifacts/selected-clang-version.txt
+          grep -R -Fq -- '-fdebug-info-for-profiling' "$KERNEL/out" --include='*.cmd'
+          grep -Fq 'lru_gen_enabled' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'lru_gen_enter_fault' "$KERNEL/mm/memory.c"
+
+          mkdir -p artifacts/etm-training-symbols
+          cp "$KERNEL/out/vmlinux" artifacts/etm-training-symbols/vmlinux
+          cp "$KERNEL/out/System.map" artifacts/etm-training-symbols/System.map
+          cp "$KERNEL/out/.config" artifacts/etm-training-symbols/kernel.config
+          cp "artifacts/Image-${LABEL}" artifacts/etm-training-symbols/Image
+          cp scripts/70_convert_etm_to_autofdo.sh artifacts/etm-training-symbols/
+          readelf -n "$KERNEL/out/vmlinux" | tee artifacts/etm-training-symbols/vmlinux-notes.txt
+          sha256sum artifacts/etm-training-symbols/* | tee artifacts/etm-training-symbols/SHA256SUMS
+
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] lru_gen_' | head -40 \
+            | tee artifacts/mglru-vmlinux-symbols.txt || true
+          nm -n "$KERNEL/out/vmlinux" \
+            | grep -F 'cass_select_task_rq_fair' \
+            | tee artifacts/cass-vmlinux-symbol.txt
+          strings "$KERNEL/out/vmlinux" \
+            | grep -F 'CASS+EEVDF77 hybrid fair CPU placement path is active' \
+            | tee artifacts/cass-runtime-proof-string.txt
+          nm -n "$KERNEL/out/vmlinux" \
+            | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
+            | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
+
+          {
+            echo phase=phase87-phase86-coresight-etm4x-autofdo-training
+            echo kernel=4.19.206
+            echo compiler=llvm-17.0.6
+            echo autofdo_training=yes
+            echo autofdo_profile=none
+            echo mglru=compiled-runtime-switchable-android-hardened
+            echo mglru_default=enabled-from-boot
+            echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled
+            echo eevdf=phase77-lifecycle-correctness
+            echo cass=phase1b-walt-safe
+            echo task_selection=EEVDF_when_enabled
+            echo cpu_placement=CASS_when_enabled
+            echo hybrid_default=sched_eevdf_1_sched_cass_1
+            echo etm_symbols=retained
+            echo bpf_abi_guard=x19-x28-callee-saved-wrapper
+            echo coresight_etm4x=enabled
+            echo bpf_ringbuf=retained
+            echo resukisu=retained
+          } | tee artifacts/phase86-autofdo-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package Phase87 AutoFDO training hybrid and scheduler rollback ZIPs
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-hybrid release-rollback
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-hybrid-enabled.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-hybrid-rollback.sh
+
+          for f in scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh; do
+            sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" "$f"
+            sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' "$f"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          for name, eevdf, cass in (
+              ("scripts/.package-hybrid-enabled.sh", "1", "1"),
+              ("scripts/.package-hybrid-rollback.sh", "0", "0"),
+          ):
+              p = Path(name)
+              s = p.read_text()
+              anchor = "dump_boot;\nwrite_boot;"
+              if s.count(anchor) != 1:
+                  raise SystemExit(
+                      f"unexpected AnyKernel boot-write anchor count in {name}: {s.count(anchor)}"
+                  )
+              s = s.replace(
+                  anchor,
+                  f'dump_boot;\n'
+                  f'patch_cmdline "sched_eevdf" "sched_eevdf={eevdf}";\n'
+                  f'patch_cmdline "sched_cass" "sched_cass={cass}";\n'
+                  f'write_boot;',
+                  1,
+              )
+              p.write_text(s)
+          PY
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF77 CASS MGLRU AutoFDO TRAINING LLVM17 BPF ABI GUARD/' scripts/.package-hybrid-enabled.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF77 CASS MGLRU AutoFDO TRAINING LLVM17 BPF ABI GUARD SCHED ROLLBACK/' scripts/.package-hybrid-rollback.sh
+
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF77-CASS-MGLRU-AUTOFDO-TRAINING-LLVM17.zip/' scripts/.package-hybrid-enabled.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF77-CASS-MGLRU-AUTOFDO-TRAINING-LLVM17-SCHED-ROLLBACK.zip/' scripts/.package-hybrid-rollback.sh
+
+          chmod +x scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
+
+          ./scripts/.package-hybrid-enabled.sh \
+            4.19.206 \
+            "artifacts/Image-${LABEL}" \
+            packaging/AnyKernel3 \
+            release-hybrid
+
+          ./scripts/.package-hybrid-rollback.sh \
+            4.19.206 \
+            "artifacts/Image-${LABEL}" \
+            packaging/AnyKernel3 \
+            release-rollback
+
+          rm -f scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
+
+      - name: Verify packaged hybrid boot toggles
+        run: |
+          set -Eeuo pipefail
+          HYBRID_ZIP="$(find release-hybrid -maxdepth 1 -name '*.zip' -type f | head -1)"
+          ROLLBACK_ZIP="$(find release-rollback -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$HYBRID_ZIP"
+          test -s "$ROLLBACK_ZIP"
+
+          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=0";'
+
+          {
+            echo 'hardware_test_package=passed'
+            echo 'hybrid_cmdline=sched_eevdf=1 sched_cass=1'
+            echo 'rollback_cmdline=sched_eevdf=0 sched_cass=0'
+            echo 'eevdf=phase77-lifecycle-correctness'
+            echo 'cass=phase1b-walt-safe'
+            echo 'mglru=compiled'
+            echo 'mglru_default=on'
+            echo 'mglru_boot=enabled'
+          } | tee artifacts/phase87-coresight-etm4x-package-audit.txt
+
+          cat > artifacts/mglru-first-boot-test.txt <<'EOF'
+          MGLRU Phase 1 safety policy:
+          - CONFIG_LRU_GEN=y
+          - CONFIG_LRU_GEN_ENABLED=y
+          - The phone boots with MGLRU enabled.
+          - After a successful boot, inspect:
+              su -c 'cat /sys/kernel/mm/lru_gen/enabled'
+              su -c 'cat /sys/kernel/mm/lru_gen/min_ttl_ms'
+          - Re-enable MGLRU live:
+              su -c 'echo Y > /sys/kernel/mm/lru_gen/enabled'
+          - Disable it live:
+              su -c 'echo 0 > /sys/kernel/mm/lru_gen/enabled'
+          EOF
+
+      - name: Upload AutoFDO ETM training symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-PHASE87-AUTOFDO-ETM-SYMBOLS-${{ github.run_number }}
+          path: artifacts/etm-training-symbols/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/kernel-source-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache-final.txt 2>&1 || true
+
+      - name: Upload Phase87 AutoFDO training ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-PHASE87-EEVDF77-CASS-MGLRU-AUTOFDO-TRAINING-LLVM17-${{ github.run_number }}
+          path: release-hybrid/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Phase86 scheduler rollback ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-PHASE87-EEVDF77-CASS-MGLRU-AUTOFDO-TRAINING-LLVM17-SCHED-ROLLBACK-${{ github.run_number }}
+          path: release-rollback/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Phase86 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-4.19.206-phase87-coresight-etm4x-autofdo-training-llvm17-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+# Phase86 workflow trigger

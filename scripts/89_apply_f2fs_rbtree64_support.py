@@ -208,17 +208,15 @@ if not hdr_already:
 # ---------------------------------------------------------------------------
 text = segment.read_text()
 
-old_call = """f2fs_check_rb_tree_consistence(sbi,
-								&dcc->root)"""
-new_call = """f2fs_check_rb_tree_consistence(sbi,
-							&dcc->root, false)"""
+old_tail = "&dcc->root));"
+new_tail = "&dcc->root, false));"
 
-if old_call in text:
-    count = text.count(old_call)
+if old_tail in text:
+    count = text.count(old_tail)
     if count != 2:
         raise SystemExit(f"expected two legacy discard consistency calls, found {count}")
-    text = text.replace(old_call, new_call)
-elif text.count("&dcc->root, false)") != 2:
+    text = text.replace(old_tail, new_tail)
+elif text.count(new_tail) != 2:
     raise SystemExit("Phase89 discard consistency callers are neither legacy nor fully converted")
 
 segment.write_text(text)

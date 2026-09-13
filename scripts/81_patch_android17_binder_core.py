@@ -30,6 +30,47 @@ if hooks:
 
 text = text.replace("proc->alloc.vm_start", "(unsigned long)proc->alloc.buffer")
 
+# Android 17's binder_buffer stores user_data as an integer address. The
+# retained 4.19 allocator stores it as void __user *, so make the address
+# arithmetic explicit without changing the allocator ABI.
+for old, new in (
+    ("parent->buffer - buffer->user_data",
+     "parent->buffer - (binder_uintptr_t)buffer->user_data"),
+    ("parent->buffer - t->buffer->user_data",
+     "parent->buffer - (binder_uintptr_t)t->buffer->user_data"),
+    ("bp->parent_offset + parent->buffer - b->user_data",
+     "bp->parent_offset + parent->buffer - (binder_uintptr_t)b->user_data"),
+):
+    if old not in text:
+        raise SystemExit(f"Binder 4.19 pointer arithmetic anchor missing: {old}")
+    text = text.replace(old, new, 1)
+
+# TASK_FREEZABLE was added long after 4.19. Restore the equivalent freezer
+# accounting used by the original 4.19 Binder wait path.
+wait_sig = "static int binder_wait_for_work(struct binder_thread *thread,"
+wait_start = text.find(wait_sig)
+if wait_start < 0:
+    raise SystemExit("binder_wait_for_work missing")
+wait_end = text.find("\n}\n", wait_start)
+if wait_end < 0:
+    raise SystemExit("binder_wait_for_work end missing")
+wait_end += 3
+wait = text[wait_start:wait_end]
+if "TASK_INTERRUPTIBLE|TASK_FREEZABLE" not in wait:
+    raise SystemExit("TASK_FREEZABLE wait anchor missing")
+wait = wait.replace("int ret = 0;\n", "int ret = 0;\n\n\tfreezer_do_not_count();\n", 1)
+wait = wait.replace("TASK_INTERRUPTIBLE|TASK_FREEZABLE", "TASK_INTERRUPTIBLE", 1)
+wait = wait.replace("\tbinder_inner_proc_unlock(proc);\n\n\treturn ret;",
+                    "\tbinder_inner_proc_unlock(proc);\n\tfreezer_count();\n\n\treturn ret;", 1)
+text = text[:wait_start] + wait + text[wait_end:]
+
+# 4.19 has no compat_ptr_ioctl helper. Binder's ioctl ABI is pointer-width
+# neutral here and the working vendor Binder routes compat directly to it.
+if ".compat_ioctl = compat_ptr_ioctl," not in text:
+    raise SystemExit("compat_ptr_ioctl anchor missing")
+text = text.replace(".compat_ioctl = compat_ptr_ioctl,",
+                    ".compat_ioctl = binder_ioctl,", 1)
+
 pat = re.compile(
     r'(t->buffer\s*=\s*binder_alloc_new_buf\(&target_proc->alloc,\s*'
     r'tr->data_size,\s*tr->offsets_size,\s*extra_buffers_size,\s*'
@@ -68,6 +109,14 @@ text = replace_function_body(
 )
 
 binder.write_text(text)
+
+# The modern tracepoint uses allocator vm_start, while the retained 4.19
+# allocator exposes the same userspace base as buffer.
+trace_h = android / "binder_trace.h"
+trace_text = trace_h.read_text()
+if "alloc->vm_start" in trace_text:
+    trace_text = trace_text.replace("alloc->vm_start", "(unsigned long)alloc->buffer")
+trace_h.write_text(trace_text)
 
 for name in ("binder_internal.h", "binder_pick.c", "binder_pick.h"):
     p = android / name

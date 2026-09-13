@@ -223,6 +223,29 @@ jobs:
           grep -Fq 'unused; kept for ABI/layout compatibility' "$KERNEL/include/linux/mmzone.h"
           git -C "$KERNEL" diff --check
 
+      - name: Enable MGLRU from kernel boot for Phase81
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          DEFCONFIG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+
+          "$KERNEL/scripts/config" --file "$DEFCONFIG" --enable LRU_GEN
+          "$KERNEL/scripts/config" --file "$DEFCONFIG" --enable LRU_GEN_ENABLED
+          "$KERNEL/scripts/config" --file "$DEFCONFIG" --disable LRU_GEN_STATS
+
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$DEFCONFIG"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$DEFCONFIG"
+          grep -Fxq '# CONFIG_LRU_GEN_STATS is not set' "$DEFCONFIG"
+
+          {
+            echo 'phase81_mglru_boot_default=enabled'
+            echo 'CONFIG_LRU_GEN=y'
+            echo 'CONFIG_LRU_GEN_ENABLED=y'
+            echo 'policy=active-from-kernel-boot'
+          } | tee artifacts/phase81-mglru-boot-default.txt
+
+          git -C "$KERNEL" diff --check
+
       - name: Apply Phase81 modern Android Binder 2026 compatibility slice
         run: |
           set -Eeuo pipefail
@@ -266,7 +289,7 @@ jobs:
           test -s "$KERNEL/out/vmlinux"
           grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/out/.config"
-          grep -Fxq '# CONFIG_LRU_GEN_ENABLED is not set' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/out/.config"
           grep -Fq 'lru_gen_enabled' "$KERNEL/mm/vmscan.c"
           grep -Fq 'lru_gen_enter_fault' "$KERNEL/mm/memory.c"
           nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] lru_gen_' | head -40 \
@@ -289,7 +312,7 @@ jobs:
           {
             echo phase=phase81-modern-binder-2026-clang11
             echo mglru=compiled-runtime-switchable-android-hardened
-            echo mglru_default=legacy-lru
+            echo mglru_default=enabled-from-kernel-boot
             echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled
             echo mglru_speculative_fault_integration=enabled\n            echo mglru_android_wait_priority_inversion_fix=enabled\n            echo mglru_lmkd_workingset_accounting_fix=enabled
             echo binder=android-modern-compat-2026
@@ -417,22 +440,22 @@ jobs:
             echo 'eevdf=phase77-lifecycle-correctness'
             echo 'cass=phase1b-walt-safe'
             echo 'mglru=compiled'
-            echo 'mglru_default=off'
-            echo 'mglru_enable_after_boot=echo_Y_to_/sys/kernel/mm/lru_gen/enabled'
+            echo 'mglru_default=on-from-kernel-boot'
+            echo 'mglru_runtime_disable=echo_0_to_/sys/kernel/mm/lru_gen/enabled'
           } | tee artifacts/eevdf77-cass-mglru-p2-hardening-package-audit.txt
 
           cat > artifacts/mglru-first-boot-test.txt <<'EOF'
-          MGLRU Phase 1 safety policy:
+          MGLRU Phase 81 boot policy:
           - CONFIG_LRU_GEN=y
-          - CONFIG_LRU_GEN_ENABLED=n
-          - The phone initially boots on the legacy LRU path.
-          - After a successful boot, inspect:
+          - CONFIG_LRU_GEN_ENABLED=y
+          - MGLRU is active from kernel boot.
+          - After boot, verify:
               su -c 'cat /sys/kernel/mm/lru_gen/enabled'
               su -c 'cat /sys/kernel/mm/lru_gen/min_ttl_ms'
-          - Enable MGLRU live:
-              su -c 'echo Y > /sys/kernel/mm/lru_gen/enabled'
-          - Disable it live:
+          - Runtime rollback remains available:
               su -c 'echo 0 > /sys/kernel/mm/lru_gen/enabled'
+          - Re-enable live if needed:
+              su -c 'echo Y > /sys/kernel/mm/lru_gen/enabled'
           EOF
 
       - name: Record diagnostics

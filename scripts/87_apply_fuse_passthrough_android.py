@@ -360,16 +360,14 @@ replace_once(
     "fs/fuse/file.c",
     "static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)\n"
     "{\n"
-    "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(file_inode(file));\n"
-    "\tssize_t ret;\n\n",
+    "\tstruct inode *inode = iocb->ki_filp->f_mapping->host;\n"
+    "\tstruct fuse_conn *fc = get_fuse_conn(inode);\n\n",
     "static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)\n"
     "{\n"
-    "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(file_inode(file));\n"
-    "\tssize_t ret;\n\n"
+    "\tstruct inode *inode = iocb->ki_filp->f_mapping->host;\n"
+    "\tstruct fuse_conn *fc = get_fuse_conn(inode);\n"
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
-    "\tstruct fuse_file *ff = file->private_data;\n"
+    "\tstruct fuse_file *ff = iocb->ki_filp->private_data;\n\n"
     "\tif (ff->passthrough.filp)\n"
     "\t\treturn fuse_passthrough_read_iter(iocb, to);\n"
     "#endif\n\n",
@@ -381,16 +379,28 @@ replace_once(
     "static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)\n"
     "{\n"
     "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct inode *inode = file_inode(file);\n",
+    "\tstruct address_space *mapping = file->f_mapping;\n"
+    "\tssize_t written = 0;\n"
+    "\tssize_t written_buffered = 0;\n"
+    "\tstruct inode *inode = mapping->host;\n"
+    "\tssize_t err;\n"
+    "\tloff_t endbyte = 0;\n\n",
     "static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)\n"
     "{\n"
     "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct inode *inode = file_inode(file);\n"
+    "\tstruct address_space *mapping = file->f_mapping;\n"
+    "\tssize_t written = 0;\n"
+    "\tssize_t written_buffered = 0;\n"
+    "\tstruct inode *inode = mapping->host;\n"
+    "\tssize_t err;\n"
+    "\tloff_t endbyte = 0;\n"
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
-    "\tstruct fuse_file *ff = file->private_data;\n\n"
+    "\tstruct fuse_file *ff = file->private_data;\n"
+    "#endif\n\n"
+    "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
     "\tif (ff->passthrough.filp)\n"
     "\t\treturn fuse_passthrough_write_iter(iocb, from);\n"
-    "#endif\n",
+    "#endif\n\n",
     "write_iter_passthrough_route",
 )
 
@@ -398,15 +408,15 @@ replace_once(
     "fs/fuse/file.c",
     "static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)\n"
     "{\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(file_inode(file));\n",
+    "\tif ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))\n",
     "static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)\n"
     "{\n"
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
     "\tstruct fuse_file *ff = file->private_data;\n\n"
     "\tif (ff->passthrough.filp)\n"
     "\t\treturn fuse_passthrough_mmap(file, vma);\n"
-    "#endif\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(file_inode(file));\n",
+    "#endif\n\n"
+    "\tif ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))\n",
     "mmap_passthrough_route",
 )
 

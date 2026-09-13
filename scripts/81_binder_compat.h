@@ -10,6 +10,41 @@
 #endif
 
 #define __BINDER_JOIN2(a, b) a##b
+
+/* Linux 6.x wraps LSM security contexts in struct lsm_context. Linux 4.19
+ * uses the older char ** + u32 length ABI. */
+struct lsm_context {
+	char *context;
+	size_t len;
+};
+
+static inline int __binder_security_secid_to_secctx(u32 secid,
+						     struct lsm_context *ctx)
+{
+	char *context = NULL;
+	u32 len = 0;
+	int ret = security_secid_to_secctx(secid, &context, &len);
+
+	if (!ret) {
+		ctx->context = context;
+		ctx->len = len;
+	}
+	return ret;
+}
+
+static inline void __binder_security_release_secctx(struct lsm_context *ctx)
+{
+	if (ctx->context)
+		security_release_secctx(ctx->context, (u32)ctx->len);
+	ctx->context = NULL;
+	ctx->len = 0;
+}
+
+#define security_secid_to_secctx(_secid, _ctx) \
+	__binder_security_secid_to_secctx((_secid), (_ctx))
+#define security_release_secctx(_ctx) \
+	__binder_security_release_secctx((_ctx))
+
 #define __BINDER_JOIN(a, b) __BINDER_JOIN2(a, b)
 
 static inline void __binder_mutex_cleanup(struct mutex **lock)

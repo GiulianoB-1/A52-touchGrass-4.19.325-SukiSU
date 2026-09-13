@@ -165,12 +165,15 @@ static void a52_r343_start(void)
 '''
     text = one(text, anchor, block + anchor, "instruction-counter insertion")
 
-    late_old = "	a52_r342_start();
-"
-    late_new = "	a52_r342_start();
-	a52_r343_start();
-"
-    text = one(text, late_old, late_new, "late-init start")
+    # Phase342's SCHED_FIFO busy loop must not run concurrently with Phase343.
+    # If ktime freezes, Phase342 would never leave CPU5 and could starve this
+    # instruction-driven probe. Replace only the Phase342 start call; keep all
+    # Phase342 code and markers in the image for lineage/audit purposes.
+    late_old = """\ta52_r342_start();
+"""
+    late_new = """\ta52_r343_start();
+"""
+    text = one(text, late_old, late_new, "replace Phase342 runtime probe")
     return text
 
 

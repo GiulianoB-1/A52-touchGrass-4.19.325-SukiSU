@@ -151,3 +151,4 @@ EOF
 sha256sum "$OUT/Image" "$OUT/config" > "$OUT/SHA256SUMS"
 stage complete
 echo 'Phase344G Golden-FDR DMA transition recorder build: PASS'
+# Phase344G workflow dispatch bridge

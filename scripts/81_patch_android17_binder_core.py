@@ -75,6 +75,7 @@ for name in ("binder_internal.h", "binder_pick.c", "binder_pick.h"):
         continue
     s = p.read_text()
     s = s.replace("#include <kunit/visibility.h>\n", '#include "binder_compat.h"\n')
+    s = s.replace("#include <linux/android_vendor.h>\n", '#include "binder_compat.h"\n')
     s = s.replace('#include <trace/hooks/binder.h>\n', '')
     p.write_text(s)
 

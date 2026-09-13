@@ -179,7 +179,7 @@ def patch_hwc(text: str) -> str:
             raise SystemExit("Phase344G HWC prerequisite missing: " + token)
 
     text = one(text, "#include <linux/iopoll.h>\n",
-               "#include <linux/iopoll.h>\n#include <linux/ktime.h>\n#include <linux/proc_fs.h>\n#include <linux/seq_file.h>\n",
+               "#include <linux/iopoll.h>\n#include <linux/ktime.h>\n#include <linux/init.h>\n#include <linux/proc_fs.h>\n#include <linux/seq_file.h>\n",
                "ktime include")
 
     anchor = """void a52_g315_launch_snapshot(struct dsi_ctrl_hw *ctrl,

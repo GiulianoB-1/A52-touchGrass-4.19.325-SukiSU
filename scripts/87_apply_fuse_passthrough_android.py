@@ -30,6 +30,24 @@ def replace_once(rel, old, new, label):
     write(rel, s.replace(old, new, 1))
     changes.append(label)
 
+def insert_before_first_if(rel, start_marker, end_marker, snippet, label):
+    s = read(rel)
+    if snippet in s:
+        changes.append(label + "_already")
+        return
+    start = s.find(start_marker)
+    if start < 0:
+        raise SystemExit(f"{label}: missing function start in {rel}: {start_marker}")
+    end = s.find(end_marker, start)
+    if end < 0:
+        raise SystemExit(f"{label}: missing function end marker in {rel}: {end_marker}")
+    pos = s.find("\n\tif (", start, end)
+    if pos < 0:
+        raise SystemExit(f"{label}: no top-level if anchor found in target function")
+    s = s[:pos + 1] + snippet + s[pos + 1:]
+    write(rel, s)
+    changes.append(label)
+
 # ---------------------------------------------------------------------------
 # UAPI: preserve FUSE 7.27 wire size while repurposing fuse_open_out.padding
 # as the Android passthrough handle and add Android's stable V2 ioctl number.
@@ -356,16 +374,12 @@ replace_once(
 
 # Route normal cached file operations into the lower file when passthrough was
 # associated. Direct-I/O fops remain separate and therefore override this.
-replace_once(
+# Use function-scoped insertion instead of fragile whole-prologue matching:
+# Phase86 reconstruction can slightly alter local declaration layout.
+insert_before_first_if(
     "fs/fuse/file.c",
-    "static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)\n"
-    "{\n"
-    "\tstruct inode *inode = iocb->ki_filp->f_mapping->host;\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(inode);\n\n",
-    "static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)\n"
-    "{\n"
-    "\tstruct inode *inode = iocb->ki_filp->f_mapping->host;\n"
-    "\tstruct fuse_conn *fc = get_fuse_conn(inode);\n"
+    "static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)",
+    "static void fuse_write_fill",
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
     "\tstruct fuse_file *ff = iocb->ki_filp->private_data;\n\n"
     "\tif (ff->passthrough.filp)\n"
@@ -374,49 +388,27 @@ replace_once(
     "read_iter_passthrough_route",
 )
 
-replace_once(
+insert_before_first_if(
     "fs/fuse/file.c",
-    "static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)\n"
-    "{\n"
-    "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct address_space *mapping = file->f_mapping;\n"
-    "\tssize_t written = 0;\n"
-    "\tssize_t written_buffered = 0;\n"
-    "\tstruct inode *inode = mapping->host;\n"
-    "\tssize_t err;\n"
-    "\tloff_t endbyte = 0;\n\n",
-    "static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)\n"
-    "{\n"
-    "\tstruct file *file = iocb->ki_filp;\n"
-    "\tstruct address_space *mapping = file->f_mapping;\n"
-    "\tssize_t written = 0;\n"
-    "\tssize_t written_buffered = 0;\n"
-    "\tstruct inode *inode = mapping->host;\n"
-    "\tssize_t err;\n"
-    "\tloff_t endbyte = 0;\n"
+    "static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)",
+    "static inline void fuse_page_descs_length_init",
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
-    "\tstruct fuse_file *ff = file->private_data;\n"
-    "#endif\n\n"
-    "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
+    "\tstruct fuse_file *ff = iocb->ki_filp->private_data;\n\n"
     "\tif (ff->passthrough.filp)\n"
     "\t\treturn fuse_passthrough_write_iter(iocb, from);\n"
     "#endif\n\n",
     "write_iter_passthrough_route",
 )
 
-replace_once(
+insert_before_first_if(
     "fs/fuse/file.c",
-    "static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)\n"
-    "{\n"
-    "\tif ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))\n",
-    "static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)\n"
-    "{\n"
+    "static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)",
+    "static int fuse_direct_mmap",
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
     "\tstruct fuse_file *ff = file->private_data;\n\n"
     "\tif (ff->passthrough.filp)\n"
     "\t\treturn fuse_passthrough_mmap(file, vma);\n"
-    "#endif\n\n"
-    "\tif ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))\n",
+    "#endif\n\n",
     "mmap_passthrough_route",
 )
 

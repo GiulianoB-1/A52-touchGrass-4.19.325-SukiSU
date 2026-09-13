@@ -235,11 +235,14 @@ jobs:
           grep -Fq 'BINDER_ENABLE_ONEWAY_SPAM_DETECTION' "$KERNEL/include/uapi/linux/android/binder.h"
           grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' "$KERNEL/include/uapi/linux/android/binder.h"
           grep -Fq 'BINDER_SET_SYSTEM_SERVER_PID' "$KERNEL/include/uapi/linux/android/binder.h"
-          ! grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
           grep -Fq 'oneway_spam_suspect' "$KERNEL/drivers/android/binder_alloc.h"
           grep -Fq 'oneway_spam_detected' "$KERNEL/drivers/android/binder_alloc.h"
           grep -Fq 'BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT' "$KERNEL/drivers/android/binder.c"
           grep -Fq 'case BINDER_ENABLE_ONEWAY_SPAM_DETECTION' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'case BINDER_GET_EXTENDED_ERROR:' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'binder_ioctl_get_extended_error' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'binder_set_txn_from_error' "$KERNEL/drivers/android/binder.c"
           grep -Fq 'atomic_inc(&target_thread->tmp_ref);' "$KERNEL/drivers/android/binder.c"
           grep -Fq 'binder_thread_dec_tmpref(target_thread);' "$KERNEL/drivers/android/binder.c"
           grep -Fq 'freecess_async_binder_report' "$KERNEL/drivers/android/binder.c"
@@ -279,7 +282,7 @@ jobs:
             | tee artifacts/binder-oneway-spam-vmlinux-proof.txt
           grep -Fq 'BINDER_ENABLE_ONEWAY_SPAM_DETECTION' "$KERNEL/include/uapi/linux/android/binder.h"
           grep -Fq 'BINDER_SET_SYSTEM_SERVER_PID' "$KERNEL/include/uapi/linux/android/binder.h"
-          ! grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
           nm -n "$KERNEL/out/vmlinux" \
             | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
             | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
@@ -294,8 +297,8 @@ jobs:
             echo binder_2026_lifetime_uaf_fixes=ported
             echo binder_samsung_freecess=preserved
             echo binder_freezer=preserved
-            echo binder_ioctl_17=samsung-vendor-preserved
-            echo binder_extended_error=deferred-due-to-ioctl17-collision
+            echo binder_samsung_system_server_ioctl=preserved
+            echo binder_extended_error=ported-coexists-with-samsung-ioctl17
             echo kernel=4.19.206
             echo sched_entity_scaffold=passed
             echo weighted_virtual_time_accounting=passed

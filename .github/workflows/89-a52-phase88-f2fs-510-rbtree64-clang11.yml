@@ -408,10 +408,6 @@ jobs:
           grep -Fq 'static void update_segment_mtime(struct f2fs_sb_info *sbi, block_t blkaddr)' "$KERNEL/fs/f2fs/segment.c"
           grep -Fq 'se->mtime = div_u64(se->mtime * se->valid_blocks + mtime,' "$KERNEL/fs/f2fs/segment.c"
           grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
-          grep -Fq 'struct rb_node **f2fs_lookup_rb_tree_ext(struct f2fs_sb_info *sbi,' "$KERNEL/fs/f2fs/extent_cache.c"
-          grep -Fq 'unsigned long long key;' "$KERNEL/fs/f2fs/f2fs.h"
-          grep -Fq 'cur_re->key > next_re->key' "$KERNEL/fs/f2fs/extent_cache.c"
-          test "$(grep -Fc '&dcc->root, false));' "$KERNEL/fs/f2fs/segment.c")" -eq 2
           python3 - "$KERNEL/fs/f2fs/segment.c" <<'PY'
           from pathlib import Path
           import sys
@@ -501,6 +497,20 @@ jobs:
           grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
           git -C "$KERNEL" diff --check
 
+      - name: Add Phase89 FUSE and page-fault crash diagnostics
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/89_apply_fuse_pagefault_diagnostics.py
+          python3 scripts/89_apply_fuse_pagefault_diagnostics.py workspace/touchgrass-a52xq
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52FUSE_BALANCE read' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'A52FUSE_BALANCE write' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'A52FUSE_BALANCE mmap' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
+          grep -Fq 'current->pagefault_disabled' "$KERNEL/arch/arm64/mm/fault.c"
+          git -C "$KERNEL" diff --check
+
       - name: Build Phase89 Phase88 + F2FS 64-bit rb-tree foundation
         run: |
           set -o pipefail
@@ -523,6 +533,14 @@ jobs:
           grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
           grep -Fq 'static void update_segment_mtime(struct f2fs_sb_info *sbi, block_t blkaddr)' "$KERNEL/fs/f2fs/segment.c"
           grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'struct rb_node **f2fs_lookup_rb_tree_ext(struct f2fs_sb_info *sbi,' "$KERNEL/fs/f2fs/extent_cache.c"
+          grep -Fq 'unsigned long long key;' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'cur_re->key > next_re->key' "$KERNEL/fs/f2fs/extent_cache.c"
+          test "$(grep -Fc '&dcc->root, false));' "$KERNEL/fs/f2fs/segment.c")" -eq 2
+          grep -Fq 'A52FUSE_BALANCE read' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
+          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52PF_BADCTX'
+          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52FUSE_BALANCE'
           grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'clear_and_wake_up_bit(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'test_and_set_bit_lock(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
@@ -626,6 +644,7 @@ jobs:
             echo fuse_passthrough_sysfs=/sys/fs/fuse/features/fuse_passthrough
             echo f2fs_segment_age_accounting=weighted-average
             echo f2fs_rbtree64=enabled-foundation-only
+            echo runtime_crash_diag=A52PF_BADCTX+A52FUSE_BALANCE
             echo f2fs_atgc=not-yet-enabled
             echo bpf_ringbuf=retained
             echo resukisu=retained

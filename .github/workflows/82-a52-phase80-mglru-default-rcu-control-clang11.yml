@@ -371,10 +371,10 @@ jobs:
           PY
 
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF77 CASS MGLRU DEFAULT RCU-CONTROL/' scripts/.package-hybrid-enabled.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF77 CASS MGLRU DEFAULT RCU-POWER ZRAM-MODERN SCHED ROLLBACK/' scripts/.package-hybrid-rollback.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF77 CASS MGLRU DEFAULT RCU-CONTROL SCHED ROLLBACK/' scripts/.package-hybrid-rollback.sh
 
           sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF77-CASS-MGLRU-P3-RCUCONTROL-CLANG11.zip/' scripts/.package-hybrid-enabled.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF77-CASS-MGLRU-P3-RCUPOWER-ZRAM-CLANG11-SCHED-ROLLBACK.zip/' scripts/.package-hybrid-rollback.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-EEVDF77-CASS-MGLRU-P3-RCUCONTROL-CLANG11-SCHED-ROLLBACK.zip/' scripts/.package-hybrid-rollback.sh
 
           chmod +x scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
 

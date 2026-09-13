@@ -204,6 +204,10 @@ def validate(before: str, after: str) -> None:
         if after.count(token) != before.count(token):
             raise SystemExit("Phase343 changed inherited token count: " + token)
 
+    if after.count("a52_r342_start();") != before.count("a52_r342_start();") - 1:
+        raise SystemExit("Phase343 must disable exactly one Phase342 runtime start")
+    if after.count("a52_r343_start();") != before.count("a52_r343_start();") + 1:
+        raise SystemExit("Phase343 must add exactly one Phase343 runtime start")
     if after.count("kthread_create(") != before.count("kthread_create(") + 1:
         raise SystemExit("Phase343 expected one kthread_create call")
     if after.count("kthread_bind(") != before.count("kthread_bind(") + 1:

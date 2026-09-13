@@ -437,7 +437,18 @@ jobs:
           set -Eeuo pipefail
           mkdir -p .prepared-cache
           rm -f .prepared-cache/phase88-source.tar.zst
-          tar --exclude='touchgrass-a52xq/out' -I 'zstd -3 -T0' \
+          # Git may leave a transient tmp_pack_* while automatic object
+          # maintenance finishes. It is never part of the repository state and
+          # racing it makes GNU tar exit 1 with "file changed as we read it".
+          # Exclude only transient Git lock/pack files; keep the actual .git
+          # metadata so restored trees still support validation/diff checks.
+          tar \
+            --exclude='touchgrass-a52xq/out' \
+            --exclude='touchgrass-a52xq/.git/objects/pack/tmp_pack_*' \
+            --exclude='touchgrass-a52xq/.git/index.lock' \
+            --exclude='touchgrass-a52xq/.git/shallow.lock' \
+            --exclude='touchgrass-a52xq/.git/maintenance.lock' \
+            -I 'zstd -3 -T0' \
             -cf .prepared-cache/phase88-source.tar.zst \
             -C workspace touchgrass-a52xq
           test -s .prepared-cache/phase88-source.tar.zst

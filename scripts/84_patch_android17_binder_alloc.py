@@ -75,7 +75,7 @@ c = c.replace('#include <trace/hooks/binder.h>\n', '')
 
 # The GKI vendor hook is advisory. Samsung 4.19 has no Android vendor-hook
 # framework, so keep allocator semantics and make the hook a no-op.
-hooks = sorted(set(re.findall(r'\\b(trace_android_vh_[A-Za-z0-9_]+)\\s*\\(', c)))
+hooks = sorted(set(re.findall(r'\b(trace_android_vh_[A-Za-z0-9_]+)\s*\(', c)))
 if hooks:
     anchor = '#include "binder_trace.h"\n'
     defs = "\n/* Android GKI allocator hooks are unavailable on Samsung 4.19. */\n"
@@ -86,12 +86,12 @@ if hooks:
 # Linux 6.18 list_lru takes nid/memcg at add/del time. Linux 4.19 derives
 # those internally, so collapse the Android 17 calls to the classic ABI.
 c = re.sub(
-    r'list_lru_add\\(alloc->freelist,\\s*page_to_lru\\(page\\),\\s*page_to_nid\\(page\\),\\s*NULL\\)',
+    r'list_lru_add\(alloc->freelist,\s*page_to_lru\(page\),\s*page_to_nid\(page\),\s*NULL\)',
     'list_lru_add(alloc->freelist, page_to_lru(page))',
     c,
 )
 c = re.sub(
-    r'list_lru_del\\(alloc->freelist,\\s*page_to_lru\\(page\\),\\s*page_to_nid\\(page\\),\\s*NULL\\)',
+    r'list_lru_del\(alloc->freelist,\s*page_to_lru\(page\),\s*page_to_nid\(page\),\s*NULL\)',
     'list_lru_del(alloc->freelist, page_to_lru(page))',
     c,
 )

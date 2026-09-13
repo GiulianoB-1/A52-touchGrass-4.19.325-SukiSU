@@ -362,18 +362,18 @@ cpath.write_text(c.rstrip() + "\n")
 # the upstream five-argument ABI, so remove that temporary compatibility arg.
 b = bpath.read_text()
 alloc_call_pat = re.compile(
-    r'(t->buffer\\s*=\\s*binder_alloc_new_buf\\(&target_proc->alloc,\\s*'
-    r'tr->data_size,\\s*tr->offsets_size,\\s*extra_buffers_size,\\s*'
-    r'!reply\\s*&&\\s*\\(t->flags\\s*&\\s*TF_ONE_WAY\\))'
-    r',\\s*thread->pid\\s*\\);',
+    r'(t->buffer\s*=\s*binder_alloc_new_buf\(&target_proc->alloc,\s*'
+    r'tr->data_size,\s*tr->offsets_size,\s*extra_buffers_size,\s*'
+    r'!reply\s*&&\s*\(t->flags\s*&\s*TF_ONE_WAY\))'
+    r',\s*thread->pid\s*\);',
     re.S,
 )
-b, alloc_call_count = alloc_call_pat.subn(r'\\1);', b, count=1)
+b, alloc_call_count = alloc_call_pat.subn(r'\1);', b, count=1)
 if alloc_call_count != 1:
     native_pat = re.compile(
-        r't->buffer\\s*=\\s*binder_alloc_new_buf\\(&target_proc->alloc,\\s*'
-        r'tr->data_size,\\s*tr->offsets_size,\\s*extra_buffers_size,\\s*'
-        r'!reply\\s*&&\\s*\\(t->flags\\s*&\\s*TF_ONE_WAY\\)\\s*\\);',
+        r't->buffer\s*=\s*binder_alloc_new_buf\(&target_proc->alloc,\s*'
+        r'tr->data_size,\s*tr->offsets_size,\s*extra_buffers_size,\s*'
+        r'!reply\s*&&\s*\(t->flags\s*&\s*TF_ONE_WAY\)\s*\);',
         re.S,
     )
     if not native_pat.search(b):

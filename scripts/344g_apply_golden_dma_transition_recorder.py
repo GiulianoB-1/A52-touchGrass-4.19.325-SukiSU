@@ -31,7 +31,10 @@ HELPER = r'''/* A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1
  *
  * Samples are stored in RAM first.  No printk occurs between q0 and q6, so
  * logging cannot create an artificial delay between SW_TRIGGER and the first
- * post-trigger samples.  The buffer is printed only after normal completion.
+ * post-trigger samples.  The retained buffer remains readable for the whole
+ * boot at /proc/a52_phase344g, so early evidence cannot be lost to printk-ring
+ * overwrite before ADB becomes available.  A post-completion printk dump is
+ * retained only as a secondary transport.
  * No DSI/PHY/clock/power/reset register write, delay, retry or return value is
  * changed by this recorder.
  */
@@ -93,6 +96,53 @@ void a52_g344_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)
 	s->axi2ahb = DSI_R32(ctrl, DSI_AXI2AHB_CTRL);
 }
 
+static int a52_g344_proc_show(struct seq_file *m, void *unused)
+{
+	unsigned int i;
+	unsigned int n = (unsigned int)atomic_read(&a52_g344_count);
+
+	if (n > A52_G344_MAX_SAMPLES)
+		n = A52_G344_MAX_SAMPLES;
+
+	seq_printf(m, "A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V2\\n");
+	seq_printf(m, "count=%u capacity=%u\\n", n, A52_G344_MAX_SAMPLES);
+	for (i = 0; i < n; i++) {
+		const struct a52_g344_sample *s = &a52_g344_samples[i];
+
+		seq_printf(m,
+			"S i=%u p=%u t=%llu st=%08x fs=%08x cc=%08x ck=%08x in=%08x ln=%08x\\n",
+			i, s->point, (unsigned long long)s->ns, s->status,
+			s->fifo, s->clk_ctrl, s->clk_status, s->int_ctrl,
+			s->lane_status);
+		seq_printf(m,
+			"D i=%u dc=%08x o=%08x l=%08x sw=%08x tg=%08x ae=%08x to=%08x pe=%08x ax=%08x\\n",
+			i, s->dma_ctrl, s->dma_offset, s->dma_length,
+			s->sw_trigger, s->trig_ctrl, s->ack_err, s->timeout,
+			s->phy_err, s->axi2ahb);
+	}
+	return 0;
+}
+
+static int a52_g344_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, a52_g344_proc_show, NULL);
+}
+
+static const struct file_operations a52_g344_proc_fops = {
+	.open = a52_g344_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int __init a52_g344_proc_init(void)
+{
+	if (!proc_create("a52_phase344g", 0444, NULL, &a52_g344_proc_fops))
+		return -ENOMEM;
+	return 0;
+}
+late_initcall(a52_g344_proc_init);
+
 void a52_g344_dump_samples(void)
 {
 	unsigned int i;
@@ -129,7 +179,7 @@ def patch_hwc(text: str) -> str:
             raise SystemExit("Phase344G HWC prerequisite missing: " + token)
 
     text = one(text, "#include <linux/iopoll.h>\n",
-               "#include <linux/iopoll.h>\n#include <linux/ktime.h>\n",
+               "#include <linux/iopoll.h>\n#include <linux/ktime.h>\n#include <linux/proc_fs.h>\n#include <linux/seq_file.h>\n",
                "ktime include")
 
     anchor = """void a52_g315_launch_snapshot(struct dsi_ctrl_hw *ctrl,
@@ -258,6 +308,9 @@ def validate(ctrl: str, hwc: str) -> None:
         "a52_g344_snapshot(&dsi_ctrl->hw, 9);",
         "a52_g344_dump_samples();",
         "ktime_get_ns();",
+        'proc_create("a52_phase344g", 0444, NULL, &a52_g344_proc_fops)',
+        "A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V2",
+        "seq_read",
     ):
         if token not in both:
             raise SystemExit("Phase344G required token missing: " + token)

@@ -357,7 +357,21 @@ cpath.write_text(c.rstrip() + "\n")
 
 # Phase81 translated vm_start to the retained old allocator's 'buffer' field.
 # With the real Android 17 allocator imported, restore the native vm_start ABI.
+# Phase81 also adapted binder_alloc_new_buf() to the retained Samsung 4.19
+# allocator by appending the sender pid. The native Android 17 allocator uses
+# the upstream five-argument ABI, so remove that temporary compatibility arg.
 b = bpath.read_text()
+old_alloc_call = """t->buffer = binder_alloc_new_buf(&target_proc->alloc,
+		tr->data_size, tr->offsets_size, extra_buffers_size,
+		!reply && (t->flags & TF_ONE_WAY), thread->pid);"""
+new_alloc_call = """t->buffer = binder_alloc_new_buf(&target_proc->alloc,
+		tr->data_size, tr->offsets_size, extra_buffers_size,
+		!reply && (t->flags & TF_ONE_WAY));"""
+if old_alloc_call in b:
+    b = b.replace(old_alloc_call, new_alloc_call, 1)
+elif new_alloc_call not in b:
+    raise SystemExit("Android17 binder_alloc_new_buf ABI restore anchor mismatch")
+
 b = b.replace("(unsigned long)proc->alloc.buffer", "proc->alloc.vm_start")
 bpath.write_text(b.rstrip() + "\n")
 

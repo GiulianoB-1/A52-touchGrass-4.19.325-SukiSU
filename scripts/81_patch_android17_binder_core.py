@@ -78,16 +78,20 @@ for name in ("binder_internal.h", "binder_pick.c", "binder_pick.h"):
     s = s.replace('#include <trace/hooks/binder.h>\n', '')
     p.write_text(s)
 
-mk = android / "Makefile"
-s = mk.read_text()
-if (android / "binder_pick.c").exists() and "binder_pick.o" not in s:
-    old = "obj-$(CONFIG_ANDROID_BINDER_IPC)\t+= binder.o binder_alloc.o"
-    if old not in s:
-        old = "obj-$(CONFIG_ANDROID_BINDER_IPC) += binder.o binder_alloc.o"
-    if old not in s:
-        raise SystemExit("Android Binder Makefile IPC anchor not recognized")
-    s = s.replace(old, old + " binder_pick.o", 1)
-mk.write_text(s)
+# Android 17's binder_pick.c only chooses between the C and Rust Binder
+# implementations. This 4.19 vendor kernel cannot host the Rust driver, so
+# keep the Android 17 C Binder and provide the selector hooks as simple stubs.
+(android / "binder_pick.h").write_text(r"""/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef _LINUX_BINDER_PICK_IMPL_H
+#define _LINUX_BINDER_PICK_IMPL_H
+#include <linux/errno.h>
+#include <linux/module.h>
+static inline void binder_remove_trace_events(struct module *module) { }
+static inline int binder_try_unload_builtin(void) { return -EOPNOTSUPP; }
+static inline int on_binderfs_mount(void) { return 0; }
+void binder_unload_builtin(void);
+#endif
+""")
 
 cfg = root / "arch/arm64/configs/a52xq_defconfig"
 s = cfg.read_text()

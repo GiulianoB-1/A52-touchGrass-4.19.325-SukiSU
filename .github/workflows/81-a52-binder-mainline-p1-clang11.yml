@@ -81,6 +81,26 @@ jobs:
           ./scripts/checkpoint_resolve_linux_4.19.200.sh
           ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
 
+      - name: Apply Android Binder mainline Phase 1 compatibility backport
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/81_apply_android_binder_mainline_p1.py
+          python3 scripts/81_apply_android_binder_mainline_p1.py workspace/touchgrass-a52xq
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'TF_CLEAR_BUF' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BINDER_ENABLE_ONEWAY_SPAM_DETECTION' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BINDER_SET_SYSTEM_SERVER_PID' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'oneway_spam_suspect' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'binder_alloc_clear_buf' "$KERNEL/drivers/android/binder_alloc.c"
+          grep -Fq 'binder_ioctl_get_extended_error' "$KERNEL/drivers/android/binder.c"
+          grep -Fq 'BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT' "$KERNEL/drivers/android/binder.c"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- drivers/android/binder.c drivers/android/binder_alloc.c drivers/android/binder_alloc.h include/uapi/linux/android/binder.h \
+            | tee artifacts/android-binder-mainline-p1.diff
+
       - name: Restore working ReSukiSU BPF-repair baseline
         run: |
           ./scripts/58_backport_bpf_ringbuf.sh
@@ -222,26 +242,6 @@ jobs:
           grep -Fq 'mod_lruvec_state(lruvec, WORKINGSET_ACTIVATE, delta);' "$KERNEL/mm/workingset.c"
           grep -Fq 'unused; kept for ABI/layout compatibility' "$KERNEL/include/linux/mmzone.h"
           git -C "$KERNEL" diff --check
-
-      - name: Apply Android Binder mainline Phase 1 compatibility backport
-        run: |
-          set -Eeuo pipefail
-          python3 -m py_compile scripts/81_apply_android_binder_mainline_p1.py
-          python3 scripts/81_apply_android_binder_mainline_p1.py workspace/touchgrass-a52xq
-
-          KERNEL=workspace/touchgrass-a52xq
-          grep -Fq 'TF_CLEAR_BUF' "$KERNEL/include/uapi/linux/android/binder.h"
-          grep -Fq 'BINDER_ENABLE_ONEWAY_SPAM_DETECTION' "$KERNEL/include/uapi/linux/android/binder.h"
-          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
-          grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' "$KERNEL/include/uapi/linux/android/binder.h"
-          grep -Fq 'BINDER_SET_SYSTEM_SERVER_PID' "$KERNEL/include/uapi/linux/android/binder.h"
-          grep -Fq 'oneway_spam_suspect' "$KERNEL/drivers/android/binder_alloc.h"
-          grep -Fq 'binder_alloc_clear_buf' "$KERNEL/drivers/android/binder_alloc.c"
-          grep -Fq 'binder_ioctl_get_extended_error' "$KERNEL/drivers/android/binder.c"
-          grep -Fq 'BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT' "$KERNEL/drivers/android/binder.c"
-          git -C "$KERNEL" diff --check
-          git -C "$KERNEL" diff -- drivers/android/binder.c drivers/android/binder_alloc.c drivers/android/binder_alloc.h include/uapi/linux/android/binder.h \
-            | tee artifacts/android-binder-mainline-p1.diff
 
       - name: Build ReSukiSU, SUSFS, BPF repair, Phase77 EEVDF + CASS and MGLRU P2 Android Hardening + Binder Mainline P1
         run: |

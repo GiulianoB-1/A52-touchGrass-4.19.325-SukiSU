@@ -136,6 +136,10 @@ for token in protected:
     if rec.count(token) != br.count(token):
         raise SystemExit("Phase343 changed protected hardware behavior: " + token)
 
+if rec.count("a52_r342_start();") != br.count("a52_r342_start();") - 1:
+    raise SystemExit("Phase343 must disable exactly one Phase342 runtime start")
+if rec.count("a52_r343_start();") != br.count("a52_r343_start();") + 1:
+    raise SystemExit("Phase343 must add exactly one Phase343 runtime start")
 if rec.count("kthread_create(") != br.count("kthread_create(") + 1:
     raise SystemExit("Phase343 expected one kthread_create call")
 if rec.count("kthread_bind(") != br.count("kthread_bind(") + 1:
@@ -229,8 +233,8 @@ identity = {
         "distinguish CPU execution halt from a frozen clocksource."
     ),
     "experiment": (
-        "Keep CPU5 continuously runnable in a SCHED_FIFO tight loop whose "
-        "checkpoint trigger depends only on a software iteration counter. "
+        "Replace the Phase342 runtime thread with one CPU5 SCHED_FIFO tight "
+        "loop whose checkpoint trigger depends only on a software iteration counter. "
         "At each iteration checkpoint, sample ktime_get_ns, get_jiffies_64 "
         "and CNTVCT as payload only, then write mirrored cache-cleaned raw "
         "sideband records. No timer or clock participates in progress."

@@ -84,6 +84,40 @@ out:
 }'''
 
 src = src[:brace] + body + src[end:]
+# Android 17 Binder's builtin-unload path expects BinderFS to expose the
+# teardown wrapper added in newer kernels. The retained 4.19 BinderFS already
+# owns the same filesystem type and chrdev range, so provide the equivalent.
+if "void unload_binderfs(void)" not in src:
+    init_sig = "int __init init_binderfs(void)"
+    init_start = src.find(init_sig)
+    if init_start < 0:
+        raise SystemExit("init_binderfs() missing for unload bridge")
+    init_brace = src.find("{", init_start)
+    if init_brace < 0:
+        raise SystemExit("init_binderfs() opening brace missing")
+    depth = 0
+    init_end = None
+    for pos in range(init_brace, len(src)):
+        if src[pos] == "{":
+            depth += 1
+        elif src[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                init_end = pos + 1
+                break
+    if init_end is None:
+        raise SystemExit("init_binderfs() closing brace missing")
+
+    unload = r'''
+
+void unload_binderfs(void)
+{
+	unregister_filesystem(&binder_fs_type);
+	unregister_chrdev_region(binderfs_dev, BINDERFS_MAX_MINOR);
+}
+'''
+    src = src[:init_end] + unload + src[init_end:]
+
 binderfs.write_text(src)
 
-print("Phase82: retained Linux 4.19 BinderFS re-enabled with Android17 log-table bridge")
+print("Phase82: retained Linux 4.19 BinderFS re-enabled with Android17 log/unload bridges")

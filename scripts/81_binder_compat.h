@@ -2,6 +2,13 @@
 #ifndef _A52_BINDER_COMPAT_H
 #define _A52_BINDER_COMPAT_H
 
+#include <linux/fdtable.h>
+#include <linux/mutex.h>
+#include <linux/rcupdate.h>
+#include <linux/sched.h>
+#include <linux/security.h>
+#include <linux/spinlock.h>
+
 #ifndef VISIBLE_IF_KUNIT
 #define VISIBLE_IF_KUNIT
 #endif
@@ -10,6 +17,42 @@
 #endif
 
 #define __BINDER_JOIN2(a, b) a##b
+
+#ifndef TWA_RESUME
+#define TWA_RESUME true
+#endif
+
+/*
+ * Backport of file_close_fd() semantics using the 4.19 fdtable layout.
+ * It detaches the descriptor without dropping the file reference; Binder
+ * then pins and defers the final fput until it has returned from ioctl.
+ */
+static inline struct file *__binder_file_close_fd(unsigned int fd)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	struct file *file = NULL;
+
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	if (fd < fdt->max_fds) {
+		fd = array_index_nospec(fd, fdt->max_fds);
+		file = rcu_dereference_raw(fdt->fd[fd]);
+		if (file) {
+			rcu_assign_pointer(fdt->fd[fd], NULL);
+			__clear_bit(fd, fdt->open_fds);
+			__clear_bit(fd, fdt->close_on_exec);
+			__clear_bit(fd / BITS_PER_LONG, fdt->full_fds_bits);
+			if (fd < files->next_fd)
+				files->next_fd = fd;
+		}
+	}
+	spin_unlock(&files->file_lock);
+	return file;
+}
+
+#define file_close_fd(_fd) __binder_file_close_fd((_fd))
+
 
 /* Linux 6.x wraps LSM security contexts in struct lsm_context. Linux 4.19
  * uses the older char ** + u32 length ABI. */

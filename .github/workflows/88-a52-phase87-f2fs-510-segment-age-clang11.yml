@@ -418,7 +418,9 @@ jobs:
           grep -Fxq 'CONFIG_RCU_FAST_NO_HZ=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_RCU_NOCB_CPU=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_FUSE_FS=y' "$KERNEL/out/.config"
-          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"\n          grep -Fq 'static void update_segment_mtime(struct f2fs_sb_info *sbi, block_t blkaddr)' "$KERNEL/fs/f2fs/segment.c"\n          grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fq 'static void update_segment_mtime(struct f2fs_sb_info *sbi, block_t blkaddr)' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
           grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'clear_and_wake_up_bit(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'test_and_set_bit_lock(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
@@ -474,7 +476,9 @@ jobs:
             echo mglru=default-on-runtime-switchable-android-hardened
             echo mglru_default=enabled-from-kernel-init
             echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled
-            echo mglru_speculative_fault_integration=enabled\n            echo mglru_android_wait_priority_inversion_fix=enabled\n            echo mglru_lmkd_workingset_accounting_fix=enabled
+            echo mglru_speculative_fault_integration=enabled
+            echo mglru_android_wait_priority_inversion_fix=enabled
+            echo mglru_lmkd_workingset_accounting_fix=enabled
             echo kernel=4.19.206
             echo sched_entity_scaffold=passed
             echo weighted_virtual_time_accounting=passed
@@ -517,7 +521,9 @@ jobs:
             echo fuse_passthrough=android12-5.4-style-backport
             echo fuse_protocol=7.27-preserved
             echo fuse_passthrough_ioctl=v2-126
-            echo fuse_passthrough_sysfs=/sys/fs/fuse/features/fuse_passthrough\n            echo f2fs_segment_age_accounting=weighted-average\n            echo f2fs_atgc=not-yet-enabled
+            echo fuse_passthrough_sysfs=/sys/fs/fuse/features/fuse_passthrough
+            echo f2fs_segment_age_accounting=weighted-average
+            echo f2fs_atgc=not-yet-enabled
             echo bpf_ringbuf=retained
             echo resukisu=retained
           } | tee artifacts/eevdf-phase1-audit.txt

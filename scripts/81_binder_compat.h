@@ -8,6 +8,20 @@
 #include <linux/sched.h>
 #include <linux/security.h>
 #include <linux/spinlock.h>
+#include <linux/list.h>
+
+/* hlist_count_nodes() is newer than Linux 4.19. */
+static inline size_t __binder_hlist_count_nodes(struct hlist_head *head)
+{
+	struct hlist_node *pos;
+	size_t count = 0;
+
+	hlist_for_each(pos, head)
+		count++;
+	return count;
+}
+
+#define hlist_count_nodes(_head) __binder_hlist_count_nodes((_head))
 
 /* Android GKI vendor/OEM reservation macros do not exist in this 4.19 tree.
  * They reserve opaque padding only and carry no Binder semantics. */

@@ -104,21 +104,32 @@ if "unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;" in out:
     # Other functions may legitimately use this pattern, so constrain checks.
     pass
 
-# Function-local structural verification.
-wb_start = out.find("static ssize_t writeback_store")
-wb_end = out.find("\n}", wb_start)
-wb = out[wb_start:wb_end+2]
+# Function-local structural verification.  Bound each function by a stable
+# following declaration rather than the first inner closing brace.
+def function_chunk(start_marker, end_marker):
+    a = out.find(start_marker)
+    b = out.find(end_marker, a)
+    if a < 0 or b < 0:
+        raise SystemExit(f"unable to isolate {start_marker}")
+    return out[a:b]
+
+wb = function_chunk("static ssize_t writeback_store", "struct zram_work")
 if "unsigned long nr_pages;" not in wb:
     raise SystemExit("writeback nr_pages is not deferred")
-if wb.find("down_read(&zram->init_lock);") > wb.find("nr_pages = zram->disksize >> PAGE_SHIFT;"):
+wb_lock = wb.find("down_read(&zram->init_lock);")
+wb_bound = wb.find("nr_pages = zram->disksize >> PAGE_SHIFT;")
+if wb_lock < 0 or wb_bound < 0 or wb_bound < wb_lock:
     raise SystemExit("writeback nr_pages still calculated before init_lock")
 
-rb_start = out.find("static ssize_t read_block_state")
-rb_end = out.find("\n}", rb_start)
-rb = out[rb_start:rb_end+2]
+rb = function_chunk(
+    "static ssize_t read_block_state",
+    "static const struct file_operations proc_zram_block_state_op",
+)
 if "unsigned long nr_pages;" not in rb:
     raise SystemExit("read_block_state nr_pages is not deferred")
-if rb.find("down_read(&zram->init_lock);") > rb.find("nr_pages = zram->disksize >> PAGE_SHIFT;"):
+rb_lock = rb.find("down_read(&zram->init_lock);")
+rb_bound = rb.find("nr_pages = zram->disksize >> PAGE_SHIFT;")
+if rb_lock < 0 or rb_bound < 0 or rb_bound < rb_lock:
     raise SystemExit("read_block_state nr_pages still calculated before init_lock")
 
 report = root.parent.parent / "artifacts" / "phase86-zram-scan-bounds.txt"

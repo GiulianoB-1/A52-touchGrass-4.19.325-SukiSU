@@ -18,6 +18,8 @@ concurrency:
 
 env:
   NDK_VERSION: 30.0.16248370
+  GLSLANG_VERSION: 16.6.0
+  GLSLANG_SHA256: 2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce
   CCACHE_DIR: ${{ github.workspace }}/.ccache-turnip
   CCACHE_MAXSIZE: 4G
 
@@ -38,9 +40,32 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             curl xz-utils zip unzip file binutils patchelf ccache pkg-config \
             python3 python3-pip python3-setuptools python3-wheel \
-            glslang-tools flex bison git ca-certificates
+            flex bison git ca-certificates
           python3 -m pip install --user --upgrade "meson>=1.4" ninja mako pyyaml packaging
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned glslang >= 12.2
+        run: |
+          set -Eeuo pipefail
+          ARCHIVE="$RUNNER_TEMP/glslang-${GLSLANG_VERSION}-linux-x86_64-release.tar.gz"
+          DEST="$HOME/.local/glslang-${GLSLANG_VERSION}"
+          URL="https://github.com/KhronosGroup/glslang/releases/download/${GLSLANG_VERSION}/glslang-${GLSLANG_VERSION}-linux-x86_64-release.tar.gz"
+
+          curl -fL --retry 5 --retry-delay 3 "$URL" -o "$ARCHIVE"
+          echo "$GLSLANG_SHA256  $ARCHIVE" | sha256sum -c -
+
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          tar -xzf "$ARCHIVE" -C "$DEST"
+
+          GLSLANG_VALIDATOR="$(find "$DEST" -type f -name glslangValidator -perm -111 | head -1)"
+          test -n "$GLSLANG_VALIDATOR"
+          test -x "$GLSLANG_VALIDATOR"
+
+          GLSLANG_BIN="$(dirname "$GLSLANG_VALIDATOR")"
+          echo "$GLSLANG_BIN" >> "$GITHUB_PATH"
+          echo "glslang_bin=$GLSLANG_BIN"
+          "$GLSLANG_VALIDATOR" --version
 
       - name: Locate Android SDK
         run: |

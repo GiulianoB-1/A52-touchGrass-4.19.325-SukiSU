@@ -1,0 +1,116 @@
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Bring-up
+
+on:
+  push:
+    branches:
+      - agent/a52-turnip-mesa-26.2-kgsl-v1
+    paths:
+      - .github/workflows/92-a52-turnip-mesa-26.2-a619-kgsl.yml
+      - scripts/92_build_turnip_mesa_26_2_2.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-turnip-mesa-26.2-a619-kgsl-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MESA_VERSION: '26.2.2'
+  MESA_SHA256: 'eeb29ca7e56cfaa8e8a79538dcf834e3b18e501c31bef5145e959ea437cc4216'
+  ANDROID_API: '34'
+  NDK_VERSION: '28.2.13676358'
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 3G
+
+jobs:
+  build:
+    name: Build Turnip AArch64 + KGSL
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison flex gettext pkg-config ninja-build ccache curl xz-utils \
+            python3 python3-pip libexpat1-dev zlib1g-dev libzstd-dev file binutils
+          python3 -m pip install --user 'meson>=1.5,<2' mako packaging pyyaml
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Restore Turnip compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-turnip-26.2.2-aarch64-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-turnip-26.2.2-aarch64-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Build Mesa Turnip 26.2.2 for Android AArch64 KGSL
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/92_build_turnip_mesa_26_2_2.sh
+          ./scripts/92_build_turnip_mesa_26_2_2.sh
+
+      - name: Audit Turnip build
+        run: |
+          set -Eeuo pipefail
+          DRIVER=release/turnip/libvulkan_freedreno.so
+          INFO=release/turnip/TURNIP-BUILD-INFO.txt
+          test -s "$DRIVER"
+          test -s "$INFO"
+          file "$DRIVER" | grep -Fq 'ARM aarch64'
+          readelf -h "$DRIVER" | grep -Fq 'AArch64'
+          ! readelf -d "$DRIVER" | grep -Fq 'libdrm'
+          grep -Fxq 'gpu=Adreno 619' "$INFO"
+          grep -Fxq 'mesa=26.2.2' "$INFO"
+          grep -Fxq 'driver=Turnip' "$INFO"
+          grep -Fxq 'vulkan_target=A6xx Vulkan 1.3' "$INFO"
+          grep -Fxq 'kernel_interface=KGSL' "$INFO"
+          grep -Fxq 'meson_freedreno_kmds=kgsl' "$INFO"
+          grep -Fxq 'integration=build-only' "$INFO"
+          sha256sum "$DRIVER"
+          readelf -d "$DRIVER" | tee artifacts/turnip/final-dynamic-audit.txt
+          ccache --show-stats | tee artifacts/turnip/ccache.txt
+
+      - name: Save Turnip compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-turnip-26.2.2-aarch64-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload Turnip build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TURNIP-MESA-26.2.2-A619-KGSL-AARCH64-${{ github.run_number }}
+          path: release/turnip/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Turnip diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-turnip-mesa-26.2.2-diagnostics-${{ github.run_number }}
+          path: artifacts/turnip/
+          if-no-files-found: warn
+          retention-days: 14

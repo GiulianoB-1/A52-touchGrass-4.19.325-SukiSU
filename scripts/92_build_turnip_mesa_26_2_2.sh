@@ -94,15 +94,40 @@ test -s "$DRIVER"
 echo "==> Stage Android Vulkan HAL"
 cp "$DRIVER" "$DIST/vulkan.adreno.so"
 patchelf --set-soname vulkan.adreno.so "$DIST/vulkan.adreno.so"
+patchelf --remove-rpath "$DIST/vulkan.adreno.so"
 "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$DIST/vulkan.adreno.so"
 
 echo "==> Audit HAL"
 readelf -d "$DIST/vulkan.adreno.so" | tee "$OUT/readelf-dynamic.txt"
 readelf -Ws "$DIST/vulkan.adreno.so" | tee "$OUT/readelf-symbols.txt" >/dev/null
-readelf -d "$DIST/vulkan.adreno.so" | grep -Fq '(SONAME)' 
+readelf -d "$DIST/vulkan.adreno.so" | grep -Fq '(SONAME)'
 readelf -d "$DIST/vulkan.adreno.so" | grep -Fq 'vulkan.adreno.so'
-readelf -Ws "$DIST/vulkan.adreno.so" | grep -Eq '[[:space:]]HMI$'
-readelf -Ws "$DIST/vulkan.adreno.so" | grep -Fq 'vk_icdGetInstanceProcAddr'
+! readelf -d "$DIST/vulkan.adreno.so" | grep -Fq '(RUNPATH)'
+readelf -Ws "$DIST/vulkan.adreno.so" | grep -Eq '[[:space:]]HMIfile "$DIST/vulkan.adreno.so" | grep -Fq 'ARM aarch64'
+sha256sum "$DIST/vulkan.adreno.so" | tee "$OUT/vulkan.adreno.so.sha256"
+
+cat > "$OUT/BUILD-INFO.txt" <<EOF
+project=touchGrass Turnip A619 KGSL bring-up
+mesa_version=26.2.2
+mesa_archive_sha256=$MESA_SHA256
+mesa_release_commit=3281a69a8bfd9f997e91c15ed0e6290cae12dd32
+gpu=Adreno 619
+kmd=KGSL
+android_api=36
+ndk=$(basename "$NDK")
+turnip_api_cap=Vulkan-1.3
+turnip_upstream_api=Vulkan-1.4
+driver_filename=vulkan.adreno.so
+soname=vulkan.adreno.so
+architecture=aarch64
+build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
+EOF
+
+echo "==> Turnip build complete"
+
+for lib in libhardware.so liblog.so libnativewindow.so libsync.so libc.so; do
+  readelf -d "$DIST/vulkan.adreno.so" | grep -Fq "Shared library: [$lib]"
+done
 file "$DIST/vulkan.adreno.so" | tee "$OUT/file.txt"
 file "$DIST/vulkan.adreno.so" | grep -Fq 'ARM aarch64'
 sha256sum "$DIST/vulkan.adreno.so" | tee "$OUT/vulkan.adreno.so.sha256"

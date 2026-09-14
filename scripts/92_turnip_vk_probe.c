@@ -54,6 +54,104 @@ static int choose_memory_type(VkPhysicalDevice physical,
     return -1;
 }
 
+static int run_noop_submit_probe(VkDevice device,
+                                 VkQueue queue,
+                                 uint32_t queue_family)
+{
+    VkResult r;
+
+    VkCommandPoolCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = queue_family,
+    };
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    r = vkCreateCommandPool(device, &cpci, NULL, &pool);
+    printf("noop_vkCreateCommandPool_result=%d\n", r);
+    if (r != VK_SUCCESS)
+        return 70;
+
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+
+    VkCommandBuffer command = VK_NULL_HANDLE;
+    r = vkAllocateCommandBuffers(device, &cbai, &command);
+    printf("noop_vkAllocateCommandBuffers_result=%d\n", r);
+    if (r != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, NULL);
+        return 71;
+    }
+
+    VkCommandBufferBeginInfo cbbi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    r = vkBeginCommandBuffer(command, &cbbi);
+    printf("noop_vkBeginCommandBuffer_result=%d\n", r);
+    if (r != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, NULL);
+        return 72;
+    }
+
+    r = vkEndCommandBuffer(command);
+    printf("noop_vkEndCommandBuffer_result=%d\n", r);
+    if (r != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, NULL);
+        return 73;
+    }
+
+    VkFenceCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+
+    VkFence fence = VK_NULL_HANDLE;
+    r = vkCreateFence(device, &fci, NULL, &fence);
+    printf("noop_vkCreateFence_result=%d\n", r);
+    if (r != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, NULL);
+        return 74;
+    }
+
+    VkSubmitInfo si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command,
+    };
+
+    printf("noop_before_vkQueueSubmit=1\n");
+    fflush(stdout);
+    r = vkQueueSubmit(queue, 1, &si, fence);
+    printf("noop_vkQueueSubmit_result=%d\n", r);
+    fflush(stdout);
+    if (r != VK_SUCCESS) {
+        vkDestroyFence(device, fence, NULL);
+        vkDestroyCommandPool(device, pool, NULL);
+        return 75;
+    }
+
+    printf("noop_before_vkWaitForFences=1\n");
+    fflush(stdout);
+    r = vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ULL);
+    printf("noop_vkWaitForFences_result=%d\n", r);
+    fflush(stdout);
+
+    vkDestroyFence(device, fence, NULL);
+    vkDestroyCommandPool(device, pool, NULL);
+
+    if (r != VK_SUCCESS)
+        return 76;
+
+    printf("noop_submit_status=PASS\n");
+    fflush(stdout);
+    return 0;
+}
+
 static int run_submit_probe(VkPhysicalDevice physical)
 {
     VkResult r;
@@ -119,6 +217,19 @@ static int run_submit_probe(VkPhysicalDevice physical)
         return 44;
     }
     printf("vkGetDeviceQueue_result=OK\n");
+
+    printf("=== NO-OP GPU SUBMISSION ===\n");
+    fflush(stdout);
+    int noop_rc = run_noop_submit_probe(device, queue, queue_family);
+    printf("noop_submit_exit=%d\n", noop_rc);
+    fflush(stdout);
+    if (noop_rc != 0) {
+        vkDestroyDevice(device, NULL);
+        return noop_rc;
+    }
+
+    printf("=== BUFFER FILL GPU SUBMISSION ===\n");
+    fflush(stdout);
 
     VkBufferCreateInfo bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -263,8 +374,11 @@ static int run_submit_probe(VkPhysicalDevice physical)
         .pCommandBuffers = &command,
     };
 
+    printf("fill_before_vkQueueSubmit=1\n");
+    fflush(stdout);
     r = vkQueueSubmit(queue, 1, &si, fence);
     printf("vkQueueSubmit_result=%d\n", r);
+    fflush(stdout);
     if (r != VK_SUCCESS) {
         vkDestroyFence(device, fence, NULL);
         vkDestroyCommandPool(device, pool, NULL);
@@ -274,8 +388,11 @@ static int run_submit_probe(VkPhysicalDevice physical)
         return 54;
     }
 
+    printf("fill_before_vkWaitForFences=1\n");
+    fflush(stdout);
     r = vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ULL);
     printf("vkWaitForFences_result=%d\n", r);
+    fflush(stdout);
     if (r != VK_SUCCESS) {
         vkDeviceWaitIdle(device);
         vkDestroyFence(device, fence, NULL);

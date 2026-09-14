@@ -282,7 +282,7 @@ for i in range(0, len(raw), 2):
 conflict_list.write_text("".join(f"{path}\n" for path in conflicts))
 policy_log.write_text("".join(policy_rows))
 report.write_text(
-    f"from_tag=v4.19.154\n"
+    f"from_tag=v4.19.206\n"
     f"from_commit={from_sha}\n"
     f"to_tag=v4.19.325\n"
     f"to_commit={to_sha}\n"

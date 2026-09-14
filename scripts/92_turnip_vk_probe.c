@@ -15,6 +15,20 @@ static void print_version(const char *key, uint32_t v)
            VK_API_VERSION_PATCH(v));
 }
 
+static void print_memory_types(VkPhysicalDevice physical)
+{
+    VkPhysicalDeviceMemoryProperties mp;
+    vkGetPhysicalDeviceMemoryProperties(physical, &mp);
+
+    printf("memory_type_count=%u\n", mp.memoryTypeCount);
+    for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
+        printf("memory_type[%u].flags=0x%x\n",
+               i, mp.memoryTypes[i].propertyFlags);
+        printf("memory_type[%u].heap=%u\n",
+               i, mp.memoryTypes[i].heapIndex);
+    }
+}
+
 static int choose_memory_type(VkPhysicalDevice physical,
                               uint32_t type_bits,
                               VkMemoryPropertyFlags required,
@@ -25,29 +39,49 @@ static int choose_memory_type(VkPhysicalDevice physical,
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(physical, &mp);
 
-    int fallback = -1;
+    int coherent_fallback = -1;
+    int visible_fallback = -1;
+
+    /*
+     * Prefer HOST_CACHED + HOST_COHERENT where the driver exposes it.
+     * The stock Qualcomm driver selected flags=0xf on this device, while
+     * Turnip's first matching coherent type is flags=0x7.  Prefer the
+     * cached coherent type for an apples-to-apples CPU readback test.
+     */
+    VkMemoryPropertyFlags strongest =
+        required |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+        VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 
     for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
         if (!(type_bits & (1u << i)))
             continue;
 
         VkMemoryPropertyFlags flags = mp.memoryTypes[i].propertyFlags;
-        if ((flags & required) != required)
-            continue;
-
-        if ((flags & preferred) == preferred) {
+        if ((flags & strongest) == strongest) {
             *type_index = i;
             *chosen_flags = flags;
             return 0;
         }
 
-        if (fallback < 0)
-            fallback = (int)i;
+        if ((flags & required) == required &&
+            (flags & preferred) == preferred &&
+            coherent_fallback < 0)
+            coherent_fallback = (int)i;
+
+        if ((flags & required) == required && visible_fallback < 0)
+            visible_fallback = (int)i;
     }
 
-    if (fallback >= 0) {
-        *type_index = (uint32_t)fallback;
-        *chosen_flags = mp.memoryTypes[fallback].propertyFlags;
+    if (coherent_fallback >= 0) {
+        *type_index = (uint32_t)coherent_fallback;
+        *chosen_flags = mp.memoryTypes[coherent_fallback].propertyFlags;
+        return 0;
+    }
+
+    if (visible_fallback >= 0) {
+        *type_index = (uint32_t)visible_fallback;
+        *chosen_flags = mp.memoryTypes[visible_fallback].propertyFlags;
         return 0;
     }
 
@@ -249,6 +283,7 @@ static int run_submit_probe(VkPhysicalDevice physical)
 
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(device, buffer, &req);
+    print_memory_types(physical);
     printf("buffer_memory_size=%llu\n",
            (unsigned long long)req.size);
     printf("buffer_memory_type_bits=0x%x\n", req.memoryTypeBits);
@@ -291,6 +326,26 @@ static int run_submit_probe(VkPhysicalDevice physical)
         vkDestroyDevice(device, NULL);
         return 48;
     }
+
+    /*
+     * Map before submitting GPU work.  This separates mmap viability from
+     * post-submit CPU readback and avoids introducing a fresh KGSL mmap only
+     * after the GPU has already written the allocation.
+     */
+    void *mapped = NULL;
+    printf("pre_submit_vkMapMemory_begin=1\n");
+    r = vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
+    printf("pre_submit_vkMapMemory_result=%d\n", r);
+    printf("pre_submit_mapped_nonnull=%d\n", mapped != NULL);
+    if (r != VK_SUCCESS || !mapped) {
+        vkFreeMemory(device, memory, NULL);
+        vkDestroyBuffer(device, buffer, NULL);
+        vkDestroyDevice(device, NULL);
+        return 59;
+    }
+
+    ((volatile uint32_t *)mapped)[0] = 0x13579BDFu;
+    printf("pre_submit_cpu_sentinel_write=PASS\n");
 
     VkCommandPoolCreateInfo cpci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -403,18 +458,7 @@ static int run_submit_probe(VkPhysicalDevice physical)
         return 55;
     }
 
-    void *mapped = NULL;
-    r = vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
-    printf("vkMapMemory_result=%d\n", r);
-    if (r != VK_SUCCESS || !mapped) {
-        vkDestroyFence(device, fence, NULL);
-        vkDestroyCommandPool(device, pool, NULL);
-        vkFreeMemory(device, memory, NULL);
-        vkDestroyBuffer(device, buffer, NULL);
-        vkDestroyDevice(device, NULL);
-        return 56;
-    }
-
+    printf("post_submit_reuse_existing_mapping=1\n");
     if (!(memory_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
         VkMappedMemoryRange range = {
             .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,

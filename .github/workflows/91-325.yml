@@ -655,10 +655,10 @@ jobs:
           grep -Fq 'bool inited;' "$KERNEL/fs/f2fs/segment.h"
           grep -Fq 'void f2fs_save_inmem_curseg' "$KERNEL/fs/f2fs/segment.c"
           grep -Fq 'f2fs_allocate_new_segment(sbi, CURSEG_COLD_DATA_PINNED);' "$KERNEL/fs/f2fs/file.c"
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52PF_BADCTX'
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52FUSE_BALANCE'
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 READY'
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 F2FS curseg restore'
+          grep -aFq 'A52PF_BADCTX' "$KERNEL/out/vmlinux"
+          grep -aFq 'A52FUSE_BALANCE' "$KERNEL/out/vmlinux"
+          grep -aFq 'A52P91 READY' "$KERNEL/out/vmlinux"
+          grep -aFq 'A52P91 F2FS curseg restore' "$KERNEL/out/vmlinux"
           grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'clear_and_wake_up_bit(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'test_and_set_bit_lock(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
@@ -845,12 +845,12 @@ jobs:
           test -s "$HYBRID_ZIP"
           test -s "$ROLLBACK_ZIP"
 
-          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
-          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
-          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "rcu_nocbs" "rcu_nocbs=6-7";'
-          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=0";'
-          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=0";'
-          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -Fq 'patch_cmdline "rcu_nocbs" "rcu_nocbs=6-7";'
+          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -F 'patch_cmdline "sched_eevdf" "sched_eevdf=1";' >/dev/null
+          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -F 'patch_cmdline "sched_cass" "sched_cass=1";' >/dev/null
+          unzip -p "$HYBRID_ZIP" anykernel.sh | grep -F 'patch_cmdline "rcu_nocbs" "rcu_nocbs=6-7";' >/dev/null
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -F 'patch_cmdline "sched_eevdf" "sched_eevdf=0";' >/dev/null
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -F 'patch_cmdline "sched_cass" "sched_cass=0";' >/dev/null
+          unzip -p "$ROLLBACK_ZIP" anykernel.sh | grep -F 'patch_cmdline "rcu_nocbs" "rcu_nocbs=6-7";' >/dev/null
 
           {
             echo 'hardware_test_package=passed'

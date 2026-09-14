@@ -547,7 +547,7 @@ jobs:
       - name: Build Phase90 F2FS Curseg
         run: |
           set -o pipefail
-          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+          bash ./scripts/57_build_resukisu_susfs_manual_detection.sh \
             2>&1 | tee artifacts/phase90-build.log
 
       - name: Audit build result
@@ -743,13 +743,13 @@ jobs:
 
           chmod +x scripts/.package-hybrid-enabled.sh scripts/.package-hybrid-rollback.sh
 
-          ./scripts/.package-hybrid-enabled.sh \
+          bash ./scripts/.package-hybrid-enabled.sh \
             4.19.206 \
             "artifacts/Image-${LABEL}" \
             packaging/AnyKernel3 \
             release-hybrid
 
-          ./scripts/.package-hybrid-rollback.sh \
+          bash ./scripts/.package-hybrid-rollback.sh \
             4.19.206 \
             "artifacts/Image-${LABEL}" \
             packaging/AnyKernel3 \

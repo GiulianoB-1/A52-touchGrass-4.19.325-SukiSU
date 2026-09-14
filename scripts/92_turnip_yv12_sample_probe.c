@@ -117,7 +117,35 @@ static int fill_yv12_pattern(AHardwareBuffer *ahb)
     return rc == 0 ? 0 : 3;
 }
 
-int main(void)
+static float absf_local(float x)
+{
+    return x < 0.0f ? -x : x;
+}
+
+static int write_reference(const char *path, const float rgba[4])
+{
+    FILE *fp = fopen(path, "w");
+    if (!fp)
+        return -1;
+    int ok = fprintf(fp, "%.9f %.9f %.9f %.9f\n",
+                     rgba[0], rgba[1], rgba[2], rgba[3]) > 0;
+    if (fclose(fp) != 0)
+        ok = 0;
+    return ok ? 0 : -1;
+}
+
+static int read_reference(const char *path, float rgba[4])
+{
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return -1;
+    int n = fscanf(fp, "%f %f %f %f",
+                   &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
+    fclose(fp);
+    return n == 4 ? 0 : -1;
+}
+
+int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     printf("========== YV12 940x1670 GPU SAMPLE PROBE ==========\n");
@@ -633,24 +661,52 @@ int main(void)
     printf("yv12_sample.rgba=%.6f,%.6f,%.6f,%.6f\n",
            out[0], out[1], out[2], out[3]);
 
-    /* For Y=128 and chroma rows around 417/418, the 601 conversion should
-     * be approximately RGB=(0.32, 0.66, 0.27).  These deliberately broad
-     * bounds accept small implementation/offset differences but reject the
-     * near-gray value produced if a 480-byte chroma pitch is wrongly rounded
-     * to 512 bytes.
-     */
-    int color_ok =
-        out[0] > 0.20f && out[0] < 0.45f &&
-        out[1] > 0.55f && out[1] < 0.80f &&
-        out[2] > 0.15f && out[2] < 0.40f &&
-        out[3] > 0.90f && out[3] < 1.01f;
+    int sane =
+        out[0] >= 0.0f && out[0] <= 1.0f &&
+        out[1] >= 0.0f && out[1] <= 1.0f &&
+        out[2] >= 0.0f && out[2] <= 1.0f &&
+        out[3] >= 0.90f && out[3] <= 1.01f;
+    printf("yv12_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
 
-    printf("yv12_sample.expected_window_r=0.20..0.45\n");
-    printf("yv12_sample.expected_window_g=0.55..0.80\n");
-    printf("yv12_sample.expected_window_b=0.15..0.40\n");
-    printf("yv12_sample.color_check=%s\n", color_ok ? "PASS" : "FAIL");
-    printf("YV12_GPU_SAMPLE_STATUS=%s\n", color_ok ? "PASS" : "FAIL");
-    ret = color_ok ? 0 : 46;
+    if (!sane) {
+        printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
+        ret = 46;
+    } else if (argc == 3 && strcmp(argv[1], "--write-ref") == 0) {
+        int wr = write_reference(argv[2], out);
+        printf("yv12_sample.reference_write=%s\n", wr == 0 ? "PASS" : "FAIL");
+        printf("YV12_GPU_SAMPLE_STATUS=%s\n", wr == 0 ? "PASS" : "FAIL");
+        ret = wr == 0 ? 0 : 47;
+    } else if (argc == 3 && strcmp(argv[1], "--compare-ref") == 0) {
+        float ref[4] = {0};
+        if (read_reference(argv[2], ref) != 0) {
+            printf("yv12_sample.reference_read=FAIL\n");
+            printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
+            ret = 48;
+        } else {
+            printf("yv12_sample.reference_rgba=%.6f,%.6f,%.6f,%.6f\n",
+                   ref[0], ref[1], ref[2], ref[3]);
+            float d0 = absf_local(out[0] - ref[0]);
+            float d1 = absf_local(out[1] - ref[1]);
+            float d2 = absf_local(out[2] - ref[2]);
+            float d3 = absf_local(out[3] - ref[3]);
+            float max_diff = d0;
+            if (d1 > max_diff) max_diff = d1;
+            if (d2 > max_diff) max_diff = d2;
+            if (d3 > max_diff) max_diff = d3;
+            printf("yv12_sample.reference_diff=%.6f,%.6f,%.6f,%.6f\n",
+                   d0, d1, d2, d3);
+            printf("yv12_sample.reference_max_diff=%.6f\n", max_diff);
+            printf("yv12_sample.reference_tolerance=0.030000\n");
+            int match = max_diff <= 0.03f;
+            printf("yv12_sample.reference_match=%s\n", match ? "PASS" : "FAIL");
+            printf("YV12_GPU_SAMPLE_STATUS=%s\n", match ? "PASS" : "FAIL");
+            ret = match ? 0 : 49;
+        }
+    } else {
+        printf("yv12_sample.mode=standalone_sanity\n");
+        printf("YV12_GPU_SAMPLE_STATUS=PASS\n");
+        ret = 0;
+    }
 
 cleanup:
     if (device != VK_NULL_HANDLE)

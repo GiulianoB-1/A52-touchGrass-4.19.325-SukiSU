@@ -5,7 +5,7 @@ on:
     branches:
       - agent/a52-uclamp-a619-gpu-p2-vulkan-re-v1
     paths:
-      - .github/workflows/87-a52-android17-uclamp-a619-gpu-p2-clang11.yml
+      - .github/workflows/88-a52-android17-uclamp-a619-gpu-p2-vulkan-re-clang11.yml
       - scripts/81_*
       - scripts/82_*
       - scripts/84_*

@@ -77,6 +77,12 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
 
+      - name: Prepare cached build workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
       - name: Reconstruct exact Phase80 kernel baseline
         if: steps.binder84_source.outputs.cache-hit != 'true'
         run: |

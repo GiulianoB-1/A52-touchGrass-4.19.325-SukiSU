@@ -150,6 +150,31 @@ if old_user_copy in c:
 elif new_user_copy not in c:
     raise SystemExit("kmap_local_page copy path anchor mismatch")
 
+# FOLL_NOFAULT is newer than Linux 4.19. Preserve the Android 17
+# non-faulting page lookup semantics with follow_page(FOLL_GET) while holding
+# mmap_sem. Without FOLL_POPULATE this only returns an already-present PTE.
+page_lookup_fn = r'''static struct page *binder_page_lookup(struct binder_alloc *alloc,
+				       unsigned long addr)
+{
+	struct mm_struct *mm = alloc->mm;
+	struct vm_area_struct *vma;
+	struct page *page = NULL;
+
+	down_read(&mm->mmap_sem);
+	if (binder_alloc_is_mapped(alloc)) {
+		vma = find_vma(mm, addr);
+		if (vma && addr >= vma->vm_start) {
+			page = follow_page(vma, addr, FOLL_GET);
+			if (IS_ERR(page))
+				page = NULL;
+		}
+	}
+	up_read(&mm->mmap_sem);
+
+	return page;
+}'''
+c = replace_function(c, "static struct page *binder_page_lookup(", page_lookup_fn)
+
 # Android 17 uses per-VMA locking and vma_lookup(). Linux 4.19 predates those
 # primitives. Serialize page installation through the allocator mutex and use
 # mmap_sem + find_vma(), which is the proven 4.19 Binder mapping model.
@@ -186,6 +211,17 @@ install_fn = r'''static int binder_install_single_page(struct binder_alloc *allo
 	return ret;
 }'''
 c = replace_function(c, "static int binder_install_single_page(", install_fn)
+
+# Our serialized page-install failure path frees the freshly allocated Binder
+# buffer while alloc->mutex is still held. The native helper is defined later
+# in Android 17 binder_alloc.c, so add a forward declaration for Clang 11.
+free_locked_proto = """static void binder_free_buf_locked(struct binder_alloc *alloc,
+				   struct binder_buffer *buffer);\n\n"""
+locked_anchor = "static struct binder_buffer *binder_alloc_new_buf_locked("
+if free_locked_proto.strip() not in c:
+    if locked_anchor not in c:
+        raise SystemExit("binder_alloc_new_buf_locked anchor missing")
+    c = c.replace(locked_anchor, free_locked_proto + locked_anchor, 1)
 
 # Keep the allocator mutex held while installing pages. This mirrors the
 # serialization guarantee of the original 4.19 allocator and makes the

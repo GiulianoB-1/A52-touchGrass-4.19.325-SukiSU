@@ -6,17 +6,24 @@ BUILD_DIR="${2:-$ROOT/artifacts/turnip-mesa-26.2.2}"
 OUT_DIR="${3:-$ROOT/release-turnip}"
 
 DRIVER="$BUILD_DIR/dist/vulkan.adreno.so"
+PROBE="$BUILD_DIR/dist/turnip-vk-probe"
+LIVE_TEST="$ROOT/scripts/92_turnip_live_test.sh"
 INFO="$BUILD_DIR/BUILD-INFO.txt"
 
 test -s "$DRIVER"
+test -s "$PROBE"
+test -s "$LIVE_TEST"
 test -s "$INFO"
 
 rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR/module/payload"
+mkdir -p "$OUT_DIR/module/payload" "$OUT_DIR/module/tools"
 
 cp "$DRIVER" "$OUT_DIR/module/payload/vulkan.adreno.so"
+cp "$PROBE" "$OUT_DIR/module/tools/turnip-vk-probe"
+cp "$LIVE_TEST" "$OUT_DIR/module/tools/turnip-live-test.sh"
 cp "$INFO" "$OUT_DIR/module/BUILD-INFO.txt"
 sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.sha256"
+sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha256"
 
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
@@ -56,6 +63,8 @@ set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/payload/vulkan.adreno.so" 0 0 0644
+set_perm "$MODPATH/tools/turnip-vk-probe" 0 0 0755
+set_perm "$MODPATH/tools/turnip-live-test.sh" 0 0 0755
 EOF
 
 cat > "$OUT_DIR/module/post-fs-data.sh" <<'EOF'
@@ -122,6 +131,12 @@ OUT="$MODDIR/turnip-status.txt"
   echo "=== MOUNT ==="
   cat /proc/mounts | grep -F 'vulkan.adreno.so' || true
   echo
+  echo "=== DIRECT TURNIP PROBE ==="
+  PROBE_STAGE=/dev/touchgrass-turnip-a619/turnip-vk-probe
+  cp -f "$MODDIR/tools/turnip-vk-probe" "$PROBE_STAGE" 2>/dev/null || true
+  chmod 0755 "$PROBE_STAGE" 2>/dev/null || true
+  "$PROBE_STAGE" 2>&1 || true
+  echo
   echo "=== VULKAN JSON ==="
   cmd gpu vkjson 2>&1 || true
   echo
@@ -163,6 +178,14 @@ Rollback:
 
 32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver in
 this first bring-up.
+
+Safer first test before installing the module:
+  1. Extract this ZIP on the PC.
+  2. Push payload/vulkan.adreno.so, tools/turnip-vk-probe and
+     tools/turnip-live-test.sh to /data/local/tmp.
+  3. Run turnip-live-test.sh through su. It bind-mounts Turnip only inside
+     that root shell namespace, runs the direct Vulkan probe, records logs,
+     and unmounts automatically on exit.
 EOF
 
 chmod +x "$OUT_DIR/module/post-fs-data.sh" "$OUT_DIR/module/action.sh" "$OUT_DIR/module/uninstall.sh"
@@ -178,6 +201,8 @@ unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -l "$ZIP" | grep -Fq 'payload/vulkan.adreno.so'
+unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
+unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'
 sha256sum "$ZIP" > "$ZIP.sha256"
 
 echo "packaged=$ZIP"

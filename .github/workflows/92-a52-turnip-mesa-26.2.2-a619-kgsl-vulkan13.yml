@@ -157,6 +157,8 @@ jobs:
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics' "$INFO"
+          grep -Fxq 'android_yv12_fix=bounded-16byte-pitch-software-ycbcr' "$INFO"
+          grep -Fxq 'android_yv12_fix_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
           file "$PROBE" | grep -Fq 'ARM aarch64'
@@ -197,7 +199,7 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.8-vk1.3-ahb-forensics'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.9-vk1.3-yv12-fix'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'

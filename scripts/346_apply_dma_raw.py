@@ -192,9 +192,25 @@ def inject_init_call(s: str) -> str:
     brace=s.find("{",pos)
     if brace<0:
         raise SystemExit("Phase346 dsi_ctrl_drv_init body missing")
-    # Insert immediately on function entry. Mapping is global/idempotent and
-    # does not depend on the controller argument.
-    return s[:brace+1] + "\n\ta52_p346_sideband_init();" + s[brace+1:]
+
+    # This downstream kernel enforces the pre-C99 declaration rule with
+    # -Werror=declaration-after-statement.  Insert only after the function's
+    # initial declaration block, immediately before its first executable
+    # statement.  Use the stable rc initialization followed by the first
+    # validation branch as the local anchor.
+    body_end=s.find("\n}",brace)
+    if body_end<0:
+        raise SystemExit("Phase346 dsi_ctrl_drv_init end missing")
+    body=s[brace:body_end]
+    anchor="\tif (!dsi_ctrl)\n"
+    if body.count(anchor)!=1:
+        raise SystemExit(
+            f"Phase346 dsi_ctrl_drv_init first-statement anchor count {body.count(anchor)}")
+    body=body.replace(
+        anchor,
+        "\ta52_p346_sideband_init();\n\n"+anchor,
+        1)
+    return s[:brace]+body+s[body_end:]
 
 def patch_ctrl(s: str) -> str:
     if MARK in s:

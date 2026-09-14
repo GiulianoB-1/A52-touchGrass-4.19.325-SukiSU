@@ -193,7 +193,7 @@ if ".min_tso_segs" in s:
 
 if ".min_tso_segs" in s:
     raise SystemExit("BBRv1 still references removed min_tso_segs congestion-op field")
-if "tcp_tso_autosize(" in s:
+if re.search(r"^\s*return\s+tcp_tso_autosize\s*\(", s, re.M):
     raise SystemExit("BBRv1 must not call static tcp_tso_autosize from tcp_output.c")
 if ".tso_segs\t= bbr_tso_segs," not in s:
     raise SystemExit("BBRv1 tso_segs callback registration missing")

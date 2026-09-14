@@ -628,6 +628,7 @@ jobs:
       - name: Audit build result
         run: |
           set -Eeuo pipefail
+          trap 'rc=$?; echo "::error::Phase91 audit failed at line $LINENO: $BASH_COMMAND (rc=$rc)" >&2; exit $rc' ERR
           KERNEL=workspace/touchgrass-a52xq
           test "$(make -s -C "$KERNEL" kernelversion)" = "4.19.325"
           grep -Fq 'SUBLEVEL = 325' "$KERNEL/Makefile"

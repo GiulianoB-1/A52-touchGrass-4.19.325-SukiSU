@@ -36,10 +36,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-yv12-sample-probe" > "$OUT_DIR/module/yv
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.10-vk1.3-yv12-sample
-versionCode=10
+version=0.11-vk1.3-yv12-stockref
+versionCode=11
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Tests the fixed 940x1670 YV12 import with real compute-shader sampling and readback while keeping the override temporary.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Captures stock Qualcomm 940x1670 YV12 sampling as the runtime reference, then compares Turnip output with tolerance while keeping the override temporary.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -166,7 +166,7 @@ post-fs-data.sh is a no-op logger.
 
 Use the KernelSU/SukiSU module Action button to run a temporary live test.
 The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
-runs the proven Vulkan submission/render probe, the stock-vs-Turnip Android hardware-buffer diagnostic, and a real 940x1670 YV12 compute-sampling/readback test using a row-varying chroma pattern to catch incorrect 480-byte pitch handling, then unmounts automatically.
+runs the proven Vulkan submission/render probe, the stock-vs-Turnip Android hardware-buffer diagnostic, and a real 940x1670 YV12 compute-sampling/readback test. Stock Qualcomm writes the reference RGBA first; Turnip must match it within a bounded tolerance, which avoids hard-coding vendor YCbCr conversion math while still catching incorrect 480-byte pitch handling. The temporary override is then unmounted automatically.
 
 Rollback from the old boot-override revision:
   adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"

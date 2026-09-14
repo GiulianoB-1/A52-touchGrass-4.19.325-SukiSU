@@ -205,6 +205,34 @@ elif 'CONFIG_NET_SCH_FQ=y' not in d:
 defconfig.write_text(d)
 PY
 
+echo "==> Normalizing whitespace from upstream BBRv3 compatibility patch"
+python3 - "$KERNEL" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+files = [
+    "include/net/tcp.h",
+    "include/uapi/linux/rtnetlink.h",
+    "net/core/sock.c",
+    "net/ipv4/tcp_input.c",
+    "net/sched/sch_fq.c",
+]
+
+for rel in files:
+    p = root / rel
+    if not p.exists():
+        continue
+    lines = p.read_text().splitlines()
+    fixed = []
+    for line in lines:
+        line = line.rstrip()
+        while line.startswith(" \t"):
+            line = line[1:]
+        fixed.append(line)
+    p.write_text("\n".join(fixed) + "\n")
+PY
+
 echo "==> Auditing BBRv3 source split"
 grep -Eq '#define[[:space:]]+BBR_VERSION[[:space:]]+3' net/ipv4/tcp_bbr3.c
 grep -Fq '.name		= "bbr3",' net/ipv4/tcp_bbr3.c

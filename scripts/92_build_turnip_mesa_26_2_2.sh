@@ -46,11 +46,11 @@ curl -fL --retry 5 --retry-delay 3 \
 # QCOM gralloc path, as proven by the stock-vs-Turnip AHB probe.  Backport only
 # the driver/FDL safety portion here so Mesa remains 26.2.2 and gains no new
 # vendor userspace dependency.
-git -C "$SRC" apply --check \
+git -C "$SRC" apply --no-index --check \
   --include='src/freedreno/fdl/*' \
   --include='src/freedreno/vulkan/*' \
   "$YV12_PATCH"
-git -C "$SRC" apply \
+git -C "$SRC" apply --no-index \
   --include='src/freedreno/fdl/*' \
   --include='src/freedreno/vulkan/*' \
   "$YV12_PATCH"

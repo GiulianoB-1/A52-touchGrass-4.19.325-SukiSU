@@ -127,7 +127,7 @@ def audit_existing_a619_features(kernel: Path) -> None:
         require(block, token, "A619 feature audit")
 
     adreno = (kernel / "drivers/gpu/msm/adreno.c").read_text()
-    require(adreno, "set_bit(ADRENO_HWCG_CTRL", "HWCG default audit")
+    require(adreno, ".pwrctrl_flag = BIT(ADRENO_THROTTLING_CTRL) | BIT(ADRENO_HWCG_CTRL)", "HWCG default audit")
     require(adreno, "preempt_level = 1", "A6xx preemption level audit")
 
     pwrscale = (kernel / "drivers/gpu/msm/kgsl_pwrscale.c").read_text()

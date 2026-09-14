@@ -28,10 +28,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha25
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.5-vk1.3-submit-forensics
-versionCode=5
+version=0.6-vk1.3-memory-forensics
+versionCode=6
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 submission forensics for Adreno 619/KGSL. Adds unbuffered milestones, timeout handling, and persistent live KGSL kernel capture.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 memory forensics for Adreno 619/KGSL. Prefers cached-coherent host memory, maps before submit, and verifies GPU-written data.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'

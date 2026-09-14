@@ -26,47 +26,66 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 # ext4_check_dir_entry() gained the logical block argument before the byte
-# offset. The first directory block is logical block zero in both checks.
+# offset. ext4_get_first_dir_block() always reads logical block zero, so both
+# dot and dotdot checks must explicitly pass lblk=0. Use function-scoped
+# replacements because the Samsung/upstream merge changes indentation.
 path = root / "fs/ext4/namei.c"
 text = path.read_text()
-old = (
-    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
-    "\t\t\t\t\t bh->b_size, 0) ||\n"
-)
-new = (
-    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
-    "\t\t\t\t\t bh->b_size, 0, 0) ||\n"
-)
-if old in text:
-    text = replace_once(text, old, new, "ext4 dot entry check")
+
+fn_start = text.index("static struct buffer_head *ext4_get_first_dir_block")
+fn_end = text.index("\nstruct ext4_renament", fn_start)
+prefix, body, suffix = text[:fn_start], text[fn_start:fn_end], text[fn_end:]
+
+old = "bh->b_size, 0) ||"
+new = "bh->b_size, 0, 0) ||"
+if old in body:
+    if body.count(old) != 1:
+        raise SystemExit(f"ext4 dot entry check anchor mismatch: {body.count(old)}")
+    body = body.replace(old, new, 1)
     repairs.append("fs/ext4/namei.c=added-lblk-to-dot-entry-check")
+elif new not in body:
+    raise SystemExit("ext4 dot entry check is neither old nor repaired")
 
-old = (
-    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
-    "\t\t\t\t\t bh->b_size, offset) ||\n"
-)
-new = (
-    "\t\tif (ext4_check_dir_entry(inode, NULL, de, bh, bh->b_data,\n"
-    "\t\t\t\t\t bh->b_size, 0, offset) ||\n"
-)
-if old in text:
-    text = replace_once(text, old, new, "ext4 dotdot entry check")
+old = "bh->b_size, offset) ||"
+new = "bh->b_size, 0, offset) ||"
+if old in body:
+    if body.count(old) != 1:
+        raise SystemExit(f"ext4 dotdot entry check anchor mismatch: {body.count(old)}")
+    body = body.replace(old, new, 1)
     repairs.append("fs/ext4/namei.c=added-lblk-to-dotdot-entry-check")
+elif new not in body:
+    raise SystemExit("ext4 dotdot entry check is neither old nor repaired")
 
-# ext4_find_entry() now returns the logical block containing the entry. Preserve
-# it in the existing ext4_renament field so later delete/update paths use the
-# same block that was re-read.
-old = (
-    "\told.bh = ext4_find_entry(old.dir, &old.dentry->d_name, &old.de,\n"
-    "\t\t\t\t &old.inlined);\n"
-)
-new = (
-    "\told.bh = ext4_find_entry(old.dir, &old.dentry->d_name, &old.de,\n"
-    "\t\t\t\t &old.inlined, &old.lblk);\n"
-)
-if old in text:
-    text = replace_once(text, old, new, "ext4 reset entry lookup")
-    repairs.append("fs/ext4/namei.c=recorded-reset-entry-lblk")
+text = prefix + body + suffix
+
+# Samsung's ext4_find_entry() has a fifth lblk output argument. The upstream
+# ext4_resetent() rereads the entry and must refresh BOTH old.inlined and
+# old.lblk before ext4_setent() chooses the inline/non-inline update path.
+fn_start = text.index("static void ext4_resetent")
+fn_end = text.index("\nstatic int ext4_find_delete_entry", fn_start)
+prefix, body, suffix = text[:fn_start], text[fn_start:fn_end], text[fn_end:]
+
+merged_form = "&old.de, NULL, &old.lblk);"
+fixed_form = "&old.de, &old.inlined, &old.lblk);"
+if merged_form in body:
+    if body.count(merged_form) != 1:
+        raise SystemExit(
+            f"ext4 reset lookup merged-form mismatch: {body.count(merged_form)}"
+        )
+    body = body.replace(merged_form, fixed_form, 1)
+    repairs.append("fs/ext4/namei.c=refreshed-reset-entry-inline-state-and-lblk")
+elif fixed_form not in body:
+    # Handle the pure-upstream four-argument form if a future merge resolves
+    # differently but still needs Samsung's lblk output.
+    upstream_form = "&old.de,\n\t\t\t\t &old.inlined);"
+    samsung_form = "&old.de,\n\t\t\t\t &old.inlined, &old.lblk);"
+    if upstream_form in body:
+        body = body.replace(upstream_form, samsung_form, 1)
+        repairs.append("fs/ext4/namei.c=recorded-reset-entry-lblk")
+    else:
+        raise SystemExit("ext4 reset lookup form is unrecognized")
+
+text = prefix + body + suffix
 path.write_text(text)
 
 # The late CPU hotplug table references random and hrtimer callbacks directly.
@@ -151,12 +170,21 @@ path.write_text(text)
 
 # Exact postconditions.
 ext4 = (root / "fs/ext4/namei.c").read_text()
-if "bh->b_size, 0) ||" in ext4 or "bh->b_size, offset) ||" in ext4:
+first_start = ext4.index("static struct buffer_head *ext4_get_first_dir_block")
+first_end = ext4.index("\nstruct ext4_renament", first_start)
+first_body = ext4[first_start:first_end]
+if "bh->b_size, 0) ||" in first_body or "bh->b_size, offset) ||" in first_body:
     raise SystemExit("old ext4_check_dir_entry signatures remain")
+if first_body.count("bh->b_size, 0, 0) ||") != 1:
+    raise SystemExit("ext4 dot entry lblk repair validation failed")
+if first_body.count("bh->b_size, 0, offset) ||") != 1:
+    raise SystemExit("ext4 dotdot entry lblk repair validation failed")
+
 reset_start = ext4.index("static void ext4_resetent")
 reset_end = ext4.index("\nstatic int ext4_find_delete_entry", reset_start)
-if "&old.inlined, &old.lblk" not in ext4[reset_start:reset_end]:
-    raise SystemExit("ext4 reset lookup did not retain lblk")
+reset_body = ext4[reset_start:reset_end]
+if "&old.de, &old.inlined, &old.lblk);" not in reset_body:
+    raise SystemExit("ext4 reset lookup did not refresh inlined state and lblk")
 
 cpu = (root / "kernel/cpu.c").read_text()
 for include in ("#include <linux/random.h>", "#include <linux/hrtimer.h>"):

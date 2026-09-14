@@ -308,22 +308,62 @@ static bool sdhci_presetable_values_change(struct sdhci_host *host,
     repairs.append("sdhci=restored-preset-helpers")
 
 
-# The modern fscrypt/F2FS merge uses the dcache flag directly. Define the helper
-# once outside the CONFIG_FS_ENCRYPTION split so both configurations compile.
+# The prepared Samsung 4.19.206 tree already carries the Phase180 no-key
+# helper in both CONFIG_FS_ENCRYPTION branches: the enabled implementation
+# checks DCACHE_ENCRYPTED_NAME, while the disabled stub returns false. Preserve
+# that layout instead of forcing a single global helper.
 fscrypt_h = root / "include/linux/fscrypt.h"
 text = fscrypt_h.read_text()
-fscrypt_helper = '''static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)
+fscrypt_sig = "static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)\n"
+supported_impl = '''static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)
 {
-\treturn dentry->d_flags & DCACHE_ENCRYPTED_NAME;
+	return dentry->d_flags & DCACHE_ENCRYPTED_NAME;
 }
-
 '''
-if "fscrypt_is_nokey_name(" not in text:
-    anchor = "#ifdef CONFIG_FS_ENCRYPTION\n"
-    if text.count(anchor) != 1:
-        raise SystemExit("fscrypt config insertion anchor mismatch")
-    fscrypt_h.write_text(text.replace(anchor, fscrypt_helper + anchor, 1))
-    repairs.append("include/linux/fscrypt.h=restored-no-key-name-helper")
+notsupp_impl = '''static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)
+{
+	return false;
+}
+'''
+
+helper_count = text.count(fscrypt_sig)
+if helper_count == 0:
+    supported_anchor = '''static inline void fscrypt_handle_d_move(struct dentry *dentry)
+{
+	dentry->d_flags &= ~DCACHE_ENCRYPTED_NAME;
+}
+'''
+    notsupp_anchor = '''static inline void fscrypt_handle_d_move(struct dentry *dentry)
+{
+}
+'''
+
+    if text.count(supported_anchor) != 1:
+        raise SystemExit("encrypted fscrypt_handle_d_move anchor mismatch")
+    if text.count(notsupp_anchor) != 1:
+        raise SystemExit("non-encryption fscrypt_handle_d_move anchor mismatch")
+
+    text = text.replace(
+        supported_anchor,
+        supported_anchor + "\n" + supported_impl,
+        1,
+    )
+    text = text.replace(
+        notsupp_anchor,
+        notsupp_anchor + "\n" + notsupp_impl,
+        1,
+    )
+    fscrypt_h.write_text(text)
+    repairs.append("include/linux/fscrypt.h=restored-two-branch-no-key-helper")
+elif helper_count == 2:
+    if text.count(supported_impl) != 1:
+        raise SystemExit("encrypted fscrypt no-key implementation is missing or duplicated")
+    if text.count(notsupp_impl) != 1:
+        raise SystemExit("non-encryption fscrypt no-key stub is missing or duplicated")
+else:
+    raise SystemExit(
+        f"unexpected fscrypt no-key helper definition count: {helper_count}"
+    )
 
 
 # block_validity.c now exposes the inode-aware helper. Update the two stale
@@ -375,7 +415,18 @@ checks = {
     "chacha20": "void chacha20_block(u32 *state, u8 *stream)" in chacha.read_text(),
     "timer_alias": new_timer in timer_h.read_text(),
     "random_init": main.read_text().count("random_init(command_line);") == 1,
-    "fscrypt_nokey": fscrypt_h.read_text().count("fscrypt_is_nokey_name(") == 1,
+    "fscrypt_nokey": (
+        fscrypt_h.read_text().count(
+            "static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)"
+        ) == 2
+        and fscrypt_h.read_text().count(
+            "return dentry->d_flags & DCACHE_ENCRYPTED_NAME;"
+        ) >= 1
+        and fscrypt_h.read_text().count(
+            "static inline bool fscrypt_is_nokey_name(const struct dentry *dentry)\n"
+            "{\n\treturn false;\n}"
+        ) == 1
+    ),
     "ext4_old_call_removed": "ext4_data_block_valid(" not in ext4_inode.read_text(),
 }
 failed = [name for name, ok in checks.items() if not ok]

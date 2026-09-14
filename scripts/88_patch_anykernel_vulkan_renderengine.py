@@ -18,7 +18,7 @@ def replace_once(old: str, new: str, label: str) -> None:
 replace_once(
     'patch_cmdline "sched_cass" "sched_cass=1";\nwrite_boot;',
     'patch_cmdline "sched_cass" "sched_cass=1";\n'
-    'cd "$RAMDISK";\n'
+    'cd "\\$RAMDISK";\n'
     'if [ ! -f init.rc ]; then\n'
     '  abort "touchGrass Vulkan RE: boot ramdisk init.rc not found";\n'
     'fi;\n'

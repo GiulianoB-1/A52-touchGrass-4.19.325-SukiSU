@@ -28,10 +28,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha25
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.2-vk1.3-manual-probe
-versionCode=2
+version=0.3-vk1.3-submit-probe
+versionCode=3
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 manual bring-up probe for Adreno 619/KGSL. Does not override Vulkan during boot.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 safe command-submission probe for Adreno 619/KGSL. Executes and verifies a GPU buffer fill without overriding Vulkan during boot.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -57,7 +57,7 @@ esac
 
 ui_print "- Stock Vulkan HAL found"
 ui_print "- SAFE MODE: no Vulkan HAL replacement during boot"
-ui_print "- Use the module Action button for a temporary Turnip probe"
+ui_print "- Use Action for a temporary Turnip GPU submit probe"
 ui_print "- Original vendor partition will not be modified"
 
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
@@ -90,7 +90,7 @@ DRIVER="$MODDIR/payload/vulkan.adreno.so"
 PROBE="$MODDIR/tools/turnip-vk-probe"
 LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-echo "touchGrass Turnip A619 manual live probe"
+echo "touchGrass Turnip A619 GPU command-submission probe"
 echo "No persistent Vulkan override is active."
 echo "A temporary bind mount will be created only for this test and removed on exit."
 echo
@@ -146,7 +146,7 @@ post-fs-data.sh is a no-op logger.
 
 Use the KernelSU/SukiSU module Action button to run a temporary live test.
 The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
-runs the direct Vulkan probe and diagnostics, then unmounts it automatically.
+runs Vulkan device creation plus a real GPU command submission and memory-verification probe, records diagnostics, then unmounts it automatically.
 
 Rollback from the old boot-override revision:
   adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"

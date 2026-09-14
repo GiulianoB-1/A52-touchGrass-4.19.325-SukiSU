@@ -167,7 +167,16 @@ if "static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)" not in s:
         + "/* Preserve legacy BBRv1's min-TSO policy on the BBRv3 TCP core. */\n"
         + "static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)\n"
         + "{\n"
-        + "\treturn tcp_tso_autosize(sk, mss_now, bbr_min_tso_segs(sk));\n"
+        + "\tu32 bytes, segs;\n"
+        + "\n"
+        + "\t/* tcp_tso_autosize() is static in tcp_output.c, so mirror its\n"
+        + "\t * calculation here and retain BBRv1's custom minimum segment count.\n"
+        + "\t */\n"
+        + "\tbytes = min_t(unsigned long,\n"
+        + "\t\t      sk->sk_pacing_rate >> READ_ONCE(sk->sk_pacing_shift),\n"
+        + "\t\t      sk->sk_gso_max_size - 1 - MAX_TCP_HEADER);\n"
+        + "\tsegs = max_t(u32, bytes / mss_now, bbr_min_tso_segs(sk));\n"
+        + "\treturn segs;\n"
         + "}"
     )
     s = s[:m.start()] + wrapper + s[m.end():]
@@ -184,6 +193,8 @@ if ".min_tso_segs" in s:
 
 if ".min_tso_segs" in s:
     raise SystemExit("BBRv1 still references removed min_tso_segs congestion-op field")
+if "tcp_tso_autosize(" in s:
+    raise SystemExit("BBRv1 must not call static tcp_tso_autosize from tcp_output.c")
 if ".tso_segs\t= bbr_tso_segs," not in s:
     raise SystemExit("BBRv1 tso_segs callback registration missing")
 

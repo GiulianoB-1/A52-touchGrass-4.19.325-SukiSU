@@ -281,13 +281,11 @@ def patch_ctrl(text: str) -> str:
 
     arm_old = """	if (atomic_cmpxchg(&a52_p293_gdm_state, 0, 1) != 0)
 		return;
-	p = msg->tx_buf;
 """
     arm_new = """	if (atomic_cmpxchg(&a52_p293_gdm_state, 0, 1) != 0)
 		return;
 	a52_p347_note_arm(3U, p347_cell, p347_flags, p347_msg_flags,
 		p347_type_len, p347_payload, 0U, 1U);
-	p = msg->tx_buf;
 """
     text = one(text, arm_old, arm_new, "successful-arm event")
     return text

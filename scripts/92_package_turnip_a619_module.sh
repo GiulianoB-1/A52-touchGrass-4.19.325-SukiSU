@@ -28,10 +28,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha25
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.1-vk1.3
-versionCode=1
+version=0.2-vk1.3-manual-probe
+versionCode=2
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 bring-up for Adreno 619 using the KGSL backend. 64-bit Android HAL only. Systemless and reversible.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 manual bring-up probe for Adreno 619/KGSL. Does not override Vulkan during boot.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -56,7 +56,8 @@ esac
 [ -f /vendor/lib64/hw/vulkan.adreno.so ] || abort "Stock /vendor/lib64/hw/vulkan.adreno.so not found"
 
 ui_print "- Stock Vulkan HAL found"
-ui_print "- Installing 64-bit Turnip override"
+ui_print "- SAFE MODE: no Vulkan HAL replacement during boot"
+ui_print "- Use the module Action button for a temporary Turnip probe"
 ui_print "- Original vendor partition will not be modified"
 
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
@@ -70,81 +71,54 @@ EOF
 cat > "$OUT_DIR/module/post-fs-data.sh" <<'EOF'
 #!/system/bin/sh
 MODDIR=${0%/*}
-TARGET=/vendor/lib64/hw/vulkan.adreno.so
-DRIVER="$MODDIR/payload/vulkan.adreno.so"
-STAGE_DIR=/dev/touchgrass-turnip-a619
-STAGE="$STAGE_DIR/vulkan.adreno.so"
 LOG="$MODDIR/turnip-mount.log"
 
-exec >>"$LOG" 2>&1
-echo "=== touchGrass Turnip mount $(date) ==="
-echo "target=$TARGET"
-echo "driver=$DRIVER"
-
-if [ ! -f "$TARGET" ]; then
-    echo "ERROR: stock Vulkan HAL missing"
-    exit 10
-fi
-
-if [ ! -f "$DRIVER" ]; then
-    echo "ERROR: Turnip payload missing"
-    exit 11
-fi
-
-mkdir -p "$STAGE_DIR" || exit 12
-cp -f "$DRIVER" "$STAGE" || exit 13
-chown 0:0 "$STAGE" 2>/dev/null || true
-chmod 0644 "$STAGE" || exit 14
-
-# Stage on /dev tmpfs so execution does not depend on /data mount policy.
-chcon u:object_r:vendor_file:s0 "$STAGE" 2>/dev/null || true
-
-mount -o bind "$STAGE" "$TARGET" || {
-    echo "ERROR: bind mount failed"
-    exit 15
-}
-
-echo "Turnip bind mount active"
-ls -lZ "$TARGET" 2>/dev/null || ls -l "$TARGET"
-sha256sum "$TARGET" 2>/dev/null || true
+{
+  echo "=== touchGrass Turnip safe bring-up $(date) ==="
+  echo "boot_override=disabled"
+  echo "stock_hal=/vendor/lib64/hw/vulkan.adreno.so"
+  echo "Turnip is NOT bind-mounted during boot."
+  echo "Use the module Action button for a temporary live probe."
+} >> "$LOG" 2>&1
 EOF
 
 cat > "$OUT_DIR/module/action.sh" <<'EOF'
 #!/system/bin/sh
 MODDIR=${0%/*}
-OUT="$MODDIR/turnip-status.txt"
+OUT="$MODDIR/turnip-live-test.txt"
+DRIVER="$MODDIR/payload/vulkan.adreno.so"
+PROBE="$MODDIR/tools/turnip-vk-probe"
+LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-{
-  echo "=== touchGrass Turnip A619 status ==="
-  date
-  echo
-  echo "=== DEVICE ==="
-  getprop ro.product.device
-  getprop ro.product.model
-  getprop ro.hardware.vulkan
-  getprop ro.board.platform
-  echo
-  echo "=== HAL ==="
-  ls -lZ /vendor/lib64/hw/vulkan.adreno.so 2>/dev/null || ls -l /vendor/lib64/hw/vulkan.adreno.so
-  sha256sum /vendor/lib64/hw/vulkan.adreno.so 2>/dev/null || true
-  echo
-  echo "=== MOUNT ==="
-  cat /proc/mounts | grep -F 'vulkan.adreno.so' || true
-  echo
-  echo "=== DIRECT TURNIP PROBE ==="
-  PROBE_STAGE=/dev/touchgrass-turnip-a619/turnip-vk-probe
-  cp -f "$MODDIR/tools/turnip-vk-probe" "$PROBE_STAGE" 2>/dev/null || true
-  chmod 0755 "$PROBE_STAGE" 2>/dev/null || true
-  "$PROBE_STAGE" 2>&1 || true
-  echo
-  echo "=== VULKAN JSON ==="
-  cmd gpu vkjson 2>&1 || true
-  echo
-  echo "=== SURFACEFLINGER ==="
-  dumpsys SurfaceFlinger 2>&1 | grep -i -E 'RE Vulkan|RE GLES|Vulkan device|Ganesh|driver' || true
-} > "$OUT" 2>&1
+echo "touchGrass Turnip A619 manual live probe"
+echo "No persistent Vulkan override is active."
+echo "A temporary bind mount will be created only for this test and removed on exit."
+echo
 
-cat "$OUT"
+if [ ! -f "$DRIVER" ]; then
+  echo "ERROR: Turnip payload missing"
+  exit 10
+fi
+
+if [ ! -x "$PROBE" ]; then
+  chmod 0755 "$PROBE" 2>/dev/null || true
+fi
+
+if [ ! -x "$LIVE" ]; then
+  chmod 0755 "$LIVE" 2>/dev/null || true
+fi
+
+"$LIVE" "$DRIVER" "$PROBE" "$OUT"
+RC=$?
+
+echo
+echo "=== LIVE TEST RESULT ==="
+cat "$OUT" 2>/dev/null || true
+echo
+echo "exit_code=$RC"
+echo "Turnip temporary mount has been removed."
+
+exit "$RC"
 EOF
 
 cat > "$OUT_DIR/module/uninstall.sh" <<'EOF'
@@ -167,14 +141,15 @@ Driver:
   Vulkan API deliberately capped to 1.3 for the first bring-up
   64-bit HAL override only
 
-The module does not modify /vendor. At post-fs-data it copies the driver to
-/dev tmpfs, applies a vendor_file SELinux label, and bind-mounts it over:
-  /vendor/lib64/hw/vulkan.adreno.so
+This revision deliberately DOES NOT replace Vulkan during boot.
+post-fs-data.sh is a no-op logger.
 
-Rollback:
-  Disable or remove the KernelSU module and reboot.
-  If Android UI fails but ADB works:
-    adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"
+Use the KernelSU/SukiSU module Action button to run a temporary live test.
+The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
+runs the direct Vulkan probe and diagnostics, then unmounts it automatically.
+
+Rollback from the old boot-override revision:
+  adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"
 
 32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver in
 this first bring-up.
@@ -199,7 +174,9 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-KSU.zip"
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
+! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind'
+unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
 unzip -l "$ZIP" | grep -Fq 'payload/vulkan.adreno.so'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'

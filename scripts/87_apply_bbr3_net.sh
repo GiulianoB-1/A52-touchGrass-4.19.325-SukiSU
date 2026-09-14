@@ -144,6 +144,52 @@ echo "==> Splitting BBRv1 and BBRv3 into separate congestion controls"
 mv net/ipv4/tcp_bbr.c net/ipv4/tcp_bbr3.c
 cp "$TMP/tcp_bbr_v1.c" net/ipv4/tcp_bbr.c
 
+echo "==> Adapting retained BBRv1 to the BBRv3 TCP-core TSO callback API"
+python3 - "$KERNEL/net/ipv4/tcp_bbr.c" <<'PY'
+from pathlib import Path
+import re, sys
+
+p = Path(sys.argv[1])
+s = p.read_text()
+
+if "static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)" not in s:
+    pat = re.compile(
+        r"(static u32 bbr_min_tso_segs\(struct sock \*sk\)\n"
+        r"\{\n.*?\n\})",
+        re.S,
+    )
+    m = pat.search(s)
+    if not m:
+        raise SystemExit("BBRv1 min_tso helper not found")
+    wrapper = (
+        m.group(1)
+        + "\n\n"
+        + "/* Preserve legacy BBRv1's min-TSO policy on the BBRv3 TCP core. */\n"
+        + "static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)\n"
+        + "{\n"
+        + "\treturn tcp_tso_autosize(sk, mss_now, bbr_min_tso_segs(sk));\n"
+        + "}"
+    )
+    s = s[:m.start()] + wrapper + s[m.end():]
+
+if ".min_tso_segs" in s:
+    s, n = re.subn(
+        r"\.min_tso_segs\s*=\s*bbr_min_tso_segs,",
+        ".tso_segs\t= bbr_tso_segs,",
+        s,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("BBRv1 congestion-ops min_tso callback anchor mismatch")
+
+if ".min_tso_segs" in s:
+    raise SystemExit("BBRv1 still references removed min_tso_segs congestion-op field")
+if ".tso_segs\t= bbr_tso_segs," not in s:
+    raise SystemExit("BBRv1 tso_segs callback registration missing")
+
+p.write_text(s)
+PY
+
 python3 - "$KERNEL" <<'PY'
 from pathlib import Path
 import re, sys

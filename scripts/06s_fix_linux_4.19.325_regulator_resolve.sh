@@ -60,29 +60,54 @@ new_tail = (
     "}\n"
 )
 
-if old_tail in segment:
+# This function already has the complete stable semantics in Linux 4.19.206,
+# and the 4.19.325 version is identical. Older uplift attempts starting from
+# 4.19.154 could leave a truncated merge tail, so keep that repair as a
+# fallback, but accept any correctly merged Samsung/stable formatting.
+required_semantics = (
+    "regulator_lock(rdev);",
+    "if (rdev->supply) {",
+    "ret = set_supply(rdev, r);",
+    "regulator_unlock(rdev);",
+    "if (rdev->use_count) {",
+    "ret = regulator_enable(rdev->supply);",
+    "_regulator_put(rdev->supply);",
+    "rdev->supply = NULL;",
+    "out:",
+    "return ret;",
+)
+
+if all(item in segment for item in required_semantics):
+    # Already complete: do not rewrite a clean 4.19.206 -> 4.19.325 merge.
+    pass
+elif old_tail in segment:
     if segment.count(old_tail) != 1:
         raise SystemExit("unexpected truncated regulator tail count")
     segment = segment.replace(old_tail, new_tail, 1)
     text = text[:func_start] + segment + text[func_end:]
     core.write_text(text)
-elif segment.count(new_tail) != 1:
-    raise SystemExit("regulator_resolve_supply tail is neither truncated nor repaired")
+else:
+    missing = [item for item in required_semantics if item not in segment]
+    raise SystemExit(
+        "regulator_resolve_supply has an unrecognized incomplete merge; "
+        f"missing semantics: {missing}"
+    )
 
 final = core.read_text()
 final_start = final.index("static int regulator_resolve_supply(struct regulator_dev *rdev)\n")
 final_end = final.index("\n/* Internal regulator request function */", final_start)
 final_segment = final[final_start:final_end]
-if final_segment.count(new_tail) != 1 or old_tail in final_segment:
-    raise SystemExit("regulator_resolve_supply cleanup repair failed")
-for required in (
-    "\tregulator_unlock(rdev);\n",
-    "\tif (rdev->use_count) {\n",
-    "\t\tret = regulator_enable(rdev->supply);\n",
-    "out:\n\treturn ret;\n",
-):
+for required in required_semantics:
     if required not in final_segment:
-        raise SystemExit(f"regulator postcondition failed for {required.strip()!r}")
+        raise SystemExit(f"regulator postcondition failed for {required!r}")
+
+# Safety checks for the locking/cleanup ordering that matters here.
+if final_segment.index("regulator_lock(rdev);") > final_segment.index("ret = set_supply(rdev, r);"):
+    raise SystemExit("regulator lock occurs after set_supply")
+if final_segment.rindex("regulator_unlock(rdev);") > final_segment.index("if (rdev->use_count) {"):
+    raise SystemExit("regulator remains locked across supply enable propagation")
+if final_segment.index("out:") > final_segment.rindex("return ret;"):
+    raise SystemExit("regulator out label does not lead to return ret")
 PY
 
 git -C "$KERNEL_DIR" diff --check -- drivers/regulator/core.c

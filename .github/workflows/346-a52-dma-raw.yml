@@ -8,6 +8,8 @@ on:
       - agent/a52-phase346-dma-raw-v1
     paths:
       - .github/workflows/346-a52-dma-raw.yml
+      - scripts/345_apply_dma_us_frontier.py
+      - scripts/345_ci_build_gki.sh
       - scripts/346_apply_dma_raw.py
       - scripts/346_ci_build_gki.sh
 
@@ -33,6 +35,7 @@ jobs:
     timeout-minutes: 300
     env:
       GH_TOKEN: ${{ github.token }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -127,12 +130,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash scripts/345_ci_build_gki.sh
-          test -s phase345-gki-out/package/boot.img
-          test "$(stat -c '%s' phase345-gki-out/package/boot.img)" -eq 100663296
-          grep -Fq 'A52_PHASE345_DMA_US_FRONTIER_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
-          grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
 
-      - name: Validate Phase345 baseline cache
+      - name: Validate Phase345 baseline
         run: |
           set -Eeuo pipefail
           test -s phase345-gki-out/package/boot.img
@@ -140,36 +139,36 @@ jobs:
           test -s phase345-gki-out/config/final.config
           test -s workspace/gki-phase199-out/arch/arm64/boot/Image
           test "$(stat -c '%s' phase345-gki-out/package/boot.img)" -eq 100663296
-          grep -Fq 'A52_PHASE345_DMA_US_FRONTIER_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
-          grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
-          grep -Fq 'static void __used a52_r342_start(void)' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
-          ! grep -Fq       - name: Upload
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE346-DMA-RAW-${{ github.run_number }}
-          path: phase346-gki-out/
-          if-no-files-found: error
-          compression-level: 1
-          retention-days: 30
-      - name: Upload boot
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE346-DMA-RAW-${{ github.run_number }}-BOOT-IMG
-          path: phase346-gki-out/package/boot.img
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-      - name: Failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE346-DMA-RAW-${{ github.run_number }}-FAILED
-          path: phase346-gki-failure/
-          if-no-files-found: warn
-          retention-days: 30
-\ta52_r342_start();' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          hwc = Path("gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c").read_text()
+          rec = Path("gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c").read_text()
+
+          required_hwc = (
+              "A52_PHASE345_DMA_US_FRONTIER_V1",
+              "a52_p345_begin(ctrl);",
+              "a52_p345_end(ctrl);",
+          )
+          for token in required_hwc:
+              if token not in hwc:
+                  raise SystemExit("Phase345 cache missing HWC token: " + token)
+
+          required_rec = (
+              "A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1",
+              "static void __used a52_r342_start(void)",
+              "A52_R342_SIDEBAND_PHYS 0xB1BFA000ULL",
+          )
+          for token in required_rec:
+              if token not in rec:
+                  raise SystemExit("Phase345 cache missing recorder token: " + token)
+
+          if "\ta52_r342_start();" in rec:
+              raise SystemExit("Phase345 cache unexpectedly has active Phase342 runtime writer")
+
+          print("Phase345 cached baseline validation: PASS")
+          PY
 
       - name: Save Phase345 baseline cache
         if: steps.phase345-baseline-cache.outputs.cache-hit != 'true'
@@ -185,6 +184,7 @@ jobs:
         env:
           PHASE346_PREWARMED_PHASE345: '1'
         run: bash scripts/346_ci_build_gki.sh
+
       - name: Upload
         if: success()
         uses: actions/upload-artifact@v4
@@ -194,6 +194,7 @@ jobs:
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
+
       - name: Upload boot
         if: success()
         uses: actions/upload-artifact@v4
@@ -203,6 +204,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
       - name: Failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

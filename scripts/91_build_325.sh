@@ -28,16 +28,24 @@ PY
 bash "$GENERATED" 4.19.325 susfs
 
 # The legacy safe-checkpoint builder intentionally publishes its verified
-# image with the historical "manual-core" label.  Phase91 uses a different
-# workflow label for auditing and packaging, so publish a canonical alias
-# without changing the proven build helper itself.
+# image with the historical "manual-core" label. Phase91 uses a different
+# workflow label for auditing and packaging, so publish canonical aliases
+# for both the Image and the exact final kernel config without changing the
+# proven build helper itself.
 : "${LABEL:?Phase91 LABEL environment variable is required}"
 SOURCE_IMAGE="$SCRIPT_DIR/../artifacts/Image-touchgrass-4.19.325-resukisu-v4.1.0-susfs-v1.4.2-manual-core"
 PHASE91_IMAGE="$SCRIPT_DIR/../artifacts/Image-${LABEL}"
+FINAL_CONFIG="$SCRIPT_DIR/../workspace/touchgrass-a52xq/out/.config"
+PHASE91_CONFIG="$SCRIPT_DIR/../artifacts/config-${LABEL}"
 
 test -s "$SOURCE_IMAGE"
+test -s "$FINAL_CONFIG"
 cp -f "$SOURCE_IMAGE" "$PHASE91_IMAGE"
+cp -f "$FINAL_CONFIG" "$PHASE91_CONFIG"
 test -s "$PHASE91_IMAGE"
+test -s "$PHASE91_CONFIG"
 
 sha256sum "$PHASE91_IMAGE"
+sha256sum "$PHASE91_CONFIG"
 echo "phase91_image=$PHASE91_IMAGE"
+echo "phase91_config=$PHASE91_CONFIG"

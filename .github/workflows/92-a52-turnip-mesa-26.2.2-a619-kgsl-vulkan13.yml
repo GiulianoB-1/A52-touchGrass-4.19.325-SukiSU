@@ -140,11 +140,13 @@ jobs:
           set -Eeuo pipefail
           DRIVER=artifacts/turnip-mesa-26.2.2/dist/vulkan.adreno.so
           PROBE=artifacts/turnip-mesa-26.2.2/dist/turnip-vk-probe
+          AHB_PROBE=artifacts/turnip-mesa-26.2.2/dist/turnip-ahb-probe
           INFO=artifacts/turnip-mesa-26.2.2/BUILD-INFO.txt
           ZIP=release-turnip/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-KSU.zip
 
           test -s "$DRIVER"
           test -s "$PROBE"
+          test -s "$AHB_PROBE"
           test -s "$ZIP"
           grep -Fxq 'mesa_version=26.2.2' "$INFO"
           grep -Fxq 'gpu=Adreno 619' "$INFO"
@@ -153,10 +155,22 @@ jobs:
           grep -Fxq 'turnip_api_cap=Vulkan-1.3' "$INFO"
           grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
+          grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
           file "$PROBE" | grep -Fq 'ARM aarch64'
+          file "$AHB_PROBE" | grep -Fq 'ARM aarch64'
           readelf -d "$PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
+          strings "$AHB_PROBE" | grep -Fq 'TURNIP/STOCK AHB IMPORT PROBE'
+          strings "$AHB_PROBE" | grep -Fq 'yv12_sf_940x1670'
+          strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
+          strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
+          strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
+          strings "$AHB_PROBE" | grep -Fq 'AHB_CASES_FAIL=%u'
+          strings "$AHB_PROBE" | grep -Fq 'stress_rgba8_passed=%u/32'
           strings "$PROBE" | grep -Fq 'gpu_submit_status=PASS'
           strings "$PROBE" | grep -Fq 'verify_mismatches=%u'
           strings "$PROBE" | grep -Fq 'noop_submit_status=PASS'
@@ -183,9 +197,11 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.7-vk1.3-offscreen-render'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.8-vk1.3-ahb-forensics'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP ANDROID HARDWARE BUFFER IMPORT PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP KERNEL WATCH'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'timeout 20'
           unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
@@ -193,9 +209,10 @@ jobs:
           unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
           unzip -p "$ZIP" README.txt | grep -Fq '32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver'
           unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-ahb-probe'
           unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'
 
-          sha256sum "$DRIVER" "$PROBE" "$ZIP" | tee artifacts/turnip-final-sha256.txt
+          sha256sum "$DRIVER" "$PROBE" "$AHB_PROBE" "$ZIP" | tee artifacts/turnip-final-sha256.txt
           unzip -l "$ZIP" | tee artifacts/turnip-module-list.txt
           ccache --show-stats | tee artifacts/turnip-ccache.txt
 

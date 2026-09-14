@@ -41,9 +41,8 @@ static const char *vk_result_name(VkResult r)
     case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
     case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
     case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
-#ifdef VK_ERROR_INVALID_EXTERNAL_HANDLE
-    case VK_ERROR_INVALID_EXTERNAL_HANDLE: return "VK_ERROR_INVALID_EXTERNAL_HANDLE";
-#endif
+    case (VkResult)-1000072003: return "VK_ERROR_INVALID_EXTERNAL_HANDLE";
+    case (VkResult)-1000158000: return "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT";
     default: return "VK_RESULT_OTHER";
     }
 }
@@ -502,12 +501,15 @@ int main(void)
     };
 
     unsigned pass = 0, fail = 0;
+    int target_yv12_sf_rc = -1;
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         int rc = run_ahb_case(physical, device, pGetProps, &cases[i]);
         if (rc == 0)
             ++pass;
         else
             ++fail;
+        if (strcmp(cases[i].name, "yv12_sf_940x1670") == 0)
+            target_yv12_sf_rc = rc;
         printf("%s.case_exit=%d\n", cases[i].name, rc);
     }
 
@@ -535,6 +537,15 @@ int main(void)
 
     printf("\nAHB_CASES_PASS=%u\n", pass);
     printf("AHB_CASES_FAIL=%u\n", fail);
+    printf("target_yv12_sf_940x1670_exit=%d\n", target_yv12_sf_rc);
+    if (target_yv12_sf_rc == 0)
+        printf("target_yv12_sf_940x1670_status=PASS\n");
+    else
+        printf("target_yv12_sf_940x1670_status=FAIL\n");
     printf("ahb_probe_status=COMPLETE\n");
-    return 0;
+
+    /* This probe may continue to report unrelated Android YUV formats as
+     * diagnostic failures, but v0.9 is specifically a regression test for
+     * the SurfaceFlinger YV12 940x1670 crash that we reproduced. */
+    return target_yv12_sf_rc == 0 ? 0 : 30;
 }

@@ -82,12 +82,31 @@ replace_once(
 
 p = root / "net/ipv4/tcp_output.c"
 text = p.read_text()
-old = """static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)\n{\n\tconst struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;\n\tu32 min_tso, tso_segs;\n\n\tmin_tso = ca_ops->min_tso_segs ?\n\t\t\tca_ops->min_tso_segs(sk) :\n\t\t\tREAD_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);\n\n\ttso_segs = tcp_tso_autosize(sk, mss_now, min_tso);\n\treturn min_t(u32, tso_segs, sk->sk_gso_max_segs);\n}"""
-new = """static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)\n{\n\tconst struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;\n\tu32 tso_segs;\n\n\ttso_segs = ca_ops->tso_segs ?\n\t\t\tca_ops->tso_segs(sk, mss_now) :\n\t\t\ttcp_tso_autosize(sk, mss_now,\n\t\t\t\t sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);\n\treturn min_t(u32, tso_segs, sk->sk_gso_max_segs);\n}"""
-if new not in text:
-    if old not in text:
-        raise SystemExit("tcp_tso_segs: expected Samsung 4.19 anchor not found")
-    p.write_text(text.replace(old, new, 1))
+new = """static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)
+{
+\tconst struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;
+\tu32 tso_segs;
+
+\ttso_segs = ca_ops->tso_segs ?
+\t\t\tca_ops->tso_segs(sk, mss_now) :
+\t\t\ttcp_tso_autosize(sk, mss_now,
+\t\t\t\t sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);
+\treturn min_t(u32, tso_segs, sk->sk_gso_max_segs);
+}"""
+if "ca_ops->tso_segs(sk, mss_now)" not in text:
+    pat = re.compile(
+        r"static u32 tcp_tso_segs\(struct sock \*sk, unsigned int mss_now\)\n"
+        r"\{.*?\n\}",
+        re.S,
+    )
+    m = pat.search(text)
+    if not m:
+        raise SystemExit("tcp_tso_segs: function not found")
+    body = m.group(0)
+    if "tcp_tso_autosize" not in body or "icsk_ca_ops" not in body:
+        raise SystemExit("tcp_tso_segs: unexpected function shape")
+    text = text[:m.start()] + new + text[m.end():]
+    p.write_text(text)
 
 for rel in (
     "net/core/sock.c.rej",

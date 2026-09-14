@@ -140,6 +140,139 @@ if [ "$rc" -ne 0 ]; then
     echo "All rejects were resolved and removed; continuing after semantic validation."
 fi
 
+echo "==> Completing BBRv3 delivery-rate metadata backport"
+python3 - "$KERNEL/net/ipv4/tcp_rate.c" <<'PY'
+from pathlib import Path
+import re, sys
+
+p = Path(sys.argv[1])
+s = p.read_text()
+
+# The third-party 4.19 BBRv3 patch updates tcp_skb_cb/rate_sample and removes
+# the legacy byte-based tx.in_flight assignment in tcp_output.c, but it omits
+# the matching tcp_rate.c changes from the Google BBR tree.  Without these,
+# tx.in_flight remains stale/zero and BBRv3 loss/ECN samples are incomplete.
+if "void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)" not in s:
+    marker = "/* Snapshot the current delivery information in the skb, to generate\n"
+    if marker not in s:
+        raise SystemExit("tcp_rate: snapshot marker missing")
+    helper = r'''void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	u32 in_flight;
+
+	/* Record packet-count flight state expected by BBRv3. */
+	in_flight = tcp_packets_in_flight(tp) + tcp_skb_pcount(skb);
+	if (WARN_ONCE(in_flight > TCPCB_IN_FLIGHT_MAX,
+		      "insane in_flight %u cc %s mss %u "
+		      "cwnd %u pif %u %u %u %u\n",
+		      in_flight, inet_csk(sk)->icsk_ca_ops->name,
+		      tp->mss_cache, tp->snd_cwnd,
+		      tp->packets_out, tp->retrans_out,
+		      tp->sacked_out, tp->lost_out))
+		in_flight = TCPCB_IN_FLIGHT_MAX;
+	TCP_SKB_CB(skb)->tx.in_flight = in_flight;
+}
+
+'''
+    s = s.replace(marker, helper + marker, 1)
+
+# Extend the existing 4.19 sent-snapshot path with the metadata fields that
+# BBRv3 consumes.  skb_mstamp/tcp_mstamp are already microseconds in this tree.
+old = """	TCP_SKB_CB(skb)->tx.first_tx_mstamp	= tp->first_tx_mstamp;
+	TCP_SKB_CB(skb)->tx.delivered_mstamp	= tp->delivered_mstamp;
+	TCP_SKB_CB(skb)->tx.delivered		= tp->delivered;
+	TCP_SKB_CB(skb)->tx.is_app_limited	= tp->app_limited ? 1 : 0;
+"""
+new = """	TCP_SKB_CB(skb)->tx.first_tx_mstamp	= tp->first_tx_mstamp;
+	TCP_SKB_CB(skb)->tx.delivered_mstamp	= tp->delivered_mstamp;
+	TCP_SKB_CB(skb)->tx.delivered		= tp->delivered;
+	TCP_SKB_CB(skb)->tx.delivered_ce	= tp->delivered_ce;
+	TCP_SKB_CB(skb)->tx.lost		= tp->lost;
+	TCP_SKB_CB(skb)->tx.is_app_limited	= tp->app_limited ? 1 : 0;
+	tcp_set_tx_in_flight(sk, skb);
+"""
+if old in s:
+    s = s.replace(old, new, 1)
+elif new not in s:
+    raise SystemExit("tcp_rate_skb_sent metadata anchor missing")
+
+old = """		rs->prior_delivered  = scb->tx.delivered;
+		rs->prior_mstamp     = scb->tx.delivered_mstamp;
+		rs->is_app_limited   = scb->tx.is_app_limited;
+		rs->is_retrans	     = scb->sacked & TCPCB_RETRANS;
+"""
+new = """		rs->prior_lost	     = scb->tx.lost;
+		rs->prior_delivered_ce = scb->tx.delivered_ce;
+		rs->prior_delivered  = scb->tx.delivered;
+		rs->prior_mstamp     = scb->tx.delivered_mstamp;
+		rs->tx_in_flight     = scb->tx.in_flight;
+		rs->last_end_seq     = scb->end_seq;
+		rs->is_app_limited   = scb->tx.is_app_limited;
+		rs->is_retrans	     = scb->sacked & TCPCB_RETRANS;
+"""
+if old in s:
+    s = s.replace(old, new, 1)
+elif "rs->tx_in_flight     = scb->tx.in_flight;" not in s:
+    raise SystemExit("tcp_rate_skb_delivered metadata anchor missing")
+
+# The BBRv3 patch intentionally shrinks the per-skb timestamps to 32 bits.
+# Use wrap-safe 32-bit deltas when generating rate samples.
+s = s.replace(
+    "rs->interval_us      = tcp_stamp_us_delta(\n"
+    "\t\t\t\t\t\tskb->skb_mstamp,\n"
+    "\t\t\t\t\t\tscb->tx.first_tx_mstamp);",
+    "rs->interval_us      = tcp_stamp32_us_delta(\n"
+    "\t\t\t\t\t\t(u32)skb->skb_mstamp,\n"
+    "\t\t\t\t\t\tscb->tx.first_tx_mstamp);",
+    1,
+)
+
+old = """	rs->delivered   = tp->delivered - rs->prior_delivered;
+
+	/* Model sending data and receiving ACKs as separate pipeline phases
+"""
+new = """	rs->delivered   = tp->delivered - rs->prior_delivered;
+	rs->lost        = tp->lost - rs->prior_lost;
+	rs->delivered_ce = tp->delivered_ce - rs->prior_delivered_ce;
+	rs->delivered_ce &= TCPCB_DELIVERED_CE_MASK;
+
+	/* Model sending data and receiving ACKs as separate pipeline phases
+"""
+if old in s:
+    s = s.replace(old, new, 1)
+elif "rs->lost        = tp->lost - rs->prior_lost;" not in s:
+    raise SystemExit("tcp_rate_gen BBRv3 loss metadata anchor missing")
+
+old = """	ack_us = tcp_stamp_us_delta(tp->tcp_mstamp,
+				    rs->prior_mstamp); /* ack phase */
+"""
+new = """	ack_us = tcp_stamp32_us_delta((u32)tp->tcp_mstamp,
+				      (u32)rs->prior_mstamp); /* ack phase */
+"""
+if old in s:
+    s = s.replace(old, new, 1)
+elif "ack_us = tcp_stamp32_us_delta((u32)tp->tcp_mstamp," not in s:
+    raise SystemExit("tcp_rate_gen timestamp anchor missing")
+
+required = [
+    "void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)",
+    "tcp_set_tx_in_flight(sk, skb);",
+    "TCP_SKB_CB(skb)->tx.delivered_ce",
+    "TCP_SKB_CB(skb)->tx.lost",
+    "rs->tx_in_flight",
+    "rs->prior_lost",
+    "rs->prior_delivered_ce",
+    "rs->lost        = tp->lost - rs->prior_lost;",
+    "rs->delivered_ce = tp->delivered_ce - rs->prior_delivered_ce;",
+]
+for needle in required:
+    if needle not in s:
+        raise SystemExit(f"tcp_rate BBRv3 metadata missing: {needle}")
+
+p.write_text(s)
+PY
+
 echo "==> Splitting BBRv1 and BBRv3 into separate congestion controls"
 mv net/ipv4/tcp_bbr.c net/ipv4/tcp_bbr3.c
 cp "$TMP/tcp_bbr_v1.c" net/ipv4/tcp_bbr.c
@@ -308,6 +441,11 @@ grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' arch/arm64/configs/a52xq_defconfig
 grep -Fxq 'CONFIG_NET_SCH_FQ=y' arch/arm64/configs/a52xq_defconfig
 grep -Fq 'tcp_plb_update_state' net/ipv4/tcp_plb.c
 grep -Fq 'TCP_CONG_WANTS_CE_EVENTS' include/net/tcp.h
+grep -Fq 'void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)' net/ipv4/tcp_rate.c
+grep -Fq 'tcp_set_tx_in_flight(sk, skb);' net/ipv4/tcp_rate.c
+grep -Fq 'rs->tx_in_flight' net/ipv4/tcp_rate.c
+grep -Fq 'rs->lost        = tp->lost - rs->prior_lost;' net/ipv4/tcp_rate.c
+grep -Fq 'rs->delivered_ce = tp->delivered_ce - rs->prior_delivered_ce;' net/ipv4/tcp_rate.c
 
 git diff --check
 

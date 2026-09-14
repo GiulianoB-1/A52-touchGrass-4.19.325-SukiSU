@@ -50,7 +50,7 @@ marker_old = """    rcu_read_lock();
 
     for_each_cpu_and(cpu, &p->cpus_allowed, cpu_active_mask) {
 """
-marker_new = """    pr_info_once("CASS uclamp-aware task demand path is active\n");
+marker_new = r"""    pr_info_once("CASS uclamp-aware task demand path is active\n");
     rcu_read_lock();
 
     for_each_cpu_and(cpu, &p->cpus_allowed, cpu_active_mask) {

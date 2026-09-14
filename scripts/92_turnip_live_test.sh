@@ -3,12 +3,18 @@
 DRIVER="${1:-/data/local/tmp/vulkan.adreno.so}"
 PROBE="${2:-/data/local/tmp/turnip-vk-probe}"
 OUT="${3:-/data/local/tmp/turnip-live-test.txt}"
+WATCH="${OUT%.txt}-kernel-watch.txt"
+WATCH_PID=""
 
 TARGET=/vendor/lib64/hw/vulkan.adreno.so
 STAGE_DIR=/dev/touchgrass-turnip-live
 STAGE="$STAGE_DIR/vulkan.adreno.so"
 
 cleanup() {
+    if [ -n "$WATCH_PID" ]; then
+        kill "$WATCH_PID" 2>/dev/null || true
+        wait "$WATCH_PID" 2>/dev/null || true
+    fi
     umount "$TARGET" 2>/dev/null || true
     rm -rf "$STAGE_DIR"
 }
@@ -76,9 +82,36 @@ echo
 
 echo "=== TURNIP VULKAN SUBMISSION PROBE ==="
 echo "turnip_probe_begin=1"
+echo "kernel_watch=$WATCH"
+: > "$WATCH"
+{
+    echo "========== TURNIP KERNEL WATCH =========="
+    date
+    echo "=== INITIAL GPU/KGSL STATE ==="
+    dmesg | grep -Ei 'kgsl|adreno|gmu|gpu|iommu|smmu' | tail -120
+    echo "=== LIVE KERNEL STREAM ==="
+} >> "$WATCH" 2>&1
+dmesg -w >> "$WATCH" 2>&1 &
+WATCH_PID=$!
 sync
-"$PROBE"
-PROBE_RC=$?
+
+if command -v timeout >/dev/null 2>&1; then
+    timeout 20 "$PROBE"
+    PROBE_RC=$?
+else
+    "$PROBE"
+    PROBE_RC=$?
+fi
+
+if [ -n "$WATCH_PID" ]; then
+    kill "$WATCH_PID" 2>/dev/null || true
+    wait "$WATCH_PID" 2>/dev/null || true
+    WATCH_PID=""
+fi
+sync
+echo "turnip_probe_exit=$PROBE_RC"
+echo "=== TURNIP KERNEL WATCH TAIL ==="
+tail -250 "$WATCH" 2>/dev/null || true
 echo "probe_exit=$PROBE_RC"
 echo
 

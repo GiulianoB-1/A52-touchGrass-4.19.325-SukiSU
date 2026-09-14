@@ -3,6 +3,7 @@
 DRIVER="${1:-/data/local/tmp/vulkan.adreno.so}"
 PROBE="${2:-/data/local/tmp/turnip-vk-probe}"
 OUT="${3:-/data/local/tmp/turnip-live-test.txt}"
+AHB_PROBE="${4:-/data/local/tmp/turnip-ahb-probe}"
 WATCH="${OUT%.txt}-kernel-watch.txt"
 WATCH_PID=""
 
@@ -52,6 +53,10 @@ if [ ! -x "$PROBE" ]; then
     echo "FAIL: Vulkan probe missing/not executable"
     exit 12
 fi
+if [ ! -x "$AHB_PROBE" ]; then
+    echo "FAIL: AHardwareBuffer probe missing/not executable"
+    exit 18
+fi
 
 echo "=== STOCK QUALCOMM SUBMISSION BASELINE ==="
 "$PROBE"
@@ -64,6 +69,18 @@ if [ "$STOCK_RC" -ne 0 ]; then
     echo "FAIL: stock Qualcomm Vulkan failed the same submission probe"
     exit 17
 fi
+
+echo "=== STOCK QUALCOMM AHB IMPORT BASELINE ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 45 "$AHB_PROBE"
+    STOCK_AHB_RC=$?
+else
+    "$AHB_PROBE"
+    STOCK_AHB_RC=$?
+fi
+echo "stock_ahb_probe_exit=$STOCK_AHB_RC"
+echo
+sync
 
 mkdir -p "$STAGE_DIR" || exit 13
 cp -f "$DRIVER" "$STAGE" || exit 14
@@ -96,12 +113,25 @@ WATCH_PID=$!
 sync
 
 if command -v timeout >/dev/null 2>&1; then
-    timeout 20 "$PROBE"
+    timeout 25 "$PROBE"
     PROBE_RC=$?
 else
     "$PROBE"
     PROBE_RC=$?
 fi
+echo "turnip_vk_probe_exit=$PROBE_RC"
+echo
+
+echo "=== TURNIP ANDROID HARDWARE BUFFER IMPORT PROBE ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 45 "$AHB_PROBE"
+    AHB_PROBE_RC=$?
+else
+    "$AHB_PROBE"
+    AHB_PROBE_RC=$?
+fi
+echo "turnip_ahb_probe_exit=$AHB_PROBE_RC"
+echo
 
 if [ -n "$WATCH_PID" ]; then
     kill "$WATCH_PID" 2>/dev/null || true
@@ -113,6 +143,7 @@ echo "turnip_probe_exit=$PROBE_RC"
 echo "=== TURNIP KERNEL WATCH TAIL ==="
 tail -250 "$WATCH" 2>/dev/null || true
 echo "probe_exit=$PROBE_RC"
+echo "ahb_probe_exit=$AHB_PROBE_RC"
 echo
 
 echo "=== CMD GPU VKJSON ==="
@@ -128,11 +159,14 @@ dmesg | grep -Ei 'kgsl|adreno|gmu|gpu|iommu|smmu' | grep -Ei 'fault|error|timeou
 echo
 
 echo "=== RESULT ==="
-if [ "$PROBE_RC" -eq 0 ]; then
+if [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ]; then
     echo "TURNIP_LIVE_TEST=PASS"
 else
     echo "TURNIP_LIVE_TEST=FAIL"
 fi
 echo "========== END =========="
 
-exit "$PROBE_RC"
+if [ "$PROBE_RC" -ne 0 ]; then
+    exit "$PROBE_RC"
+fi
+exit "$AHB_PROBE_RC"

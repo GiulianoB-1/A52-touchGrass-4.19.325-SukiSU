@@ -8,7 +8,7 @@ if len(sys.argv) != 2:
 root = Path(sys.argv[1]).resolve()
 paths = {name: root / "fs/f2fs" / name for name in (
     "f2fs.h", "segment.h", "segment.c", "checkpoint.c",
-    "file.c", "gc.c", "super.c",
+    "file.c", "gc.c", "super.c", "recovery.c",
 )}
 for p in paths.values():
     if not p.is_file():
@@ -270,6 +270,18 @@ replace_once(
 "\tfor (type = CURSEG_HOT_DATA; type < NR_CURSEG_TYPE; type++)\n",
 "\tfor (type = CURSEG_HOT_DATA; type < NR_CURSEG_PERSIST_TYPE; type++)\n",
     "gc.c resize curseg loop",
+)
+
+# ---------------------------------------------------------------------------
+# recovery.c: after fsync recovery, rotate the three normal data cursegs.
+# Upstream's helper no longer takes the old NO_CHECK_TYPE selector.
+# ---------------------------------------------------------------------------
+p = paths["recovery.c"]
+replace_once(
+    p,
+"\t\tf2fs_allocate_new_segments(sbi, NO_CHECK_TYPE);\n",
+"\t\tf2fs_allocate_new_segments(sbi);\n",
+    "recovery.c allocate all data cursegs",
 )
 
 # ---------------------------------------------------------------------------
@@ -705,6 +717,7 @@ checks = {
         "map.m_seg_type = CURSEG_COLD_DATA_PINNED;",
     ],
     "gc.c": ["type < NR_CURSEG_PERSIST_TYPE"],
+    "recovery.c": ["f2fs_allocate_new_segments(sbi);"],
     "super.c": [
         "arg != NR_CURSEG_PERSIST_TYPE",
         "active_logs = NR_CURSEG_PERSIST_TYPE",
@@ -722,6 +735,7 @@ for forbidden in (
     "if (type == CURSEG_COLD_DATA_PINNED) {\n\t\ttype = CURSEG_COLD_DATA;",
     "bool put_pin_sem = false;",
     "f2fs_allocate_new_segments(sbi, CURSEG_COLD_DATA)",
+    "f2fs_allocate_new_segments(sbi, NO_CHECK_TYPE)",
 ):
     if forbidden in all_text:
         raise SystemExit(f"legacy pinned-curseg alias remains: {forbidden}")

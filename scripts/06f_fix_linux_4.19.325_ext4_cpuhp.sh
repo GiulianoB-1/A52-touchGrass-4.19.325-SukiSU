@@ -73,16 +73,18 @@ path.write_text(text)
 # Restore the matching public headers that were dropped by the vendor merge.
 path = root / "kernel/cpu.c"
 text = path.read_text()
-anchor = "#include <linux/cpuset.h>\n"
+anchor = "#include <trace/events/power.h>\n"
 if "#include <linux/random.h>" not in text or "#include <linux/hrtimer.h>" not in text:
-    if anchor not in text:
-        raise SystemExit("kernel/cpu.c include anchor is missing")
+    if text.count(anchor) != 1:
+        raise SystemExit(
+            f"kernel/cpu.c trace include anchor mismatch: {text.count(anchor)}"
+        )
     additions = ""
     if "#include <linux/random.h>" not in text:
         additions += "#include <linux/random.h>\n"
     if "#include <linux/hrtimer.h>" not in text:
         additions += "#include <linux/hrtimer.h>\n"
-    text = replace_once(text, anchor, anchor + additions, "CPU hotplug includes")
+    text = text.replace(anchor, additions + "\n" + anchor, 1)
     repairs.append("kernel/cpu.c=restored-random-and-hrtimer-includes")
 path.write_text(text)
 

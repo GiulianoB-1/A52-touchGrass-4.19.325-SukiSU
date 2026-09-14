@@ -31,7 +31,8 @@ bash "$GENERATED" 4.19.325 susfs
 # image with the historical "manual-core" label. Phase91 uses a different
 # workflow label for auditing and packaging, so publish canonical aliases
 # for both the Image and the exact final kernel config without changing the
-# proven build helper itself.
+# proven build helper itself. Keep these aliases in sync with LABEL so the
+# packaging validator always checks the exact config that produced the Image.
 : "${LABEL:?Phase91 LABEL environment variable is required}"
 SOURCE_IMAGE="$SCRIPT_DIR/../artifacts/Image-touchgrass-4.19.325-resukisu-v4.1.0-susfs-v1.4.2-manual-core"
 PHASE91_IMAGE="$SCRIPT_DIR/../artifacts/Image-${LABEL}"

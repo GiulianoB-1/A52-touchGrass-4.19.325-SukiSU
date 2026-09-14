@@ -1,0 +1,367 @@
+name: 87 - A52 BBRv3 + FQ Network P1 Clang11
+
+on:
+  push:
+    branches:
+      - agent/a52-bbr3-net-v1
+    paths:
+      - .github/workflows/87-a52-bbr3-net-p1-clang11.yml
+      - scripts/81_*
+      - scripts/82_*
+      - scripts/84_*
+      - scripts/85_*
+      - scripts/86_*
+      - scripts/87_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-bbr3-net-p1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build BBRv3 + FQ Network P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-u17-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-u17-ccache-${{ runner.os }}-
+            a52xq-binder84-${{ runner.os }}-
+            a52xq-binder82-${{ runner.os }}-
+            a52xq-binder81-${{ runner.os }}-
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore U17-UCLAMP-P1 prepared source cache
+        id: binder84_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
+
+      - name: Prepare cached build workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Reconstruct exact Phase80 kernel baseline
+        if: steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Apply successful Android17 Binder and BinderFS port
+        if: steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BR_TRANSACTION_PENDING_FROZEN' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Android17 Binder allocator on Linux 4.19
+        if: steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/84_apply_android17_binder_alloc.sh
+          python3 -m py_compile scripts/84_patch_android17_binder_alloc.py
+          ./scripts/84_apply_android17_binder_alloc.sh
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'struct binder_shrinker_mdata' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'unsigned long vm_start;' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'bool oneway_spam_detected;' "$KERNEL/drivers/android/binder_alloc.h"
+          ! grep -Fq 'struct binder_lru_page' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'static struct shrinker binder_shrinker' "$KERNEL/drivers/android/binder_alloc.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply proven Android FUSE passthrough
+        if: steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/84_apply_fuse_passthrough_android.py
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq '#define FUSE_PASSTHROUGH' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'fuse_passthrough_setup(fc, ff, &outarg);' "$KERNEL/fs/fuse/file.c"
+          grep -Fq 'fuse_features_group' "$KERNEL/fs/fuse/inode.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Save U17-UCLAMP-P1 prepared source cache
+        if: steps.binder84_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
+
+      - name: Apply Android17 uclamp Phase1
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/85_apply_android17_uclamp_phase1.py
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'sched_uclamp_used' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Android17 uclamp CASS Phase2
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/86_apply_uclamp_cass_p2.py
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
+          grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/out/.config"
+          grep -Eq '#define[[:space:]]+BBR_VERSION[[:space:]]+3' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr3",' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr",' "$KERNEL/net/ipv4/tcp_bbr.c"
+          grep -Fq 'tcp_plb_update_state' "$KERNEL/net/ipv4/tcp_plb.c"
+          grep -Fq 'TCP_CONG_WANTS_CE_EVENTS' "$KERNEL/include/net/tcp.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply BBRv3 + FQ network Phase1
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/87_apply_bbr3_net.sh
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_TCP_CONG_BBR=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Eq '#define[[:space:]]+BBR_VERSION[[:space:]]+3' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr3",' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr",' "$KERNEL/net/ipv4/tcp_bbr.c"
+          grep -Fq 'tcp_plb_update_state' "$KERNEL/net/ipv4/tcp_plb.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Build BBRv3 + FQ Network P1 kernel
+        run: |
+          set -o pipefail
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/bbr3-net-p1-build.log
+
+      - name: Audit BBRv3 + FQ Network P1 image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fq 'DEFINE_STATIC_KEY_FALSE(sched_uclamp_used)' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
+          grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'struct binder_shrinker_mdata' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'page_private(page)' "$KERNEL/drivers/android/binder_alloc.c"
+          grep -Fq 'oneway_spam_detected' "$KERNEL/drivers/android/binder_alloc.c"
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] (binder_ioctl|binder_open|binder_mmap|binder_alloc_new_buf|binder_alloc_free_buf|binder_alloc_mmap_handler|init_binderfs|unload_binderfs)$' \
+            | tee artifacts/bbr3-net-p1-vmlinux-symbols.txt
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_(open|setup|read_iter|write_iter|mmap|release)$' \
+            | tee artifacts/bbr3-net-p1-fuse-vmlinux-symbols.txt
+          grep -Fq 'binder_alloc_new_buf' artifacts/bbr3-net-p1-vmlinux-symbols.txt
+          grep -Fq 'binder_alloc_mmap_handler' artifacts/bbr3-net-p1-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_open' artifacts/bbr3-net-p1-fuse-vmlinux-symbols.txt
+          {
+            echo phase=bbr3-net-p1
+            echo network_bbrv1=bbr
+            echo network_bbrv3=bbr3
+            echo bbrv3_google_source_commit=cb31f3d02b1d7cd7cfdff4dd2b8b9d38879904af
+            echo bbrv3_linux419_compat=kucingoranye-b249b8278b9691b73fc806ed379bd0c20c823b69
+            echo fq=enabled
+            echo default_tcp_cc=retained-existing-bic-for-first-hwtest
+            echo binder_source=android17-6.18-2026-09_r1
+            echo binder_source_commit=bab5f6aca819542b9dd13a70d3c62271e81b8e85
+            echo binder_core=android17-runtime-proven-phase83
+            echo binder_alloc=android17-native-logic-with-linux-4.19-mm-lru-compat
+            echo binderfs=retained-4.19-with-android17-debug-and-unload-bridges
+            echo fuse_passthrough=phase87-android-v2-ioctl-126
+            echo fuse_feature_probe=/sys/fs/fuse/features/fuse_passthrough
+            echo samsung_freecess=restored
+            echo android_netlink_reporting=deferred
+            echo uclamp=android17-p2-cass-aware
+            echo rt_uclamp_default=sysctl-live-sync
+            echo eevdf=phase77
+            echo cass=walt-safe-plus-uclamp-task-demand
+            echo mglru=phase80-compiled-runtime-switchable
+            echo compiler=vendor-clang-r383902
+            echo kernel=4.19.206
+          } | tee artifacts/bbr3-net-p1-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package BBRv3 + FQ Network P1 ZIP
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-bbr3-net-p1.sh
+
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-bbr3-net-p1.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-bbr3-net-p1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/.package-bbr3-net-p1.sh")
+          s = p.read_text()
+          anchor = "dump_boot;\nwrite_boot;"
+          if s.count(anchor) != 1:
+              raise SystemExit(f"unexpected AnyKernel boot-write anchor count: {s.count(anchor)}")
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BBRv3 FQ Net P1/' scripts/.package-bbr3-net-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BBR3-FQ-NET-P1-CLANG11.zip/' scripts/.package-bbr3-net-p1.sh
+          chmod +x scripts/.package-bbr3-net-p1.sh
+
+          ./scripts/.package-bbr3-net-p1.sh \
+            4.19.206 \
+            "$IMAGE" \
+            packaging/AnyKernel3 \
+            release
+
+          rm -f scripts/.package-bbr3-net-p1.sh
+
+      - name: Verify packaged BBRv3 + FQ Network P1
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -l "$ZIP" | tee artifacts/bbr3-net-p1-package-list.txt
+          sha256sum "$ZIP" | tee artifacts/bbr3-net-p1-package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-u17-ccache-${{ runner.os }}-${{ github.sha }}
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/bbr3-net-p1-kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/bbr3-net-p1-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/bbr3-net-p1-ccache.txt 2>&1 || true
+
+      - name: Upload BBRv3 + FQ Network P1 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-BBR3-FQ-NET-P1-CLANG11-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload BBR3-NET-P1 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-bbr3-net-p1-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

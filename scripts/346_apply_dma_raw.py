@@ -193,24 +193,29 @@ def inject_init_call(s: str) -> str:
     if brace<0:
         raise SystemExit("Phase346 dsi_ctrl_drv_init body missing")
 
-    # This downstream kernel enforces the pre-C99 declaration rule with
-    # -Werror=declaration-after-statement.  Insert only after the function's
-    # initial declaration block, immediately before its first executable
-    # statement.  Use the stable rc initialization followed by the first
-    # validation branch as the local anchor.
-    body_end=s.find("\n}",brace)
-    if body_end<0:
-        raise SystemExit("Phase346 dsi_ctrl_drv_init end missing")
-    body=s[brace:body_end]
-    anchor="\tif (!dsi_ctrl)\n"
+    depth=0
+    end=-1
+    for i in range(brace,len(s)):
+        if s[i]=="{":
+            depth+=1
+        elif s[i]=="}":
+            depth-=1
+            if depth==0:
+                end=i+1
+                break
+    if end<0:
+        raise SystemExit("Phase346 dsi_ctrl_drv_init unterminated")
+
+    body=s[brace:end]
+    anchor="\tint rc = 0;\n\n"
     if body.count(anchor)!=1:
         raise SystemExit(
-            f"Phase346 dsi_ctrl_drv_init first-statement anchor count {body.count(anchor)}")
+            f"Phase346 dsi_ctrl_drv_init declaration anchor count {body.count(anchor)}")
     body=body.replace(
         anchor,
-        "\ta52_p346_sideband_init();\n\n"+anchor,
+        anchor+"\ta52_p346_sideband_init();\n\n",
         1)
-    return s[:brace]+body+s[body_end:]
+    return s[:brace]+body+s[end:]
 
 def patch_ctrl(s: str) -> str:
     if MARK in s:

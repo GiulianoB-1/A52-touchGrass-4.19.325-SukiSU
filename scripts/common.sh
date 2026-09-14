@@ -68,8 +68,13 @@ build_kernel() {
   fi
 
   configure_toolchain
-  rm -rf "$KERNEL_DIR/out"
-  mkdir -p "$KERNEL_DIR/out"
+  if [ "${KERNEL_OUT_REUSE:-0}" = "1" ]; then
+    info "Reusing cached kernel out/ directory for incremental build"
+    mkdir -p "$KERNEL_DIR/out"
+  else
+    rm -rf "$KERNEL_DIR/out"
+    mkdir -p "$KERNEL_DIR/out"
+  fi
 
   info "Building $label with $jobs jobs"
   set +e

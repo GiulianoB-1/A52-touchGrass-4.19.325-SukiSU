@@ -1,0 +1,12 @@
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D src_yv12;
+layout(set = 0, binding = 1, std430) buffer SampleOut {
+    vec4 rgba;
+} out_data;
+
+void main()
+{
+    out_data.rgba = texture(src_yv12, vec2(0.5, 0.5));
+}

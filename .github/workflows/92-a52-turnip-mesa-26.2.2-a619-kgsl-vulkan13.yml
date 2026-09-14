@@ -173,6 +173,8 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
           strings "$AHB_PROBE" | grep -Fq 'AHB_CASES_FAIL=%u'
           strings "$AHB_PROBE" | grep -Fq 'stress_rgba8_passed=%u/32'
+          strings "$AHB_PROBE" | grep -Fq 'target_yv12_sf_940x1670_status=PASS'
+          strings "$AHB_PROBE" | grep -Fq 'VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT'
           strings "$PROBE" | grep -Fq 'gpu_submit_status=PASS'
           strings "$PROBE" | grep -Fq 'verify_mismatches=%u'
           strings "$PROBE" | grep -Fq 'noop_submit_status=PASS'

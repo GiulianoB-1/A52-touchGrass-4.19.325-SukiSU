@@ -49,14 +49,14 @@ jobs:
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
 
       - name: Restore compiler cache
-        id: ccache-restore
+        id: ccache_restore
         uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: a52xq-u17-ccache-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-u17-ccache-${{ runner.os }}-
-            a52xq-u17-uclamp-p1-${{ runner.os }}-
+            a52xq-binder84-${{ runner.os }}-
             a52xq-binder82-${{ runner.os }}-
             a52xq-binder81-${{ runner.os }}-
             a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
@@ -70,14 +70,14 @@ jobs:
           ccache --zero-stats
 
       - name: Restore U17-UCLAMP-P1 prepared source cache
-        id: u17-uclamp-p1-source
+        id: binder84_source
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-u17-uclamp-p1-pre-uclamp-${{ runner.os }}-d303dff9-v2
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
 
       - name: Reconstruct exact Phase80 kernel baseline
-        if: steps.u17-uclamp-p1-source.outputs.cache-hit != 'true'
+        if: steps.binder84_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           chmod +x scripts/*.sh scripts/*.py
@@ -111,7 +111,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Apply successful Android17 Binder and BinderFS port
-        if: steps.u17-uclamp-p1-source.outputs.cache-hit != 'true'
+        if: steps.binder84_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           ./scripts/81_apply_android17_binder_core_probe.sh
@@ -124,7 +124,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply Android17 Binder allocator on Linux 4.19
-        if: steps.u17-uclamp-p1-source.outputs.cache-hit != 'true'
+        if: steps.binder84_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           chmod +x scripts/84_apply_android17_binder_alloc.sh
@@ -139,7 +139,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply proven Android FUSE passthrough
-        if: steps.u17-uclamp-p1-source.outputs.cache-hit != 'true'
+        if: steps.binder84_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/84_apply_fuse_passthrough_android.py
@@ -153,11 +153,11 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save U17-UCLAMP-P1 prepared source cache
-        if: steps.u17-uclamp-p1-source.outputs.cache-hit != 'true'
+        if: steps.binder84_source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-u17-uclamp-p1-pre-uclamp-${{ runner.os }}-d303dff9-v2
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
 
       - name: Apply Android17 uclamp Phase1
         run: |
@@ -178,7 +178,7 @@ jobs:
           ./scripts/57_build_resukisu_susfs_manual_detection.sh \
             2>&1 | tee artifacts/u17-uclamp-p1-build.log
 
-      - name: Audit Android17 Binder allocator + FUSE image
+      - name: Audit Android17 uclamp Phase1 image
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -186,6 +186,12 @@ jobs:
           test -s "$KERNEL/out/vmlinux"
           grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fq 'DEFINE_STATIC_KEY_FALSE(sched_uclamp_used)' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
           grep -Fq 'struct binder_shrinker_mdata' "$KERNEL/drivers/android/binder_alloc.h"
           grep -Fq 'page_private(page)' "$KERNEL/drivers/android/binder_alloc.c"
           grep -Fq 'oneway_spam_detected' "$KERNEL/drivers/android/binder_alloc.c"
@@ -222,7 +228,7 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package Android17 Binder allocator + FUSE hardware-test ZIP
+      - name: Package Android17 uclamp Phase1 ZIP
         run: |
           set -Eeuo pipefail
           mkdir -p release
@@ -261,7 +267,7 @@ jobs:
 
           rm -f scripts/.package-u17-uclamp-p1.sh
 
-      - name: Verify packaged Binder hardware test
+      - name: Verify packaged Android17 uclamp Phase1
         run: |
           set -Eeuo pipefail
           ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
@@ -272,7 +278,7 @@ jobs:
           sha256sum "$ZIP" | tee artifacts/u17-uclamp-p1-package-sha256.txt
 
       - name: Save compiler cache
-        if: always() && steps.ccache-restore.outputs.cache-hit != 'true'
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .ccache
@@ -288,7 +294,7 @@ jobs:
           fi
           ccache --show-stats > artifacts/u17-uclamp-p1-ccache.txt 2>&1 || true
 
-      - name: Upload Android17 Binder allocator + FUSE hardware-test ZIP
+      - name: Upload Android17 uclamp Phase1 ZIP
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-4.19.206-ANDROID17-UCLAMP-P1-CLANG11-${{ github.run_number }}
@@ -300,7 +306,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a52xq-android17-binderalloc-fuse-hwtest-${{ github.run_number }}-diagnostics
+          name: a52xq-android17-uclamp-p1-${{ github.run_number }}-diagnostics
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14

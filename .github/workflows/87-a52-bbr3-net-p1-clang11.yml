@@ -26,6 +26,7 @@ env:
   JOBS: '4'
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 5G
+  KERNEL_OUT_REUSE: '1'
   IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
   ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
 
@@ -208,6 +209,15 @@ jobs:
           grep -Fq 'tcp_plb_update_state' "$KERNEL/net/ipv4/tcp_plb.c"
           git -C "$KERNEL" diff --check
 
+      - name: Restore incremental kernel output cache
+        id: kernel_out_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq/out
+          key: a52xq-bbr3-out-${{ runner.os }}-${{ hashFiles('scripts/08_*', 'scripts/56_*', 'scripts/57_*', 'scripts/85_*', 'scripts/86_*', 'scripts/87_*', 'scripts/common.sh') }}
+          restore-keys: |
+            a52xq-bbr3-out-${{ runner.os }}-
+
       - name: Build BBRv3 + FQ Network P1 kernel
         run: |
           set -o pipefail
@@ -331,6 +341,13 @@ jobs:
         with:
           path: .ccache
           key: a52xq-u17-ccache-${{ runner.os }}-${{ github.sha }}
+
+      - name: Save incremental kernel output cache
+        if: always() && steps.kernel_out_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq/out
+          key: a52xq-bbr3-out-${{ runner.os }}-${{ hashFiles('scripts/08_*', 'scripts/56_*', 'scripts/57_*', 'scripts/85_*', 'scripts/86_*', 'scripts/87_*', 'scripts/common.sh') }}
 
       - name: Record diagnostics
         if: always()

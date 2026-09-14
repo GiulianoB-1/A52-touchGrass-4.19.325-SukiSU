@@ -32,10 +32,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-ahb-probe" > "$OUT_DIR/module/ahb-probe.
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.8-vk1.3-ahb-forensics
-versionCode=8
+version=0.9-vk1.3-yv12-fix
+versionCode=9
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 Android buffer import forensics for Adreno 619/KGSL. Compares stock and Turnip RGBA/YUV/YV12 AHardwareBuffer import, bind, and lifetime behavior.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 compatibility fix for Adreno 619/KGSL. Backports bounded Android YV12 16-byte-pitch import and software YCbCr sampling while keeping the override temporary.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -96,7 +96,7 @@ PROBE="$MODDIR/tools/turnip-vk-probe"
 AHB_PROBE="$MODDIR/tools/turnip-ahb-probe"
 LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-echo "touchGrass Turnip A619 Vulkan 1.3 Android buffer import forensics"
+echo "touchGrass Turnip A619 Vulkan 1.3 YV12 fix validation"
 echo "No persistent Vulkan override is active."
 echo "A temporary bind mount will be created only for this test and removed on exit."
 echo
@@ -156,7 +156,7 @@ post-fs-data.sh is a no-op logger.
 
 Use the KernelSU/SukiSU module Action button to run a temporary live test.
 The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
-runs the proven Vulkan submission/render probe plus a stock-vs-Turnip Android hardware-buffer import diagnostic for RGBA, YUV420, YV12, and repeated buffer lifetime stress, records diagnostics, then unmounts automatically.
+runs the proven Vulkan submission/render probe plus a stock-vs-Turnip Android hardware-buffer diagnostic focused on the SurfaceFlinger-sized 940x1670 YV12 import, while retaining RGBA/YUV controls and lifetime stress, then unmounts automatically.
 
 Rollback from the old boot-override revision:
   adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"

@@ -262,8 +262,8 @@ static int run_ahb_case(VkPhysicalDevice physical,
     r = vkBindImageMemory(device, image, memory, 0);
     printf("%s.vkBindImageMemory=%d:%s\n", tc->name, r, vk_result_name(r));
     if (r != VK_SUCCESS) {
-        vkFreeMemory(device, memory, NULL);
         vkDestroyImage(device, image, NULL);
+        vkFreeMemory(device, memory, NULL);
         AHardwareBuffer_release(ahb);
         printf("%s.status=BIND_FAIL\n", tc->name);
         return 6;
@@ -311,8 +311,8 @@ static int run_ahb_case(VkPhysicalDevice physical,
                tc->name);
     }
 
-    vkFreeMemory(device, memory, NULL);
     vkDestroyImage(device, image, NULL);
+    vkFreeMemory(device, memory, NULL);
     AHardwareBuffer_release(ahb);
 
     printf("%s.status=IMPORT_BIND_PASS\n", tc->name);

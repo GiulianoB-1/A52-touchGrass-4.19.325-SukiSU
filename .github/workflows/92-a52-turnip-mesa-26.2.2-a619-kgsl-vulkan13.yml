@@ -173,9 +173,11 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.4-vk1.3-submit-diagnostic'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.5-vk1.3-submit-forensics'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP KERNEL WATCH'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'timeout 20'
           unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
           ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind'
           unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'

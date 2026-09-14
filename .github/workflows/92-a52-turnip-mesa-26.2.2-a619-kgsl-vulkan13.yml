@@ -157,8 +157,8 @@ jobs:
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics' "$INFO"
-          grep -Fxq 'android_yv12_fix=bounded-16byte-pitch-software-ycbcr' "$INFO"
-          grep -Fxq 'android_yv12_fix_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
+          grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-16byte-pitch' "$INFO"
+          grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
           file "$PROBE" | grep -Fq 'ARM aarch64'

@@ -35,7 +35,7 @@ name=touchGrass Turnip A619 Mesa 26.2.2
 version=0.9-vk1.3-yv12-fix
 versionCode=9
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 compatibility fix for Adreno 619/KGSL. Backports bounded Android YV12 16-byte-pitch import and software YCbCr sampling while keeping the override temporary.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 layout-fix candidate for Adreno 619/KGSL. Backports exact Android YV12 16-byte-pitch import handling while keeping the override temporary.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'

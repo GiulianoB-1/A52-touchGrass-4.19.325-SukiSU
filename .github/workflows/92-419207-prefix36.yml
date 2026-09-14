@@ -588,44 +588,6 @@ jobs:
 
           git -C "$KERNEL" diff --check
 
-      - name: Add persistent Phase92 prefix36 boot diagnostics
-        run: |
-          set -Eeuo pipefail
-          cp scripts/91_apply_boot_diag.py scripts/.91b_apply_boot_diag_no_curseg.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("scripts/.91b_apply_boot_diag_no_curseg.py")
-          text = p.read_text()
-          text = text.replace("A52P91", "A52P92")
-          old = 'sig+"\\ta52_persistent_diag_mark(\\\"A52P92 F2FS curseg begin total=%d persist=%d\\\\n\\\", NR_CURSEG_TYPE, NR_CURSEG_PERSIST_TYPE);\\n",'
-          new = 'sig+"\\ta52_persistent_diag_mark(\\\"A52P92 F2FS curseg begin total=%d\\\\n\\\", NR_CURSEG_TYPE);\\n",'
-          if text.count(old) != 1:
-              raise SystemExit(f"curseg-begin diagnostic anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          old = (
-              '"\\ta52_persistent_diag_mark(\\\"A52P92 F2FS curseg restore err=%d pinned_inited=%d pinned_seg=%u\\\\n\\\",\\n"\n'
-              '    "\\t\\ti, CURSEG_I(sbi, CURSEG_COLD_DATA_PINNED)->inited,\\n"\n'
-              '    "\\t\\tCURSEG_I(sbi, CURSEG_COLD_DATA_PINNED)->segno);\\n"'
-          )
-          new = '"\\ta52_persistent_diag_mark(\\\"A52P92 F2FS curseg restore err=%d\\\\n\\\", i);\\n"'
-          if text.count(old) != 1:
-              raise SystemExit(f"curseg-restore diagnostic anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          text = text.replace('"phase91-bootdiag.txt"', '"phase92-prefix36-bootdiag.txt"')
-          p.write_text(text)
-          PY
-          python3 -m py_compile scripts/.91b_apply_boot_diag_no_curseg.py
-          python3 scripts/.91b_apply_boot_diag_no_curseg.py workspace/touchgrass-a52xq
-          rm -f scripts/.91b_apply_boot_diag_no_curseg.py
-
-          KERNEL=workspace/touchgrass-a52xq
-          grep -Fq 'A52P92 READY' "$KERNEL/fs/pstore/ram.c"
-          grep -Fq 'A52P92 IC begin' "$KERNEL/init/main.c"
-          grep -Fq 'A52P92 F2FS fill enter' "$KERNEL/fs/f2fs/super.c"
-          grep -Fq 'A52P92 F2FS curseg restore' "$KERNEL/fs/f2fs/segment.c"
-          ! grep -Fq 'pinned_inited' "$KERNEL/fs/f2fs/segment.c"
-          git -C "$KERNEL" diff --check
-
       - name: Build Phase92 Prefix36
         run: |
           set -Eeuo pipefail
@@ -662,13 +624,11 @@ jobs:
           ! grep -Fq '#define NR_CURSEG_PERSIST_TYPE' "$KERNEL/fs/f2fs/f2fs.h"
           ! grep -Fq 'bool inited;' "$KERNEL/fs/f2fs/segment.h"
           ! grep -Fq 'void f2fs_save_inmem_curseg' "$KERNEL/fs/f2fs/segment.c"
-          grep -aFq 'A52P92 F2FS curseg restore' "$KERNEL/out/vmlinux"
           test "$(grep -Fc '&dcc->root, false));' "$KERNEL/fs/f2fs/segment.c")" -eq 2
           grep -Fq 'A52FUSE_BALANCE read' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
           grep -aFq 'A52PF_BADCTX' "$KERNEL/out/vmlinux"
           grep -aFq 'A52FUSE_BALANCE' "$KERNEL/out/vmlinux"
-          grep -aFq 'A52P92 READY' "$KERNEL/out/vmlinux"
           grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'clear_and_wake_up_bit(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'test_and_set_bit_lock(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
@@ -778,7 +738,7 @@ jobs:
             echo stable_bisect_prior_bad_prefix=73
             echo stable_bisect_test_prefix=36
             echo stable_bisect_test_sha=c1c3b899fb5d481c2a0ea99f259be44b1115e209
-            echo persistent_boot_diag=A52P92
+            echo persistent_boot_diag=disabled-for-clean-prefix-bisect
             echo runtime_crash_diag=A52PF_BADCTX+A52FUSE_BALANCE
             echo f2fs_atgc=not-yet-enabled
             echo bpf_ringbuf=retained

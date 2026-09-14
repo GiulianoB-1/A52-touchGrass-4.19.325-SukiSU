@@ -311,6 +311,25 @@ write(IOMMU_C, iommu)
 
 for preempt_path, family in ((A5_PREEMPT, "A5xx"), (A6_PREEMPT, "A6xx")):
     text = read(preempt_path)
+    legacy_comment = '''\t/*
+\t * Get the pagetable from the pagetable info.
+\t * The pagetable_desc is allocated and mapped at probe time, and
+\t * preemption_desc at init time, so no need to check if
+\t * sharedmem accesses to these memdescs succeed.
+\t */
+'''
+    if legacy_comment in text:
+        text = replace_once(
+            text,
+            legacy_comment,
+            '''\t/*
+\t * Read the per-ringbuffer pagetable shadow from the device scratch page.
+\t * The preemption descriptor remains allocated and mapped at init time.
+\t */
+''',
+            f"{family} pagetable shadow comment",
+        )
+
     old = '''\tkgsl_sharedmem_readq(&next->pagetable_desc, &ttbr0,
 \t\tPT_INFO_OFFSET(ttbr0));
 \tkgsl_sharedmem_readl(&next->pagetable_desc, &contextidr,

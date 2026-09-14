@@ -19,7 +19,7 @@ concurrency:
 env:
   NDK_VERSION: 30.0.16248370
   GLSLANG_VERSION: 16.6.0
-  GLSLANG_SHA256: 2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce
+  GLSLANG_COMMIT: e1b562a8bed273a02f30b59b66a5d499793cede5
   CCACHE_DIR: ${{ github.workspace }}/.ccache-turnip
   CCACHE_MAXSIZE: 4G
 
@@ -38,34 +38,43 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            curl xz-utils zip unzip file binutils patchelf ccache pkg-config \
+            curl xz-utils zip unzip file binutils patchelf ccache pkg-config cmake \
             python3 python3-pip python3-setuptools python3-wheel \
             flex bison git ca-certificates
           python3 -m pip install --user --upgrade "meson>=1.4" ninja mako pyyaml packaging
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install pinned glslang >= 12.2
+      - name: Build pinned glslang >= 12.2
         run: |
           set -Eeuo pipefail
-          ARCHIVE="$RUNNER_TEMP/glslang-${GLSLANG_VERSION}-linux-x86_64-release.tar.gz"
-          DEST="$HOME/.local/glslang-${GLSLANG_VERSION}"
-          URL="https://github.com/KhronosGroup/glslang/releases/download/${GLSLANG_VERSION}/glslang-${GLSLANG_VERSION}-linux-x86_64-release.tar.gz"
+          SRC="$RUNNER_TEMP/glslang-src"
+          BUILD="$RUNNER_TEMP/glslang-build"
+          DEST="$HOME/.local/bin"
 
-          curl -fL --retry 5 --retry-delay 3 "$URL" -o "$ARCHIVE"
-          echo "$GLSLANG_SHA256  $ARCHIVE" | sha256sum -c -
+          rm -rf "$SRC" "$BUILD"
+          git clone --filter=blob:none https://github.com/KhronosGroup/glslang.git "$SRC"
+          git -C "$SRC" checkout --detach "$GLSLANG_COMMIT"
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$GLSLANG_COMMIT"
 
-          rm -rf "$DEST"
-          mkdir -p "$DEST"
-          tar -xzf "$ARCHIVE" -C "$DEST"
+          cmake -S "$SRC" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXTERNAL=OFF \
+            -DENABLE_OPT=OFF \
+            -DENABLE_HLSL=OFF \
+            -DGLSLANG_TESTS=OFF \
+            -DGLSLANG_ENABLE_INSTALL=OFF \
+            -DENABLE_GLSLANG_BINARIES=ON
 
-          GLSLANG_VALIDATOR="$(find "$DEST" -type f -name glslangValidator -perm -111 | head -1)"
-          test -n "$GLSLANG_VALIDATOR"
+          cmake --build "$BUILD" --target glslang-standalone --parallel 2
+
+          GLSLANG_VALIDATOR="$BUILD/StandAlone/glslangValidator"
           test -x "$GLSLANG_VALIDATOR"
+          mkdir -p "$DEST"
+          cp -L "$GLSLANG_VALIDATOR" "$DEST/glslangValidator"
+          chmod 0755 "$DEST/glslangValidator"
 
-          GLSLANG_BIN="$(dirname "$GLSLANG_VALIDATOR")"
-          echo "$GLSLANG_BIN" >> "$GITHUB_PATH"
-          echo "glslang_bin=$GLSLANG_BIN"
-          "$GLSLANG_VALIDATOR" --version
+          echo "$DEST" >> "$GITHUB_PATH"
+          "$DEST/glslangValidator" --version
 
       - name: Locate Android SDK
         run: |

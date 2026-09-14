@@ -29,6 +29,77 @@ git apply --reject --whitespace=nowarn "$TMP/bbr3-4.19.patch"
 rc=$?
 set -e
 
+# Resolve the small set of Samsung/touchGrass 4.19 semantic conflicts
+# that the generic 4.19 BBRv3 compatibility patch cannot match by context.
+python3 - "$KERNEL" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+
+def replace_once(path, old, new, label):
+    p = root / path
+    text = p.read_text()
+    if new in text:
+        return
+    if old not in text:
+        raise SystemExit(f"{label}: expected source anchor not found in {path}")
+    p.write_text(text.replace(old, new, 1))
+
+replace_once(
+    "net/core/sock.c",
+    "sk->sk_max_pacing_rate = ~0U;\n\tsk->sk_pacing_rate = ~0U;\n\tsk->sk_pacing_shift = 10;",
+    "sk->sk_max_pacing_rate = ~0UL;\n\tsk->sk_pacing_rate = ~0UL;\n\tWRITE_ONCE(sk->sk_pacing_shift, 10);",
+    "sock pacing width",
+)
+
+replace_once(
+    "net/ipv4/tcp.c",
+    "tp->reord_seen = 0;\n",
+    "tp->reord_seen = 0;\n\ttp->fast_ack_mode = 0;\n",
+    "tcp disconnect fast_ack reset",
+)
+
+replace_once(
+    "net/ipv4/tcp_input.c",
+    "tcp_process_tlp_ack(sk, ack, flag);",
+    "tcp_process_tlp_ack(sk, ack, flag, &rs);",
+    "TLP ACK rate-sample plumbing",
+)
+
+replace_once(
+    "net/ipv4/tcp_output.c",
+    "u64 len_ns;\n\tu32 rate;\n",
+    "u64 len_ns;\n\tunsigned long rate;\n",
+    "internal pacing rate width",
+)
+replace_once(
+    "net/ipv4/tcp_output.c",
+    "if (!rate || rate == ~0U)",
+    "if (!rate || rate == ~0UL)",
+    "internal pacing unlimited sentinel",
+)
+
+p = root / "net/ipv4/tcp_output.c"
+text = p.read_text()
+old = """static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)\n{\n\tconst struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;\n\tu32 min_tso, tso_segs;\n\n\tmin_tso = ca_ops->min_tso_segs ?\n\t\t\tca_ops->min_tso_segs(sk) :\n\t\t\tREAD_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);\n\n\ttso_segs = tcp_tso_autosize(sk, mss_now, min_tso);\n\treturn min_t(u32, tso_segs, sk->sk_gso_max_segs);\n}"""
+new = """static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)\n{\n\tconst struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;\n\tu32 tso_segs;\n\n\ttso_segs = ca_ops->tso_segs ?\n\t\t\tca_ops->tso_segs(sk, mss_now) :\n\t\t\ttcp_tso_autosize(sk, mss_now,\n\t\t\t\t sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);\n\treturn min_t(u32, tso_segs, sk->sk_gso_max_segs);\n}"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("tcp_tso_segs: expected Samsung 4.19 anchor not found")
+    p.write_text(text.replace(old, new, 1))
+
+for rel in (
+    "net/core/sock.c.rej",
+    "net/ipv4/tcp.c.rej",
+    "net/ipv4/tcp_input.c.rej",
+    "net/ipv4/tcp_output.c.rej",
+):
+    q = root / rel
+    if q.exists():
+        q.unlink()
+PY
+
 if find . -name '*.rej' -print -quit | grep -q .; then
     echo "ERROR: BBRv3 compatibility patch produced rejects:" >&2
     find . -name '*.rej' -print >&2

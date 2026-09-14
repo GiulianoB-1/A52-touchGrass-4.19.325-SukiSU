@@ -372,6 +372,46 @@ readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
 readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
 sha256sum "$AHB_PROBE" | tee "$OUT/turnip-ahb-probe.sha256"
 
+echo "==> Build on-device YV12 GPU sampling probe"
+YV12_SHADER_SRC="$ROOT/scripts/92_turnip_yv12_sample.comp"
+YV12_PROBE_SRC="$ROOT/scripts/92_turnip_yv12_sample_probe.c"
+YV12_SPV="$OUT/yv12_sample.spv"
+YV12_HDR="$OUT/yv12_sample_spv.h"
+YV12_PROBE="$DIST/turnip-yv12-sample-probe"
+test -s "$YV12_SHADER_SRC"
+test -s "$YV12_PROBE_SRC"
+glslangValidator -V --target-env vulkan1.1 -S comp \
+  "$YV12_SHADER_SRC" -o "$YV12_SPV"
+python3 - "$YV12_SPV" "$YV12_HDR" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+spv = Path(sys.argv[1]).read_bytes()
+if len(spv) % 4:
+    raise SystemExit("SPIR-V size is not uint32 aligned")
+words = struct.unpack("<%dI" % (len(spv) // 4), spv)
+with open(sys.argv[2], "w") as out:
+    out.write("#pragma once\n#include <stddef.h>\n#include <stdint.h>\n")
+    out.write("static const uint32_t yv12_sample_spv[] = {\n")
+    for i in range(0, len(words), 8):
+        chunk = words[i:i+8]
+        out.write("    " + ", ".join(f"0x{w:08x}u" for w in chunk) + ",\n")
+    out.write("};\n")
+    out.write("static const size_t yv12_sample_spv_size = sizeof(yv12_sample_spv);\n")
+PY
+"$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+  -O2 -Wall -Wextra -Werror -I"$OUT" \
+  "$YV12_PROBE_SRC" -o "$YV12_PROBE" -lvulkan -landroid
+"$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$YV12_PROBE"
+chmod 0755 "$YV12_PROBE"
+file "$YV12_PROBE" | tee "$OUT/yv12-sample-probe-file.txt"
+file "$YV12_PROBE" | grep -Fq 'ARM aarch64'
+readelf -d "$YV12_PROBE" | tee "$OUT/yv12-sample-probe-readelf-dynamic.txt"
+readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
+sha256sum "$YV12_PROBE" "$YV12_SPV" | tee "$OUT/turnip-yv12-sample-probe.sha256"
+
 cat > "$OUT/BUILD-INFO.txt" <<EOF
 project=touchGrass Turnip A619 KGSL bring-up
 mesa_version=26.2.2
@@ -391,6 +431,8 @@ probe_api_request=Vulkan-1.3
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
+yv12_sample_probe=turnip-yv12-sample-probe
+yv12_sample_mode=940x1670-cpu-pattern-compute-sample-readback
 android_yv12_fix=mesa-26.2.2-explicit-layout-16byte-pitch
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac

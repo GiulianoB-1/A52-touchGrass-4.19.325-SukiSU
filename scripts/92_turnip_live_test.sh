@@ -4,6 +4,7 @@ DRIVER="${1:-/data/local/tmp/vulkan.adreno.so}"
 PROBE="${2:-/data/local/tmp/turnip-vk-probe}"
 OUT="${3:-/data/local/tmp/turnip-live-test.txt}"
 AHB_PROBE="${4:-/data/local/tmp/turnip-ahb-probe}"
+YV12_SAMPLE_PROBE="${5:-/data/local/tmp/turnip-yv12-sample-probe}"
 WATCH="${OUT%.txt}-kernel-watch.txt"
 WATCH_PID=""
 
@@ -57,6 +58,10 @@ if [ ! -x "$AHB_PROBE" ]; then
     echo "FAIL: AHardwareBuffer probe missing/not executable"
     exit 18
 fi
+if [ ! -x "$YV12_SAMPLE_PROBE" ]; then
+    echo "FAIL: YV12 sample probe missing/not executable"
+    exit 19
+fi
 
 echo "=== STOCK QUALCOMM SUBMISSION BASELINE ==="
 "$PROBE"
@@ -81,6 +86,23 @@ fi
 echo "stock_ahb_probe_exit=$STOCK_AHB_RC"
 echo
 sync
+
+echo "=== STOCK QUALCOMM YV12 GPU SAMPLE BASELINE ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 45 "$YV12_SAMPLE_PROBE"
+    STOCK_YV12_RC=$?
+else
+    "$YV12_SAMPLE_PROBE"
+    STOCK_YV12_RC=$?
+fi
+echo "stock_yv12_sample_exit=$STOCK_YV12_RC"
+echo
+sync
+
+if [ "$STOCK_YV12_RC" -ne 0 ]; then
+    echo "FAIL: stock Qualcomm failed the YV12 GPU sampling baseline"
+    exit 20
+fi
 
 mkdir -p "$STAGE_DIR" || exit 13
 cp -f "$DRIVER" "$STAGE" || exit 14
@@ -133,6 +155,17 @@ fi
 echo "turnip_ahb_probe_exit=$AHB_PROBE_RC"
 echo
 
+echo "=== TURNIP YV12 GPU SAMPLE PROBE ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 45 "$YV12_SAMPLE_PROBE"
+    YV12_SAMPLE_RC=$?
+else
+    "$YV12_SAMPLE_PROBE"
+    YV12_SAMPLE_RC=$?
+fi
+echo "turnip_yv12_sample_exit=$YV12_SAMPLE_RC"
+echo
+
 if [ -n "$WATCH_PID" ]; then
     kill "$WATCH_PID" 2>/dev/null || true
     wait "$WATCH_PID" 2>/dev/null || true
@@ -144,6 +177,7 @@ echo "=== TURNIP KERNEL WATCH TAIL ==="
 tail -250 "$WATCH" 2>/dev/null || true
 echo "probe_exit=$PROBE_RC"
 echo "ahb_probe_exit=$AHB_PROBE_RC"
+echo "yv12_sample_exit=$YV12_SAMPLE_RC"
 echo
 
 echo "=== CMD GPU VKJSON ==="
@@ -159,7 +193,7 @@ dmesg | grep -Ei 'kgsl|adreno|gmu|gpu|iommu|smmu' | grep -Ei 'fault|error|timeou
 echo
 
 echo "=== RESULT ==="
-if [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ]; then
+if [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ] && [ "$YV12_SAMPLE_RC" -eq 0 ]; then
     echo "TURNIP_LIVE_TEST=PASS"
 else
     echo "TURNIP_LIVE_TEST=FAIL"
@@ -169,4 +203,7 @@ echo "========== END =========="
 if [ "$PROBE_RC" -ne 0 ]; then
     exit "$PROBE_RC"
 fi
-exit "$AHB_PROBE_RC"
+if [ "$AHB_PROBE_RC" -ne 0 ]; then
+    exit "$AHB_PROBE_RC"
+fi
+exit "$YV12_SAMPLE_RC"

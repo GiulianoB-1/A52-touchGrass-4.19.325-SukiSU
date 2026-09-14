@@ -142,6 +142,7 @@ soname=vulkan.adreno.so
 architecture=aarch64
 probe=turnip-vk-probe
 probe_api_request=Vulkan-1.3
+probe_mode=device-create-buffer-fill-queue-submit-fence-memory-verify
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF
 

@@ -52,13 +52,13 @@ dev.write_text(s.replace(old, new, 1))
 
 s = meson.read_text()
 old = "'--api-version', '1.4'"
-if s.count(old) != 1:
+if s.count(old) != 2:
     raise SystemExit(f"unexpected ICD api-version anchor count: {s.count(old)}")
-meson.write_text(s.replace(old, "'--api-version', '1.3'", 1))
+meson.write_text(s.replace(old, "'--api-version', '1.3'"))
 PY
 
 grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION)'   "$SRC/src/freedreno/vulkan/tu_device.cc"
-grep -Fq "'--api-version', '1.3'" "$SRC/src/freedreno/vulkan/meson.build"
+test "$(grep -F "'--api-version', '1.3'" "$SRC/src/freedreno/vulkan/meson.build" | wc -l)" -eq 2
 
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 CROSS="$WORK/android-aarch64.ini"

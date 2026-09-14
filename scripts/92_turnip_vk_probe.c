@@ -469,6 +469,10 @@ static int run_submit_probe(VkPhysicalDevice physical)
 
 int main(void)
 {
+    /* Preserve the exact last successful milestone if Turnip hangs, crashes,
+     * or the GPU resets during a submission. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     uint32_t loader_version = VK_API_VERSION_1_0;
     PFN_vkEnumerateInstanceVersion enumerate_instance_version =
         (PFN_vkEnumerateInstanceVersion)vkGetInstanceProcAddr(

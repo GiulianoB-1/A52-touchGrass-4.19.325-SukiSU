@@ -162,6 +162,10 @@ jobs:
           strings "$PROBE" | grep -Fq 'noop_submit_status=PASS'
           strings "$PROBE" | grep -Fq 'noop_before_vkQueueSubmit=1'
           strings "$PROBE" | grep -Fq 'fill_before_vkQueueSubmit=1'
+          strings "$PROBE" | grep -Fq 'pre_submit_vkMapMemory_begin=1'
+          strings "$PROBE" | grep -Fq 'pre_submit_cpu_sentinel_write=PASS'
+          strings "$PROBE" | grep -Fq 'post_submit_reuse_existing_mapping=1'
+          strings "$PROBE" | grep -Fq 'memory_type_count=%u'
           strings "$PROBE" | grep -Fq 'vkQueueSubmit_result=%d'
           strings "$PROBE" | grep -Fq 'vkWaitForFences_result=%d'
           readelf -d "$DRIVER" | grep -Fq 'vulkan.adreno.so'
@@ -173,7 +177,7 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.5-vk1.3-submit-forensics'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.6-vk1.3-memory-forensics'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP KERNEL WATCH'

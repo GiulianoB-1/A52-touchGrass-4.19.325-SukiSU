@@ -16,6 +16,61 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_trigger_in_function(text: str, name: str) -> str:
+    pos = text.find(name + "(")
+    if pos < 0:
+        raise SystemExit("Phase345 missing function: " + name)
+
+    brace = text.find("{", pos)
+    if brace < 0:
+        raise SystemExit("Phase345 missing function body: " + name)
+
+    depth = 0
+    end = -1
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end < 0:
+        raise SystemExit("Phase345 unterminated function: " + name)
+
+    body = text[brace:end]
+    trigger = "DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);"
+    if body.count(trigger) != 1:
+        raise SystemExit(
+            f"Phase345 {name}: expected one SW_TRIGGER write, found {body.count(trigger)}"
+        )
+
+    p = body.index(trigger)
+    line_start = body.rfind("\n", 0, p) + 1
+    line_end = body.find("\n", p)
+    if line_end < 0:
+        line_end = len(body)
+    line = body[line_start:line_end]
+    if line.strip() != trigger:
+        raise SystemExit("Phase345 malformed SW_TRIGGER line in " + name)
+    indent = line[:len(line) - len(line.lstrip())]
+
+    lines = [
+        "a52_p345_begin(ctrl);",
+        trigger,
+        "a52_p345_store(ctrl, 1);",
+        "a52_p345_store(ctrl, 2);",
+        "a52_p345_store(ctrl, 3);",
+        "a52_p345_store(ctrl, 4);",
+        "a52_p345_store(ctrl, 5);",
+        "a52_p345_store(ctrl, 6);",
+        "a52_p345_end(ctrl);",
+    ]
+    injected = "\n".join(indent + x for x in lines)
+    body = body[:line_start] + injected + body[line_end:]
+    return text[:brace] + body + text[end:]
+
+
 HELPER = r'''/* A52_PHASE345_DMA_US_FRONTIER_V1
  *
  * High-resolution exact-F0 command-DMA observer matched to the successful
@@ -166,27 +221,13 @@ def patch_hwc(text: str) -> str:
     anchor = "static const u32 a52_p319_selectors[6] = {\n"
     text = one(text, anchor, HELPER + anchor, "helper insertion")
 
-    old = """		a52_p319_debugbus_snapshot(ctrl, 0);
-		DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
-		a52_p319_debugbus_snapshot(ctrl, 1);
-"""
-    new = """		a52_p319_debugbus_snapshot(ctrl, 0);
-		a52_p345_begin(ctrl);
-		DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
-		a52_p345_store(ctrl, 1);
-		a52_p345_store(ctrl, 2);
-		a52_p345_store(ctrl, 3);
-		a52_p345_store(ctrl, 4);
-		a52_p345_store(ctrl, 5);
-		a52_p345_store(ctrl, 6);
-		a52_p345_end(ctrl);
-		a52_p319_debugbus_snapshot(ctrl, 1);
-"""
-    # Both the immediate memory-kickoff path and deferred trigger path have this
-    # exact Phase319 sequence.
-    if text.count(old) != 2:
-        raise SystemExit(f"Phase345 expected two trigger anchors, found {text.count(old)}")
-    text = text.replace(old, new)
+    # Hook the actual SW_TRIGGER write in each production function. This is
+    # intentionally independent of surrounding Phase319/329/330 observer text,
+    # which later phases may expand without changing trigger semantics.
+    text = replace_trigger_in_function(
+        text, "dsi_ctrl_hw_cmn_kickoff_command")
+    text = replace_trigger_in_function(
+        text, "dsi_ctrl_hw_cmn_trigger_command_dma")
     return text
 
 
@@ -228,6 +269,8 @@ def validate(before_h: str, after_h: str, before_c: str, after_c: str) -> None:
         "a52_p345_store(ctrl, 0);",
         "a52_p345_store(ctrl, 6);",
         "a52_p345_flush(&dsi_ctrl->hw);",
+        "dsi_ctrl_hw_cmn_kickoff_command",
+        "dsi_ctrl_hw_cmn_trigger_command_dma",
         "ktime_get_ns()",
     ):
         if token not in both:

@@ -19,7 +19,7 @@ BAD_TAG = "v4.19.207"
 TEST_POSITION = 295
 PRIOR_BAD_POSITION = 73
 
-EXPECTED_GOOD_SHA = "b172b44fcb1771e083aad806fa97f3f60e2ddfac"
+EXPECTED_GOOD_SHA = "b172b44fcb1771e083aad806fa96f3f60e2ddfac"
 EXPECTED_TEST_SHA = "2950c9c5e0df6bd34af45a5168bbee345e95eae2"
 EXPECTED_PRIOR_BAD_SHA = "c5c62f4c936407fb734cae64700f20b68273b059"
 # Phase97 intentionally keeps boot diagnostics out of the bisect delta.
@@ -126,7 +126,7 @@ def main() -> None:
     try:
         run("git", "-C", str(STABLE), "cat-file", "-e", f"{EXPECTED_GOOD_SHA}^{{commit}}")
     except subprocess.CalledProcessError:
-        run("git", "-C", str(STABLE), "fetch", "--quiet", "--deepen=4097", "origin", BAD_TAG)
+        run("git", "-C", str(STABLE), "fetch", "--quiet", "--deepen=4096", "origin", BAD_TAG)
 
     run("git", "-C", str(STABLE), "update-ref", f"refs/tags/{GOOD_TAG}", EXPECTED_GOOD_SHA)
     run("git", "-C", str(STABLE), "merge-base", "--is-ancestor", GOOD_TAG, BAD_TAG)

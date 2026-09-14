@@ -141,13 +141,15 @@ static void kgsl_pwrctrl_clk"""
 """
     text = replace_once(text, old, new, "pwrlevel change locals")
 
-    # This anchor exists after Phase1 has corrected bus-vote ordering.
+    # Phase1 rewrites the original unconditional bus update into a guarded
+    # pre-clock vote. Insert the temporary P6 boost immediately before that
+    # Phase1 block so the boosted vote is the one applied before an upclock.
     old = """	if (pwr->bus_mod < 0 || new_level < old_level) {
 		pwr->bus_mod = 0;
 		pwr->bus_percent_ab = 0;
 	}
-
-	pwrlevel = &pwr->pwrlevels[pwr->active_pwrlevel];
+	/*
+	 * A619 GPU modernization: Qualcomm 536bf34a8db3
 """
     new = f"""	if (pwr->bus_mod < 0 || new_level < old_level) {{
 		pwr->bus_mod = 0;
@@ -167,9 +169,10 @@ static void kgsl_pwrctrl_clk"""
 		p6_bus_preboost = true;
 	}}
 
-	pwrlevel = &pwr->pwrlevels[pwr->active_pwrlevel];
+	/*
+	 * A619 GPU modernization: Qualcomm 536bf34a8db3
 """
-    text = replace_once(text, old, new, "transition bus boost placement")
+    text = replace_once(text, old, new, "transition bus boost placement after P1")
 
     anchor = """	trace_gpu_frequency(pwrlevel->gpu_freq/1000, 0);
 

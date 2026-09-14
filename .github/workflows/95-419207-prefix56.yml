@@ -556,7 +556,7 @@ jobs:
           KERNEL=workspace/touchgrass-a52xq
           test -s artifacts/phase95-prefix56-state.txt
           grep -Fxq 'test_applied_commits=56' artifacts/phase95-prefix56-state.txt
-          grep -Fxq 'test_commit=3e6bd2b583f18da9856fc9741ffa200a74a52cba' artifacts/phase95-prefix56-state.txt
+          grep -Fxq 'test_commit=6812cb0d4379a55677337f115318b6857a4b905e' artifacts/phase95-prefix56-state.txt
           grep -Fxq 'prior_bad_applied_commits=73' artifacts/phase95-prefix56-state.txt
           grep -Fxq 'prior_bad_commit=c5c62f4c936407fb734cae64700f20b68273b059' artifacts/phase95-prefix56-state.txt
           git -C "$KERNEL" diff --check
@@ -606,7 +606,7 @@ jobs:
           CANDIDATE_VERSION="$(make -s -C "$KERNEL" kernelversion)"
           test -n "$CANDIDATE_VERSION"
           grep -Fxq 'test_applied_commits=56' artifacts/phase95-prefix56-state.txt
-          grep -Fxq 'test_commit=3e6bd2b583f18da9856fc9741ffa200a74a52cba' artifacts/phase95-prefix56-state.txt
+          grep -Fxq 'test_commit=6812cb0d4379a55677337f115318b6857a4b905e' artifacts/phase95-prefix56-state.txt
           test -s "artifacts/Image-${LABEL}"
           test -s "$KERNEL/out/vmlinux"
           grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
@@ -739,7 +739,7 @@ jobs:
             echo stable_bisect_known_bad=v4.19.207
             echo stable_bisect_prior_bad_prefix=73
             echo stable_bisect_test_prefix=56
-            echo stable_bisect_test_sha=3e6bd2b583f18da9856fc9741ffa200a74a52cba
+            echo stable_bisect_test_sha=6812cb0d4379a55677337f115318b6857a4b905e
             echo persistent_boot_diag=disabled-for-clean-prefix-bisect
             echo runtime_crash_diag=A52PF_BADCTX+A52FUSE_BALANCE
             echo f2fs_atgc=not-yet-enabled

@@ -22,6 +22,7 @@ PRIOR_BAD_POSITION = 73
 EXPECTED_GOOD_SHA = "b172b44fcb1771e083aad806fa96f3f60e2ddfac"
 EXPECTED_TEST_SHA = "c1c3b899fb5d481c2a0ea99f259be44b1115e209"
 EXPECTED_PRIOR_BAD_SHA = "c5c62f4c936407fb734cae64700f20b68273b059"
+# Phase92 intentionally keeps boot diagnostics out of the bisect delta.
 
 POLICY = ROOT / "scripts" / "05_merge_linux_4.19.325.py"
 FIX_TEMPLATE = ROOT / "scripts" / "checkpoint_fix_linux_4.19.210_compile.sh"

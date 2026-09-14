@@ -139,39 +139,83 @@ elif "request_status =" in cleanup and cleanup.count("int request_status;") != 1
 
 dwc3_gadget.write_text(text)
 
-# Resolve three FunctionFS textual merge artifacts while preserving Samsung's
-# surrounding implementation.
+# Resolve/validate FunctionFS merge artifacts structurally. The current
+# 4.19.206 -> 4.19.325 merge often already contains the correct Samsung form,
+# so do not require exact historical text from the older uplift attempt.
 ffs = root / "drivers/usb/gadget/function/f_fs.c"
-replace_once(
-    ffs,
+text = ffs.read_text()
+
+# Endpoint descriptor speed switch: exactly one SUPER and one SUPER_PLUS case.
+desc_marker = "case FUNCTIONFS_ENDPOINT_DESC:"
+desc_start = text.index(desc_marker)
+desc_end = text.index("\n\tdefault:", desc_start)
+desc = text[desc_start:desc_end]
+dup = (
     "\t\tcase USB_SPEED_SUPER_PLUS:\n"
     "\t\tcase USB_SPEED_SUPER:\n"
-    "\t\tcase USB_SPEED_SUPER_PLUS:\n",
-    "\t\tcase USB_SPEED_SUPER:\n"
-    "\t\tcase USB_SPEED_SUPER_PLUS:\n",
-    "functionfs=removed-duplicate-super-plus-case",
+    "\t\tcase USB_SPEED_SUPER_PLUS:\n"
 )
-replace_once(
-    ffs,
+if dup in desc:
+    desc = desc.replace(
+        dup,
+        "\t\tcase USB_SPEED_SUPER:\n"
+        "\t\tcase USB_SPEED_SUPER_PLUS:\n",
+        1,
+    )
+    text = text[:desc_start] + desc + text[desc_end:]
+    repairs.append("functionfs=removed-duplicate-super-plus-case")
+elif desc.count("case USB_SPEED_SUPER_PLUS:") != 1 or desc.count("case USB_SPEED_SUPER:") != 1:
+    raise SystemExit(
+        "FunctionFS endpoint descriptor speed switch has an unexpected merge shape"
+    )
+
+# ffs_fs_mount(): remove the historical stray closing brace only if present.
+mount_sig = "ffs_fs_mount(struct file_system_type *t, int flags,"
+mount_start = text.index(mount_sig)
+mount_end = text.index("\nstatic void\nffs_fs_kill_sb", mount_start)
+mount = text[mount_start:mount_end]
+stray = (
     "\trv = mount_nodev(t, flags, &data, ffs_sb_fill);\n"
     "\tif (IS_ERR(rv) && data.ffs_data)\n"
     "\t\tffs_data_put(data.ffs_data);\n"
     "\t}\n\n"
-    "\treturn rv;\n",
+    "\treturn rv;\n"
+)
+fixed_mount = (
     "\trv = mount_nodev(t, flags, &data, ffs_sb_fill);\n"
     "\tif (IS_ERR(rv) && data.ffs_data)\n"
     "\t\tffs_data_put(data.ffs_data);\n\n"
-    "\treturn rv;\n",
-    "functionfs=removed-stray-mount-brace",
+    "\treturn rv;\n"
 )
-replace_once(
-    ffs,
-    "\tstruct ffs_data *ffs = ffs_opts->dev->ffs_data;\n"
-    "\tint ret;\n",
-    "\tstruct ffs_data *ffs_data;\n"
-    "\tint ret;\n",
-    "functionfs=restored-locked-ffs-data-declaration",
-)
+if stray in mount:
+    mount = mount.replace(stray, fixed_mount, 1)
+    text = text[:mount_start] + mount + text[mount_end:]
+    repairs.append("functionfs=removed-stray-mount-brace")
+elif "rv = mount_nodev(t, flags, &data, ffs_sb_fill);" not in mount or "\treturn rv;\n" not in mount:
+    raise SystemExit("FunctionFS mount path has an unexpected merge shape")
+
+# The bind path may declare ffs_data alone or together with Samsung's ffs
+# variable. Accept either, but ensure the local exists before it is assigned.
+bind_sig = "static inline struct f_fs_opts *ffs_do_functionfs_bind"
+bind_start = text.index(bind_sig)
+bind_end = text.index("\nstatic int ffs_func_bind", bind_start)
+bind = text[bind_start:bind_end]
+if "*ffs_data;" not in bind:
+    legacy = "\tstruct ffs_data *ffs = ffs_opts->dev->ffs_data;\n"
+    if legacy in bind:
+        bind = bind.replace(
+            legacy,
+            "\tstruct ffs_data *ffs_data;\n",
+            1,
+        )
+        text = text[:bind_start] + bind + text[bind_end:]
+        repairs.append("functionfs=restored-locked-ffs-data-declaration")
+    else:
+        raise SystemExit("FunctionFS bind path uses ffs_data without a declaration")
+if "ffs_data = ffs_opts->dev->ffs_data;" not in bind and "ffs_data = ffs_opts->dev->ffs_data;" not in text[bind_start:bind_end]:
+    raise SystemExit("FunctionFS bind path does not snapshot ffs_data")
+
+ffs.write_text(text)
 
 # Match the Linux 4.19.325 implementation, which accepts a 64-bit timeout.
 xhci_h = root / "drivers/usb/host/xhci.h"
@@ -217,10 +261,27 @@ if "request_status =" in cleanup and cleanup.count("int request_status;") != 1:
     raise SystemExit("DWC3 request_status declaration count is not one")
 
 ffs_text = ffs.read_text()
-if "case USB_SPEED_SUPER_PLUS:\n\t\tcase USB_SPEED_SUPER:\n\t\tcase USB_SPEED_SUPER_PLUS:" in ffs_text:
-    raise SystemExit("duplicate FunctionFS SuperSpeedPlus case remains")
-if ffs_text.count("struct ffs_data *ffs_data;") < 1:
-    raise SystemExit("FunctionFS ffs_data declaration is missing")
+desc_start = ffs_text.index("case FUNCTIONFS_ENDPOINT_DESC:")
+desc_end = ffs_text.index("\n\tdefault:", desc_start)
+desc = ffs_text[desc_start:desc_end]
+if desc.count("case USB_SPEED_SUPER_PLUS:") != 1:
+    raise SystemExit("FunctionFS SuperSpeedPlus case count is not one")
+if desc.count("case USB_SPEED_SUPER:") != 1:
+    raise SystemExit("FunctionFS SuperSpeed case count is not one")
+
+mount_start = ffs_text.index("ffs_fs_mount(struct file_system_type *t, int flags,")
+mount_end = ffs_text.index("\nstatic void\nffs_fs_kill_sb", mount_start)
+mount = ffs_text[mount_start:mount_end]
+if "rv = mount_nodev(t, flags, &data, ffs_sb_fill);" not in mount or "\treturn rv;\n" not in mount:
+    raise SystemExit("FunctionFS mount postcondition failed")
+
+bind_start = ffs_text.index("static inline struct f_fs_opts *ffs_do_functionfs_bind")
+bind_end = ffs_text.index("\nstatic int ffs_func_bind", bind_start)
+bind = ffs_text[bind_start:bind_end]
+if "*ffs_data;" not in bind:
+    raise SystemExit("FunctionFS ffs_data local declaration is missing")
+if "ffs_data = ffs_opts->dev->ffs_data;" not in bind:
+    raise SystemExit("FunctionFS ffs_data snapshot is missing")
 
 xhci_text = xhci_h.read_text()
 if "xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec)" in xhci_text:

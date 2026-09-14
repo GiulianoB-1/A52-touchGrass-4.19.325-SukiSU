@@ -41,34 +41,64 @@ if variant == "pagealloc24":
         "static inline void __free_one_page",
         "static inline bool page_expected_state",
     )
-    body = replace_once(
-        body,
-        "max_order = min_t(unsigned int, MAX_ORDER - 1, pageblock_order);",
-        "max_order = min_t(unsigned int, MAX_ORDER, pageblock_order + 1);",
-        "pagealloc max_order initialization",
+
+    # The vendor/upstream three-way merge can legitimately leave this function
+    # in a mixed semantic state because Samsung added compaction_capture()
+    # inside the same loop that upstream changed in 4.19.207.  Normalize the
+    # entire four-part #24 change back to the known-good 4.19.206 semantics
+    # instead of assuming all four upstream anchors survived together.
+    pairs = (
+        (
+            "max_order = min_t(unsigned int, MAX_ORDER - 1, pageblock_order);",
+            "max_order = min_t(unsigned int, MAX_ORDER, pageblock_order + 1);",
+            "pagealloc max_order initialization",
+        ),
+        (
+            "while (order < max_order) {",
+            "while (order < max_order - 1) {",
+            "pagealloc merge loop",
+        ),
+        (
+            "if (order < MAX_ORDER - 1) {",
+            "if (max_order < MAX_ORDER) {",
+            "pagealloc upper-order condition",
+        ),
+        (
+            "max_order = order + 1;",
+            "max_order++;",
+            "pagealloc max_order increment",
+        ),
     )
-    body = replace_once(
-        body,
-        "while (order < max_order) {",
-        "while (order < max_order - 1) {",
-        "pagealloc merge loop",
-    )
-    body = replace_once(
-        body,
-        "if (order < MAX_ORDER - 1) {",
-        "if (max_order < MAX_ORDER) {",
-        "pagealloc upper-order condition",
-    )
-    body = replace_once(
-        body,
-        "max_order = order + 1;",
-        "max_order++;",
-        "pagealloc max_order increment",
-    )
+    states = []
+    for modern, old, label in pairs:
+        modern_count = body.count(modern)
+        old_count = body.count(old)
+        if modern_count == 1 and old_count == 0:
+            body = body.replace(modern, old, 1)
+            states.append(f"{label}=reverted-modern")
+        elif modern_count == 0 and old_count == 1:
+            states.append(f"{label}=already-419206")
+        else:
+            raise SystemExit(
+                f"{label}: unrecognized hybrid counts modern={modern_count} old={old_count}"
+            )
+
+    # Samsung's compaction capture hook is part of the vendor allocator and
+    # must remain present.  The point of this variant is to restore only the
+    # 4.19.206 buddy-merge semantics around it.
+    if "compaction_capture(capc, page, order, migratetype)" not in body:
+        raise SystemExit("pagealloc Samsung compaction_capture hook disappeared")
+
+    for _, old, label in pairs:
+        if body.count(old) != 1:
+            raise SystemExit(f"{label}: normalized 4.19.206 anchor missing")
+
     put_scope(path, text, a, b, body)
     report += [
         "reverted_stable_commit=dd8b408964e77e9b23c4fc6e0cca61bc9345a01f",
         "subject=mm/page_alloc: speed up the iteration of max_order",
+        "samsung_compaction_capture=preserved",
+        *states,
     ]
 
 elif variant == "mutex32":

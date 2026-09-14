@@ -126,6 +126,22 @@ readelf -d "$PROBE" | tee "$OUT/probe-readelf-dynamic.txt"
 readelf -d "$PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
 sha256sum "$PROBE" | tee "$OUT/turnip-vk-probe.sha256"
 
+echo "==> Build on-device Android hardware-buffer import probe"
+AHB_PROBE_SRC="$ROOT/scripts/92_turnip_ahb_probe.c"
+AHB_PROBE="$DIST/turnip-ahb-probe"
+test -s "$AHB_PROBE_SRC"
+"$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+  -O2 -Wall -Wextra -Werror \
+  "$AHB_PROBE_SRC" -o "$AHB_PROBE" -lvulkan -landroid
+"$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$AHB_PROBE"
+chmod 0755 "$AHB_PROBE"
+file "$AHB_PROBE" | tee "$OUT/ahb-probe-file.txt"
+file "$AHB_PROBE" | grep -Fq 'ARM aarch64'
+readelf -d "$AHB_PROBE" | tee "$OUT/ahb-probe-readelf-dynamic.txt"
+readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
+sha256sum "$AHB_PROBE" | tee "$OUT/turnip-ahb-probe.sha256"
+
 cat > "$OUT/BUILD-INFO.txt" <<EOF
 project=touchGrass Turnip A619 KGSL bring-up
 mesa_version=26.2.2
@@ -143,6 +159,8 @@ architecture=aarch64
 probe=turnip-vk-probe
 probe_api_request=Vulkan-1.3
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
+ahb_probe=turnip-ahb-probe
+ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF
 

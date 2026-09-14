@@ -1,0 +1,19 @@
+name: Cancel obsolete 85B integration run
+
+on:
+  push:
+    branches:
+      - agent/a52-uclamp-p1-a619-gpu-v1
+    paths:
+      - .github/workflows/cancel-obsolete-85b.yml
+  workflow_dispatch:
+
+concurrency:
+  group: a52-android17-uclamp-p1-a619-gpu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cancel-obsolete:
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo "Superseding obsolete integration-only GPU run"

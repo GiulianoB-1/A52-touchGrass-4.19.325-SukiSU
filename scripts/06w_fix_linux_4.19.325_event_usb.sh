@@ -87,35 +87,57 @@ if "#define DWC3_GUCTL3_SPLITDISABLE" not in text:
     repairs.append("dwc3_core_h=restored-split-disable-bit")
 dwc3_core_h.write_text(text)
 
-# Two declarations from the upstream gadget changes were lost while retaining
-# the code that uses them.
+# Two declarations from the upstream gadget changes can be lost in the
+# Samsung/upstream merge. Validate them structurally instead of depending on
+# Samsung's tab alignment.
 dwc3_gadget = root / "drivers/usb/dwc3/gadget.c"
-replace_once(
-    dwc3_gadget,
-    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
-    "{\n"
-    "\tu8\t\t\ttrbs_left;\n",
-    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
-    "{\n"
-    "\tstruct dwc3_trb\t*tmp;\n"
-    "\tu8\t\t\ttrbs_left;\n",
-    "dwc3_gadget=restored-previous-trb-declaration",
+text = dwc3_gadget.read_text()
+
+calc_sig = "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)"
+calc_start = text.index(calc_sig)
+calc_end = text.index("\nstatic void __dwc3_prepare_one_trb", calc_start)
+calc = text[calc_start:calc_end]
+
+if "tmp = dwc3_ep_prev_trb(" in calc:
+    if "struct dwc3_trb" not in calc or "*tmp;" not in calc:
+        decl_anchor = "{\n"
+        calc = calc.replace(
+            decl_anchor,
+            decl_anchor + "\tstruct dwc3_trb\t\t*tmp;\n",
+            1,
+        )
+        text = text[:calc_start] + calc + text[calc_end:]
+        repairs.append("dwc3_gadget=restored-previous-trb-declaration")
+else:
+    # A pure 4.19.325 merge uses request/num_trbs instead of the previous-TRB
+    # test and therefore correctly has no tmp variable.
+    if "req = next_request(&dep->started_list);" not in calc:
+        raise SystemExit("dwc3_calc_trbs_left has an unrecognized merge shape")
+
+cleanup_sig = "static int dwc3_gadget_ep_cleanup_completed_request(struct dwc3_ep *dep,"
+cleanup_start = text.index(cleanup_sig)
+cleanup_end = text.index(
+    "\nstatic void dwc3_gadget_ep_cleanup_completed_requests", cleanup_start
 )
-replace_once(
-    dwc3_gadget,
-    "{\n"
-    "\tstruct dwc3 *dwc = dep->dwc;\n"
-    "\tint ret;\n\n"
-    "\t/*\n"
-    "\t * If the HWO is set, it implies the TRB is still being\n",
-    "{\n"
-    "\tstruct dwc3 *dwc = dep->dwc;\n"
-    "\tint request_status;\n"
-    "\tint ret;\n\n"
-    "\t/*\n"
-    "\t * If the HWO is set, it implies the TRB is still being\n",
-    "dwc3_gadget=restored-request-status-declaration",
-)
+cleanup = text[cleanup_start:cleanup_end]
+
+if "request_status =" in cleanup and "int request_status;" not in cleanup:
+    ret_anchor = "\tint ret;\n"
+    if cleanup.count(ret_anchor) != 1:
+        raise SystemExit(
+            f"DWC3 cleanup ret declaration anchor mismatch: {cleanup.count(ret_anchor)}"
+        )
+    cleanup = cleanup.replace(
+        ret_anchor,
+        "\tint request_status;\n" + ret_anchor,
+        1,
+    )
+    text = text[:cleanup_start] + cleanup + text[cleanup_end:]
+    repairs.append("dwc3_gadget=restored-request-status-declaration")
+elif "request_status =" in cleanup and cleanup.count("int request_status;") != 1:
+    raise SystemExit("DWC3 request_status declaration count is invalid")
+
+dwc3_gadget.write_text(text)
 
 # Resolve three FunctionFS textual merge artifacts while preserving Samsung's
 # surrounding implementation.
@@ -177,9 +199,21 @@ for symbol in ("DWC3_GUCTL_HSTINAUTORETRY", "DWC3_GUCTL3_SPLITDISABLE"):
         raise SystemExit(f"DWC3 register symbol count is not one: {symbol}")
 
 gadget_text = dwc3_gadget.read_text()
-if gadget_text.count("struct dwc3_trb\t*tmp;") != 1:
-    raise SystemExit("DWC3 tmp declaration count is not one")
-if gadget_text.count("int request_status;") != 1:
+calc_start = gadget_text.index("static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)")
+calc_end = gadget_text.index("\nstatic void __dwc3_prepare_one_trb", calc_start)
+calc = gadget_text[calc_start:calc_end]
+if "tmp = dwc3_ep_prev_trb(" in calc:
+    if "struct dwc3_trb" not in calc or "*tmp;" not in calc:
+        raise SystemExit("DWC3 previous-TRB path uses tmp without a declaration")
+
+cleanup_start = gadget_text.index(
+    "static int dwc3_gadget_ep_cleanup_completed_request(struct dwc3_ep *dep,"
+)
+cleanup_end = gadget_text.index(
+    "\nstatic void dwc3_gadget_ep_cleanup_completed_requests", cleanup_start
+)
+cleanup = gadget_text[cleanup_start:cleanup_end]
+if "request_status =" in cleanup and cleanup.count("int request_status;") != 1:
     raise SystemExit("DWC3 request_status declaration count is not one")
 
 ffs_text = ffs.read_text()

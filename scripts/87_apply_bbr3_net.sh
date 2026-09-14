@@ -33,7 +33,7 @@ set -e
 # that the generic 4.19 BBRv3 compatibility patch cannot match by context.
 python3 - "$KERNEL" <<'PY'
 from pathlib import Path
-import sys
+import re, sys
 
 root = Path(sys.argv[1])
 

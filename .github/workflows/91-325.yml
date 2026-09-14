@@ -544,8 +544,6 @@ jobs:
           grep -Fq 'f2fs_allocate_new_segment(sbi, CURSEG_COLD_DATA_PINNED);' "$KERNEL/fs/f2fs/file.c"
           grep -Fq 'f2fs_allocate_new_segments(sbi, NO_CHECK_TYPE);' "$KERNEL/fs/f2fs/recovery.c"
           grep -Fq 'if (type == NO_CHECK_TYPE || curseg->next_blkoff ||' "$KERNEL/fs/f2fs/segment.c"
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 READY'
-          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 F2FS curseg restore'
           grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
           grep -Fq 'A52FUSE_BALANCE mmap' "$KERNEL/fs/fuse/passthrough.c"
           ! grep -Fq 'struct atgc_management' "$KERNEL/fs/f2fs/f2fs.h"
@@ -659,6 +657,8 @@ jobs:
           grep -Fq 'f2fs_allocate_new_segment(sbi, CURSEG_COLD_DATA_PINNED);' "$KERNEL/fs/f2fs/file.c"
           strings "$KERNEL/out/vmlinux" | grep -Fq 'A52PF_BADCTX'
           strings "$KERNEL/out/vmlinux" | grep -Fq 'A52FUSE_BALANCE'
+          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 READY'
+          strings "$KERNEL/out/vmlinux" | grep -Fq 'A52P91 F2FS curseg restore'
           grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'clear_and_wake_up_bit(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'test_and_set_bit_lock(ZRAM_LOCK' "$KERNEL/drivers/block/zram/zram_drv.c"

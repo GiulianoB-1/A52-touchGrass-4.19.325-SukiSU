@@ -34,6 +34,34 @@ grep -Fq "freedreno_kmds.contains('kgsl')" "$SRC/src/freedreno/vulkan/meson.buil
 grep -Fq "libtu_files += files('tu_knl_kgsl.cc')" "$SRC/src/freedreno/vulkan/meson.build"
 grep -Fq 'PUBLIC struct hwvulkan_module_t HAL_MODULE_INFO_SYM' "$SRC/src/vulkan/runtime/vk_android.c"
 
+echo "==> Backport bounded Android YV12 16-byte-pitch sampling"
+YV12_FIX_COMMIT="aeaf924c56adf7eddb0a9033b33474b48367e33d"
+YV12_PATCH="$WORK/turnip-yv12-16byte-pitch.patch"
+curl -fL --retry 5 --retry-delay 3 \
+  "https://github.com/LFRon/Turnip-Enhanced/commit/${YV12_FIX_COMMIT}.patch" \
+  -o "$YV12_PATCH"
+
+# The upstream fix also adds a newer QTI libui metadata backend.  The Samsung
+# A52 stack already returns authoritative YV12 layout through Mesa's existing
+# QCOM gralloc path, as proven by the stock-vs-Turnip AHB probe.  Backport only
+# the driver/FDL safety portion here so Mesa remains 26.2.2 and gains no new
+# vendor userspace dependency.
+git -C "$SRC" apply --check \
+  --include='src/freedreno/fdl/*' \
+  --include='src/freedreno/vulkan/*' \
+  "$YV12_PATCH"
+git -C "$SRC" apply \
+  --include='src/freedreno/fdl/*' \
+  --include='src/freedreno/vulkan/*' \
+  "$YV12_PATCH"
+
+grep -Fq 'tu_is_android_yv12_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'pitch_alignment = android_yv12_import ? 16u : 0u' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'skip_last_level_padding = android_yv12_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'has_software_ycbcr' "$SRC/src/freedreno/vulkan/tu_image.h"
+grep -Fq 'tu_nir_lower_software_ycbcr' "$SRC/src/freedreno/vulkan/tu_shader.cc"
+grep -Fq 'has_explicit_pitch' "$SRC/src/freedreno/fdl/freedreno_layout.h"
+
 echo "==> Cap Turnip bring-up to Vulkan 1.3"
 python3 - "$SRC" <<'PY'
 from pathlib import Path
@@ -161,6 +189,8 @@ probe_api_request=Vulkan-1.3
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
+android_yv12_fix=bounded-16byte-pitch-software-ycbcr
+android_yv12_fix_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF
 

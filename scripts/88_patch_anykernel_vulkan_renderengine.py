@@ -26,10 +26,10 @@ install_vulkan_re_module() {
 
   [ -d /data/adb ] || abort "/data/adb is unavailable. Aborting before kernel flash...";
 
-  rm -rf "$moddir" || abort "Cannot remove old Vulkan RE module. Aborting before kernel flash...";
-  mkdir -p "$moddir" || abort "Cannot create Vulkan RE module directory. Aborting before kernel flash...";
+  rm -rf "\$moddir" || abort "Cannot remove old Vulkan RE module. Aborting before kernel flash...";
+  mkdir -p "\$moddir" || abort "Cannot create Vulkan RE module directory. Aborting before kernel flash...";
 
-  cat > "$moddir/module.prop" <<'EOF_VULKAN_MODULE'
+  cat > "\$moddir/module.prop" <<'EOF_VULKAN_MODULE'
 id=touchgrass-vulkan-re
 name=touchGrass SurfaceFlinger Vulkan RenderEngine
 version=1.1
@@ -38,17 +38,17 @@ author=touchGrass A52xq
 description=Sets SurfaceFlinger RenderEngine to skiavkthreaded using KernelSU system.prop
 EOF_VULKAN_MODULE
 
-  cat > "$moddir/system.prop" <<'EOF_VULKAN_PROP'
+  cat > "\$moddir/system.prop" <<'EOF_VULKAN_PROP'
 debug.renderengine.backend=skiavkthreaded
 EOF_VULKAN_PROP
 
-  touch "$moddir/skip_mount" || abort "Cannot create KernelSU skip_mount flag. Aborting before kernel flash...";
+  touch "\$moddir/skip_mount" || abort "Cannot create KernelSU skip_mount flag. Aborting before kernel flash...";
 
-  chown -R 0:0 "$moddir" 2>/dev/null || true;
-  chmod 755 "$moddir" 2>/dev/null || true;
-  chmod 644 "$moddir/module.prop" "$moddir/system.prop" "$moddir/skip_mount" 2>/dev/null || true;
+  chown -R 0:0 "\$moddir" 2>/dev/null || true;
+  chmod 755 "\$moddir" 2>/dev/null || true;
+  chmod 644 "\$moddir/module.prop" "\$moddir/system.prop" "\$moddir/skip_mount" 2>/dev/null || true;
 
-  grep -Fxq 'debug.renderengine.backend=skiavkthreaded' "$moddir/system.prop" \
+  grep -Fxq 'debug.renderengine.backend=skiavkthreaded' "\$moddir/system.prop" \
     || abort "Vulkan RE property verification failed. Aborting before kernel flash...";
 
   ui_print "Vulkan RE persistence staged in /data/adb/modules/touchgrass-vulkan-re";

@@ -6,6 +6,7 @@ OUT="${3:-/data/local/tmp/turnip-live-test.txt}"
 AHB_PROBE="${4:-/data/local/tmp/turnip-ahb-probe}"
 YV12_SAMPLE_PROBE="${5:-/data/local/tmp/turnip-yv12-sample-probe}"
 WATCH="${OUT%.txt}-kernel-watch.txt"
+YV12_REF="${OUT%.txt}-yv12-stock-ref.txt"
 WATCH_PID=""
 
 TARGET=/vendor/lib64/hw/vulkan.adreno.so
@@ -89,10 +90,10 @@ sync
 
 echo "=== STOCK QUALCOMM YV12 GPU SAMPLE BASELINE ==="
 if command -v timeout >/dev/null 2>&1; then
-    timeout 45 "$YV12_SAMPLE_PROBE"
+    timeout 45 "$YV12_SAMPLE_PROBE" --write-ref "$YV12_REF"
     STOCK_YV12_RC=$?
 else
-    "$YV12_SAMPLE_PROBE"
+    "$YV12_SAMPLE_PROBE" --write-ref "$YV12_REF"
     STOCK_YV12_RC=$?
 fi
 echo "stock_yv12_sample_exit=$STOCK_YV12_RC"
@@ -157,10 +158,10 @@ echo
 
 echo "=== TURNIP YV12 GPU SAMPLE PROBE ==="
 if command -v timeout >/dev/null 2>&1; then
-    timeout 45 "$YV12_SAMPLE_PROBE"
+    timeout 45 "$YV12_SAMPLE_PROBE" --compare-ref "$YV12_REF"
     YV12_SAMPLE_RC=$?
 else
-    "$YV12_SAMPLE_PROBE"
+    "$YV12_SAMPLE_PROBE" --compare-ref "$YV12_REF"
     YV12_SAMPLE_RC=$?
 fi
 echo "turnip_yv12_sample_exit=$YV12_SAMPLE_RC"

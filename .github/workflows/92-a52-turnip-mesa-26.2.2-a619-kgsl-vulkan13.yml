@@ -153,8 +153,54 @@ jobs:
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
           readelf -d "$DRIVER" | grep -Fq 'vulkan.adreno.so'
-          readelf -Ws "$DRIVER" | grep -Eq '[[:space:]]HMI$'
-          readelf -Ws "$DRIVER" | grep -Fq 'vk_icdGetInstanceProcAddr'
+          ! readelf -d "$DRIVER" | grep -Fq '(RUNPATH)'
+          readelf -Ws "$DRIVER" | grep -Eq '[[:space:]]HMI
+          unzip -tq "$ZIP"
+          unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
+          unzip -p "$ZIP" post-fs-data.sh | grep -Fq '/vendor/lib64/hw/vulkan.adreno.so'
+          unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
+          unzip -p "$ZIP" README.txt | grep -Fq '32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver'
+
+          sha256sum "$DRIVER" "$ZIP" | tee artifacts/turnip-final-sha256.txt
+          unzip -l "$ZIP" | tee artifacts/turnip-module-list.txt
+          ccache --show-stats | tee artifacts/turnip-ccache.txt
+
+      - name: Save Turnip compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-turnip
+          key: a52-turnip-26.2.2-ndk30-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload Turnip KernelSU module
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TURNIP-MESA-26.2.2-A619-KGSL-VULKAN-1.3-KSU-${{ github.run_number }}
+          path: |
+            release-turnip/*.zip
+            release-turnip/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Turnip build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-turnip-mesa-26.2.2-${{ github.run_number }}-diagnostics
+          path: |
+            artifacts/turnip-mesa-26.2.2/BUILD-INFO.txt
+            artifacts/turnip-mesa-26.2.2/*.txt
+            artifacts/turnip-mesa-26.2.2/*.sha256
+            artifacts/turnip-mesa-26.2.2-build.log
+            artifacts/turnip-final-sha256.txt
+            artifacts/turnip-module-list.txt
+            artifacts/turnip-ccache.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+          for lib in libhardware.so liblog.so libnativewindow.so libsync.so libc.so; do
+            readelf -d "$DRIVER" | grep -Fq "Shared library: [$lib]"
+          done
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'

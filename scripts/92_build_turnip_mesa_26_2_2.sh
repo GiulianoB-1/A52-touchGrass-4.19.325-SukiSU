@@ -111,6 +111,21 @@ file "$DIST/vulkan.adreno.so" | tee "$OUT/file.txt"
 file "$DIST/vulkan.adreno.so" | grep -Fq 'ARM aarch64'
 sha256sum "$DIST/vulkan.adreno.so" | tee "$OUT/vulkan.adreno.so.sha256"
 
+echo "==> Build on-device Vulkan probe"
+PROBE_SRC="$ROOT/scripts/92_turnip_vk_probe.c"
+PROBE="$DIST/turnip-vk-probe"
+test -s "$PROBE_SRC"
+"$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+  -O2 -Wall -Wextra -Werror \
+  "$PROBE_SRC" -o "$PROBE" -lvulkan
+"$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$PROBE"
+chmod 0755 "$PROBE"
+file "$PROBE" | tee "$OUT/probe-file.txt"
+file "$PROBE" | grep -Fq 'ARM aarch64'
+readelf -d "$PROBE" | tee "$OUT/probe-readelf-dynamic.txt"
+readelf -d "$PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+sha256sum "$PROBE" | tee "$OUT/turnip-vk-probe.sha256"
+
 cat > "$OUT/BUILD-INFO.txt" <<EOF
 project=touchGrass Turnip A619 KGSL bring-up
 mesa_version=26.2.2
@@ -125,6 +140,8 @@ turnip_upstream_api=Vulkan-1.4
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64
+probe=turnip-vk-probe
+probe_api_request=Vulkan-1.3
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF
 

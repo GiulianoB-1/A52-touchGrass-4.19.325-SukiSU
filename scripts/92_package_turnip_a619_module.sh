@@ -28,10 +28,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha25
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.3-vk1.3-submit-probe
-versionCode=3
+version=0.4-vk1.3-submit-diagnostic
+versionCode=4
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 safe command-submission probe for Adreno 619/KGSL. Executes and verifies a GPU buffer fill without overriding Vulkan during boot.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 diagnostic for Adreno 619/KGSL. Compares stock Qualcomm vs Turnip no-op and buffer-fill submissions without overriding Vulkan during boot.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -57,7 +57,7 @@ esac
 
 ui_print "- Stock Vulkan HAL found"
 ui_print "- SAFE MODE: no Vulkan HAL replacement during boot"
-ui_print "- Use Action for a temporary Turnip GPU submit probe"
+ui_print "- Use Action for stock-vs-Turnip submission diagnostics"
 ui_print "- Original vendor partition will not be modified"
 
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
@@ -90,7 +90,7 @@ DRIVER="$MODDIR/payload/vulkan.adreno.so"
 PROBE="$MODDIR/tools/turnip-vk-probe"
 LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-echo "touchGrass Turnip A619 GPU command-submission probe"
+echo "touchGrass Turnip A619 stock-vs-Turnip submission diagnostic"
 echo "No persistent Vulkan override is active."
 echo "A temporary bind mount will be created only for this test and removed on exit."
 echo

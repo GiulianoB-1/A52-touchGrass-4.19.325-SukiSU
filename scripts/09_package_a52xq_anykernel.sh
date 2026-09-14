@@ -23,12 +23,8 @@ CONFIG_PATH="$(dirname "$IMAGE_PATH")/config-${IMAGE_BASENAME#Image-}"
 test -s "$CONFIG_PATH" || fail "Matching kernel config is missing: $CONFIG_PATH"
 
 grep -Fxq 'CONFIG_KSU=y' "$CONFIG_PATH" || fail "Kernel config does not enable ReSukiSU"
-if grep -Fxq 'CONFIG_KSU_SUSFS=y' "$CONFIG_PATH"; then
-  grep -Fxq '# CONFIG_KSU_MANUAL_HOOK is not set' "$CONFIG_PATH" || fail "SUSFS build must use inline hooks, not KSU manual-hook mode"
-else
-  grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG_PATH" || fail "Non-SUSFS build does not enable KSU manual hooks"
-  grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$CONFIG_PATH" || fail "Unexpected SUSFS config state"
-fi
+grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG_PATH" || fail "Kernel config does not enable manual hooks"
+grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$CONFIG_PATH" || fail "SUSFS must remain disabled for this package"
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 MARKER = "A619 GPU P5: Qualcomm 48fc67d2bcfb"
+MSM = Path("drivers/gpu/msm")
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -16,47 +17,80 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def sub_once(text: str, pattern: str, repl: str, label: str, flags: int = 0) -> str:
-    new, count = re.subn(pattern, repl, text, count=1, flags=flags)
+    out, count = re.subn(pattern, repl, text, count=1, flags=flags)
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one regex match, found {count}")
-    return new
+    return out
 
 
-def patch_global_scratch_layout(root: Path) -> None:
-    path = root / "drivers/gpu/msm/kgsl.h"
+def patch_scratch_layout(root: Path) -> None:
+    path = root / MSM / "kgsl.h"
     text = path.read_text()
 
     if MARKER in text:
-        print(f"[already] {path}: global ringbuffer scratch layout")
+        print(f"[already] {path}: scratch shadow layout")
         return
 
-    pattern = r"(struct adreno_rb_shadow\s*\{.*?)(\n\};)"
-    match = re.search(pattern, text, re.S)
-    if not match:
-        raise SystemExit("kgsl.h: struct adreno_rb_shadow not found")
+    old = """/* Shadow global helpers */
+#define SCRATCH_RPTR_OFFSET(id) ((id) * sizeof(unsigned int))
+#define SCRATCH_RPTR_GPU_ADDR(dev, id) \\
+\t((dev)->scratch.gpuaddr + SCRATCH_RPTR_OFFSET(id))
+"""
 
-    block = match.group(1)
-    for required in ("rptr", "wptr"):
-        if required not in block:
-            raise SystemExit(f"kgsl.h: adreno_rb_shadow missing expected {required}")
+    new = f"""/*
+ * {MARKER}
+ *
+ * The legacy Samsung/Qualcomm tree stored page-table switch state in one
+ * separately allocated PAGE_SIZE object per ringbuffer.  Newer Qualcomm KGSL
+ * folds that state into the already privileged global scratch page.
+ *
+ * Keep rptr as the first field so all existing RPTR users can move to the
+ * same per-ringbuffer shadow without changing their semantics.
+ */
+struct adreno_rb_shadow {{
+\tu32 rptr;
+\tu32 current_rb_ptname;
+\tu64 ttbr0;
+\tu32 contextidr;
+}};
 
-    fields = f"""
-	/* {MARKER}: page-table state moved out of per-RB allocations */
-	u32 current_rb_ptname;
-	u64 ttbr0;
-	u32 contextidr;"""
+#define SCRATCH_RB_OFFSET(id, field) \\
+\t(((id) * sizeof(struct adreno_rb_shadow)) + \\
+\t offsetof(struct adreno_rb_shadow, field))
 
-    text = text[:match.start(2)] + fields + text[match.start(2):]
+#define SCRATCH_RB_GPU_ADDR(dev, id, field) \\
+\t((dev)->scratch.gpuaddr + SCRATCH_RB_OFFSET(id, field))
 
-    if "SCRATCH_RB_OFFSET" not in text or "SCRATCH_RB_GPU_ADDR" not in text:
-        raise SystemExit("kgsl.h: global scratch ringbuffer offset helpers are missing")
+#define SCRATCH_RPTR_OFFSET(id) SCRATCH_RB_OFFSET(id, rptr)
+#define SCRATCH_RPTR_GPU_ADDR(dev, id) \\
+\tSCRATCH_RB_GPU_ADDR(dev, id, rptr)
+"""
+
+    text = replace_once(text, old, new, "kgsl scratch helpers")
+    path.write_text(text)
+    print(f"[patched] {path}: expanded global scratch to per-RB shadow state")
+
+
+def patch_ringbuffer_struct(root: Path) -> None:
+    path = root / MSM / "adreno_ringbuffer.h"
+    text = path.read_text()
+
+    # Keep the old pagetable-info type harmlessly for source compatibility, but
+    # remove the actual per-RB memory descriptor.  No remaining code may use it.
+    old = "\tstruct kgsl_memdesc pagetable_desc;\n"
+    if old in text:
+        text = replace_once(text, old, "", "ringbuffer pagetable_desc field")
+    elif "struct kgsl_memdesc pagetable_desc;" not in text:
+        print(f"[already] {path}: pagetable_desc field removed")
+    else:
+        raise SystemExit("adreno_ringbuffer.h: unexpected pagetable_desc layout")
 
     path.write_text(text)
-    print(f"[patched] {path}: added page-table fields to global RB scratch")
+    print(f"[patched] {path}: removed per-ringbuffer pagetable memdesc")
 
 
 def patch_pagetable_helper(root: Path) -> None:
-    path = root / "drivers/gpu/msm/adreno.h"
+    path = root / MSM / "adreno.h"
     text = path.read_text()
 
     if MARKER in text:
@@ -68,228 +102,256 @@ def patch_pagetable_helper(root: Path) -> None:
         r"static inline void adreno_ringbuffer_set_pagetable\(.*?\n\}\n"
     )
 
-    replacement = f"""/* {MARKER}
- * Store per-ringbuffer page-table state in the already privileged KGSL
- * scratch page instead of allocating a separate page for every ringbuffer.
+    replacement = f"""/*
+ * {MARKER}
+ * Store per-ringbuffer page-table state in device->scratch instead of a
+ * dedicated PAGE_SIZE allocation for every ringbuffer.
  */
 static inline void adreno_ringbuffer_set_pagetable(struct kgsl_device *device,
-		struct adreno_ringbuffer *rb, struct kgsl_pagetable *pt)
+\t\tstruct adreno_ringbuffer *rb, struct kgsl_pagetable *pt)
 {{
-	unsigned long flags;
+\tunsigned long flags;
 
-	spin_lock_irqsave(&rb->preempt_lock, flags);
+\tspin_lock_irqsave(&rb->preempt_lock, flags);
 
-	kgsl_sharedmem_writel(device->scratch,
-		SCRATCH_RB_OFFSET(rb->id, current_rb_ptname), pt->name);
+\tkgsl_sharedmem_writel(device, &device->scratch,
+\t\tSCRATCH_RB_OFFSET(rb->id, current_rb_ptname), pt->name);
 
-	kgsl_sharedmem_writeq(device->scratch,
-		SCRATCH_RB_OFFSET(rb->id, ttbr0),
-		kgsl_mmu_pagetable_get_ttbr0(pt));
+\tkgsl_sharedmem_writeq(device, &device->scratch,
+\t\tSCRATCH_RB_OFFSET(rb->id, ttbr0),
+\t\tkgsl_mmu_pagetable_get_ttbr0(pt));
 
-	kgsl_sharedmem_writel(device->scratch,
-		SCRATCH_RB_OFFSET(rb->id, contextidr), 0);
+\tkgsl_sharedmem_writel(device, &device->scratch,
+\t\tSCRATCH_RB_OFFSET(rb->id, contextidr),
+\t\tkgsl_mmu_pagetable_get_contextidr(pt));
 
-	spin_unlock_irqrestore(&rb->preempt_lock, flags);
+\tspin_unlock_irqrestore(&rb->preempt_lock, flags);
 }}
 """
 
-    text = sub_once(text, pattern, replacement, "adreno pagetable helpers", re.S)
+    text = sub_once(text, pattern, replacement, "legacy pagetable helpers", re.S)
     path.write_text(text)
-    print(f"[patched] {path}: page-table helper uses device scratch")
+    print(f"[patched] {path}: page-table helper now uses device scratch")
 
 
 def remove_per_rb_allocation(root: Path) -> None:
-    path = root / "drivers/gpu/msm/adreno_ringbuffer.c"
+    path = root / MSM / "adreno_ringbuffer.c"
     text = path.read_text()
 
-    if MARKER in text:
-        print(f"[already] {path}: per-RB pagetable allocation removed")
-        return
-
-    pattern = (
-        r"\n\t/\*\s*\n"
-        r"\t \* Allocate mem for storing RB pagetables and commands to\s*\n"
-        r"\t \* switch pagetable\s*\n"
-        r"\t \*/\s*\n"
-        r"\tret = adreno_allocate_global\(device, &rb->pagetable_desc, PAGE_SIZE,\s*\n"
-        r"\t\tSZ_16K, 0, KGSL_MEMDESC_PRIVILEGED, \"pagetable_desc\"\);\s*\n"
-        r"\tif \(ret\)\s*\n"
-        r"\t\treturn ret;\s*\n"
+    alloc_pattern = (
+        r"\n\t/\*\n"
+        r"\t \* Allocate mem for storing RB pagetables and commands to\n"
+        r"\t \* switch pagetable\n"
+        r"\t \*/\n"
+        r"\tret = kgsl_allocate_global\(KGSL_DEVICE\(adreno_dev\), &rb->pagetable_desc,\n"
+        r"\t\tPAGE_SIZE, 0, KGSL_MEMDESC_PRIVILEGED, \"pagetable_desc\"\);\n"
+        r"\tif \(ret\)\n"
+        r"\t\treturn ret;\n"
     )
 
-    replacement = f"""
-	/*
-	 * {MARKER}
-	 * Page-table metadata now lives in device->scratch. Avoid allocating
-	 * one dedicated PAGE_SIZE object for each ringbuffer.
-	 */
-"""
+    if re.search(alloc_pattern, text):
+        text = re.sub(
+            alloc_pattern,
+            f"""
+\t/*
+\t * {MARKER}
+\t * Page-table state now reuses the privileged device scratch page.
+\t */
+""",
+            text,
+            count=1,
+        )
+    elif "&rb->pagetable_desc" in text:
+        raise SystemExit("adreno_ringbuffer.c: legacy allocation shape changed")
 
-    text = sub_once(text, pattern, replacement, "per-ringbuffer pagetable allocation", re.S)
+    text = text.replace("\tkgsl_free_global(device, &rb->pagetable_desc);\n", "")
     path.write_text(text)
-    print(f"[patched] {path}: removed per-RB pagetable memory allocation")
+    print(f"[patched] {path}: removed per-RB allocation/free")
 
 
 def patch_active_context_reset(root: Path) -> None:
-    path = root / "drivers/gpu/msm/adreno.c"
+    path = root / MSM / "adreno.c"
     text = path.read_text()
 
-    if "SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)" not in text:
-        old_start = """void adreno_set_active_ctxs_null(struct adreno_device *adreno_dev)
+    old_start = """static void adreno_set_active_ctxs_null(struct adreno_device *adreno_dev)
 {
-	int i;
-	struct adreno_ringbuffer *rb;
+\tint i;
+\tstruct adreno_ringbuffer *rb;
 """
-        new_start = """void adreno_set_active_ctxs_null(struct adreno_device *adreno_dev)
+    new_start = """static void adreno_set_active_ctxs_null(struct adreno_device *adreno_dev)
 {
-	int i;
-	struct adreno_ringbuffer *rb;
-	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+\tint i;
+\tstruct adreno_ringbuffer *rb;
+\tstruct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 """
+    if old_start in text:
         text = replace_once(text, old_start, new_start, "active context device pointer")
 
-        pattern = (
-            r"kgsl_sharedmem_writel\(rb->pagetable_desc,\s*"
-            r"PT_INFO_OFFSET\(current_rb_ptname\), 0\);"
-        )
-        replacement = (
-            "kgsl_sharedmem_writel(device->scratch,\n"
-            "\t\t\tSCRATCH_RB_OFFSET(rb->id, current_rb_ptname), 0);"
-        )
-        text = sub_once(text, pattern, replacement, "active context scratch reset", re.S)
+    old_write = """\t\tkgsl_sharedmem_writel(KGSL_DEVICE(adreno_dev),
+\t\t\t&rb->pagetable_desc, PT_INFO_OFFSET(current_rb_ptname),
+\t\t\t0);
+"""
+    new_write = """\t\tkgsl_sharedmem_writel(device, &device->scratch,
+\t\t\tSCRATCH_RB_OFFSET(rb->id, current_rb_ptname), 0);
+"""
+    if old_write in text:
+        text = replace_once(text, old_write, new_write, "active context reset")
+    elif "SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)" not in text:
+        raise SystemExit("adreno.c: active context pagetable reset anchor not found")
+
+    # The old global PT-name slot existed only in ringbuffers[0].  Once the
+    # per-RB state is in scratch there is no separate global slot to clear.
+    text, removed = re.subn(
+        r"\n\s*adreno_ringbuffer_set_global\(adreno_dev, 0\);\n",
+        "\n",
+        text,
+    )
+    if removed not in (0, 2):
+        raise SystemExit(f"adreno.c: expected 0 or 2 set_global resets, found {removed}")
 
     path.write_text(text)
-    print(f"[patched] {path}: active-context reset uses global scratch")
+    print(f"[patched] {path}: active-context reset uses global scratch; obsolete global resets removed")
 
 
 def patch_preemption_file(path: Path) -> None:
     text = path.read_text()
-    original = text
 
-    pattern_q = (
-        r"kgsl_sharedmem_readq\(next->pagetable_desc, &ttbr0,\s*"
-        r"PT_INFO_OFFSET\(ttbr0\)\);"
+    text, qcount = re.subn(
+        r"kgsl_sharedmem_readq\(&next->pagetable_desc, &ttbr0,\s*"
+        r"PT_INFO_OFFSET\(ttbr0\)\);",
+        "kgsl_sharedmem_readq(&device->scratch, &ttbr0,\\n"
+        "\\t\\tSCRATCH_RB_OFFSET(next->id, ttbr0));",
+        text,
+        flags=re.S,
     )
-    repl_q = (
-        "kgsl_sharedmem_readq(device->scratch, &ttbr0,\n"
-        "\t\tSCRATCH_RB_OFFSET(next->id, ttbr0));"
+    text, lcount = re.subn(
+        r"kgsl_sharedmem_readl\(&next->pagetable_desc, &contextidr,\s*"
+        r"PT_INFO_OFFSET\(contextidr\)\);",
+        "kgsl_sharedmem_readl(&device->scratch, &contextidr,\\n"
+        "\\t\\tSCRATCH_RB_OFFSET(next->id, contextidr));",
+        text,
+        flags=re.S,
     )
-    text, qcount = re.subn(pattern_q, repl_q, text, flags=re.S)
 
-    pattern_l = (
-        r"kgsl_sharedmem_readl\(next->pagetable_desc, &contextidr,\s*"
-        r"PT_INFO_OFFSET\(contextidr\)\);"
-    )
-    repl_l = (
-        "kgsl_sharedmem_readl(device->scratch, &contextidr,\n"
-        "\t\tSCRATCH_RB_OFFSET(next->id, contextidr));"
-    )
-    text, lcount = re.subn(pattern_l, repl_l, text, flags=re.S)
-
+    call_count = text.count("adreno_ringbuffer_set_pagetable(rb,")
     text = text.replace(
         "adreno_ringbuffer_set_pagetable(rb,",
         "adreno_ringbuffer_set_pagetable(device, rb,",
     )
 
-    if original == text:
-        raise SystemExit(f"{path}: no legacy pagetable scratch references were patched")
+    if qcount not in (0, 1) or lcount not in (0, 1):
+        raise SystemExit(f"{path}: unexpected scratch read counts {qcount}/{lcount}")
+    if qcount == 0 and "SCRATCH_RB_OFFSET(next->id, ttbr0)" not in text:
+        raise SystemExit(f"{path}: TTBR0 scratch read not found")
+    if lcount == 0 and "SCRATCH_RB_OFFSET(next->id, contextidr)" not in text:
+        raise SystemExit(f"{path}: CONTEXTIDR scratch read not found")
+    if call_count == 0 and "adreno_ringbuffer_set_pagetable(device, rb," not in text:
+        raise SystemExit(f"{path}: set_pagetable call not found")
 
-    if qcount != 1 or lcount != 1:
-        raise SystemExit(f"{path}: expected one ttbr0/contextidr read, got {qcount}/{lcount}")
+    # Fix the now-stale explanatory comment.
+    text = text.replace(
+        "The pagetable_desc is allocated and mapped at probe time, and\\n"
+        "\\t * preemption_desc at init time, so no need to check if\\n"
+        "\\t * sharedmem accesses to these memdescs succeed.",
+        "The per-ringbuffer page-table state lives in the privileged global\\n"
+        "\\t * scratch page, while preemption_desc is allocated at init time.",
+    )
 
     path.write_text(text)
-    print(f"[patched] {path}: preemption reads page-table state from global scratch")
+    print(f"[patched] {path}: preemption reads TTBR0/contextidr from global scratch")
 
 
-def patch_ringbuffer_switch(path: Path) -> None:
+def patch_iommu_cp_writes(root: Path) -> None:
+    path = root / MSM / "adreno_iommu.c"
     text = path.read_text()
-    original = text
 
-    low_pattern = (
-        r"lower_32_bits\(rb->pagetable_desc->gpuaddr \+\s*"
-        r"PT_INFO_OFFSET\(ttbr0\)\)"
+    pattern = (
+        r"cmds \+= cp_gpuaddr\(adreno_dev, cmds, \(rb->pagetable_desc\.gpuaddr \+\s*"
+        r"PT_INFO_OFFSET\(ttbr0\)\)\);"
     )
-    high_pattern = (
-        r"upper_32_bits\(rb->pagetable_desc->gpuaddr \+\s*"
-        r"PT_INFO_OFFSET\(ttbr0\)\)"
+    replacement = (
+        "cmds += cp_gpuaddr(adreno_dev, cmds,\\n"
+        "\\t\\tSCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0));"
     )
 
-    low_repl = "lower_32_bits(SCRATCH_RB_GPU_ADDR(device,\n\t\t\trb->id, ttbr0))"
-    high_repl = "upper_32_bits(SCRATCH_RB_GPU_ADDR(device,\n\t\t\trb->id, ttbr0))"
-
-    text, low_count = re.subn(low_pattern, low_repl, text, flags=re.S)
-    text, high_count = re.subn(high_pattern, high_repl, text, flags=re.S)
-
-    if original == text:
-        raise SystemExit(f"{path}: pagetable switch scratch address anchor not found")
-    if low_count != 1 or high_count != 1:
-        raise SystemExit(f"{path}: expected one scratch address pair, got {low_count}/{high_count}")
+    text, count = re.subn(pattern, replacement, text, flags=re.S)
+    if count == 0:
+        existing = text.count("SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)")
+        if existing != 2:
+            raise SystemExit(
+                f"adreno_iommu.c: expected 2 scratch CP write targets, found {existing}"
+            )
+    elif count != 2:
+        raise SystemExit(f"adreno_iommu.c: expected 2 legacy CP write targets, found {count}")
 
     path.write_text(text)
-    print(f"[patched] {path}: CP page-table write targets global scratch")
-
-
-def remove_global_ptname_calls(root: Path) -> None:
-    total = 0
-    for name in ("adreno.c", "adreno_a6xx_gmu.c", "adreno_a6xx_rgmu.c"):
-        path = root / "drivers/gpu/msm" / name
-        if not path.exists():
-            continue
-        text = path.read_text()
-        new, count = re.subn(
-            r"\n\s*adreno_ringbuffer_set_global\(adreno_dev, 0\);\s*\n",
-            "\n",
-            text,
-        )
-        if count:
-            path.write_text(new)
-            total += count
-            print(f"[patched] {path}: removed {count} obsolete global PT-name reset(s)")
-
-    if total == 0:
-        print("[audit] no obsolete adreno_ringbuffer_set_global calls remained")
-
-
-def patch_all_set_pagetable_calls(root: Path) -> None:
-    changed = 0
-    for path in (root / "drivers/gpu/msm").glob("*.c"):
-        text = path.read_text()
-        if "adreno_ringbuffer_set_pagetable(rb," in text:
-            new = text.replace(
-                "adreno_ringbuffer_set_pagetable(rb,",
-                "adreno_ringbuffer_set_pagetable(device, rb,",
-            )
-            path.write_text(new)
-            changed += 1
-            print(f"[patched] {path}: updated scratch helper call signature")
-    if changed == 0:
-        print("[audit] all adreno_ringbuffer_set_pagetable call sites already updated")
+    print(f"[patched] {path}: A5xx/A6xx CP page-table writes target global scratch")
 
 
 def audit(root: Path) -> None:
-    msm = root / "drivers/gpu/msm"
+    msm = root / MSM
 
     kgsl = (msm / "kgsl.h").read_text()
     for token in (
         MARKER,
-        "current_rb_ptname",
+        "struct adreno_rb_shadow",
+        "u32 rptr;",
+        "u32 current_rb_ptname;",
         "u64 ttbr0;",
         "u32 contextidr;",
         "SCRATCH_RB_OFFSET",
         "SCRATCH_RB_GPU_ADDR",
+        "SCRATCH_RPTR_OFFSET(id) SCRATCH_RB_OFFSET(id, rptr)",
     ):
         if token not in kgsl:
-            raise SystemExit(f"kgsl scratch audit missing: {token}")
+            raise SystemExit(f"kgsl.h audit missing: {token}")
+
+    ring_h = (msm / "adreno_ringbuffer.h").read_text()
+    if "struct kgsl_memdesc pagetable_desc;" in ring_h:
+        raise SystemExit("adreno_ringbuffer.h: pagetable_desc field remains")
+    if "ADRENO_RB_SET_PSEUDO_DONE" not in ring_h:
+        raise SystemExit("P4 ringbuffer pseudo-register flag was lost")
 
     adreno_h = (msm / "adreno.h").read_text()
-    if MARKER not in adreno_h:
-        raise SystemExit("adreno.h scratch helper marker missing")
+    for token in (
+        MARKER,
+        "adreno_ringbuffer_set_pagetable(struct kgsl_device *device,",
+        "SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)",
+        "SCRATCH_RB_OFFSET(rb->id, ttbr0)",
+        "SCRATCH_RB_OFFSET(rb->id, contextidr)",
+    ):
+        if token not in adreno_h:
+            raise SystemExit(f"adreno.h audit missing: {token}")
     if "adreno_ringbuffer_set_global(" in adreno_h:
         raise SystemExit("obsolete adreno_ringbuffer_set_global helper remains")
 
-    ring = (msm / "adreno_ringbuffer.c").read_text()
-    if "&rb->pagetable_desc" in ring:
-        raise SystemExit("per-ringbuffer pagetable allocation still present")
+    ring_c = (msm / "adreno_ringbuffer.c").read_text()
+    if "pagetable_desc" in ring_c:
+        raise SystemExit("adreno_ringbuffer.c: per-RB pagetable allocation/free remains")
+
+    adreno_c = (msm / "adreno.c").read_text()
+    if "SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)" not in adreno_c:
+        raise SystemExit("adreno.c: scratch-backed active context reset missing")
+    if "adreno_ringbuffer_set_global(" in adreno_c:
+        raise SystemExit("adreno.c: obsolete set_global reset remains")
+
+    for name in ("adreno_a5xx_preempt.c", "adreno_a6xx_preempt.c"):
+        data = (msm / name).read_text()
+        for token in (
+            "SCRATCH_RB_OFFSET(next->id, ttbr0)",
+            "SCRATCH_RB_OFFSET(next->id, contextidr)",
+            "adreno_ringbuffer_set_pagetable(device, rb,",
+        ):
+            if token not in data:
+                raise SystemExit(f"{name}: missing {token}")
+        if "->pagetable_desc" in data:
+            raise SystemExit(f"{name}: legacy pagetable_desc reference remains")
+
+    iommu = (msm / "adreno_iommu.c").read_text()
+    if iommu.count("SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)") != 2:
+        raise SystemExit("adreno_iommu.c: expected A5xx and A6xx scratch CP targets")
+    if "rb->pagetable_desc" in iommu:
+        raise SystemExit("adreno_iommu.c: legacy pagetable_desc GPU address remains")
 
     leftovers = []
     for path in msm.glob("*.[ch]"):
@@ -299,52 +361,32 @@ def audit(root: Path) -> None:
         if "adreno_ringbuffer_set_global(" in data:
             leftovers.append(path.name + ":set_global")
     if leftovers:
-        raise SystemExit("legacy pagetable scratch references remain: " + ", ".join(sorted(set(leftovers))))
+        raise SystemExit(
+            "legacy pagetable scratch references remain: "
+            + ", ".join(sorted(set(leftovers)))
+        )
 
-    for name in ("adreno_a5xx_preempt.c", "adreno_a6xx_preempt.c"):
-        path = msm / name
-        data = path.read_text()
-        for token in (
-            "SCRATCH_RB_OFFSET(next->id, ttbr0)",
-            "SCRATCH_RB_OFFSET(next->id, contextidr)",
-            "adreno_ringbuffer_set_pagetable(device, rb,",
-        ):
-            if token not in data:
-                raise SystemExit(f"{name}: missing {token}")
-
-    for name in ("adreno_a5xx_ringbuffer.c", "adreno_a6xx_ringbuffer.c"):
-        data = (msm / name).read_text()
-        if "SCRATCH_RB_GPU_ADDR(device" not in data:
-            raise SystemExit(f"{name}: global scratch GPU address not present")
+    # Scratch layout must remain safely below the existing KMD postamble area.
+    # Four legacy priority ringbuffers * 24-byte shadow = 96 bytes, while the
+    # postamble begins at 800 bytes.
+    if "SCRATCH_POSTAMBLE_OFFSET (100 * sizeof(u64))" not in kgsl:
+        raise SystemExit("unexpected legacy scratch postamble layout")
 
     p4 = (msm / "adreno_a6xx_preempt.c").read_text()
     for token in (
         "A619 GPU P4: Qualcomm 96f7537ccfcd",
-        "ADRENO_RB_SET_PSEUDO_DONE",
         "test_and_set_bit(ADRENO_RB_SET_PSEUDO_DONE, &rb->flags)",
     ):
-        if token not in p4 and token != "ADRENO_RB_SET_PSEUDO_DONE":
+        if token not in p4:
             raise SystemExit(f"P4 preservation audit missing: {token}")
 
-    ring_h = (msm / "adreno_ringbuffer.h").read_text()
-    if "ADRENO_RB_SET_PSEUDO_DONE" not in ring_h:
-        raise SystemExit("P4 ringbuffer pseudo-register flag was lost")
-    if "unsigned long flags;" not in ring_h:
-        raise SystemExit("P4 bitops-compatible ringbuffer flags storage was lost")
-
-    gpulist = (msm / "adreno-gpulist.h").read_text()
-    start = gpulist.find("adreno_gpu_core_a619")
-    if start < 0:
-        raise SystemExit("A619 core block not found")
-    block = gpulist[start:start + 1800]
-    if "ADRENO_PROCESS_RECLAIM" in block or "ADRENO_USE_SHMEM" in block:
-        raise SystemExit("A619 reclaim feature unexpectedly enabled; do not port async reclaim")
-
-    print("[audit] per-ringbuffer pagetable allocations removed")
-    print("[audit] A5xx/A6xx preemption reads scratch-backed TTBR0/contextidr")
-    print("[audit] A5xx/A6xx CP pagetable writes target global scratch")
+    print("[audit] legacy Samsung 4.19 KGSL layout adapted directly")
+    print("[audit] per-ringbuffer PAGE_SIZE pagetable allocations removed")
+    print("[audit] RPTR + current PT + TTBR0 + CONTEXTIDR share device scratch")
+    print("[audit] A5xx/A6xx preemption reads global scratch")
+    print("[audit] A5xx/A6xx CP page-table writes target global scratch")
+    print("[audit] scratch shadow remains well below KMD postamble offset")
     print("[audit] Phase4 pseudo-register optimization preserved")
-    print("[audit] async GPU reclaim remains excluded for A619")
 
 
 def main() -> int:
@@ -355,26 +397,24 @@ def main() -> int:
     if not (root / "Makefile").is_file():
         raise SystemExit(f"not a kernel tree: {root}")
 
-    patch_global_scratch_layout(root)
+    patch_scratch_layout(root)
+    patch_ringbuffer_struct(root)
     patch_pagetable_helper(root)
     remove_per_rb_allocation(root)
     patch_active_context_reset(root)
 
-    patch_preemption_file(root / "drivers/gpu/msm/adreno_a5xx_preempt.c")
-    patch_preemption_file(root / "drivers/gpu/msm/adreno_a6xx_preempt.c")
+    patch_preemption_file(root / MSM / "adreno_a5xx_preempt.c")
+    patch_preemption_file(root / MSM / "adreno_a6xx_preempt.c")
+    patch_iommu_cp_writes(root)
 
-    patch_ringbuffer_switch(root / "drivers/gpu/msm/adreno_a5xx_ringbuffer.c")
-    patch_ringbuffer_switch(root / "drivers/gpu/msm/adreno_a6xx_ringbuffer.c")
-
-    patch_all_set_pagetable_calls(root)
-    remove_global_ptname_calls(root)
     audit(root)
 
     print("[done] A619 GPU modernization Phase5 applied")
     print("[source] Qualcomm 48fc67d2bcfb: get rid of per-ringbuffer scratch memory")
-    print("[effect] page-table metadata now reuses privileged KGSL global scratch")
-    print("[effect] removes one PAGE_SIZE pagetable allocation per ringbuffer (16 KiB total on Qualcomm layout)")
-    print("[excluded] async reclaim a07afc4e1477: A619 lacks PROCESS_RECLAIM/USE_SHMEM")
+    print("[adaptation] legacy Samsung 4.19 pagetable_desc layout -> global KGSL scratch")
+    print("[effect] removes one PAGE_SIZE privileged allocation per ringbuffer")
+    print("[effect] page-table switch state now shares the existing randomized privileged scratch page")
+    print("[safety] no clock, voltage, bus-policy, thermal, or scheduler tuning changes")
     return 0
 
 

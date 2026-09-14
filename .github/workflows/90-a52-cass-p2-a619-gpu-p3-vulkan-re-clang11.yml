@@ -357,10 +357,14 @@ jobs:
           test -s "$ZIP"
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'prepend_file init.rc "import /init.touchgrass-vulkan.rc" init.touchgrass-vulkan.import;'
-          unzip -p "$ZIP" ramdisk/init.touchgrass-vulkan.rc | grep -Fq 'setprop debug.renderengine.backend skiavkthreaded'
-          test "$(unzip -p "$ZIP" patch/init.touchgrass-vulkan.import)" = 'import /init.touchgrass-vulkan.rc'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'module install "$modzip"'
+          unzip -p "$ZIP" touchgrass-vulkan-re-module.zip > /tmp/touchgrass-vulkan-re-module.zip
+          unzip -p /tmp/touchgrass-vulkan-re-module.zip system.prop | grep -Fxq 'debug.renderengine.backend=skiavkthreaded'
+          unzip -p /tmp/touchgrass-vulkan-re-module.zip initrc/touchgrass-vulkan-re.rc | grep -Fq 'on early-init'
+          unzip -p /tmp/touchgrass-vulkan-re-module.zip initrc/touchgrass-vulkan-re.rc | grep -Fq 'setprop debug.renderengine.backend skiavkthreaded'
           unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_renderengine=skiavkthreaded'
+          unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_vulkan_integration=kernelsu-initrc-plus-system-prop'
           unzip -l "$ZIP" | tee artifacts/u17-uclamp-p2-package-list.txt
           sha256sum "$ZIP" | tee artifacts/u17-uclamp-p2-package-sha256.txt
 

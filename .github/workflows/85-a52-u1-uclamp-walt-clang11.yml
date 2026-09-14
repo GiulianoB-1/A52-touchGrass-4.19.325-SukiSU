@@ -159,7 +159,8 @@ jobs:
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
           grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
-          grep -Fxq '# CONFIG_UCLAMP_TASK_GROUP is not set' "$KERNEL/out/.config"
+          grep -E '^(CONFIG_UCLAMP_TASK|# CONFIG_UCLAMP_TASK_GROUP|CONFIG_SCHED_TUNE|CONFIG_SCHED_WALT|CONFIG_CPU_FREQ_GOV_SCHEDUTIL|CONFIG_SCHED_CASS|CONFIG_ANDROID_BINDERFS|CONFIG_FUSE_PASSTHROUGH)' "$KERNEL/out/.config" | tee artifacts/u1-config-audit.txt
+          ! grep -Fxq 'CONFIG_UCLAMP_TASK_GROUP=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y' "$KERNEL/out/.config"

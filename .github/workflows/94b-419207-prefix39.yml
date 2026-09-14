@@ -16,7 +16,7 @@ on:
       - .github/workflows/90-f2fs-curseg.yml
       - .github/workflows/91-325.yml
       - .github/workflows/91b-325-no-curseg.yml
-      - .github/workflows/92-419207-prefix39.yml
+      - .github/workflows/94b-419207-prefix39.yml
       - scripts/74_*
       - scripts/77_*
       - scripts/78_*
@@ -549,8 +549,8 @@ jobs:
       - name: Apply Linux 4.19.207 cumulative prefix 36
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile scripts/92_merge_419207_prefix39.py
-          python3 scripts/92_merge_419207_prefix39.py
+          python3 -m py_compile scripts/94b_merge_419207_prefix39.py
+          python3 scripts/94b_merge_419207_prefix39.py
 
           KERNEL=workspace/touchgrass-a52xq
           test -s artifacts/phase94b-prefix39-state.txt
@@ -594,7 +594,7 @@ jobs:
           set -Eeuo pipefail
           find scripts -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
 
-          bash ./scripts/92_build_prefix39.sh \
+          bash ./scripts/94b_build_prefix39.sh \
             2>&1 | tee artifacts/phase94b-prefix39-build.log
 
       - name: Audit build result
@@ -681,7 +681,7 @@ jobs:
             | grep -E ' [Tt] bpf_ringbuf_(output|reserve|submit|discard|query)' \
             | tee artifacts/bpf-ringbuf-vmlinux-symbols.txt
           {
-            echo phase=92-419207-prefix39-current-stack
+            echo phase=94b-419207-prefix39-current-stack
             echo mglru=default-on-runtime-switchable-android-hardened
             echo mglru_default=enabled-from-kernel-init
             echo mglru_runtime_enable=/sys/kernel/mm/lru_gen/enabled

@@ -7,11 +7,13 @@ OUT_DIR="${3:-$ROOT/release-turnip}"
 
 DRIVER="$BUILD_DIR/dist/vulkan.adreno.so"
 PROBE="$BUILD_DIR/dist/turnip-vk-probe"
+AHB_PROBE="$BUILD_DIR/dist/turnip-ahb-probe"
 LIVE_TEST="$ROOT/scripts/92_turnip_live_test.sh"
 INFO="$BUILD_DIR/BUILD-INFO.txt"
 
 test -s "$DRIVER"
 test -s "$PROBE"
+test -s "$AHB_PROBE"
 test -s "$LIVE_TEST"
 test -s "$INFO"
 
@@ -20,18 +22,20 @@ mkdir -p "$OUT_DIR/module/payload" "$OUT_DIR/module/tools"
 
 cp "$DRIVER" "$OUT_DIR/module/payload/vulkan.adreno.so"
 cp "$PROBE" "$OUT_DIR/module/tools/turnip-vk-probe"
+cp "$AHB_PROBE" "$OUT_DIR/module/tools/turnip-ahb-probe"
 cp "$LIVE_TEST" "$OUT_DIR/module/tools/turnip-live-test.sh"
 cp "$INFO" "$OUT_DIR/module/BUILD-INFO.txt"
 sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.sha256"
 sha256sum "$OUT_DIR/module/tools/turnip-vk-probe" > "$OUT_DIR/module/probe.sha256"
+sha256sum "$OUT_DIR/module/tools/turnip-ahb-probe" > "$OUT_DIR/module/ahb-probe.sha256"
 
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.7-vk1.3-offscreen-render
-versionCode=7
+version=0.8-vk1.3-ahb-forensics
+versionCode=8
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 offscreen graphics probe for Adreno 619/KGSL. Verifies real GPU submission, dynamic rendering to a 64x64 RGBA image, and pixel readback.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 Android buffer import forensics for Adreno 619/KGSL. Compares stock and Turnip RGBA/YUV/YV12 AHardwareBuffer import, bind, and lifetime behavior.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -65,6 +69,7 @@ set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/payload/vulkan.adreno.so" 0 0 0644
 set_perm "$MODPATH/tools/turnip-vk-probe" 0 0 0755
+set_perm "$MODPATH/tools/turnip-ahb-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-live-test.sh" 0 0 0755
 EOF
 
@@ -88,9 +93,10 @@ MODDIR=${0%/*}
 OUT="$MODDIR/turnip-live-test.txt"
 DRIVER="$MODDIR/payload/vulkan.adreno.so"
 PROBE="$MODDIR/tools/turnip-vk-probe"
+AHB_PROBE="$MODDIR/tools/turnip-ahb-probe"
 LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-echo "touchGrass Turnip A619 Vulkan 1.3 offscreen rendering probe"
+echo "touchGrass Turnip A619 Vulkan 1.3 Android buffer import forensics"
 echo "No persistent Vulkan override is active."
 echo "A temporary bind mount will be created only for this test and removed on exit."
 echo
@@ -104,11 +110,15 @@ if [ ! -x "$PROBE" ]; then
   chmod 0755 "$PROBE" 2>/dev/null || true
 fi
 
+if [ ! -x "$AHB_PROBE" ]; then
+  chmod 0755 "$AHB_PROBE" 2>/dev/null || true
+fi
+
 if [ ! -x "$LIVE" ]; then
   chmod 0755 "$LIVE" 2>/dev/null || true
 fi
 
-"$LIVE" "$DRIVER" "$PROBE" "$OUT"
+"$LIVE" "$DRIVER" "$PROBE" "$OUT" "$AHB_PROBE"
 RC=$?
 
 echo
@@ -146,7 +156,7 @@ post-fs-data.sh is a no-op logger.
 
 Use the KernelSU/SukiSU module Action button to run a temporary live test.
 The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
-runs Vulkan device creation, real GPU submission, a 64x64 dynamic-rendering clear, pixel readback verification, records diagnostics, then unmounts it automatically.
+runs the proven Vulkan submission/render probe plus a stock-vs-Turnip Android hardware-buffer import diagnostic for RGBA, YUV420, YV12, and repeated buffer lifetime stress, records diagnostics, then unmounts automatically.
 
 Rollback from the old boot-override revision:
   adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable; reboot"
@@ -179,6 +189,7 @@ unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
 unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
 unzip -l "$ZIP" | grep -Fq 'payload/vulkan.adreno.so'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
+unzip -l "$ZIP" | grep -Fq 'tools/turnip-ahb-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'
 sha256sum "$ZIP" > "$ZIP.sha256"
 

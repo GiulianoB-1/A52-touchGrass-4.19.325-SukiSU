@@ -40,11 +40,12 @@ root = Path(sys.argv[1])
 def replace_once(path, old, new, label):
     p = root / path
     text = p.read_text()
+    if old in text:
+        p.write_text(text.replace(old, new, 1))
+        return
     if new in text:
         return
-    if old not in text:
-        raise SystemExit(f"{label}: expected source anchor not found in {path}")
-    p.write_text(text.replace(old, new, 1))
+    raise SystemExit(f"{label}: expected source anchor not found in {path}")
 
 replace_once(
     "net/core/sock.c",
@@ -107,6 +108,12 @@ if "ca_ops->tso_segs(sk, mss_now)" not in text:
         raise SystemExit("tcp_tso_segs: unexpected function shape")
     text = text[:m.start()] + new + text[m.end():]
     p.write_text(text)
+
+# The generic patch can create another 4-argument TLP call elsewhere in the
+# file, so verify the Samsung call site itself is no longer left behind.
+tcp_input = (root / "net/ipv4/tcp_input.c").read_text()
+if "tcp_process_tlp_ack(sk, ack, flag);" in tcp_input:
+    raise SystemExit("TLP ACK rate-sample plumbing: stale 3-argument call remains")
 
 for rel in (
     "net/core/sock.c.rej",

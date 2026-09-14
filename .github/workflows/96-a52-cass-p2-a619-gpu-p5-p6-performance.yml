@@ -258,11 +258,14 @@ jobs:
             2>&1 | tee artifacts/a619-gpu-p5-apply.txt
           KERNEL=workspace/touchgrass-a52xq
           grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/kgsl.h"
-          grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RPTR_OFFSET(id) SCRATCH_RB_OFFSET(id, rptr)' "$KERNEL/drivers/gpu/msm/kgsl.h"
+          test "$(grep -F 'SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_iommu.c" | wc -l)" -eq 2
           grep -Fq 'SCRATCH_RB_OFFSET(next->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
           grep -Fq 'SCRATCH_RB_OFFSET(next->id, contextidr)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
-          grep -Fq 'SCRATCH_RB_GPU_ADDR(device' "$KERNEL/drivers/gpu/msm/adreno_a6xx_ringbuffer.c"
-          ! grep -Fq '&rb->pagetable_desc' "$KERNEL/drivers/gpu/msm/adreno_ringbuffer.c"
+          ! grep -R -F -- '->pagetable_desc' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          ! grep -R -F 'adreno_ringbuffer_set_global(' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          grep -Fq 'ADRENO_RB_SET_PSEUDO_DONE' "$KERNEL/drivers/gpu/msm/adreno_ringbuffer.h"
           git -C "$KERNEL" diff --check
 
       - name: Apply A619 GPU modernization Phase6 performance policy
@@ -318,11 +321,13 @@ jobs:
           grep -Fq 'A619 GPU P4: Qualcomm 06f837b9da4f' "$KERNEL/drivers/gpu/msm/kgsl_gmu.h"
           grep -Fq 'gmu->num_oob_perfcntr++' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
           grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/kgsl.h"
-          grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RPTR_OFFSET(id) SCRATCH_RB_OFFSET(id, rptr)' "$KERNEL/drivers/gpu/msm/kgsl.h"
+          test "$(grep -F 'SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_iommu.c" | wc -l)" -eq 2
           grep -Fq 'SCRATCH_RB_OFFSET(next->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
           grep -Fq 'SCRATCH_RB_OFFSET(next->id, contextidr)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
-          grep -Fq 'SCRATCH_RB_GPU_ADDR(device' "$KERNEL/drivers/gpu/msm/adreno_a6xx_ringbuffer.c"
-          ! grep -R -Fq -- '->pagetable_desc' "$KERNEL/drivers/gpu/msm"
+          ! grep -R -F -- '->pagetable_desc' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          ! grep -R -F 'adreno_ringbuffer_set_global(' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
           grep -Fq 'A619 GPU P6: adaptive downscale hysteresis' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
           grep -Fq 'tg_gpu_downscale_hold_ms = 16' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
           grep -Fq 'A619 GPU P6: transition-only bus preboost' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"

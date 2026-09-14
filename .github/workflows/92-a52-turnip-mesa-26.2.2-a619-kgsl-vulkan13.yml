@@ -165,8 +165,9 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" post-fs-data.sh | grep -Fq '/vendor/lib64/hw/vulkan.adreno.so'
-          unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
+          unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
+          ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind'
+          unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
           unzip -p "$ZIP" README.txt | grep -Fq '32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver'
           unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
           unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'

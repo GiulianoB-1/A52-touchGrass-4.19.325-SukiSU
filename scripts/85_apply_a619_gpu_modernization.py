@@ -46,7 +46,9 @@ def patch_bus_vote_order(kernel: Path) -> None:
 \t * For a frequency decrease, keep the old bus vote until after the GPU
 \t * clock has dropped. This mirrors Qualcomm's later A6xx ordering fix.
 \t */
-\tif (new_level < old_level)
+\tif (new_level < old_level ||
+\t\t(new_level == old_level &&
+\t\t test_bit(GMU_DCVS_REPLAY, &device->gmu_core.flags)))
 \t\tkgsl_pwrctrl_buslevel_update(device, true);
 
 \tpwrlevel = &pwr->pwrlevels[pwr->active_pwrlevel];

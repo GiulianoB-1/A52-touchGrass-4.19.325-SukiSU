@@ -8,7 +8,7 @@ if len(sys.argv) != 2:
 root = Path(sys.argv[1]).resolve()
 paths = {name: root / "fs/f2fs" / name for name in (
     "f2fs.h", "segment.h", "segment.c", "checkpoint.c",
-    "file.c", "gc.c", "super.c", "recovery.c",
+    "file.c", "gc.c", "super.c", "recovery.c", "debug.c",
 )}
 for p in paths.values():
     if not p.is_file():
@@ -83,7 +83,7 @@ void f2fs_restore_inmem_curseg(struct f2fs_sb_info *sbi, int type);
 void allocate_segment_for_resize(struct f2fs_sb_info *sbi, int type,
 \t\t\t\t\tunsigned int start, unsigned int end);
 void f2fs_allocate_new_segment(struct f2fs_sb_info *sbi, int type);
-void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi);
+void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi, int type);
 """,
     "f2fs.h curseg prototypes",
 )
@@ -262,27 +262,23 @@ replace_once(
 )
 
 # ---------------------------------------------------------------------------
-# gc.c: only persistent logs are relocated during resize.
+# gc.c: keep Samsung's NR_CURSEG_TYPE resize loop.
+# This also carries the later upstream fix 8ec06f50ddd8, which corrected the
+# original d0b9e42 behavior so active in-memory cursegs are evacuated too.
 # ---------------------------------------------------------------------------
 p = paths["gc.c"]
-replace_once(
-    p,
-"\tfor (type = CURSEG_HOT_DATA; type < NR_CURSEG_TYPE; type++)\n",
-"\tfor (type = CURSEG_HOT_DATA; type < NR_CURSEG_PERSIST_TYPE; type++)\n",
-    "gc.c resize curseg loop",
-)
+if "\tfor (type = CURSEG_HOT_DATA; type < NR_CURSEG_TYPE; type++)\n" not in p.read_text():
+    raise SystemExit("gc.c: all-curseg resize loop missing")
 
 # ---------------------------------------------------------------------------
-# recovery.c: after fsync recovery, rotate the three normal data cursegs.
-# Upstream's helper no longer takes the old NO_CHECK_TYPE selector.
+# recovery.c: preserve Samsung's downstream forced-rotation contract.
+# NO_CHECK_TYPE intentionally forces all three data cursegs to rotate after
+# fsync recovery; replacing this with upstream's conditional no-arg helper
+# changes downstream recovery semantics and is unsafe on this vendor tree.
 # ---------------------------------------------------------------------------
 p = paths["recovery.c"]
-replace_once(
-    p,
-"\t\tf2fs_allocate_new_segments(sbi, NO_CHECK_TYPE);\n",
-"\t\tf2fs_allocate_new_segments(sbi);\n",
-    "recovery.c allocate all data cursegs",
-)
+if "\t\tf2fs_allocate_new_segments(sbi, NO_CHECK_TYPE);\n" not in p.read_text():
+    raise SystemExit("recovery.c: Samsung forced curseg rotation caller missing")
 
 # ---------------------------------------------------------------------------
 # segment.c core.
@@ -473,35 +469,13 @@ if helper not in s:
     s = s.replace(helper_anchor, helper + helper_anchor, 1)
     p.write_text(s)
 
-# Replace Samsung's type-filtered helper with the upstream split helpers.
-replace_once(
-    p,
-"""void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi, int type)
-{
-\tstruct curseg_info *curseg;
-\tunsigned int old_segno;
-\tint i;
-
-\tdown_write(&SIT_I(sbi)->sentry_lock);
-
-\tfor (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
-\t\tif (type != NO_CHECK_TYPE && i != type)
-\t\t\tcontinue;
-
-\t\tcurseg = CURSEG_I(sbi, i);
-\t\tif (type == NO_CHECK_TYPE || curseg->next_blkoff ||
-\t\t\t\tget_valid_blocks(sbi, curseg->segno, false) ||
-\t\t\t\tget_ckpt_valid_blocks(sbi, curseg->segno)) {
-\t\t\told_segno = curseg->segno;
-\t\t\tSIT_I(sbi)->s_ops->allocate_segment(sbi, i, true);
-\t\t\tlocate_dirty_segment(sbi, old_segno);
-\t\t}
-\t}
-
-\tup_write(&SIT_I(sbi)->sentry_lock);
-}
-""",
-"""static void __allocate_new_segment(struct f2fs_sb_info *sbi, int type)
+# Add upstream's singular allocator for the new in-memory pinned curseg, but
+# KEEP Samsung's existing typed f2fs_allocate_new_segments(sbi, type).
+# Samsung's NO_CHECK_TYPE path deliberately forces post-recovery rotation.
+p = paths["segment.c"]
+s = p.read_text()
+helper_anchor = "void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi, int type)\n"
+helper = """static void __allocate_new_segment(struct f2fs_sb_info *sbi, int type)
 {
 \tstruct curseg_info *curseg = CURSEG_I(sbi, type);
 \tunsigned int old_segno;
@@ -527,18 +501,23 @@ void f2fs_allocate_new_segment(struct f2fs_sb_info *sbi, int type)
 \tup_write(&SIT_I(sbi)->sentry_lock);
 }
 
-void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi)
-{
-\tint i;
+"""
+if helper not in s:
+    if s.count(helper_anchor) != 1:
+        raise SystemExit("segment.c: Samsung typed multi-curseg helper anchor missing")
+    s = s.replace(helper_anchor, helper + helper_anchor, 1)
+    p.write_text(s)
 
-\tdown_write(&SIT_I(sbi)->sentry_lock);
-\tfor (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++)
-\t\t__allocate_new_segment(sbi, i);
-\tup_write(&SIT_I(sbi)->sentry_lock);
-}
-""",
-    "segment.c allocate-new helpers",
+# Prove the Samsung recovery semantics remain intact.
+s = p.read_text()
+required_samsung_multi = (
+    "void f2fs_allocate_new_segments(struct f2fs_sb_info *sbi, int type)",
+    "if (type != NO_CHECK_TYPE && i != type)",
+    "if (type == NO_CHECK_TYPE || curseg->next_blkoff ||",
 )
+for needle in required_samsung_multi:
+    if needle not in s:
+        raise SystemExit(f"segment.c: Samsung recovery semantic missing: {needle}")
 
 # Remove Samsung's pinned/cold alias lock workaround from allocation.
 s = p.read_text()
@@ -637,6 +616,35 @@ replace_once(
 )
 
 # ---------------------------------------------------------------------------
+# debug.c: include the in-memory pinned curseg in runtime status.
+# ---------------------------------------------------------------------------
+p = paths["debug.c"]
+replace_once(
+    p,
+"\tfor (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_NODE; i++) {\n",
+"\tfor (i = CURSEG_HOT_DATA; i < NO_CHECK_TYPE; i++) {\n",
+    "debug.c curseg status loop",
+)
+replace_once(
+    p,
+"""\t\tseq_printf(s, "  - Indir nodes: %d, %d, %d\\n",
+\t\t\t   si->curseg[CURSEG_COLD_NODE],
+\t\t\t   si->cursec[CURSEG_COLD_NODE],
+\t\t\t   si->curzone[CURSEG_COLD_NODE]);
+""",
+"""\t\tseq_printf(s, "  - Indir nodes: %d, %d, %d\\n",
+\t\t\t   si->curseg[CURSEG_COLD_NODE],
+\t\t\t   si->cursec[CURSEG_COLD_NODE],
+\t\t\t   si->curzone[CURSEG_COLD_NODE]);
+\t\tseq_printf(s, "  - Pinned file: %d, %d, %d\\n",
+\t\t\t   si->curseg[CURSEG_COLD_DATA_PINNED],
+\t\t\t   si->cursec[CURSEG_COLD_DATA_PINNED],
+\t\t\t   si->curzone[CURSEG_COLD_DATA_PINNED]);
+""",
+    "debug.c pinned curseg status",
+)
+
+# ---------------------------------------------------------------------------
 # super.c: mount/checkpoint ABI remains six persistent logs.
 # ---------------------------------------------------------------------------
 p = paths["super.c"]
@@ -716,8 +724,12 @@ checks = {
         "f2fs_allocate_new_segment(sbi, CURSEG_COLD_DATA_PINNED);",
         "map.m_seg_type = CURSEG_COLD_DATA_PINNED;",
     ],
-    "gc.c": ["type < NR_CURSEG_PERSIST_TYPE"],
-    "recovery.c": ["f2fs_allocate_new_segments(sbi);"],
+    "gc.c": ["type < NR_CURSEG_TYPE"],
+    "recovery.c": ["f2fs_allocate_new_segments(sbi, NO_CHECK_TYPE);"],
+    "debug.c": [
+        "for (i = CURSEG_HOT_DATA; i < NO_CHECK_TYPE; i++)",
+        "Pinned file:",
+    ],
     "super.c": [
         "arg != NR_CURSEG_PERSIST_TYPE",
         "active_logs = NR_CURSEG_PERSIST_TYPE",
@@ -735,7 +747,6 @@ for forbidden in (
     "if (type == CURSEG_COLD_DATA_PINNED) {\n\t\ttype = CURSEG_COLD_DATA;",
     "bool put_pin_sem = false;",
     "f2fs_allocate_new_segments(sbi, CURSEG_COLD_DATA)",
-    "f2fs_allocate_new_segments(sbi, NO_CHECK_TYPE)",
 ):
     if forbidden in all_text:
         raise SystemExit(f"legacy pinned-curseg alias remains: {forbidden}")
@@ -756,6 +767,9 @@ report.write_text(
     "inmem_logs=1\n"
     "checkpoint_format=unchanged\n"
     "mount_active_logs_abi=2,4,6\n"
+    "samsung_fsync_recovery_forced_rotation=preserved\n"
+    "whint_followup_fix=011e0868e0cf\n"
+    "resize_all_curseg_fix=8ec06f50ddd8\n"
     "atgc=not-yet-enabled\n"
     "crash_diagnostics=preserved-by-workflow\n"
 )

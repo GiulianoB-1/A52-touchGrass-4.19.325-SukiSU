@@ -24,24 +24,39 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 
 
 namespace = root / "fs/namespace.c"
+text = namespace.read_text()
 
-# Linux 4.19.325 moved has_locked_children() before clone_private_mount().
-# Keep that ordering, but preserve Samsung's CONFIG_KDP_NS mount layout.
-replace_once(
-    namespace,
-    "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
-    "{\n"
-    "\tstruct mount *child;\n"
-    "\n"
-    "\tlist_for_each_entry(child, &mnt->mnt_mounts, mnt_child) {\n"
-    "\t\tif (!is_subdir(child->mnt_mountpoint, dentry))\n"
-    "\t\t\tcontinue;\n"
-    "\n"
-    "\t\tif (child->mnt.mnt_flags & MNT_LOCKED)\n"
-    "\t\t\treturn true;\n"
-    "\t}\n"
-    "\treturn false;\n"
-    "}\n",
+# 4.19.325 moved has_locked_children() before clone_private_mount() and made
+# clone_private_mount() reject unbindable, detached, or locked-child mounts
+# while holding namespace_sem. Samsung's CONFIG_KDP_NS changes struct mount's
+# vfsmount storage, so preserve that access pattern while adopting the stable
+# ordering and validation semantics.
+
+def extract_function(text: str, signature: str):
+    start = text.find(signature)
+    if start < 0:
+        return None
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"malformed function for {signature}")
+    depth = 0
+    i = brace
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                if end < len(text) and text[end] == "\n":
+                    end += 1
+                return start, end, text[start:end]
+        i += 1
+    raise SystemExit(f"unterminated function for {signature}")
+
+
+helper_sig = "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)"
+helper_template = (
     "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
     "{\n"
     "\tstruct mount *child;\n"
@@ -58,20 +73,56 @@ replace_once(
     "\t\t\treturn true;\n"
     "\t}\n"
     "\treturn false;\n"
-    "}\n",
-    "KDP-aware locked-child helper",
+    "}\n"
 )
 
-# The direct merge retained the new gotos but lost the upstream cleanup label.
-replace_once(
-    namespace,
-    "#ifdef CONFIG_KDP_NS\n"
-    "\treturn new_mnt->mnt;\n"
-    "#else\n"
-    "\treturn &new_mnt->mnt;\n"
-    "#endif\n"
-    "}\n"
-    "EXPORT_SYMBOL_GPL(clone_private_mount);\n",
+# Remove every merged/vendor copy, then insert one canonical KDP-aware helper
+# immediately before clone_private_mount().
+removed = 0
+while True:
+    fn = extract_function(text, helper_sig)
+    if fn is None:
+        break
+    start, end, _ = fn
+    text = text[:start] + text[end:]
+    removed += 1
+
+clone_sig = "struct vfsmount *clone_private_mount(const struct path *path)"
+clone_pos = text.find(clone_sig)
+if clone_pos < 0:
+    raise SystemExit("clone_private_mount is missing after stable merge")
+text = text[:clone_pos] + helper_template + "\n" + text[clone_pos:]
+repairs = [f"fs/namespace.c=canonicalized-kdp-locked-child-helper-from-{removed}-copies"]
+
+# Replace clone_private_mount() as a complete unit. This avoids depending on
+# whether diff3 preserved Samsung's old body, upstream's new body, or a clean
+# mixture of both.
+fn = extract_function(text, clone_sig)
+if fn is None:
+    raise SystemExit("unable to isolate clone_private_mount")
+clone_start, clone_end, _ = fn
+clone_template = (
+    "struct vfsmount *clone_private_mount(const struct path *path)\n"
+    "{\n"
+    "\tstruct mount *old_mnt = real_mount(path->mnt);\n"
+    "\tstruct mount *new_mnt;\n"
+    "\n"
+    "\tdown_read(&namespace_sem);\n"
+    "\tif (IS_MNT_UNBINDABLE(old_mnt))\n"
+    "\t\tgoto invalid;\n"
+    "\n"
+    "\tif (!check_mnt(old_mnt))\n"
+    "\t\tgoto invalid;\n"
+    "\n"
+    "\tif (has_locked_children(old_mnt, path->dentry))\n"
+    "\t\tgoto invalid;\n"
+    "\n"
+    "\tnew_mnt = clone_mnt(old_mnt, path->dentry, CL_PRIVATE);\n"
+    "\tup_read(&namespace_sem);\n"
+    "\n"
+    "\tif (IS_ERR(new_mnt))\n"
+    "\t\treturn ERR_CAST(new_mnt);\n"
+    "\n"
     "#ifdef CONFIG_KDP_NS\n"
     "\treturn new_mnt->mnt;\n"
     "#else\n"
@@ -82,46 +133,32 @@ replace_once(
     "\tup_read(&namespace_sem);\n"
     "\treturn ERR_PTR(-EINVAL);\n"
     "}\n"
-    "EXPORT_SYMBOL_GPL(clone_private_mount);\n",
-    "clone_private_mount invalid cleanup",
 )
+text = text[:clone_start] + clone_template + text[clone_end:]
+repairs.append("fs/namespace.c=adopted-4.19.325-clone-validation-with-kdp-return")
 
-# Remove the obsolete second copy that remained in the Samsung source location.
-replace_once(
-    namespace,
-    "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
-    "{\n"
-    "\tstruct mount *child;\n"
-    "\tlist_for_each_entry(child, &mnt->mnt_mounts, mnt_child) {\n"
-    "\t\tif (!is_subdir(child->mnt_mountpoint, dentry))\n"
-    "\t\t\tcontinue;\n"
-    "\n"
-    "#ifdef CONFIG_KDP_NS\n"
-    "\t\tif (child->mnt->mnt_flags & MNT_LOCKED)\n"
-    "#else\n"
-    "\t\tif (child->mnt.mnt_flags & MNT_LOCKED)\n"
-    "#endif\n"
-    "\t\t\treturn true;\n"
-    "\t}\n"
-    "\treturn false;\n"
-    "}\n"
-    "\n"
-    "/*\n"
-    " * do loopback mount.\n"
-    " */\n",
-    "/*\n"
-    " * do loopback mount.\n"
-    " */\n",
-    "duplicate locked-child helper",
-)
+namespace.write_text(text)
 
 ns_text = namespace.read_text()
-if ns_text.count("static bool has_locked_children(") != 1:
+if ns_text.count(helper_sig) != 1:
     raise SystemExit("namespace repair did not leave exactly one has_locked_children helper")
-clone_start = ns_text.index("struct vfsmount *clone_private_mount")
+helper_pos = ns_text.index(helper_sig)
+clone_start = ns_text.index(clone_sig)
 clone_end = ns_text.index("EXPORT_SYMBOL_GPL(clone_private_mount);", clone_start)
-if "invalid:\n\tup_read(&namespace_sem);\n\treturn ERR_PTR(-EINVAL);" not in ns_text[clone_start:clone_end]:
-    raise SystemExit("clone_private_mount cleanup label is missing after repair")
+if helper_pos > clone_start:
+    raise SystemExit("has_locked_children must precede clone_private_mount")
+clone_body = ns_text[clone_start:clone_end]
+for fragment in (
+    "down_read(&namespace_sem);",
+    "if (!check_mnt(old_mnt))",
+    "if (has_locked_children(old_mnt, path->dentry))",
+    "invalid:\n\tup_read(&namespace_sem);\n\treturn ERR_PTR(-EINVAL);",
+    "#ifdef CONFIG_KDP_NS\n\treturn new_mnt->mnt;",
+):
+    if fragment not in clone_body:
+        raise SystemExit(f"clone_private_mount repair missing: {fragment}")
+if "#ifdef CONFIG_KDP_NS\n\t\tif (child->mnt->mnt_flags & MNT_LOCKED)" not in ns_text:
+    raise SystemExit("KDP-aware locked-child access is missing")
 
 mailbox = root / "drivers/mailbox/mailbox.c"
 
@@ -160,7 +197,7 @@ git -C "$KERNEL_DIR" diff --check -- fs/namespace.c drivers/mailbox/mailbox.c
 
 {
   printf 'kernel_version=%s\n' "$(kernel_version)"
-  printf 'namespace=restored-invalid-cleanup-and-single-kdp-aware-helper\n'
+  printf 'namespace=4.19.325-clone-validation-plus-single-kdp-aware-helper\n'
   printf 'mailbox=declared-poll-hrtimer-irqsave-flags\n'
   printf 'result=linux-4.19.325-namespace-mailbox-compatibility-repaired\n'
 } | tee "$REPORT"

@@ -90,6 +90,32 @@ jobs:
             scripts/319_regenerate_phase175_base.sh \
             scripts/319_reconstruct_phase206_from_verified_artifact.sh
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          s = Path("scripts/346_ci_build_gki.sh").read_text()
+          expected = {
+              'stage "obtain Phase345 baseline"': 1,
+              'stage "apply DMA raw sideband"': 1,
+              'stage "scope audit"': 1,
+              'stage "config"': 1,
+              'stage "compile"': 1,
+              'stage "package"': 1,
+              'stage "complete"': 1,
+              'Phase346 DMA raw build: PASS': 1,
+          }
+          for token, count in expected.items():
+              actual = s.count(token)
+              if actual != count:
+                  raise SystemExit(
+                      f"Phase346 build-script structure invalid: {token!r} "
+                      f"count={actual}, expected={count}"
+                  )
+          if s.count("a52_p342_start();") != 0:
+              raise SystemExit("Phase346 build script unexpectedly invokes Phase342")
+          print("Phase346 build-script structural audit: PASS")
+          PY
+
       - name: Restore pinned GKI source
         uses: actions/cache/restore@v4
         with:

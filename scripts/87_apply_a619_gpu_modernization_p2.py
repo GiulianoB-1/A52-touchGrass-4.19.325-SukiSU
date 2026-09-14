@@ -35,7 +35,7 @@ def patch_idle_timer_race(root: Path) -> None:
             "kgsl idle_jiffies field",
         )
 
-        anchor = """#define KGSL_MMU_DEVICE(_mmu) \\\
+        anchor = """#define KGSL_MMU_DEVICE(_mmu) \\
 \tcontainer_of((_mmu), struct kgsl_device, mmu)
 """
         helper = """/*
@@ -83,6 +83,32 @@ static inline void kgsl_mod_idle_timer(struct kgsl_device *device,
             "stale idle work guard",
         )
 
+    replacements = [
+        (
+            """\t\t\tmod_timer(&device->idle_timer,
+\t\t\t\t\tjiffies +
+\t\t\t\t\tdevice->pwrctrl.interval_timeout);""",
+            """\t\t\tkgsl_mod_idle_timer(device,
+\t\t\t\tjiffies + device->pwrctrl.interval_timeout);""",
+            "idle_check rearm",
+        ),
+        (
+            """\t\tmod_timer(&device->idle_timer, jiffies +
+\t\t\t\tdevice->pwrctrl.interval_timeout);""",
+            """\t\tkgsl_mod_idle_timer(device,
+\t\t\tjiffies + device->pwrctrl.interval_timeout);""",
+            "wake nap rearm",
+        ),
+        (
+            """\t\tmod_timer(&device->idle_timer,
+\t\t\tjiffies + device->pwrctrl.interval_timeout);""",
+            """\t\tkgsl_mod_idle_timer(device,
+\t\t\tjiffies + device->pwrctrl.interval_timeout);""",
+            "active count rearm",
+        ),
+    ]
+
+    # Two wake-state sites share exactly the same source form.
     old = """\t\tmod_timer(&device->idle_timer, jiffies +
 \t\t\t\tdevice->pwrctrl.interval_timeout);"""
     if pc.count(old) == 2:

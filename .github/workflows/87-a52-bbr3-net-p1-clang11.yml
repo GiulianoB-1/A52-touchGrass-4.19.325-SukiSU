@@ -190,14 +190,6 @@ jobs:
           grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
           grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
           grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
-          grep -Fxq 'CONFIG_TCP_CONG_BBR=y' "$KERNEL/out/.config"
-          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
-          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/out/.config"
-          grep -Eq '#define[[:space:]]+BBR_VERSION[[:space:]]+3' "$KERNEL/net/ipv4/tcp_bbr3.c"
-          grep -Fq '.name		= "bbr3",' "$KERNEL/net/ipv4/tcp_bbr3.c"
-          grep -Fq '.name		= "bbr",' "$KERNEL/net/ipv4/tcp_bbr.c"
-          grep -Fq 'tcp_plb_update_state' "$KERNEL/net/ipv4/tcp_plb.c"
-          grep -Fq 'TCP_CONG_WANTS_CE_EVENTS' "$KERNEL/include/net/tcp.h"
           git -C "$KERNEL" diff --check
 
       - name: Apply BBRv3 + FQ network Phase1

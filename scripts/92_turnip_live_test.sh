@@ -47,6 +47,18 @@ if [ ! -x "$PROBE" ]; then
     exit 12
 fi
 
+echo "=== STOCK QUALCOMM SUBMISSION BASELINE ==="
+"$PROBE"
+STOCK_RC=$?
+echo "stock_probe_exit=$STOCK_RC"
+echo
+sync
+
+if [ "$STOCK_RC" -ne 0 ]; then
+    echo "FAIL: stock Qualcomm Vulkan failed the same submission probe"
+    exit 17
+fi
+
 mkdir -p "$STAGE_DIR" || exit 13
 cp -f "$DRIVER" "$STAGE" || exit 14
 chown 0:0 "$STAGE" 2>/dev/null || true
@@ -62,7 +74,9 @@ cat /proc/mounts | grep -F 'vulkan.adreno.so' || true
 sha256sum "$TARGET" 2>/dev/null || true
 echo
 
-echo "=== DIRECT VULKAN PROBE ==="
+echo "=== TURNIP VULKAN SUBMISSION PROBE ==="
+echo "turnip_probe_begin=1"
+sync
 "$PROBE"
 PROBE_RC=$?
 echo "probe_exit=$PROBE_RC"

@@ -28,6 +28,12 @@ def replace_once(path, old, new, label):
 # 4.19 persistent_ram_new() has the 6-argument API.
 # ---------------------------------------------------------------------------
 s = ram.read_text()
+if "#include <generated/utsrelease.h>\n" not in s:
+    anchor = "#include <linux/pstore_ram.h>\n"
+    if anchor not in s:
+        raise SystemExit("ram.c: pstore_ram include anchor missing for utsrelease")
+    s = s.replace(anchor, anchor + "#include <generated/utsrelease.h>\n", 1)
+
 if "#include <linux/console.h>\n" not in s:
     anchors = (
         "#include <linux/compiler.h>\n#include <linux/pstore_ram.h>\n",
@@ -97,7 +103,6 @@ int __init a52_persistent_diag_init(void)
 
 	/* Start each test boot with a fresh producer buffer. */
 	persistent_ram_zap(a52_diag_prz);
-	a52_diag_prz->type = PSTORE_TYPE_CONSOLE;
 	a52_persistent_diag_mark(
 		"A52P91 READY phys=0x%llx size=0x%lx kernel=%s\n",
 		(unsigned long long)A52_DIAG_CONSOLE_PHYS,
@@ -271,7 +276,7 @@ segment_c.write_text(s)
 
 # Audits.
 checks={
-    ram:["A52P91 READY","persistent_ram_zap(a52_diag_prz);","CON_PRINTBUFFER"],
+    ram:["A52P91 READY","persistent_ram_zap(a52_diag_prz);","CON_PRINTBUFFER","#include <generated/utsrelease.h>"],
     main:["A52P91 IC begin","A52P91 after driver_init"],
     super_c:["A52P91 F2FS fill enter","A52P91 F2FS sm begin","A52P91 F2FS nm begin"],
     segment_c:["A52P91 F2FS curseg begin","A52P91 F2FS curseg restore","A52P91 F2FS sanity end"],

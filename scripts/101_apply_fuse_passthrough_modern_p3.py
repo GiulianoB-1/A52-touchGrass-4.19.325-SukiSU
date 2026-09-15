@@ -41,9 +41,9 @@ def replace_once(rel, old, new, label):
 #   - modern fuse_init_out field names in the previously reserved 32-byte tail,
 #     without changing the 64-byte reply size;
 #   - per-connection max_stack_depth;
-#   - legacy-safe default max_stack_depth = 1;
-#   - backing registration enforces the negotiated/compatibility depth instead
-#     of the global FILESYSTEM_MAX_STACK_DEPTH constant.
+#   - legacy 7.27 retains the proven P2 FILESYSTEM_MAX_STACK_DEPTH policy;
+#   - protocol >=7.40 may use daemon-negotiated max_stack_depth;
+#   - backing registration enforces the effective per-connection depth.
 #
 # We intentionally DO NOT bump FUSE_KERNEL_MINOR_VERSION from the Samsung 7.27
 # baseline here.  Old Android daemons continue seeing the proven ABI.  If a
@@ -91,7 +91,8 @@ replace_once(
 )
 
 # Track the effective passthrough stack-depth limit per connection, matching
-# current upstream FUSE.  The legacy Android path uses depth 1.
+# current upstream FUSE. Legacy Android 7.27 did not negotiate this field, so
+# it must retain the proven P2 global stacking policy.
 replace_once(
     "fs/fuse/fuse_i.h",
     "\t/** Android passthrough mode negotiated during FUSE_INIT. */\n"
@@ -105,11 +106,10 @@ replace_once(
     "conn_max_stack_depth",
 )
 
-# Replace the old Android behavior that pessimistically marked the FUSE mount
-# at FILESYSTEM_MAX_STACK_DEPTH.  Upstream semantics use the actual passthrough
-# limit.  Since this tree still negotiates protocol 7.27, depth 1 is the safe
-# compatibility value.  The >=7.40 branch is future-ready but cannot activate
-# until the kernel minor is deliberately raised in a separate ABI phase.
+# Hybrid stack-depth semantics:
+# - Samsung/Android protocol 7.27 never negotiated max_stack_depth, so preserve
+#   the runtime-proven P2 behavior exactly.
+# - A future protocol >=7.40 daemon may supply an explicit modern depth.
 replace_once(
     "fs/fuse/inode.c",
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
@@ -121,12 +121,11 @@ replace_once(
     "#endif\n",
     "#ifdef CONFIG_FUSE_PASSTHROUGH\n"
     "\t\t\tif (arg->flags & FUSE_PASSTHROUGH) {\n"
-    "\t\t\t\tint max_stack_depth = 1;\n\n"
+    "\t\t\t\tint max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;\n\n"
     "\t\t\t\t/*\n"
-    "\t\t\t\t * P3 keeps Samsung's protocol 7.27 ABI.  For a future\n"
-    "\t\t\t\t * >=7.40 negotiation, accept the daemon-provided depth\n"
-    "\t\t\t\t * only when it is valid; otherwise retain the proven\n"
-    "\t\t\t\t * legacy single-layer passthrough model.\n"
+    "\t\t\t\t * Legacy 7.27 userspace has no max_stack_depth field.\n"
+    "\t\t\t\t * Keep the proven P2 limit unless a real >=7.40 daemon\n"
+    "\t\t\t\t * explicitly negotiates a valid modern depth.\n"
     "\t\t\t\t */\n"
     "\t\t\t\tif (arg->minor >= 40 && arg->max_stack_depth > 0 &&\n"
     "\t\t\t\t    arg->max_stack_depth <= FILESYSTEM_MAX_STACK_DEPTH)\n"
@@ -139,9 +138,9 @@ replace_once(
     "init_stack_depth_semantics",
 )
 
-# Persistent and legacy backing registration now share the connection-specific
-# stack limit.  With the 7.27 compatibility path this means backing files must
-# live on an unstacked filesystem (depth 0), exactly the modern depth=1 model.
+# Persistent and legacy backing registration now share the effective
+# connection-specific stack limit. Legacy 7.27 therefore remains identical to
+# P2, while a future >=7.40 daemon can opt into a tighter negotiated depth.
 replace_once(
     "fs/fuse/backing.c",
     "\tbacking_sb = file_inode(file)->i_sb;\n"
@@ -193,7 +192,7 @@ checks = {
         "struct idr backing_files_map;",
     ],
     "fs/fuse/inode.c": [
-        "int max_stack_depth = 1;",
+        "int max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;",
         "arg->minor >= 40",
         "fc->max_stack_depth = max_stack_depth;",
         "fc->sb->s_stack_depth = max_stack_depth;",
@@ -248,9 +247,9 @@ report.write_text(
     "open_reply_alias=passthrough_fh-plus-backing_id\n"
     "init_reply_size=64-bytes-preserved-modern-tail-names\n"
     "protocol_minor=27-preserved\n"
-    "compat_max_stack_depth=1\n"
+    "compat_max_stack_depth=FILESYSTEM_MAX_STACK_DEPTH-p2-preserved\n"
     "future_7_40_max_stack_depth=parser-ready\n"
-    "backing_stack_depth=connection-enforced\n"
+    "backing_stack_depth=connection-enforced-legacy-p2-compatible\n"
     "unsafe_full_7_40_minor_bump=deferred\n"
     "changes=" + ",".join(changes) + "\n"
 )

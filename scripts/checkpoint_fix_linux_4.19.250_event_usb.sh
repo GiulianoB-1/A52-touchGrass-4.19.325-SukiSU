@@ -168,12 +168,13 @@ calc_end = gadget_text.find("\nstatic ", calc_start + len(func_marker))
 if calc_end < 0:
     raise SystemExit("DWC3 calc_trbs_left validation end anchor missing")
 calc_segment = gadget_text[calc_start:calc_end]
-calc_tmp_count = len(
-    re.findall(
-        r"^[ \\t]*struct[ \\t]+dwc3_trb[ \\t]+\\*tmp;[ \\t]*$",
-        calc_segment,
-        re.MULTILINE,
-    )
+calc_tmp_count = sum(
+    1
+    for line in calc_segment.splitlines()
+    if line.strip().replace("\t", " ") in {
+        "struct dwc3_trb *tmp;",
+        "struct dwc3_trb  *tmp;",
+    }
 )
 if calc_tmp_count != 1:
     raise SystemExit(
@@ -181,7 +182,7 @@ if calc_tmp_count != 1:
     )
 
 # request_status should have one declaration for the single retained use path.
-request_use_count = len(re.findall(r"\\brequest_status\\b", request_decl_re.sub("", gadget_text)))
+request_use_count = len(re.findall(r"\brequest_status\b", request_decl_re.sub("", gadget_text)))
 request_decl_count = len(request_decl_re.findall(gadget_text))
 if request_use_count and request_decl_count != 1:
     raise SystemExit(

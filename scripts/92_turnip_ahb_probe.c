@@ -491,6 +491,14 @@ static int run_ahb_case(VkPhysicalDevice physical,
     printf("%s.props.ycbcrRange=%d\n", tc->name, fmt.suggestedYcbcrRange);
     printf("%s.props.xChromaOffset=%d\n", tc->name, fmt.suggestedXChromaOffset);
     printf("%s.props.yChromaOffset=%d\n", tc->name, fmt.suggestedYChromaOffset);
+    printf("%s.props.components.r=%d\n", tc->name,
+           fmt.samplerYcbcrConversionComponents.r);
+    printf("%s.props.components.g=%d\n", tc->name,
+           fmt.samplerYcbcrConversionComponents.g);
+    printf("%s.props.components.b=%d\n", tc->name,
+           fmt.samplerYcbcrConversionComponents.b);
+    printf("%s.props.components.a=%d\n", tc->name,
+           fmt.samplerYcbcrConversionComponents.a);
 
     VkExternalFormatANDROID external_format = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
@@ -894,6 +902,7 @@ int main(void)
     };
 
     unsigned pass = 0, fail = 0;
+    int target_yuv420_rc = -1;
     int target_yv12_sf_rc = -1;
     int target_qti_nv12_ubwc_rc = -1;
     int target_qti_tp10_ubwc_rc = -1;
@@ -903,6 +912,8 @@ int main(void)
             ++pass;
         else
             ++fail;
+        if (strcmp(cases[i].name, "yuv420_256") == 0)
+            target_yuv420_rc = rc;
         if (strcmp(cases[i].name, "yv12_sf_940x1670") == 0)
             target_yv12_sf_rc = rc;
         if (strcmp(cases[i].name, "qti_nv12_ubwc_720x1280") == 0)
@@ -936,6 +947,11 @@ int main(void)
 
     printf("\nAHB_CASES_PASS=%u\n", pass);
     printf("AHB_CASES_FAIL=%u\n", fail);
+    printf("target_yuv420_256_exit=%d\n", target_yuv420_rc);
+    if (target_yuv420_rc == 0)
+        printf("target_yuv420_256_status=PASS\n");
+    else
+        printf("target_yuv420_256_status=FAIL\n");
     printf("target_yv12_sf_940x1670_exit=%d\n", target_yv12_sf_rc);
     if (target_yv12_sf_rc == 0)
         printf("target_yv12_sf_940x1670_status=PASS\n");

@@ -1329,16 +1329,22 @@ replace_once(
 
 replace_once(
     "src/freedreno/fdl/fd6_view.cc",
-    """      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+    """      if (layout->tile_all)
+         view->descriptor[3] |= A6XX_TEX_MEMOBJ_3_TILE_ALL;
+
+      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
           args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
 """,
-    """      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+    """      if (layout->tile_all)
+         view->descriptor[3] |= A6XX_TEX_MEMOBJ_3_TILE_ALL;
+
+      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
           args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
           args->format == PIPE_FORMAT_R10_G10B10_420_UNORM) {
 """,
-    "FDL TP10 multi-plane view",
+    "FDL TP10 A6xx multi-plane view",
 )
 
 # Turnip image/view integration.

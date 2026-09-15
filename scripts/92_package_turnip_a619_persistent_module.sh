@@ -382,7 +382,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 v0.27 NV21 sample validation
+touchGrass Turnip A619 Mesa 26.2.2 v0.28 camera NV21 fix
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
@@ -428,7 +428,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.27-vk1.4-nv21-sample-validation'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.28-vk1.4-camera-nv21-fix'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

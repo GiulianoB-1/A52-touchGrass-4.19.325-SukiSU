@@ -107,6 +107,90 @@ def repair_merge_shapes() -> None:
                     return end
         raise SystemExit("schedutil helper closing brace missing")
 
+    # Linux 4.19.250 commit 4208239d748b fixes table-descriptor physical
+    # address formatting by passing the full arm_lpae table object here.
+    # Samsung's tree independently extended the same helper with ref_count
+    # metadata.  The generic merge can combine the new body with the old
+    # cfg-parameter signature, leaving 'data' undeclared and cfg duplicated.
+    # Keep both changes: upstream address formatting + Samsung refcounting.
+    iommu_path = KERNEL / "drivers/iommu/io-pgtable-arm.c"
+    iommu_text = iommu_path.read_text()
+    vendor_sig = """static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
+\t\t\t\t\t     arm_lpae_iopte *ptep,
+\t\t\t\t\t     arm_lpae_iopte curr,
+\t\t\t\t\t     struct io_pgtable_cfg *cfg,
+\t\t\t\t\t     int ref_count)
+"""
+    integrated_sig = """static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
+\t\t\t\t\t     arm_lpae_iopte *ptep,
+\t\t\t\t\t     arm_lpae_iopte curr,
+\t\t\t\t\t     struct arm_lpae_io_pgtable *data,
+\t\t\t\t\t     int ref_count)
+"""
+    if iommu_text.count(vendor_sig) == 1:
+        iommu_text = iommu_text.replace(vendor_sig, integrated_sig, 1)
+    elif iommu_text.count(integrated_sig) != 1:
+        raise SystemExit("io-pgtable-arm install-table signature is unrecognized")
+
+    install_start = iommu_text.index(integrated_sig)
+    install_end = function_end(iommu_text, install_start)
+    install_body = iommu_text[install_start:install_end]
+    declaration = "\tstruct io_pgtable_cfg *cfg = &data->iop.cfg;\n"
+    vars_anchor = "\tarm_lpae_iopte old, new;\n"
+    if declaration not in install_body:
+        if install_body.count(vars_anchor) != 1:
+            raise SystemExit("io-pgtable-arm install-table variable anchor is not unique")
+        install_body = install_body.replace(
+            vars_anchor, vars_anchor + declaration, 1
+        )
+    elif install_body.count(declaration) != 1:
+        raise SystemExit("io-pgtable-arm install-table cfg declaration is duplicated")
+
+    old_addr = "\tnew = __pa(table) | ARM_LPAE_PTE_TYPE_TABLE;\n"
+    fixed_addr = (
+        "\tnew = paddr_to_iopte(__pa(table), data) | "
+        "ARM_LPAE_PTE_TYPE_TABLE;\n"
+    )
+    if old_addr in install_body:
+        install_body = install_body.replace(old_addr, fixed_addr, 1)
+    elif install_body.count(fixed_addr) != 1:
+        raise SystemExit("io-pgtable-arm table address formatting is unrecognized")
+    if install_body.count("iopte_tblcnt_set(&new, ref_count);") != 1:
+        raise SystemExit("io-pgtable-arm Samsung table refcount update is missing")
+    iommu_text = iommu_text[:install_start] + install_body + iommu_text[install_end:]
+
+    vendor_calls = (
+        (
+            "arm_lpae_install_table(cptep, ptep, 0, cfg, 0)",
+            "arm_lpae_install_table(cptep, ptep, 0, data, 0)",
+        ),
+        (
+            "arm_lpae_install_table(tablep, ptep, blk_pte, cfg, child_cnt)",
+            "arm_lpae_install_table(tablep, ptep, blk_pte, data, child_cnt)",
+        ),
+    )
+    for old_call, new_call in vendor_calls:
+        old_count = iommu_text.count(old_call)
+        new_count = iommu_text.count(new_call)
+        if old_count == 1 and new_count == 0:
+            iommu_text = iommu_text.replace(old_call, new_call, 1)
+        elif old_count == 0 and new_count == 1:
+            pass
+        else:
+            raise SystemExit(
+                f"io-pgtable-arm call shape is unrecognized: "
+                f"{old_call} (old={old_count}, new={new_count})"
+            )
+
+    iommu_path.write_text(iommu_text)
+    iommu_final = iommu_path.read_text()
+    if iommu_final.count(integrated_sig) != 1:
+        raise SystemExit("io-pgtable-arm integrated signature postcondition failed")
+    if "arm_lpae_install_table(cptep, ptep, 0, cfg, 0)" in iommu_final:
+        raise SystemExit("io-pgtable-arm map call still passes cfg")
+    if "arm_lpae_install_table(tablep, ptep, blk_pte, cfg, child_cnt)" in iommu_final:
+        raise SystemExit("io-pgtable-arm split call still passes cfg")
+
     # Linux 4.19.250 made the tunables kobject own the final free. The Samsung
     # tree still carries its older explicit struct-pointer free helper for its
     # tunables cache. Keeping both creates conflicting C definitions and, if

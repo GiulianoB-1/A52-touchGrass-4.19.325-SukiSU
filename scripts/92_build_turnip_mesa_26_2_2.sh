@@ -1614,6 +1614,39 @@ grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION)' \
   "$SRC/src/freedreno/vulkan/tu_device.cc"
 test "$(grep -F "'--api-version', '1.4'" "$SRC/src/freedreno/vulkan/meson.build" | wc -l)" -eq 2
 
+echo "==> Promote only Adreno 619 (chip_id 0x06010900) to Vulkan 1.4"
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+path = src / "src/freedreno/vulkan/tu_device.cc"
+text = path.read_text()
+
+old = """   props->apiVersion =
+      tu_has_multiview(pdevice) ?
+         ((pdevice->info->chip >= 7) ? TU_API_VERSION :
+            VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION))
+         : VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION);
+"""
+
+new = """   props->apiVersion =
+      tu_has_multiview(pdevice) ?
+         ((pdevice->info->chip >= 7 ||
+           pdevice->dev_id.chip_id == 0x06010900) ? TU_API_VERSION :
+            VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION))
+         : VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION);
+"""
+
+if text.count(old) != 1:
+    raise SystemExit(f"A619 Vulkan 1.4 physical-device API anchor count: {text.count(old)}")
+
+path.write_text(text.replace(old, new, 1))
+PY
+
+grep -Fq 'pdevice->dev_id.chip_id == 0x06010900' "$SRC/src/freedreno/vulkan/tu_device.cc"
+grep -Fq '((pdevice->info->chip >= 7 ||' "$SRC/src/freedreno/vulkan/tu_device.cc"
+
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 CROSS="$WORK/android-aarch64.ini"
 cat > "$CROSS" <<EOF
@@ -1747,6 +1780,7 @@ android_api=36
 ndk=$(basename "$NDK")
 turnip_api_cap=Vulkan-1.4
 turnip_upstream_api=Vulkan-1.4
+a619_vulkan14_override=device-id-0x06010900-only
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64

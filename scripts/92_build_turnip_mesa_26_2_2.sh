@@ -1609,6 +1609,120 @@ for rel, needle, label in source_checks:
     print(f"source_audit={label}:PASS")
 PY
 
+echo "==> Fix KGSL zero-timeout Vulkan fence polling"
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+path = src / "src/freedreno/vulkan/tu_knl_kgsl.cc"
+text = path.read_text()
+
+old = """static VkResult
+wait_timestamp_safe(int fd,
+                    unsigned int context_id,
+                    unsigned int timestamp,
+                    uint64_t abs_timeout_ns)
+{
+   struct kgsl_device_waittimestamp_ctxtid wait = {
+      .context_id = context_id,
+      .timestamp = timestamp,
+      .timeout = get_relative_ms(abs_timeout_ns),
+   };
+
+   while (true) {
+      int ret = ioctl(fd, IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID, &wait);
+
+      if (ret == -1 && (errno == EINTR || errno == EAGAIN)) {
+         int timeout_ms = get_relative_ms(abs_timeout_ns);
+
+         /* update timeout to consider time that has passed since the start */
+         if (timeout_ms == 0)
+            return VK_TIMEOUT;
+
+         wait.timeout = timeout_ms;
+"""
+
+new = """static VkResult
+wait_timestamp_safe(int fd,
+                    unsigned int context_id,
+                    unsigned int timestamp,
+                    uint64_t abs_timeout_ns)
+{
+   int timeout_ms = get_relative_ms(abs_timeout_ns);
+
+   /* Vulkan timeout=0 is a non-blocking poll.  On the legacy KGSL used by
+    * a52xq, WAITTIMESTAMP_CTXTID with timeout=0 can sleep the caller until
+    * retirement.  Poll the retired timestamp directly instead so
+    * vkGetFenceStatus() remains non-blocking as required by Vulkan.
+    */
+   if (timeout_ms == 0) {
+      struct kgsl_cmdstream_readtimestamp_ctxtid req = {
+         .context_id = context_id,
+         .type = KGSL_TIMESTAMP_RETIRED,
+      };
+
+      int ret =
+         ioctl(fd, IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID, &req);
+      if (ret == 0 && timestamp_cmp(req.timestamp, timestamp))
+         return VK_SUCCESS;
+
+      return VK_TIMEOUT;
+   }
+
+   struct kgsl_device_waittimestamp_ctxtid wait = {
+      .context_id = context_id,
+      .timestamp = timestamp,
+      .timeout = timeout_ms,
+   };
+
+   while (true) {
+      int ret = ioctl(fd, IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID, &wait);
+
+      if (ret == -1 && (errno == EINTR || errno == EAGAIN)) {
+         timeout_ms = get_relative_ms(abs_timeout_ns);
+
+         /* update timeout to consider time that has passed since the start */
+         if (timeout_ms == 0)
+            return VK_TIMEOUT;
+
+         wait.timeout = timeout_ms;
+"""
+
+if text.count(old) != 1:
+    raise SystemExit(
+        f"KGSL zero-timeout poll anchor count: {text.count(old)}"
+    )
+
+header = src / "src/freedreno/vulkan/msm_kgsl.h"
+header_text = header.read_text()
+for needle in (
+    "struct kgsl_cmdstream_readtimestamp_ctxtid",
+    "KGSL_TIMESTAMP_RETIRED",
+    "IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID",
+):
+    if needle not in header_text:
+        raise SystemExit(f"KGSL ABI prerequisite missing: {needle}")
+
+text = text.replace(old, new, 1)
+path.write_text(text)
+
+for needle in (
+    "Vulkan timeout=0 is a non-blocking poll",
+    "IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID",
+    "KGSL_TIMESTAMP_RETIRED",
+):
+    if needle not in path.read_text():
+        raise SystemExit(f"KGSL zero-timeout source audit failed: {needle}")
+
+print("source_audit=KGSL zero-timeout retired-timestamp poll:PASS")
+PY
+
+grep -Fq 'Vulkan timeout=0 is a non-blocking poll' \
+  "$SRC/src/freedreno/vulkan/tu_knl_kgsl.cc"
+grep -Fq 'IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID' \
+  "$SRC/src/freedreno/vulkan/tu_knl_kgsl.cc"
+
 echo "==> Keep upstream Turnip Vulkan 1.4 API"
 grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION)' \
   "$SRC/src/freedreno/vulkan/tu_device.cc"
@@ -1807,6 +1921,7 @@ ndk=$(basename "$NDK")
 turnip_api_cap=Vulkan-1.4
 turnip_upstream_api=Vulkan-1.4
 a619_vulkan14_override=device-id-0x06010900-only
+kgsl_zero_timeout_poll=retired-timestamp-nonblocking
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64

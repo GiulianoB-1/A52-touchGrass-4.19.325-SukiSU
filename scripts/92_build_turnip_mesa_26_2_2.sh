@@ -1432,12 +1432,16 @@ clear.write_text(clear_text)
 replace_once(
     "src/vulkan/runtime/vk_android.c",
     """   case DRM_FORMAT_P010:
-      external_format = VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      resolved_external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      external_format = resolved_external_format;
       break;
    case DRM_FORMAT_XBGR8888:
 """,
     """   case DRM_FORMAT_P010:
-      external_format = VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      resolved_external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      external_format = resolved_external_format;
       break;
    case DRM_FORMAT_NV15:
       /* Qualcomm TP10 UBWC.  This is tightly packed 10-bit storage, not
@@ -1445,8 +1449,9 @@ replace_once(
        * as the Android external-format YCbCr semantic token; Turnip's A52
        * path programs native A6xx FMT6_TP10 storage/view descriptors.
        */
-      external_format =
+      resolved_external_format =
          VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      external_format = resolved_external_format;
       break;
    case DRM_FORMAT_XBGR8888:
 """,
@@ -1458,7 +1463,8 @@ replace_once(
     """finish:
 
    device->physical->dispatch_table.GetPhysicalDeviceFormatProperties2(
-      (VkPhysicalDevice)device->physical, external_format, &format_properties);
+      (VkPhysicalDevice)device->physical, resolved_external_format,
+      &format_properties);
 """,
     """finish:
 
@@ -1467,9 +1473,9 @@ replace_once(
     * capabilities as NV12.  Query NV12 only for the external-format feature
     * mask; the image/view storage is handled by the native TP10 path.
     */
-   VkFormat properties_format = external_format;
+   VkFormat properties_format = resolved_external_format;
    if (p->format == VK_FORMAT_UNDEFINED &&
-       external_format ==
+       resolved_external_format ==
           VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16)
       properties_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
 

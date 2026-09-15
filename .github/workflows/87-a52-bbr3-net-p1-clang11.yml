@@ -31,6 +31,8 @@ env:
 
 jobs:
   build:
+    # Archived: network work moved onto the Phase94 GPU-P5 baseline.
+    if: false
     name: Build BBRv3 + Wi-Fi/RMNET FQ Native Defaults
     runs-on: ubuntu-22.04
     timeout-minutes: 360

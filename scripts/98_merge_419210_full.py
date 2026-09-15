@@ -181,6 +181,26 @@ def main() -> None:
         EXPECTED_GOOD_SHA, test_sha,
     )
 
+    # Normalize the two known v4.19.210 synclink_gt whitespace defects.
+    # This mirrors checkpoint_merge_linux_4.19.210.sh exactly so that the
+    # compatibility repair script can use git diff --check as an invariant.
+    synclink = KERNEL / "drivers/tty/synclink_gt.c"
+    text = synclink.read_text()
+    normalizations = (
+        ("\t \tset_gtsignals(info);", "\t\tset_gtsignals(info);", "set_gtsignals"),
+        (" \tget_gtsignals(info);", "\tget_gtsignals(info);", "get_gtsignals"),
+    )
+    rows = []
+    for old, new, label in normalizations:
+        count = text.count(old)
+        if count > 1:
+            raise SystemExit(f"synclink {label}: expected at most one whitespace defect, found {count}")
+        if count == 1:
+            text = text.replace(old, new, 1)
+            rows.append(f"{label}=normalized\\n")
+    synclink.write_text(text)
+    (ARTIFACTS / "phase98-synclink-whitespace.txt").write_text("".join(rows))
+
     candidate_version = kernel_version()
     generated_fix = ROOT / "scripts" / ".phase98-full210-compile-fix.sh"
     fix_text = FIX_TEMPLATE.read_text()

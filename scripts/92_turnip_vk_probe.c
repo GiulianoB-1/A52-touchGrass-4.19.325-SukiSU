@@ -739,8 +739,8 @@ static int run_submit_probe(VkPhysicalDevice physical)
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = dynamic_rendering_supported
-                    ? &dynamic_rendering
-                    : (vulkan14_supported ? &v14_features : NULL),
+                    ? (const void *)&dynamic_rendering
+                    : (vulkan14_supported ? (const void *)&v14_features : NULL),
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
     };

@@ -704,17 +704,42 @@ def main() -> None:
     # newly added upstream source even when a later Makefile now requires it.
     # Restore this exact v4.19.250 source from the already-verified THEIRS tree;
     # this mirrors the historical 4.19.250 link-closure behavior.
+    closure_rows = []
+
     chacha20_src = THEIRS_TREE / "lib/chacha20.c"
     chacha20_dst = KERNEL / "lib/chacha20.c"
     if not chacha20_src.is_file():
         raise SystemExit("verified v4.19.250 THEIRS tree is missing lib/chacha20.c")
     if not chacha20_dst.is_file():
         shutil.copy2(chacha20_src, chacha20_dst)
-        (ARTIFACTS / "phase100-upstream-closure.txt").write_text(
-            "lib/chacha20.c\n"
-        )
+        closure_rows.append("lib/chacha20.c")
     elif chacha20_dst.read_bytes() != chacha20_src.read_bytes():
         raise SystemExit("existing lib/chacha20.c differs from exact v4.19.250 source")
+
+    # The .250 procfs compatibility repair upgrades internal.h/root.c to the
+    # stable three-argument proc_fill_super ABI. The historical .250 link
+    # closure paired that ABI with the exact upstream inode.c implementation.
+    # Restore it only when the direct merge retained Samsung's one-argument
+    # implementation; accept an already-exact stable file.
+    proc_inode_src = THEIRS_TREE / "fs/proc/inode.c"
+    proc_inode_dst = KERNEL / "fs/proc/inode.c"
+    if not proc_inode_src.is_file():
+        raise SystemExit("verified v4.19.250 THEIRS tree is missing fs/proc/inode.c")
+    proc_inode_text = proc_inode_dst.read_text()
+    old_proc_fill = "int proc_fill_super(struct super_block *s)\n"
+    new_proc_fill = "int proc_fill_super(struct super_block *s, void *data, int silent)\n"
+    if old_proc_fill in proc_inode_text and new_proc_fill not in proc_inode_text:
+        shutil.copy2(proc_inode_src, proc_inode_dst)
+        closure_rows.append("fs/proc/inode.c")
+    elif proc_inode_dst.read_bytes() == proc_inode_src.read_bytes():
+        pass
+    elif new_proc_fill not in proc_inode_text:
+        raise SystemExit("fs/proc/inode.c proc_fill_super ABI is unrecognized")
+
+    if closure_rows:
+        (ARTIFACTS / "phase100-upstream-closure.txt").write_text(
+            "\n".join(closure_rows) + "\n"
+        )
 
     # Normalize the two known v4.19.250 synclink_gt whitespace defects.
     # This mirrors checkpoint_merge_linux_4.19.250.sh exactly so that the

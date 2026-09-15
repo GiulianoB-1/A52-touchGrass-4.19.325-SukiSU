@@ -24,10 +24,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.17-vk1.3-persistent-qti-nv12-ubwc
-versionCode=17
+version=0.18-vk1.3-persistent-qti-tp10-ubwc
+versionCode=18
 author=touchGrass project
-description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds validated import of Qualcomm private NV12 Venus UBWC AHardwareBuffers (0x7fa30c06), while retaining the v0.16 exact-size AHB/CCU fix and proven YV12 fixes.
+description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds Qualcomm private TP10 UBWC AHardwareBuffer import (0x7fa30c09 as DRM NV15), while retaining validated NV12 Venus UBWC (0x7fa30c06), exact-size AHB/CCU and YV12 fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -215,7 +215,7 @@ EOF
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
 touchGrass Turnip A619 Mesa 26.2.2 persistent SurfaceFlinger test
 
-This persistent arm64 test adds the QTI private NV12 Venus UBWC import path discovered from the v0.16 SurfaceFlinger crash, while retaining bounded GMEM handling for exact-size linear Android AHBs. The synthetic Vulkan/AHB suite
+This persistent arm64 test adds the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash, mapping the packed 10-bit 4:2:0 buffer as DRM NV15 + QCOM_COMPRESSED. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
   - Vulkan 1.3 device creation and real KGSL command submission
   - GPU memory fill/readback
@@ -259,7 +259,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.17-vk1.3-persistent-qti-nv12-ubwc'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.18-vk1.3-persistent-qti-tp10-ubwc'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

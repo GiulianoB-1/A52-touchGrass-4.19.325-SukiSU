@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.21.1-vk1.4-syncfd-profile
-versionCode=32
+version=0.21.2-vk1.4-syncfd-pending-profile
+versionCode=33
 author=touchGrass project
-description=Diagnostic build based on the validated v0.21 A619 Vulkan 1.4 baseline. Driver behavior is unchanged; turnip-vk-probe adds per-call profiling for exportable semaphore creation, queue submit, vkGetSemaphoreFdKHR sync-fd export, and post-export fence wait.
+description=Diagnostic build based on the validated v0.21 A619 Vulkan 1.4 baseline. Driver behavior is unchanged; turnip-vk-probe profiles pending Android sync-fd export after a real 16 MiB GPU transfer workload and distinguishes real sync fds from already-signaled fd=-1 exports.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -275,7 +275,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.21.1-vk1.4-syncfd-profile'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.21.2-vk1.4-syncfd-pending-profile'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

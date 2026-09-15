@@ -24,10 +24,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.17-vk1.3-persistent-qti-nv12-ubwc
-versionCode=17
+version=0.18-vk1.4-persistent-qti-nv12-ubwc
+versionCode=18
 author=touchGrass project
-description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds validated import of Qualcomm private NV12 Venus UBWC AHardwareBuffers (0x7fa30c06), while retaining the v0.16 exact-size AHB/CCU fix and proven YV12 fixes.
+description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.4 test for Adreno 619/KGSL. Adds validated import of Qualcomm private NV12 Venus UBWC AHardwareBuffers (0x7fa30c06), while retaining the v0.16 exact-size AHB/CCU fix and proven YV12 fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -35,7 +35,7 @@ SKIPUNZIP=0
 
 ui_print "*********************************************"
 ui_print " touchGrass Turnip A619 / Mesa 26.2.2"
-ui_print " Vulkan 1.3 / PERSISTENT arm64 HAL test"
+ui_print " Vulkan 1.4 / PERSISTENT arm64 HAL test"
 ui_print "*********************************************"
 
 DEVICE="$(getprop ro.product.device)"
@@ -217,9 +217,9 @@ touchGrass Turnip A619 Mesa 26.2.2 persistent SurfaceFlinger test
 
 This persistent arm64 test adds the QTI private NV12 Venus UBWC import path discovered from the v0.16 SurfaceFlinger crash, while retaining bounded GMEM handling for exact-size linear Android AHBs. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
-  - Vulkan 1.3 device creation and real KGSL command submission
+  - Vulkan 1.4 device creation and real KGSL command submission
   - GPU memory fill/readback
-  - Vulkan 1.3 dynamic rendering/readback
+  - Vulkan 1.4 dynamic rendering/readback
   - exact 940x1670 Android YV12 import with 960/480 byte pitches
   - real YV12 GPU sampling matching stock Qualcomm exactly
   - post-CPU-touch YV12 import after QCOM mapped-pointer normalization
@@ -252,10 +252,10 @@ chmod +x "$OUT_DIR/module/post-fs-data.sh" "$OUT_DIR/module/service.sh" "$OUT_DI
 
 (
   cd "$OUT_DIR/module"
-  zip -9 -r "../touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-PERSISTENT-KSU.zip" .
+  zip -9 -r "../touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.zip" .
 )
 
-ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-PERSISTENT-KSU.zip"
+ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.zip"
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'

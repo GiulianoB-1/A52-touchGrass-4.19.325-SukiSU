@@ -209,6 +209,8 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'qti_tp10_ubwc_1080x1920'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_tp10_ubwc_1080x1920_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_tp10_ubwc_1080x1920_status=DIAGNOSTIC_FAIL'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.GetYUVPlaneInfo.count=%d'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.private_format=0x%08x'
           strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
@@ -264,7 +266,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.1-vk1.3-persistent-qti-tp10-ubwc-diag'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.2-vk1.3-persistent-qti-tp10-forensics'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

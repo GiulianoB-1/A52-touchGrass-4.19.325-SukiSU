@@ -598,6 +598,27 @@ def repair_merge_shapes() -> None:
     if sum(1 for line in drivers_kconfig.splitlines() if line.strip() == "endmenu") != 1:
         raise SystemExit("drivers/Kconfig top-level endmenu count is not one")
 
+    # Diagnostic A/B test for the 4.19.236 ARM64 Spectre-BHB backport.
+    # The complete Android 5.10 GKI implementation is known to get past the
+    # A52's early boot, but Phase100 contains a vendor/upstream hybrid across
+    # entry.S, cpu_errata.c, cpufeature.c and vectors.h. Disable only the BHB
+    # mitigation selection so the rest of 4.19.250 remains unchanged.
+    defconfig = KERNEL / "arch/arm64/configs/a52xq_defconfig"
+    defconfig_text = defconfig.read_text()
+    bhb_on = "CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY=y"
+    bhb_off = "# CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY is not set"
+    defconfig_lines = [
+        line for line in defconfig_text.splitlines()
+        if line not in (bhb_on, bhb_off)
+    ]
+    defconfig_lines.append(bhb_off)
+    defconfig.write_text("\n".join(defconfig_lines) + "\n")
+    defconfig_post = defconfig.read_text()
+    if bhb_on in defconfig_post:
+        raise SystemExit("Spectre-BHB diagnostic config still enabled")
+    if defconfig_post.count(bhb_off) != 1:
+        raise SystemExit("Spectre-BHB diagnostic config postcondition failed")
+
 
 def main() -> None:
     if not (KERNEL / ".git").is_dir():

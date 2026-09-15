@@ -452,41 +452,97 @@ static int run_ahb_case(VkPhysicalDevice physical,
         PFN_vkCreateSamplerYcbcrConversion pCreateYcbcr =
             (PFN_vkCreateSamplerYcbcrConversion)vkGetDeviceProcAddr(
                 device, "vkCreateSamplerYcbcrConversion");
+        PFN_vkDestroySamplerYcbcrConversion pDestroyYcbcr =
+            (PFN_vkDestroySamplerYcbcrConversion)vkGetDeviceProcAddr(
+                device, "vkDestroySamplerYcbcrConversion");
 
         printf("%s.vkCreateSamplerYcbcrConversion_ptr=%s\n",
                tc->name, pCreateYcbcr ? "OK" : "NULL");
 
-        if (pCreateYcbcr) {
-            VkExternalFormatANDROID conv_external = {
-                .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
-                .externalFormat = fmt.externalFormat,
-            };
-            VkSamplerYcbcrConversionCreateInfo ci = {
-                .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
-                .pNext = &conv_external,
-                .format = VK_FORMAT_UNDEFINED,
-                .ycbcrModel = fmt.suggestedYcbcrModel,
-                .ycbcrRange = fmt.suggestedYcbcrRange,
-                .components = fmt.samplerYcbcrConversionComponents,
-                .xChromaOffset = fmt.suggestedXChromaOffset,
-                .yChromaOffset = fmt.suggestedYChromaOffset,
-                .chromaFilter = VK_FILTER_NEAREST,
-                .forceExplicitReconstruction = VK_FALSE,
-            };
-            VkSamplerYcbcrConversion conversion = VK_NULL_HANDLE;
-            VkResult cr = pCreateYcbcr(device, &ci, NULL, &conversion);
-            printf("%s.vkCreateSamplerYcbcrConversion=%d:%s\n",
-                   tc->name, cr, vk_result_name(cr));
-            if (cr == VK_SUCCESS) {
-                PFN_vkDestroySamplerYcbcrConversion pDestroyYcbcr =
-                    (PFN_vkDestroySamplerYcbcrConversion)vkGetDeviceProcAddr(
-                        device, "vkDestroySamplerYcbcrConversion");
-                if (pDestroyYcbcr)
-                    pDestroyYcbcr(device, conversion, NULL);
-            }
+        if (!pCreateYcbcr || !pDestroyYcbcr) {
+            vkDestroyImage(device, image, NULL);
+            vkFreeMemory(device, memory, NULL);
+            AHardwareBuffer_release(ahb);
+            printf("%s.status=YCBCR_FUNCTION_MISSING\n", tc->name);
+            return 7;
         }
+
+        VkExternalFormatANDROID conv_external = {
+            .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
+            .externalFormat = fmt.externalFormat,
+        };
+        VkSamplerYcbcrConversionCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
+            .pNext = &conv_external,
+            .format = VK_FORMAT_UNDEFINED,
+            .ycbcrModel = fmt.suggestedYcbcrModel,
+            .ycbcrRange = fmt.suggestedYcbcrRange,
+            .components = fmt.samplerYcbcrConversionComponents,
+            .xChromaOffset = fmt.suggestedXChromaOffset,
+            .yChromaOffset = fmt.suggestedYChromaOffset,
+            .chromaFilter = VK_FILTER_NEAREST,
+            .forceExplicitReconstruction = VK_FALSE,
+        };
+        VkSamplerYcbcrConversion conversion = VK_NULL_HANDLE;
+        VkResult cr = pCreateYcbcr(device, &ci, NULL, &conversion);
+        printf("%s.vkCreateSamplerYcbcrConversion=%d:%s\n",
+               tc->name, cr, vk_result_name(cr));
+        if (cr != VK_SUCCESS) {
+            vkDestroyImage(device, image, NULL);
+            vkFreeMemory(device, memory, NULL);
+            AHardwareBuffer_release(ahb);
+            printf("%s.status=YCBCR_CONVERSION_FAIL\n", tc->name);
+            return 8;
+        }
+
+        /* SurfaceFlinger/Skia v0.17 died while constructing the backend
+         * texture. Exercise the external-format image-view path as well as
+         * import/bind. Vulkan requires format=UNDEFINED and the matching
+         * YCbCr conversion for an Android external-format image view.
+         */
+        VkSamplerYcbcrConversionInfo conversion_info = {
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO,
+            .conversion = conversion,
+        };
+        VkImageViewCreateInfo view_ci = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = &conversion_info,
+            .image = image,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = VK_FORMAT_UNDEFINED,
+            .components = {
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VkImageView view = VK_NULL_HANDLE;
+        VkResult vr = vkCreateImageView(device, &view_ci, NULL, &view);
+        printf("%s.vkCreateImageView_external=%d:%s\n",
+               tc->name, vr, vk_result_name(vr));
+        if (vr != VK_SUCCESS) {
+            pDestroyYcbcr(device, conversion, NULL);
+            vkDestroyImage(device, image, NULL);
+            vkFreeMemory(device, memory, NULL);
+            AHardwareBuffer_release(ahb);
+            printf("%s.status=EXTERNAL_IMAGE_VIEW_FAIL\n", tc->name);
+            return 9;
+        }
+
+        vkDestroyImageView(device, view, NULL);
+        pDestroyYcbcr(device, conversion, NULL);
     } else {
         printf("%s.vkCreateSamplerYcbcrConversion=SKIP_NON_EXTERNAL_FORMAT\n",
+               tc->name);
+        printf("%s.vkCreateImageView_external=SKIP_NON_EXTERNAL_FORMAT\n",
                tc->name);
     }
 

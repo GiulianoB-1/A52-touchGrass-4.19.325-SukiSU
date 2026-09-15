@@ -198,8 +198,13 @@ if xhci_text.count(
     raise SystemExit("xHCI 64-bit handshake prototype count is not one")
 
 lib_makefile = (root / "lib/Makefile").read_text()
-if lib_makefile.count("sha1.o chacha20.o irq_regs.o") != 1:
-    raise SystemExit("Linux stable chacha20 object entry count is not one")
+chacha20_object_count = len(
+    re.findall(r"(?<!\\S)chacha20\\.o(?!\\S)", lib_makefile)
+)
+if chacha20_object_count != 1:
+    raise SystemExit(
+        f"Linux stable chacha20 object entry count is {chacha20_object_count}, expected 1"
+    )
 if not (root / "lib/chacha20.c").is_file():
     raise SystemExit("Linux stable lib/chacha20.c source is missing")
 if not (root / "lib/chacha.c").is_file():

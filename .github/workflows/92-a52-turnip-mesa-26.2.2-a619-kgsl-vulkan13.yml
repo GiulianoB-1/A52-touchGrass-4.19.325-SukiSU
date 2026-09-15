@@ -171,7 +171,8 @@ jobs:
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
-          grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix' "$INFO"
+          grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix-plus-tp10-smoke' "$INFO"
+          grep -Fxq 'tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-compute-smoke' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
           grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
@@ -188,7 +189,10 @@ jobs:
           readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
           readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
           readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
-          strings "$YV12_PROBE" | grep -Fq 'YV12 940x1670 GPU SAMPLE PROBE'
+          strings "$YV12_PROBE" | grep -Fq 'YV12 / QTI TP10 GPU SAMPLE PROBE'
+          strings "$YV12_PROBE" | grep -Fq -- '--tp10-smoke'
+          strings "$YV12_PROBE" | grep -Fq 'TP10_GPU_SAMPLE_STATUS=PASS'
+          strings "$YV12_PROBE" | grep -Fq 'tp10_sample.vkQueueSubmit=%d:%s'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.before_vkQueueSubmit=1'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_match=%s'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.import_before_fill=%d'
@@ -274,13 +278,14 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.19-vk1.3-persistent-qti-tp10-native'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.19.1-vk1.3-persistent-qti-tp10-gpu-sample'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'service.sh'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-vk-probe'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-ahb-probe'
+          unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-yv12-sample-probe'
           unzip -p "$PERSIST_ZIP" action.sh | grep -Fq '=== DIRECT AHB IMPORT PROBE ==='
           unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'Could not initialize Vulkan RenderEngine'
           unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'PAGE FAULT'

@@ -339,7 +339,268 @@ new3 = """      struct fdl_explicit_layout plane_layout = {
 if text.count(anchor3) != 1:
     raise SystemExit(f"plane layout init anchor count: {text.count(anchor3)}")
 text = text.replace(anchor3, new3, 1)
+
+# Backport Turnip-Enhanced 76a4087d9e26fd2470936fae698827b6a2872528.
+# Android gralloc linear color allocations can end exactly at the final
+# logical row. Turnip's ordinary last-level tail padding plus event/CCU GMEM
+# fast paths may then access beyond the dma-buf and produce CCU write
+# translation faults. Preserve the exact imported footprint and route edge
+# loads/stores through bounded paths.
+replace_once(
+    "src/freedreno/vulkan/tu_image.h",
+    """   struct fdl_layout layout[3];
+   uint64_t subsampled_metadata_offset;
+   uint64_t total_size;
+
+   /* Set when bound */
+""",
+    """   struct fdl_layout layout[3];
+   uint64_t subsampled_metadata_offset;
+   uint64_t total_size;
+
+   /* Exact-size linear Android imports have no private FDL tail rows, so
+    * mem<->GMEM operations must use bounded edge paths when necessary.
+    */
+   bool android_external_no_gmem_padding;
+
+   /* Set when bound */
+""",
+    "tu_image exact linear Android flag",
+)
+
+helper_anchor = """template <chip CHIP>
+VkResult
+tu_image_init(struct tu_device *device, struct tu_image *image,
+              const VkImageCreateInfo *pCreateInfo, uint64_t modifier,
+              const VkSubresourceLayout *plane_layouts)
+{"""
+if text.count(helper_anchor) != 1:
+    raise SystemExit(f"exact-linear helper anchor count: {text.count(helper_anchor)}")
+
+exact_linear_helper = r"""static bool
+tu_is_android_exact_linear_color_import(struct tu_image *image,
+                                        uint64_t modifier,
+                                        const VkSubresourceLayout *plane_layouts)
+{
+   const VkImageUsageFlags supported_usage =
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+      VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_STORAGE_BIT |
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+
+   const bool is_android_buffer =
+      vk_image_is_android_hardware_buffer(&image->vk) ||
+      vk_image_is_android_native_buffer(&image->vk) ||
+      vk_image_is_android_native_buffer_alias(&image->vk);
+
+   if (!is_android_buffer || !plane_layouts ||
+       modifier != DRM_FORMAT_MOD_LINEAR ||
+       tu6_plane_count(image->vk.format) != 1 ||
+       !vk_format_is_color(image->vk.format) ||
+       vk_format_is_depth_or_stencil(image->vk.format) ||
+       vk_format_is_compressed(image->vk.format) ||
+       image->vk.image_type != VK_IMAGE_TYPE_2D ||
+       image->vk.samples != VK_SAMPLE_COUNT_1_BIT ||
+       image->vk.mip_levels != 1 || image->vk.array_layers != 1 ||
+       image->vk.extent.depth != 1 ||
+       (image->vk.usage & ~supported_usage))
+      return false;
+
+   const enum pipe_format format = tu6_plane_format(image->vk.format, 0);
+   if (format == PIPE_FORMAT_NONE)
+      return false;
+
+   const uint64_t pitch = plane_layouts[0].rowPitch;
+   const uint64_t offset = plane_layouts[0].offset;
+   const uint64_t min_pitch =
+      util_format_get_stride(format, image->vk.extent.width);
+   const uint64_t size = pitch * image->vk.extent.height;
+
+   return pitch >= min_pitch && pitch <= UINT32_MAX &&
+          offset <= UINT32_MAX && size <= UINT32_MAX &&
+          offset + size <= UINT32_MAX;
+}
+
+"""
+text = text.replace(helper_anchor, exact_linear_helper + helper_anchor, 1)
+
+layout_anchor = """   /* Layout computation begins here */
+   enum a6xx_tile_mode tile_mode = TILE6_3;
+#if DETECT_OS_LINUX || DETECT_OS_BSD
+"""
+layout_new = """   /* Layout computation begins here */
+   enum a6xx_tile_mode tile_mode = TILE6_3;
+   image->android_external_no_gmem_padding = false;
+#if DETECT_OS_LINUX || DETECT_OS_BSD
+"""
+if text.count(layout_anchor) != 1:
+    raise SystemExit(f"exact-linear layout anchor count: {text.count(layout_anchor)}")
+text = text.replace(layout_anchor, layout_new, 1)
+
+yv12_bool_anchor = """   const bool android_yv12_import =
+      tu_is_android_yv12_import(image, modifier, plane_layouts);
+
+   for (uint32_t i = 0; i < tu6_plane_count(image->vk.format); i++) {"""
+yv12_bool_new = """   const bool android_yv12_import =
+      tu_is_android_yv12_import(image, modifier, plane_layouts);
+   const bool android_exact_linear_color_import =
+      tu_is_android_exact_linear_color_import(image, modifier, plane_layouts);
+   image->android_external_no_gmem_padding =
+      android_exact_linear_color_import;
+
+   for (uint32_t i = 0; i < tu6_plane_count(image->vk.format); i++) {"""
+if text.count(yv12_bool_anchor) != 1:
+    raise SystemExit(f"exact-linear boolean anchor count: {text.count(yv12_bool_anchor)}")
+text = text.replace(yv12_bool_anchor, yv12_bool_new, 1)
+
+plane_padding_anchor = """.skip_last_level_padding = android_yv12_import,"""
+plane_padding_new = """.skip_last_level_padding =
+            android_yv12_import || android_exact_linear_color_import,"""
+if text.count(plane_padding_anchor) != 1:
+    raise SystemExit(f"exact-linear padding anchor count: {text.count(plane_padding_anchor)}")
+text = text.replace(plane_padding_anchor, plane_padding_new, 1)
+
+bind_anchor = """   assert(mem);
+   image->mem = mem;
+"""
+bind_new = """   assert(mem);
+
+   const bool is_android_buffer =
+      vk_image_is_android_hardware_buffer(&image->vk) ||
+      vk_image_is_android_native_buffer(&image->vk) ||
+      vk_image_is_android_native_buffer_alias(&image->vk);
+   if (is_android_buffer && mem->bo &&
+       (offset > mem->bo->size ||
+        image->total_size > mem->bo->size - offset)) {
+      return vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE,
+                       "Android image binding exceeds dma-buf size (%" PRIu64
+                       " + %" PRIu64 " > %" PRIu64 ")",
+                       offset, image->total_size, mem->bo->size);
+   }
+
+   image->mem = mem;
+"""
+if text.count(bind_anchor) != 1:
+    raise SystemExit(f"exact-linear bind anchor count: {text.count(bind_anchor)}")
+text = text.replace(bind_anchor, bind_new, 1)
+
 tu.write_text(text)
+
+clear = src / "src/freedreno/vulkan/tu_clear_blit.cc"
+clear_text = clear.read_text()
+
+clear_helper_anchor = """template <chip CHIP>
+void
+tu_load_gmem_attachment(struct tu_cmd_buffer *cmd,
+"""
+if clear_text.count(clear_helper_anchor) != 1:
+    raise SystemExit(f"bounded GMEM helper anchor count: {clear_text.count(clear_helper_anchor)}")
+
+clear_helper = r"""static bool
+tu_attachment_gmem_edge_unaligned(struct tu_cmd_buffer *cmd, uint32_t a,
+                                  bool require_image_edge_y_alignment)
+{
+   struct tu_physical_device *phys_dev = cmd->device->physical_device;
+   const struct tu_image_view *iview = cmd->state.attachments[a];
+
+   unsigned render_area_count =
+      cmd->state.per_layer_render_area ? cmd->state.pass->num_views : 1;
+
+   /* Existing FDM paths already use bounded coordinates. */
+   if (cmd->state.fdm_subsampled)
+      return false;
+
+   for (unsigned i = 0; i < render_area_count; i++) {
+      const VkRect2D *render_area = &cmd->state.render_areas[i];
+      uint32_t x1 = render_area->offset.x;
+      uint32_t y1 = render_area->offset.y;
+      uint32_t x2 = x1 + render_area->extent.width;
+      uint32_t y2 = y1 + render_area->extent.height;
+
+      bool need_x2_align = x2 != iview->view.width;
+      if (!need_x2_align &&
+          iview->image->android_external_no_gmem_padding) {
+         const struct fdl_layout *layout = &iview->image->layout[0];
+         const uint64_t aligned_width =
+            DIV_ROUND_UP((uint64_t)x2, phys_dev->info->gmem_align_w) *
+            phys_dev->info->gmem_align_w;
+         const uint64_t required_pitch = aligned_width * layout->cpp;
+         need_x2_align = required_pitch > layout->pitch0;
+      }
+
+      const bool need_y2_align =
+         y2 != iview->view.height || iview->view.need_y2_align ||
+         require_image_edge_y_alignment;
+
+      if (x1 % phys_dev->info->gmem_align_w ||
+          (x2 % phys_dev->info->gmem_align_w && need_x2_align) ||
+          y1 % phys_dev->info->gmem_align_h ||
+          (y2 % phys_dev->info->gmem_align_h && need_y2_align))
+         return true;
+   }
+
+   return false;
+}
+
+"""
+clear_text = clear_text.replace(clear_helper_anchor,
+                                clear_helper + clear_helper_anchor, 1)
+
+load_anchor = """   if (!load_common && !load_stencil)
+      return;
+
+   trace_start_gmem_load(&cmd->rp_trace, cs, cmd, attachment->format, force_load);
+"""
+load_new = """   if (!load_common && !load_stencil)
+      return;
+
+   const bool bounded_external_load =
+      iview->image->android_external_no_gmem_padding &&
+      tu_attachment_gmem_edge_unaligned(cmd, a, true);
+
+   trace_start_gmem_load(&cmd->rp_trace, cs, cmd, attachment->format, force_load);
+"""
+if clear_text.count(load_anchor) != 1:
+    raise SystemExit(f"bounded load anchor count: {clear_text.count(load_anchor)}")
+clear_text = clear_text.replace(load_anchor, load_new, 1)
+
+fast_load_anchor = """   if (TU_DEBUG(3D_LOAD) ||
+       cmd->state.pass->has_fdm ||
+"""
+fast_load_new = """   if (TU_DEBUG(3D_LOAD) ||
+       bounded_external_load ||
+       cmd->state.pass->has_fdm ||
+"""
+if clear_text.count(fast_load_anchor) != 1:
+    raise SystemExit(f"bounded load-path anchor count: {clear_text.count(fast_load_anchor)}")
+clear_text = clear_text.replace(fast_load_anchor, fast_load_new, 1)
+
+store_start = clear_text.index("""static bool
+tu_attachment_store_unaligned(struct tu_cmd_buffer *cmd, uint32_t a)
+{""")
+store_end = clear_text.index("""
+}
+
+/* The fast path cannot handle mismatched mutability. */""", store_start) + 2
+old_store = clear_text[store_start:store_end]
+new_store = r"""static bool
+tu_attachment_store_unaligned(struct tu_cmd_buffer *cmd, uint32_t a)
+{
+   const struct tu_image_view *iview = cmd->state.attachments[a];
+
+   /* Unaligned store is incredibly rare in CTS, we have to force it to test. */
+   if (TU_DEBUG(UNALIGNED_STORE))
+      return true;
+
+   return tu_attachment_gmem_edge_unaligned(
+      cmd, a, iview->image->android_external_no_gmem_padding);
+}"""
+clear_text = clear_text[:store_start] + new_store + clear_text[store_end:]
+
+clear.write_text(clear_text)
 PY
 
 grep -Fq 'bool has_explicit_pitch : 1;' "$SRC/src/freedreno/fdl/freedreno_layout.h"
@@ -347,6 +608,11 @@ grep -Fq 'if (level == 0 && layout->has_explicit_pitch)' "$SRC/src/freedreno/fdl
 grep -Fq 'pitch_alignment = android_yv12_import ? 16u : 0u' "$SRC/src/freedreno/vulkan/tu_image.cc"
 grep -Fq 'skip_last_level_padding = android_yv12_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
 grep -Fq 'tu_is_android_yv12_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'android_external_no_gmem_padding' "$SRC/src/freedreno/vulkan/tu_image.h"
+grep -Fq 'tu_is_android_exact_linear_color_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'Android image binding exceeds dma-buf size' "$SRC/src/freedreno/vulkan/tu_image.cc"
+grep -Fq 'tu_attachment_gmem_edge_unaligned' "$SRC/src/freedreno/vulkan/tu_clear_blit.cc"
+grep -Fq 'bounded_external_load' "$SRC/src/freedreno/vulkan/tu_clear_blit.cc"
 
 echo "==> Cap Turnip bring-up to Vulkan 1.3"
 python3 - "$SRC" <<'PY'
@@ -517,7 +783,7 @@ ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
-android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
+android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization\nandroid_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF

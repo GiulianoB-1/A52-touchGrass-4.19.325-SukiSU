@@ -246,6 +246,428 @@ replace_once(
     "u_gralloc normalized YV12 offsets",
 )
 
+
+# v0.17: import QTI's private NV12 Venus UBWC Android buffers
+# (HAL format 0x7fa30c06) through the legacy Qualcomm PlaneLayoutInfo ABI.
+#
+# The v0.16 SurfaceFlinger tombstone proved the remaining failure is no longer
+# the exact-size RGB/CCU path.  SurfaceFlinger aborts while importing a
+# 720x1280 AHardwareBuffer whose vendor format is 0x7fa30c06.  Mesa 26.2.2's
+# old qcom gralloc backend does not classify that private format as YUV and
+# consequently returns VK_ERROR_INVALID_EXTERNAL_HANDLE.
+#
+# Keep this deliberately narrow.  We runtime-load the exact public Qualcomm
+# GetYUVPlaneInfo(BufferInfo, ...) symbol, validate the native-handle ABI and
+# all four physical NV12-UBWC ranges (Y data, UV data, Y metadata, UV
+# metadata), cross-check the handle-aware android_ycbcr result returned by the
+# already-active gralloc module, then normalize it to the two logical Vulkan
+# planes expected by DRM_FORMAT_NV12 + DRM_FORMAT_MOD_QCOM_COMPRESSED.
+replace_once(
+    "src/util/u_gralloc/u_gralloc_qcom.c",
+    """#include <assert.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <string.h>
+""",
+    """#include <assert.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+""",
+    "qcom NV12 UBWC includes",
+)
+
+replace_once(
+    "src/util/u_gralloc/u_gralloc_qcom.c",
+    """/* Using this gralloc is not recommended for new distributions. */
+
+struct qcom_gralloc {
+""",
+    r"""/* Using this gralloc is not recommended for new distributions. */
+
+#define TG_QTI_NV12_UBWC_FORMAT 0x7fa30c06
+#define TG_QTI_HANDLE_NUM_FDS 2
+#define TG_QTI_HANDLE_MIN_INTS 22
+#define TG_QTI_HANDLE_MAX_INTS 26
+#define TG_QTI_HANDLE_MAGIC \
+   (('g' << 24) | ('m' << 16) | ('s' << 8) | 'm')
+
+#define TG_QTI_HANDLE_FLAGS_INDEX 3
+#define TG_QTI_HANDLE_WIDTH_INDEX 4
+#define TG_QTI_HANDLE_HEIGHT_INDEX 5
+#define TG_QTI_HANDLE_UNALIGNED_WIDTH_INDEX 6
+#define TG_QTI_HANDLE_UNALIGNED_HEIGHT_INDEX 7
+#define TG_QTI_HANDLE_FORMAT_INDEX 8
+#define TG_QTI_HANDLE_LAYER_COUNT_INDEX 10
+#define TG_QTI_HANDLE_USAGE_INDEX 13
+#define TG_QTI_HANDLE_SIZE_INDEX 15
+#define TG_QTI_HANDLE_OFFSET_INDEX 16
+#define TG_QTI_HANDLE_BASE_INDEX 18
+
+#define TG_QTI_FLAG_SECURE_BUFFER 0x00000400u
+#define TG_QTI_FLAG_UBWC_ALIGNED 0x08000000u
+#define TG_QTI_FLAG_UBWC_ALIGNED_PI 0x40000000u
+
+#define TG_QTI_PLANE_Y (1u << 0)
+#define TG_QTI_PLANE_CB (1u << 1)
+#define TG_QTI_PLANE_CR (1u << 2)
+#define TG_QTI_PLANE_META (1u << 31)
+
+#define TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL \
+   "_ZN7gralloc15GetYUVPlaneInfoERKNS_10BufferInfoEiiiiPiPNS_15PlaneLayoutInfoE"
+
+struct tg_qti_buffer_info {
+   int32_t width;
+   int32_t height;
+   int32_t format;
+   int32_t layer_count;
+   uint64_t usage;
+};
+
+struct tg_qti_plane_layout_info {
+   uint32_t component;
+   uint32_t horizontal_subsampling;
+   uint32_t vertical_subsampling;
+   uint32_t offset;
+   int32_t step;
+   int32_t stride;
+   int32_t stride_bytes;
+   int32_t scanlines;
+   uint32_t size;
+};
+
+typedef int (*tg_qti_get_yuv_plane_layouts_t)(
+   const struct tg_qti_buffer_info *info, int32_t format, int32_t width,
+   int32_t height, int32_t flags, int *plane_count,
+   struct tg_qti_plane_layout_info *plane_info);
+
+struct qcom_gralloc {
+""",
+    "qcom NV12 UBWC ABI definitions",
+)
+
+replace_once(
+    "src/util/u_gralloc/u_gralloc_qcom.c",
+    """   void *perform_handle;
+   int (* perform)(void *dev, int op, ...);
+   struct u_gralloc *fallback_gralloc;
+};
+""",
+    """   void *perform_handle;
+   int (* perform)(void *dev, int op, ...);
+   struct u_gralloc *fallback_gralloc;
+   void *grallocutils;
+   tg_qti_get_yuv_plane_layouts_t get_yuv_plane_layouts;
+};
+""",
+    "qcom NV12 UBWC runtime helper fields",
+)
+
+qcom = src / "src/util/u_gralloc/u_gralloc_qcom.c"
+qcom_text = qcom.read_text()
+qcom_helper_anchor = """static int
+fallback_gralloc_get_yuv_info(struct u_gralloc *gralloc,
+"""
+if qcom_text.count(qcom_helper_anchor) != 1:
+    raise SystemExit(
+        f"qcom NV12 UBWC helper anchor count: {qcom_text.count(qcom_helper_anchor)}"
+    )
+
+qcom_helpers = r"""static uint64_t
+tg_qti_read_u64(const native_handle_t *handle, int index)
+{
+   uint64_t value = 0;
+   memcpy(&value, &handle->data[index], sizeof(value));
+   return value;
+}
+
+static bool
+tg_qti_pointer_matches(uintptr_t base, uint32_t offset, const void *pointer)
+{
+   const uintptr_t value = (uintptr_t) pointer;
+
+   /* Legacy Samsung/QCOM gralloc can return either null-based offsets or
+    * base-relative process virtual addresses depending on mapping state.
+    */
+   if (value == (uintptr_t) offset)
+      return true;
+
+   return offset <= UINTPTR_MAX - base && value == base + offset;
+}
+
+static bool
+tg_qti_plane_range_valid(const struct tg_qti_plane_layout_info *plane,
+                         uint32_t component, uint32_t hsub, uint32_t vsub,
+                         int32_t step, int32_t aligned_width,
+                         uint64_t declared_size, uint64_t dma_size)
+{
+   if (plane->component != component ||
+       plane->horizontal_subsampling != hsub ||
+       plane->vertical_subsampling != vsub ||
+       plane->step != step ||
+       plane->stride != aligned_width ||
+       plane->stride_bytes <= 0 || plane->scanlines <= 0 ||
+       plane->size == 0 || plane->offset > INT_MAX)
+      return false;
+
+   const uint64_t offset = plane->offset;
+   const uint64_t size = plane->size;
+   const uint64_t stride = (uint64_t) plane->stride_bytes;
+   const uint64_t rows = (uint64_t) plane->scanlines;
+
+   if (offset > declared_size || size > declared_size - offset ||
+       offset > dma_size || size > dma_size - offset ||
+       rows > UINT64_MAX / stride || stride * rows > size)
+      return false;
+
+   return true;
+}
+
+/* Return -EAGAIN when the handle is not the private NV12-UBWC allocation we
+ * own.  Once the private format is positively identified, every inconsistency
+ * is a hard failure so it can never fall through and be guessed as linear.
+ */
+static int
+tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
+                           struct u_gralloc_buffer_handle *hnd,
+                           struct u_gralloc_buffer_basic_info *out)
+{
+   if (!hnd || !hnd->handle || !gr->get_yuv_plane_layouts)
+      return -EAGAIN;
+
+   const native_handle_t *handle = hnd->handle;
+   if (sizeof(void *) != 8 ||
+       handle->version != sizeof(native_handle_t) ||
+       handle->numFds != TG_QTI_HANDLE_NUM_FDS ||
+       handle->numInts < TG_QTI_HANDLE_MIN_INTS ||
+       handle->numInts > TG_QTI_HANDLE_MAX_INTS ||
+       handle->data[handle->numFds] != TG_QTI_HANDLE_MAGIC)
+      return -EAGAIN;
+
+   const int32_t private_format = handle->data[TG_QTI_HANDLE_FORMAT_INDEX];
+   if (private_format != TG_QTI_NV12_UBWC_FORMAT)
+      return -EAGAIN;
+
+   if (hnd->hal_format != TG_QTI_NV12_UBWC_FORMAT &&
+       hnd->hal_format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED &&
+       hnd->hal_format != HAL_PIXEL_FORMAT_YCbCr_420_888)
+      return -EINVAL;
+
+   const uint32_t flags =
+      (uint32_t) handle->data[TG_QTI_HANDLE_FLAGS_INDEX];
+   const int32_t width = handle->data[TG_QTI_HANDLE_WIDTH_INDEX];
+   const int32_t height = handle->data[TG_QTI_HANDLE_HEIGHT_INDEX];
+   const int32_t unaligned_width =
+      handle->data[TG_QTI_HANDLE_UNALIGNED_WIDTH_INDEX];
+   const int32_t unaligned_height =
+      handle->data[TG_QTI_HANDLE_UNALIGNED_HEIGHT_INDEX];
+   const int32_t layer_count =
+      handle->data[TG_QTI_HANDLE_LAYER_COUNT_INDEX];
+   const uint64_t usage =
+      tg_qti_read_u64(handle, TG_QTI_HANDLE_USAGE_INDEX);
+   const int32_t declared_size_i =
+      handle->data[TG_QTI_HANDLE_SIZE_INDEX];
+   const uintptr_t base =
+      (uintptr_t) tg_qti_read_u64(handle, TG_QTI_HANDLE_BASE_INDEX);
+
+   if (width <= 0 || height <= 0 ||
+       unaligned_width <= 0 || unaligned_height <= 0 ||
+       width < unaligned_width || height < unaligned_height ||
+       layer_count != 1 || declared_size_i <= 0 ||
+       handle->data[TG_QTI_HANDLE_OFFSET_INDEX] != 0 ||
+       !(flags & TG_QTI_FLAG_UBWC_ALIGNED) ||
+       (flags & (TG_QTI_FLAG_UBWC_ALIGNED_PI |
+                 TG_QTI_FLAG_SECURE_BUFFER)))
+      return -EINVAL;
+
+   const uint64_t declared_size = (uint32_t) declared_size_i;
+   off_t dma_end = lseek(handle->data[0], 0, SEEK_END);
+   if (dma_end <= 0 || declared_size > (uint64_t) dma_end)
+      return -EINVAL;
+   const uint64_t dma_size = (uint64_t) dma_end;
+
+   struct tg_qti_buffer_info info = {
+      .width = unaligned_width,
+      .height = unaligned_height,
+      .format = private_format,
+      .layer_count = 1,
+      .usage = usage,
+   };
+   struct tg_qti_plane_layout_info planes[8];
+   memset(planes, 0, sizeof(planes));
+   int plane_count = 0;
+
+   int ret = gr->get_yuv_plane_layouts(
+      &info, private_format, width, height, 0, &plane_count, planes);
+   if (ret != 0 || plane_count != 4)
+      return -EINVAL;
+
+   const struct tg_qti_plane_layout_info *y = &planes[0];
+   const struct tg_qti_plane_layout_info *uv = &planes[1];
+   const struct tg_qti_plane_layout_info *y_meta = &planes[2];
+   const struct tg_qti_plane_layout_info *uv_meta = &planes[3];
+
+   if (!tg_qti_plane_range_valid(
+          y, TG_QTI_PLANE_Y, 0, 0, 1, width,
+          declared_size, dma_size) ||
+       !tg_qti_plane_range_valid(
+          uv, TG_QTI_PLANE_CB | TG_QTI_PLANE_CR, 1, 1, 2, width,
+          declared_size, dma_size) ||
+       !tg_qti_plane_range_valid(
+          y_meta, TG_QTI_PLANE_META | TG_QTI_PLANE_Y, 0, 0, 0, width,
+          declared_size, dma_size) ||
+       !tg_qti_plane_range_valid(
+          uv_meta,
+          TG_QTI_PLANE_META | TG_QTI_PLANE_CB | TG_QTI_PLANE_CR,
+          0, 0, 0, width, declared_size, dma_size))
+      return -EINVAL;
+
+   const uint64_t y_meta_end =
+      (uint64_t) y_meta->offset + y_meta->size;
+   const uint64_t y_end = (uint64_t) y->offset + y->size;
+   const uint64_t uv_meta_end =
+      (uint64_t) uv_meta->offset + uv_meta->size;
+   const uint64_t uv_end = (uint64_t) uv->offset + uv->size;
+
+   /* Progressive QTI NV12 UBWC is physically:
+    * Y metadata -> Y data -> UV metadata -> UV data.
+    */
+   if (y_meta->offset != 0 ||
+       (uint64_t) y->offset != y_meta_end ||
+       (uint64_t) uv_meta->offset != y_end ||
+       (uint64_t) uv->offset != uv_meta_end ||
+       uv_end > declared_size || uv_end > dma_size)
+      return -EINVAL;
+
+   /* Independently cross-check the layout against the handle-aware vendor
+    * query used by the stock gralloc module.
+    */
+   struct android_ycbcr ycbcr[2];
+   memset(ycbcr, 0, sizeof(ycbcr));
+   ret = gr->perform(gr->perform_handle,
+                     GRALLOC_MODULE_PERFORM_GET_YUV_PLANE_INFO,
+                     handle, ycbcr);
+   if (ret != 0 ||
+       ycbcr[1].y || ycbcr[1].cb || ycbcr[1].cr ||
+       ycbcr[1].ystride || ycbcr[1].cstride ||
+       ycbcr[1].chroma_step ||
+       ycbcr[0].ystride != (size_t) y->stride_bytes ||
+       ycbcr[0].cstride != (size_t) uv->stride_bytes ||
+       ycbcr[0].chroma_step != 2 ||
+       !tg_qti_pointer_matches(base, y->offset, ycbcr[0].y) ||
+       !tg_qti_pointer_matches(base, uv->offset, ycbcr[0].cb) ||
+       uv->offset == UINT32_MAX ||
+       !tg_qti_pointer_matches(base, uv->offset + 1, ycbcr[0].cr))
+      return -EINVAL;
+
+   out->drm_fourcc = DRM_FORMAT_NV12;
+   out->modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+   out->num_planes = 2;
+   out->fds[0] = out->fds[1] = handle->data[0];
+
+   /* For QCOM_COMPRESSED, Turnip's logical plane starts at the metadata
+    * range. FDL computes the primary-data offset from the modifier geometry.
+    */
+   out->offsets[0] = (int) y_meta->offset;
+   out->offsets[1] = (int) uv_meta->offset;
+   out->strides[0] = y->stride_bytes;
+   out->strides[1] = uv->stride_bytes;
+
+   mesa_logi("touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo");
+   return 0;
+}
+
+"""
+qcom_text = qcom_text.replace(
+    qcom_helper_anchor, qcom_helpers + qcom_helper_anchor, 1
+)
+
+get_info_anchor = """   int out_flag = 0;
+   int err;
+
+   err = gr->perform(gr->perform_handle, GRALLOC_MODULE_PERFORM_GET_UBWC_FLAG,
+"""
+get_info_new = """   int out_flag = 0;
+   int err;
+
+   /* Intercept only positively identified private QTI NV12 UBWC handles.
+    * -EAGAIN means this is an ordinary allocation and the Mesa 26.2.2 path
+    * below remains untouched.
+    */
+   int qti_ret = tg_qcom_get_nv12_ubwc_info(gr, hnd, out);
+   if (qti_ret != -EAGAIN)
+      return qti_ret;
+
+   err = gr->perform(gr->perform_handle, GRALLOC_MODULE_PERFORM_GET_UBWC_FLAG,
+"""
+if qcom_text.count(get_info_anchor) != 1:
+    raise SystemExit(
+        f"qcom NV12 UBWC get_buffer_info anchor count: {qcom_text.count(get_info_anchor)}"
+    )
+qcom_text = qcom_text.replace(get_info_anchor, get_info_new, 1)
+
+destroy_anchor = """   if (gr->fallback_gralloc)
+      gr->fallback_gralloc->ops.destroy(gr->fallback_gralloc);
+
+   FREE(gr);
+"""
+destroy_new = """   if (gr->fallback_gralloc)
+      gr->fallback_gralloc->ops.destroy(gr->fallback_gralloc);
+
+   if (gr->grallocutils)
+      dlclose(gr->grallocutils);
+
+   FREE(gr);
+"""
+if qcom_text.count(destroy_anchor) != 1:
+    raise SystemExit(
+        f"qcom NV12 UBWC destroy anchor count: {qcom_text.count(destroy_anchor)}"
+    )
+qcom_text = qcom_text.replace(destroy_anchor, destroy_new, 1)
+
+create_anchor = """   if (out_stride == 0)
+      goto fail;
+
+   gr->base.ops.get_buffer_basic_info = get_buffer_info;
+"""
+create_new = r"""   if (out_stride == 0)
+      goto fail;
+
+   /* Prefer the helper already loaded with the active gralloc module.  If the
+    * dependency is not in that lookup scope, try the process-wide scope and
+    * finally take an explicit reference.  Failure is non-fatal for ordinary
+    * buffers; only private 0x7fa30c06 imports require this helper.
+    */
+   void *plane_symbol =
+      dlsym(gr->gralloc_module->dso, TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL);
+   if (!plane_symbol)
+      plane_symbol = dlsym(RTLD_DEFAULT, TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL);
+   if (!plane_symbol) {
+      gr->grallocutils = dlopen("libgrallocutils.so", RTLD_NOW | RTLD_LOCAL);
+      if (gr->grallocutils)
+         plane_symbol =
+            dlsym(gr->grallocutils, TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL);
+   }
+
+   if (plane_symbol) {
+      memcpy(&gr->get_yuv_plane_layouts, &plane_symbol,
+             sizeof(gr->get_yuv_plane_layouts));
+      mesa_logi("touchGrass: QTI legacy PlaneLayoutInfo helper available");
+   }
+
+   gr->base.ops.get_buffer_basic_info = get_buffer_info;
+"""
+if qcom_text.count(create_anchor) != 1:
+    raise SystemExit(
+        f"qcom NV12 UBWC create anchor count: {qcom_text.count(create_anchor)}"
+    )
+qcom_text = qcom_text.replace(create_anchor, create_new, 1)
+
+qcom.write_text(qcom_text)
+
 tu = src / "src/freedreno/vulkan/tu_image.cc"
 text = tu.read_text()
 anchor = """template <chip CHIP>
@@ -615,6 +1037,9 @@ source_checks = [
     ("src/freedreno/vulkan/tu_image.cc", "Android image binding exceeds dma-buf size", "Android dma-buf bounds check"),
     ("src/freedreno/vulkan/tu_clear_blit.cc", "tu_attachment_gmem_edge_unaligned", "bounded GMEM edge helper"),
     ("src/freedreno/vulkan/tu_clear_blit.cc", "bounded_external_load", "bounded GMEM load path"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "TG_QTI_NV12_UBWC_FORMAT 0x7fa30c06", "QTI private NV12 UBWC format"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL", "QTI PlaneLayoutInfo runtime ABI"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo", "QTI NV12 UBWC import path"),
 ]
 for rel, needle, label in source_checks:
     if needle not in (src / rel).read_text():
@@ -793,6 +1218,8 @@ yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
+qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06
+qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF

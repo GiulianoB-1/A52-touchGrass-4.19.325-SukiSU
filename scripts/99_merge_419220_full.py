@@ -161,16 +161,16 @@ def main() -> None:
     repo = os.environ.get("LINUX_STABLE_REPO", "https://github.com/gregkh/linux.git")
     run("git", "init", "-q", str(STABLE))
     run("git", "-C", str(STABLE), "remote", "add", "origin", repo)
+    # 4.19.220 is 1066 first-parent commits beyond 4.19.206. Fetch enough
+    # history in one transaction; a 1024-depth fetch followed by --deepen can
+    # race Git's shallow-file bookkeeping on Actions runners.
     run(
-        "git", "-C", str(STABLE), "fetch", "--quiet", "--depth=1024", "origin",
+        "git", "-C", str(STABLE), "fetch", "--quiet", "--depth=4096", "origin",
         f"refs/tags/{BAD_TAG}:refs/tags/{BAD_TAG}",
     )
 
     bad_sha = run("git", "-C", str(STABLE), "rev-parse", f"{BAD_TAG}^{{commit}}", capture=True)
-    try:
-        run("git", "-C", str(STABLE), "cat-file", "-e", f"{EXPECTED_GOOD_SHA}^{{commit}}")
-    except subprocess.CalledProcessError:
-        run("git", "-C", str(STABLE), "fetch", "--quiet", "--deepen=4096", "origin", BAD_TAG)
+    run("git", "-C", str(STABLE), "cat-file", "-e", f"{EXPECTED_GOOD_SHA}^{{commit}}")
 
     run("git", "-C", str(STABLE), "update-ref", f"refs/tags/{GOOD_TAG}", EXPECTED_GOOD_SHA)
     run("git", "-C", str(STABLE), "merge-base", "--is-ancestor", GOOD_TAG, BAD_TAG)

@@ -160,8 +160,8 @@ jobs:
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
-          grep -Fxq 'yv12_sample_mode=940x1670-postfill-vs-importfirst-stock-reference' "$INFO"
-          grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-16byte-pitch' "$INFO"
+          grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix' "$INFO"
+          grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
@@ -178,6 +178,7 @@ jobs:
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_match=%s'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.import_before_fill=%d'
           strings "$YV12_PROBE" | grep -Fq 'offset_from_plane0='
+          strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
@@ -216,7 +217,7 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.13-vk1.3-yv12-import-order'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.14-vk1.3-yv12-qcom-mapped-fix'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'

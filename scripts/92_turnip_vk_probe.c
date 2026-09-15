@@ -1036,8 +1036,8 @@ int main(void)
 
     print_version("loader_instance_version", loader_version);
 
-    uint32_t requested = loader_version < VK_API_VERSION_1_3
-        ? loader_version : VK_API_VERSION_1_3;
+    uint32_t requested = loader_version < VK_API_VERSION_1_4
+        ? loader_version : VK_API_VERSION_1_4;
     print_version("requested_instance_version", requested);
 
     VkApplicationInfo app = {
@@ -1082,6 +1082,8 @@ int main(void)
         return 32;
     }
 
+    uint32_t first_device_api_version = 0;
+
     for (uint32_t i = 0; i < count; ++i) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(devices[i], &p);
@@ -1090,6 +1092,8 @@ int main(void)
         printf("device[%u].vendor_id=0x%04x\n", i, p.vendorID);
         printf("device[%u].device_id=0x%04x\n", i, p.deviceID);
         print_version("device_api_version", p.apiVersion);
+        if (i == 0)
+            first_device_api_version = p.apiVersion;
         printf("device[%u].driver_version_raw=%u\n", i, p.driverVersion);
 
         uint32_t ext_count = 0;
@@ -1132,6 +1136,15 @@ int main(void)
         }
     }
 
+    if (first_device_api_version < VK_API_VERSION_1_4) {
+        printf("vulkan14_device_status=FAIL\n");
+        print_version("vulkan14_required_device_version", VK_API_VERSION_1_4);
+        free(devices);
+        vkDestroyInstance(instance, NULL);
+        return 33;
+    }
+
+    printf("vulkan14_device_status=PASS\n");
     printf("=== GPU COMMAND SUBMISSION ===\n");
     int submit_rc = run_submit_probe(devices[0]);
     printf("gpu_submit_exit=%d\n", submit_rc);

@@ -105,15 +105,30 @@ else:
 # in the gadget source but no declaration exists.
 request_decl_re = re.compile(r"^[ \t]*int[ \t]+request_status;[ \t]*$", re.MULTILINE)
 request_decls = list(request_decl_re.finditer(text))
-request_used = "request_status" in request_decl_re.sub("", text)
-if len(request_decls) == 0 and request_used:
+without_decl = request_decl_re.sub("", text)
+request_uses = [m.start() for m in re.finditer(r"\brequest_status\b", without_decl)]
+
+if len(request_decls) == 0 and request_uses:
+    # Several DWC3 functions declare a local 'dwc'. Pick the declaration that
+    # belongs to the function actually using request_status, not a global text
+    # anchor. The last matching dwc declaration before the first use is the
+    # function-local declaration for this merged Samsung path.
+    first_use = request_uses[0]
     anchor = "\tstruct dwc3 *dwc = dep->dwc;\n"
-    anchor_count = text.count(anchor)
-    if anchor_count != 1:
+    anchor_pos = text.rfind(anchor, 0, first_use)
+    if anchor_pos < 0:
         raise SystemExit(
-            f"drivers/usb/dwc3/gadget.c: request_status insertion anchor count is {anchor_count}"
+            "drivers/usb/dwc3/gadget.c: request_status function-local dwc anchor missing"
         )
-    text = text.replace(anchor, anchor + "\tint request_status;\n", 1)
+    # Refuse to bind across functions: the declaration must be close to the use
+    # and no intervening top-level function definition may exist.
+    between = text[anchor_pos + len(anchor):first_use]
+    if len(between) > 4096 or re.search(r"\n(?:static\s+)?[A-Za-z_][^\n]*\([^;\n]*\)\n\{", between):
+        raise SystemExit(
+            "drivers/usb/dwc3/gadget.c: request_status use is not in the selected dwc function"
+        )
+    insert_at = anchor_pos + len(anchor)
+    text = text[:insert_at] + "\tint request_status;\n" + text[insert_at:]
     repairs.append("dwc3_gadget=restored-request-status-declaration")
 elif len(request_decls) == 1:
     repairs.append("dwc3_gadget=request-status-declaration-already-present")

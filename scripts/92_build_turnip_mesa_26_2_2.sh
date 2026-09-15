@@ -1047,31 +1047,15 @@ for rel, needle, label in source_checks:
     print(f"source_audit={label}:PASS")
 PY
 
-echo "==> Cap Turnip bring-up to Vulkan 1.3"
-python3 - "$SRC" <<'PY'
-from pathlib import Path
-import sys
-
-src = Path(sys.argv[1])
-dev = src / "src/freedreno/vulkan/tu_device.cc"
-meson = src / "src/freedreno/vulkan/meson.build"
-
-s = dev.read_text()
-old = "#define TU_API_VERSION VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION)"
-new = "#define TU_API_VERSION VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION)"
-if s.count(old) != 1:
-    raise SystemExit(f"unexpected TU_API_VERSION anchor count: {s.count(old)}")
-dev.write_text(s.replace(old, new, 1))
-
-s = meson.read_text()
-old = "'--api-version', '1.4'"
-if s.count(old) != 2:
-    raise SystemExit(f"unexpected ICD api-version anchor count: {s.count(old)}")
-meson.write_text(s.replace(old, "'--api-version', '1.3'"))
-PY
-
-grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION)'   "$SRC/src/freedreno/vulkan/tu_device.cc"
-test "$(grep -F "'--api-version', '1.3'" "$SRC/src/freedreno/vulkan/meson.build" | wc -l)" -eq 2
+echo "==> Enable upstream Turnip Vulkan 1.4 exposure"
+# Mesa 26.2.2 already advertises Vulkan 1.4 for Turnip.  v0.17 deliberately
+# rewrote both the Turnip API version and Android ICD metadata to 1.3 during
+# compatibility bring-up.  v0.18 removes that artificial cap and verifies the
+# upstream 1.4 declarations are intact, without changing the proven A52 AHB,
+# YV12, GMEM/CCU, or QTI NV12 UBWC compatibility patches.
+grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION)' \
+  "$SRC/src/freedreno/vulkan/tu_device.cc"
+test "$(grep -F "'--api-version', '1.4'" "$SRC/src/freedreno/vulkan/meson.build" | wc -l)" -eq 2
 
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 CROSS="$WORK/android-aarch64.ini"
@@ -1204,13 +1188,13 @@ gpu=Adreno 619
 kmd=KGSL
 android_api=36
 ndk=$(basename "$NDK")
-turnip_api_cap=Vulkan-1.3
+turnip_api_cap=Vulkan-1.4
 turnip_upstream_api=Vulkan-1.4
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64
 probe=turnip-vk-probe
-probe_api_request=Vulkan-1.3
+probe_api_request=Vulkan-1.4
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-ubwc-import-bind-lifetime-forensics

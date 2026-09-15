@@ -232,7 +232,7 @@ remove_channel:
     if start < 0 or end < 0:
         raise SystemExit("disable_ch function boundaries not found")
 
-    new_disable = r'''int btfm_slim_disable_ch(struct btfmslim *btfmslim, struct btfmslim_ch *ch,
+    new_disable = '''int btfm_slim_disable_ch(struct btfmslim *btfmslim, struct btfmslim_ch *ch,
 	uint8_t rxport, uint8_t grp, uint8_t nchan)
 {
 	int ret = 0, tmp_ret, i;

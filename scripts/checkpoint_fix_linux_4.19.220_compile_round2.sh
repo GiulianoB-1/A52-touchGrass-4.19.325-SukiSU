@@ -115,15 +115,25 @@ gadget_fixed = (
     "\tstruct dwc3_trb\t\t*tmp;\n"
     "\tu8\t\t\ttrbs_left;\n"
 )
-if text.count(gadget_anchor) != 1:
-    raise SystemExit("drivers/usb/dwc3/gadget.c: TRB count declaration anchor not found once")
+anchor_count = text.count(gadget_anchor)
+fixed_count = text.count(gadget_fixed)
 if text.count("tmp = dwc3_ep_prev_trb(dep, dep->trb_enqueue);") != 1:
     raise SystemExit("drivers/usb/dwc3/gadget.c: Samsung previous-TRB check is missing")
-text = text.replace(gadget_anchor, gadget_fixed, 1)
+
+if anchor_count == 1 and fixed_count == 0:
+    text = text.replace(gadget_anchor, gadget_fixed, 1)
+    rows.append("dwc3_trb_pointer=declaration_restored\n")
+elif anchor_count == 0 and fixed_count == 1:
+    rows.append("dwc3_trb_pointer=already-present\n")
+else:
+    raise SystemExit(
+        f"drivers/usb/dwc3/gadget.c: unrecognized TRB declaration shape "
+        f"(missing-tmp={anchor_count}, with-tmp={fixed_count})"
+    )
+
 if text.count("struct dwc3_trb\t\t*tmp;") != 1:
     raise SystemExit("drivers/usb/dwc3/gadget.c: temporary TRB pointer count is not one")
 dwc3_gadget.write_text(text)
-rows.append("dwc3_trb_pointer=declaration_restored\n")
 
 report.write_text("".join(rows))
 PY

@@ -111,7 +111,12 @@ if [ ! -f "$STAGE" ]; then
     echo "NV21_AB_STATUS=FAIL_STAGE_MISSING"
     exit 11
 fi
-if ! cat /proc/mounts | grep -F "$TARGET" | grep -Fq "$STAGE"; then
+TARGET_SHA="$(sha256sum "$TARGET" 2>/dev/null | awk '{print $1}')"
+STAGE_SHA="$(sha256sum "$STAGE" 2>/dev/null | awk '{print $1}')"
+echo "target_sha=$TARGET_SHA"
+echo "stage_sha=$STAGE_SHA"
+if [ -z "$TARGET_SHA" ] || [ -z "$STAGE_SHA" ] ||
+   [ "$TARGET_SHA" != "$STAGE_SHA" ]; then
     echo "NV21_AB_STATUS=FAIL_TURNIP_BIND_NOT_ACTIVE"
     exit 12
 fi
@@ -147,7 +152,12 @@ echo
 echo "=== RESTORED TURNIP HAL ==="
 ls -lZ "$TARGET" 2>/dev/null || true
 sha256sum "$TARGET" 2>/dev/null || true
-if ! cat /proc/mounts | grep -F "$TARGET" | grep -Fq "$STAGE"; then
+TARGET_SHA="$(sha256sum "$TARGET" 2>/dev/null | awk '{print $1}')"
+STAGE_SHA="$(sha256sum "$STAGE" 2>/dev/null | awk '{print $1}')"
+echo "restored_target_sha=$TARGET_SHA"
+echo "restored_stage_sha=$STAGE_SHA"
+if [ -z "$TARGET_SHA" ] || [ -z "$STAGE_SHA" ] ||
+   [ "$TARGET_SHA" != "$STAGE_SHA" ]; then
     echo "NV21_AB_STATUS=FAIL_REMOUNT"
     exit 14
 fi

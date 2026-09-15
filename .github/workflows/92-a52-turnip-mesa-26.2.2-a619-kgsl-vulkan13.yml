@@ -3,7 +3,7 @@ name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-capability-validation-v1
+      - agent/a52-turnip-vulkan14-stable-v1
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -300,7 +300,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.20.4-vk1.4-pushdescriptor-validation'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.21-vk1.4-stable-a619'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

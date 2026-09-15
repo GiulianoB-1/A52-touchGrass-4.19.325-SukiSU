@@ -89,6 +89,9 @@ static int fill_yv12_pattern(AHardwareBuffer *ahb)
     for (uint32_t p = 0; p < planes.planeCount; ++p) {
         printf("yv12_sample.plane[%u].rowStride=%u\n", p, planes.planes[p].rowStride);
         printf("yv12_sample.plane[%u].pixelStride=%u\n", p, planes.planes[p].pixelStride);
+        intptr_t off = (uint8_t *)planes.planes[p].data -
+                       (uint8_t *)planes.planes[0].data;
+        printf("yv12_sample.plane[%u].offset_from_plane0=%" PRIdPTR "\n", p, off);
     }
 
     /* Luma stays constant. Chroma varies by row so a wrong 480 -> 512 pitch
@@ -147,8 +150,22 @@ static int read_reference(const char *path, float rgba[4])
 
 int main(int argc, char **argv)
 {
+    int import_before_fill = 0;
+    const char *write_ref_path = NULL;
+    const char *compare_ref_path = NULL;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--import-before-fill") == 0) {
+            import_before_fill = 1;
+        } else if (strcmp(argv[i], "--write-ref") == 0 && i + 1 < argc) {
+            write_ref_path = argv[++i];
+        } else if (strcmp(argv[i], "--compare-ref") == 0 && i + 1 < argc) {
+            compare_ref_path = argv[++i];
+        }
+    }
+
     setvbuf(stdout, NULL, _IONBF, 0);
     printf("========== YV12 940x1670 GPU SAMPLE PROBE ==========\n");
+    printf("yv12_sample.import_before_fill=%d\n", import_before_fill);
 
     VkInstance instance = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -273,7 +290,9 @@ int main(int argc, char **argv)
     AHardwareBuffer_describe(ahb, &got);
     printf("yv12_sample.desc_stride=%u\n", got.stride);
 
-    if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
+    if (!import_before_fill) {
+        if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
+    }
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID get_ahb_props =
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
@@ -351,6 +370,11 @@ int main(int argc, char **argv)
     r = vkBindImageMemory(device, image, image_mem, 0);
     printf("yv12_sample.vkBindImageMemory=%d:%s\n", r, vk_result_name(r));
     if (r != VK_SUCCESS) { ret = 24; goto cleanup; }
+
+    if (import_before_fill) {
+        printf("yv12_sample.fill_after_bind=1\n");
+        if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
+    }
 
     VkExternalFormatANDROID conv_external = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
@@ -671,14 +695,14 @@ int main(int argc, char **argv)
     if (!sane) {
         printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
         ret = 46;
-    } else if (argc == 3 && strcmp(argv[1], "--write-ref") == 0) {
-        int wr = write_reference(argv[2], out);
+    } else if (write_ref_path) {
+        int wr = write_reference(write_ref_path, out);
         printf("yv12_sample.reference_write=%s\n", wr == 0 ? "PASS" : "FAIL");
         printf("YV12_GPU_SAMPLE_STATUS=%s\n", wr == 0 ? "PASS" : "FAIL");
         ret = wr == 0 ? 0 : 47;
-    } else if (argc == 3 && strcmp(argv[1], "--compare-ref") == 0) {
+    } else if (compare_ref_path) {
         float ref[4] = {0};
-        if (read_reference(argv[2], ref) != 0) {
+        if (read_reference(compare_ref_path, ref) != 0) {
             printf("yv12_sample.reference_read=FAIL\n");
             printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
             ret = 48;

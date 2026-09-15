@@ -144,9 +144,18 @@ exit_new = (
     "\tif (!count)\n"
     "\t\tsugov_clear_global_tunables();\n"
 )
-if text.count(exit_old) != 1:
-    raise SystemExit("cpufreq_schedutil.c: expected one unsafe merged sugov_exit block")
-text = text.replace(exit_old, exit_new, 1)
+old_count = text.count(exit_old)
+new_count = text.count(exit_new)
+if old_count == 1 and new_count == 0:
+    text = text.replace(exit_old, exit_new, 1)
+    rows.append("schedutil_exit_shape=repaired\n")
+elif old_count == 0 and new_count == 1:
+    rows.append("schedutil_exit_shape=already-safe\n")
+else:
+    raise SystemExit(
+        f"cpufreq_schedutil.c: unrecognized sugov_exit shape "
+        f"(unsafe={old_count}, safe={new_count})"
+    )
 if text.count("static void sugov_tunables_release(struct kobject *kobj)") != 1:
     raise SystemExit("cpufreq_schedutil.c: kobject release callback count is not one")
 if text.count("static void sugov_clear_global_tunables(void)") != 1:

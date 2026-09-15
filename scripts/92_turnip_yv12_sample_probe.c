@@ -9,6 +9,10 @@
 
 #include "yv12_sample_spv.h"
 
+#ifndef AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420
+#define AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 0x23u
+#endif
+
 #ifndef AHARDWAREBUFFER_FORMAT_YV12
 #define AHARDWAREBUFFER_FORMAT_YV12 0x32315659u
 #endif
@@ -21,6 +25,8 @@
 #define TEST_H 1670u
 #define TP10_W 1080u
 #define TP10_H 1920u
+#define NV21_W 256u
+#define NV21_H 256u
 
 static const char *vk_result_name(VkResult r)
 {
@@ -126,6 +132,111 @@ static int fill_yv12_pattern(AHardwareBuffer *ahb)
     return rc == 0 ? 0 : 3;
 }
 
+
+static int fill_nv21_pattern(AHardwareBuffer *ahb)
+{
+    AHardwareBuffer_Planes planes;
+    memset(&planes, 0, sizeof(planes));
+
+    int rc = AHardwareBuffer_lockPlanes(
+        ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY, -1, NULL, &planes);
+    printf("nv21_sample.ahb_lock_planes=%d\n", rc);
+    if (rc != 0)
+        return 1;
+
+    printf("nv21_sample.plane_count=%u\n", planes.planeCount);
+    if (planes.planeCount < 3) {
+        AHardwareBuffer_unlock(ahb, NULL);
+        return 2;
+    }
+
+    for (uint32_t p = 0; p < planes.planeCount && p < 3; ++p) {
+        intptr_t off = (uint8_t *)planes.planes[p].data -
+                       (uint8_t *)planes.planes[0].data;
+        printf("nv21_sample.plane[%u].rowStride=%u\n",
+               p, planes.planes[p].rowStride);
+        printf("nv21_sample.plane[%u].pixelStride=%u\n",
+               p, planes.planes[p].pixelStride);
+        printf("nv21_sample.plane[%u].offset_from_plane0=%" PRIdPTR "\n",
+               p, off);
+    }
+
+    if (planes.planes[0].pixelStride == 0 ||
+        planes.planes[1].pixelStride == 0 ||
+        planes.planes[2].pixelStride == 0) {
+        AHardwareBuffer_unlock(ahb, NULL);
+        return 3;
+    }
+
+    /* Deliberately asymmetric Cb/Cr values. If NV21 CrCb storage is treated
+     * as NV12 CbCr, stock-vs-Turnip RGBA differs dramatically.
+     */
+    for (uint32_t y = 0; y < NV21_H; ++y) {
+        uint8_t *row = (uint8_t *)planes.planes[0].data +
+                       (size_t)y * planes.planes[0].rowStride;
+        for (uint32_t x = 0; x < NV21_W; ++x) {
+            row[(size_t)x * planes.planes[0].pixelStride] =
+                (uint8_t)(80u + ((x / 32u + y / 32u) % 96u));
+        }
+    }
+
+    const uint32_t cw = NV21_W / 2u;
+    const uint32_t ch = NV21_H / 2u;
+    for (uint32_t y = 0; y < ch; ++y) {
+        uint8_t *cb_row = (uint8_t *)planes.planes[1].data +
+                          (size_t)y * planes.planes[1].rowStride;
+        uint8_t *cr_row = (uint8_t *)planes.planes[2].data +
+                          (size_t)y * planes.planes[2].rowStride;
+        for (uint32_t x = 0; x < cw; ++x) {
+            uint8_t cb = (uint8_t)(32u + ((x / 16u + y / 16u) % 48u));
+            uint8_t cr = (uint8_t)(224u - ((x / 16u + 2u * (y / 16u)) % 48u));
+            cb_row[(size_t)x * planes.planes[1].pixelStride] = cb;
+            cr_row[(size_t)x * planes.planes[2].pixelStride] = cr;
+        }
+    }
+
+    rc = AHardwareBuffer_unlock(ahb, NULL);
+    printf("nv21_sample.ahb_unlock=%d\n", rc);
+    return rc == 0 ? 0 : 4;
+}
+
+static int write_reference16(const char *path, const float rgba[16])
+{
+    FILE *fp = fopen(path, "w");
+    if (!fp)
+        return -1;
+
+    int ok = 1;
+    for (unsigned i = 0; i < 16; ++i) {
+        if (fprintf(fp, "%.9f%c", rgba[i],
+                    i == 15 ? '\n' : ' ') <= 0) {
+            ok = 0;
+            break;
+        }
+    }
+
+    if (fclose(fp) != 0)
+        ok = 0;
+    return ok ? 0 : -1;
+}
+
+static int read_reference16(const char *path, float rgba[16])
+{
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return -1;
+
+    for (unsigned i = 0; i < 16; ++i) {
+        if (fscanf(fp, "%f", &rgba[i]) != 1) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+
 static float absf_local(float x)
 {
     return x < 0.0f ? -x : x;
@@ -158,6 +269,7 @@ int main(int argc, char **argv)
 {
     int import_before_fill = 0;
     int tp10_smoke = 0;
+    int nv21_sample = 0;
     const char *write_ref_path = NULL;
     const char *compare_ref_path = NULL;
     for (int i = 1; i < argc; ++i) {
@@ -165,6 +277,8 @@ int main(int argc, char **argv)
             import_before_fill = 1;
         } else if (strcmp(argv[i], "--tp10-smoke") == 0) {
             tp10_smoke = 1;
+        } else if (strcmp(argv[i], "--nv21") == 0) {
+            nv21_sample = 1;
         } else if (strcmp(argv[i], "--write-ref") == 0 && i + 1 < argc) {
             write_ref_path = argv[++i];
         } else if (strcmp(argv[i], "--compare-ref") == 0 && i + 1 < argc) {
@@ -180,11 +294,14 @@ int main(int argc, char **argv)
         write_ref_path = NULL;
         compare_ref_path = NULL;
     }
+    if (nv21_sample)
+        tp10_smoke = 0;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    printf("========== YV12 / QTI TP10 GPU SAMPLE PROBE ==========\n");
+    printf("========== YV12 / NV21 / QTI TP10 GPU SAMPLE PROBE ==========\n");
     printf("yv12_sample.import_before_fill=%d\n", import_before_fill);
     printf("tp10_sample.enabled=%d\n", tp10_smoke);
+    printf("nv21_sample.enabled=%d\n", nv21_sample);
 
     VkInstance instance = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -208,7 +325,9 @@ int main(int argc, char **argv)
 
     VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = tp10_smoke ? "touchGrass-TP10-Sample" : "touchGrass-YV12-Sample",
+        .pApplicationName = tp10_smoke ? "touchGrass-TP10-Sample" :
+                            (nv21_sample ? "touchGrass-NV21-Sample" :
+                                           "touchGrass-YV12-Sample"),
         .applicationVersion = 1,
         .pEngineName = "touchGrass",
         .engineVersion = 1,
@@ -293,11 +412,12 @@ int main(int argc, char **argv)
     vkGetDeviceQueue(device, qfi, 0, &queue);
 
     AHardwareBuffer_Desc desc = {
-        .width = tp10_smoke ? TP10_W : TEST_W,
-        .height = tp10_smoke ? TP10_H : TEST_H,
+        .width = tp10_smoke ? TP10_W : (nv21_sample ? NV21_W : TEST_W),
+        .height = tp10_smoke ? TP10_H : (nv21_sample ? NV21_H : TEST_H),
         .layers = 1,
-        .format = tp10_smoke ? TOUCHGRASS_QTI_TP10_UBWC
-                             : AHARDWAREBUFFER_FORMAT_YV12,
+        .format = tp10_smoke ? TOUCHGRASS_QTI_TP10_UBWC :
+                  (nv21_sample ? AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 :
+                                 AHARDWAREBUFFER_FORMAT_YV12),
         .usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
                  (tp10_smoke ? 0 : AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY),
     };
@@ -316,7 +436,9 @@ int main(int argc, char **argv)
     printf("yv12_sample.desc_stride=%u\n", got.stride);
 
     if (!tp10_smoke && !import_before_fill) {
-        if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
+        int fill_rc = nv21_sample ? fill_nv21_pattern(ahb)
+                                  : fill_yv12_pattern(ahb);
+        if (fill_rc != 0) { ret = 18; goto cleanup; }
     }
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID get_ahb_props =
@@ -337,6 +459,9 @@ int main(int argc, char **argv)
     if (r != VK_SUCCESS) { ret = 20; goto cleanup; }
 
     printf("yv12_sample.externalFormat=%" PRIu64 "\n", (uint64_t)fmt.externalFormat);
+    if (nv21_sample)
+        printf("nv21_sample.externalFormat=%" PRIu64 "\n",
+               (uint64_t)fmt.externalFormat);
     if (tp10_smoke)
         printf("tp10_sample.externalFormat=%" PRIu64 "\n",
                (uint64_t)fmt.externalFormat);
@@ -401,7 +526,9 @@ int main(int argc, char **argv)
 
     if (!tp10_smoke && import_before_fill) {
         printf("yv12_sample.fill_after_bind=1\n");
-        if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
+        int fill_rc = nv21_sample ? fill_nv21_pattern(ahb)
+                                  : fill_yv12_pattern(ahb);
+        if (fill_rc != 0) { ret = 18; goto cleanup; }
     }
 
     VkExternalFormatANDROID conv_external = {
@@ -724,7 +851,26 @@ int main(int argc, char **argv)
         out[2] >= 0.0f && out[2] <= 1.0f &&
         out[3] >= 0.90f && out[3] <= 1.01f;
 
-    if (tp10_smoke) {
+    if (nv21_sample) {
+        sane = 1;
+        for (unsigned i = 0; i < 4; ++i) {
+            const float *v = &out[i * 4];
+            printf("nv21_sample.rgba[%u]=%.6f,%.6f,%.6f,%.6f\n",
+                   i, v[0], v[1], v[2], v[3]);
+            int sample_sane =
+                v[0] == v[0] && v[1] == v[1] &&
+                v[2] == v[2] && v[3] == v[3] &&
+                v[0] > -4.0f && v[0] < 4.0f &&
+                v[1] > -4.0f && v[1] < 4.0f &&
+                v[2] > -4.0f && v[2] < 4.0f &&
+                v[3] >= 0.90f && v[3] <= 1.01f;
+            printf("nv21_sample.sample[%u]_sane=%s\n",
+                   i, sample_sane ? "PASS" : "FAIL");
+            if (!sample_sane)
+                sane = 0;
+        }
+        printf("nv21_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
+    } else if (tp10_smoke) {
         /* This private TP10 buffer is GPU-only and deliberately uninitialized.
          * Narrow-range YCbCr conversion is not clamped to [0,1], so arbitrary
          * YUV code values may legitimately produce negative RGB or RGB > 1.
@@ -755,6 +901,8 @@ int main(int argc, char **argv)
     if (!sane) {
         if (tp10_smoke)
             printf("TP10_GPU_SAMPLE_STATUS=FAIL\n");
+        else if (nv21_sample)
+            printf("NV21_GPU_SAMPLE_STATUS=FAIL\n");
         else
             printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
         ret = 46;
@@ -762,6 +910,38 @@ int main(int argc, char **argv)
         printf("tp10_sample.mode=gpu-only-qti-ubwc-ycbcr-4point-compute-smoke\n");
         printf("TP10_GPU_SAMPLE_STATUS=PASS\n");
         ret = 0;
+    } else if (nv21_sample && write_ref_path) {
+        int wr = write_reference16(write_ref_path, out);
+        printf("nv21_sample.reference_write=%s\n", wr == 0 ? "PASS" : "FAIL");
+        printf("NV21_GPU_SAMPLE_STATUS=%s\n", wr == 0 ? "PASS" : "FAIL");
+        ret = wr == 0 ? 0 : 47;
+    } else if (nv21_sample && compare_ref_path) {
+        float ref[16] = {0};
+        if (read_reference16(compare_ref_path, ref) != 0) {
+            printf("nv21_sample.reference_read=FAIL\n");
+            printf("NV21_GPU_SAMPLE_STATUS=FAIL\n");
+            ret = 48;
+        } else {
+            float max_diff = 0.0f;
+            for (unsigned i = 0; i < 4; ++i) {
+                printf("nv21_sample.reference_rgba[%u]=%.6f,%.6f,%.6f,%.6f\n",
+                       i, ref[i * 4 + 0], ref[i * 4 + 1],
+                       ref[i * 4 + 2], ref[i * 4 + 3]);
+                for (unsigned c = 0; c < 4; ++c) {
+                    float d = absf_local(out[i * 4 + c] - ref[i * 4 + c]);
+                    if (d > max_diff)
+                        max_diff = d;
+                }
+            }
+            printf("nv21_sample.reference_max_diff=%.6f\n", max_diff);
+            printf("nv21_sample.reference_tolerance=0.030000\n");
+            int match = max_diff <= 0.03f;
+            printf("nv21_sample.reference_match=%s\n",
+                   match ? "PASS" : "FAIL");
+            printf("NV21_GPU_SAMPLE_STATUS=%s\n",
+                   match ? "PASS" : "FAIL");
+            ret = match ? 0 : 49;
+        }
     } else if (write_ref_path) {
         int wr = write_reference(write_ref_path, out);
         printf("yv12_sample.reference_write=%s\n", wr == 0 ? "PASS" : "FAIL");
@@ -794,14 +974,21 @@ int main(int argc, char **argv)
             ret = match ? 0 : 49;
         }
     } else {
-        printf("yv12_sample.mode=standalone_sanity\n");
-        printf("YV12_GPU_SAMPLE_STATUS=PASS\n");
+        if (nv21_sample) {
+            printf("nv21_sample.mode=standalone_sanity\n");
+            printf("NV21_GPU_SAMPLE_STATUS=PASS\n");
+        } else {
+            printf("yv12_sample.mode=standalone_sanity\n");
+            printf("YV12_GPU_SAMPLE_STATUS=PASS\n");
+        }
         ret = 0;
     }
 
 cleanup:
     if (tp10_smoke && ret != 0)
         printf("TP10_GPU_SAMPLE_STATUS=FAIL\n");
+    if (nv21_sample && ret != 0)
+        printf("NV21_GPU_SAMPLE_STATUS=FAIL\n");
     if (device != VK_NULL_HANDLE)
         vkDeviceWaitIdle(device);
     if (mapped && device != VK_NULL_HANDLE && out_mem != VK_NULL_HANDLE)
@@ -827,6 +1014,6 @@ cleanup:
     printf("yv12_sample.exit=%d\n", ret);
     if (tp10_smoke)
         printf("tp10_sample.exit=%d\n", ret);
-    printf("========== END YV12 / QTI TP10 GPU SAMPLE PROBE ==========\n");
+    printf("========== END YV12 / NV21 / QTI TP10 GPU SAMPLE PROBE ==========\n");
     return ret;
 }

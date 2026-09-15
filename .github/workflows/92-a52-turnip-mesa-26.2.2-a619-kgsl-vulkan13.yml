@@ -264,12 +264,14 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18-vk1.3-persistent-qti-tp10-ubwc'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.1-vk1.3-persistent-qti-tp10-ubwc-diag'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'service.sh'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-vk-probe'
+          unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-ahb-probe'
+          unzip -p "$PERSIST_ZIP" action.sh | grep -Fq '=== DIRECT AHB IMPORT PROBE ==='
           unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'Could not initialize Vulkan RenderEngine'
           unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'PAGE FAULT'
           unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'

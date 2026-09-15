@@ -275,7 +275,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.22-vk1.4-stable-a619'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.23-vk1.4-syncfd-diagnostic'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

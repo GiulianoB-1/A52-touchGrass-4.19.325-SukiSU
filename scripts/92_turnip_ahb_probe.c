@@ -15,6 +15,10 @@
 #define AHARDWAREBUFFER_FORMAT_YV12 0x32315659u
 #endif
 
+#ifndef TOUCHGRASS_QTI_NV12_UBWC
+#define TOUCHGRASS_QTI_NV12_UBWC 0x7fa30c06u
+#endif
+
 #define TEST_W 256u
 #define TEST_H 256u
 #define SF_YV12_W 940u
@@ -469,6 +473,13 @@ int main(void)
         AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
         AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY;
 
+    /* Private QTI UBWC video buffers are GPU/compositor allocations. Do not
+     * request CPU mapping, because CPU access can force a different physical
+     * layout or make the allocation unsupported.
+     */
+    const uint64_t sampled_gpu_only_usage =
+        AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+
     const struct ahb_case cases[] = {
         {
             .name = "rgba8_256",
@@ -498,10 +509,18 @@ int main(void)
             .height = SF_YV12_H,
             .usage = sampled_usage,
         },
+        {
+            .name = "qti_nv12_ubwc_720x1280",
+            .format = TOUCHGRASS_QTI_NV12_UBWC,
+            .width = 720,
+            .height = 1280,
+            .usage = sampled_gpu_only_usage,
+        },
     };
 
     unsigned pass = 0, fail = 0;
     int target_yv12_sf_rc = -1;
+    int target_qti_nv12_ubwc_rc = -1;
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         int rc = run_ahb_case(physical, device, pGetProps, &cases[i]);
         if (rc == 0)
@@ -510,6 +529,8 @@ int main(void)
             ++fail;
         if (strcmp(cases[i].name, "yv12_sf_940x1670") == 0)
             target_yv12_sf_rc = rc;
+        if (strcmp(cases[i].name, "qti_nv12_ubwc_720x1280") == 0)
+            target_qti_nv12_ubwc_rc = rc;
         printf("%s.case_exit=%d\n", cases[i].name, rc);
     }
 
@@ -542,10 +563,17 @@ int main(void)
         printf("target_yv12_sf_940x1670_status=PASS\n");
     else
         printf("target_yv12_sf_940x1670_status=FAIL\n");
+    printf("target_qti_nv12_ubwc_720x1280_exit=%d\n",
+           target_qti_nv12_ubwc_rc);
+    if (target_qti_nv12_ubwc_rc == 0)
+        printf("target_qti_nv12_ubwc_720x1280_status=PASS\n");
+    else
+        printf("target_qti_nv12_ubwc_720x1280_status=DIAGNOSTIC_FAIL\n");
     printf("ahb_probe_status=COMPLETE\n");
 
-    /* This probe may continue to report unrelated Android YUV formats as
-     * diagnostic failures, but v0.9 is specifically a regression test for
-     * the SurfaceFlinger YV12 940x1670 crash that we reproduced. */
+    /* Keep YV12 as the hard regression gate. The private QTI UBWC case is
+     * diagnostic because some gralloc revisions refuse direct allocation of
+     * vendor-private formats even though MediaCodec can supply such buffers.
+     * Persistent SurfaceFlinger is the authoritative 0x7fa30c06 test. */
     return target_yv12_sf_rc == 0 ? 0 : 30;
 }

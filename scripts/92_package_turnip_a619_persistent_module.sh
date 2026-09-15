@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.27-vk1.4-nv21-sample-validation
-versionCode=39
+version=0.28-vk1.4-camera-nv21-fix
+versionCode=40
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.27 validation build. Driver is the v0.26 NV21 fix; adds stock-vs-Turnip four-point NV21 GPU sampling comparison to verify CrCb chroma ordering while retaining all validated Vulkan 1.4, YV12, NV12 UBWC, TP10 and KGSL fixes.
+description=A52 Turnip Vulkan 1.4 v0.28 camera compatibility build. Adds explicit Android HAL_PIXEL_FORMAT_YCrCb_420_SP (0x11) NV21 import support for Samsung camera preview, on top of the validated generic YUV_420_888/NV21, YV12, NV12 UBWC, TP10 and legacy-KGSL fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'

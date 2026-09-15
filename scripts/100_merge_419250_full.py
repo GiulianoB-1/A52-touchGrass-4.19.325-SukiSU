@@ -230,6 +230,22 @@ def main() -> None:
         EXPECTED_GOOD_SHA, test_sha,
     )
 
+    # The generic merge policy can preserve vendor deletion semantics for a
+    # newly added upstream source even when a later Makefile now requires it.
+    # Restore this exact v4.19.250 source from the already-verified THEIRS tree;
+    # this mirrors the historical 4.19.250 link-closure behavior.
+    chacha20_src = THEIRS_TREE / "lib/chacha20.c"
+    chacha20_dst = KERNEL / "lib/chacha20.c"
+    if not chacha20_src.is_file():
+        raise SystemExit("verified v4.19.250 THEIRS tree is missing lib/chacha20.c")
+    if not chacha20_dst.is_file():
+        shutil.copy2(chacha20_src, chacha20_dst)
+        (ARTIFACTS / "phase100-upstream-closure.txt").write_text(
+            "lib/chacha20.c\n"
+        )
+    elif chacha20_dst.read_bytes() != chacha20_src.read_bytes():
+        raise SystemExit("existing lib/chacha20.c differs from exact v4.19.250 source")
+
     # Normalize the two known v4.19.250 synclink_gt whitespace defects.
     # This mirrors checkpoint_merge_linux_4.19.250.sh exactly so that the
     # compatibility repair script can use git diff --check as an invariant.

@@ -1,9 +1,9 @@
-name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.25 YUV420 Forensics
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.26 NV21
 
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-yuv420-forensics-v025
+      - agent/a52-turnip-vulkan14-nv21-v026
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -172,11 +172,12 @@ jobs:
           grep -Fxq 'kgsl_zero_timeout_poll=retired-timestamp-nonblocking' "$INFO"
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-pushdescriptor-maintenance6-syncfd-ab-workload-scaling' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
-          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics-nv21-fix' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
           grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix-plus-tp10-smoke' "$INFO"
           grep -Fxq 'tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
+          grep -Fxq 'android_flexible_yuv420_nv21_fix=YCrCb-step2-DRM-NV21-plus-opaque-external-format-swap' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
           grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
           grep -Fxq 'qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06' "$INFO"
@@ -204,6 +205,8 @@ jobs:
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.import_before_fill=%d'
           strings "$YV12_PROBE" | grep -Fq 'offset_from_plane0='
           strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers'
+          strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers'
+          strings "$DRIVER" | grep -Fq 'touchGrass: resolved flexible Android YUV420 CrCb as NV21'
           strings "$DRIVER" | grep -Fq 'Android image binding exceeds dma-buf size'
           strings "$DRIVER" | grep -Fq 'touchGrass: QTI legacy PlaneLayoutInfo helper available'
           strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo'
@@ -235,6 +238,8 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'g8_b8_r8_3plane_420'
           strings "$AHB_PROBE" | grep -Fq 'g8_b8r8_2plane_420'
           strings "$AHB_PROBE" | grep -Fq 'forensics.failure_stage=vkGetAndroidHardwareBufferPropertiesANDROID'
+          strings "$AHB_PROBE" | grep -Fq 'props.components.r=%d'
+          strings "$AHB_PROBE" | grep -Fq 'target_yuv420_256_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
@@ -317,7 +322,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.25-vk1.4-yuv420-forensics'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.26-vk1.4-nv21-fix'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

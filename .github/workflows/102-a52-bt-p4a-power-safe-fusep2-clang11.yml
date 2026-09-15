@@ -1,0 +1,733 @@
+name: 102 - A52 BT-P4A + FUSE Modern P2 Clang11
+
+on:
+  push:
+    branches:
+      - agent/a52-bt-p4a-power-safe-fusep2-v1
+    paths:
+      - .github/workflows/102-a52-bt-p4a-power-safe-fusep2-clang11.yml
+      - scripts/81_*
+      - scripts/82_*
+      - scripts/84_*
+      - scripts/85_*
+      - scripts/86_*
+      - scripts/87_*
+      - scripts/88_*
+      - scripts/90_*
+      - scripts/91_*
+      - scripts/94_*
+      - scripts/96_*
+      - scripts/97_*
+      - scripts/98_*
+      - scripts/99_*
+      - scripts/100_*
+      - scripts/102_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-bt-p4a-fusep2-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build BT-P4A + FUSE Modern P2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-bt-p4a-fusep2-${{ runner.os }}-v1
+          restore-keys: |
+            a52xq-bt-p3-fusep2-${{ runner.os }}-
+            a52xq-fuse-modern-p2-btp2b-${{ runner.os }}-
+            a52xq-bt-p2c-rxpm-${{ runner.os }}-
+            a52xq-bt-p2b-async-${{ runner.os }}-
+            a52xq-bt-p2a-geni-${{ runner.os }}-
+            a52xq-gpu-p5-bbr3-fq-${{ runner.os }}-
+            a52xq-bbr3-ccache-${{ runner.os }}-
+            a52xq-u17-ccache-${{ runner.os }}-
+            a52xq-binder84-${{ runner.os }}-
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore BT-P2B prepared source cache
+        id: btp2b_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-bt-p2b-pre-fuse-${{ runner.os }}-f8e6826-v1
+
+      - name: Restore U17-UCLAMP-P1 prepared source cache
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        id: binder84_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
+
+      - name: Prepare cached build workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Reconstruct exact Phase80 kernel baseline
+        if: steps.btp2b_source.outputs.cache-hit != 'true' && steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh scripts/*.py
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Apply successful Android17 Binder and BinderFS port
+        if: steps.btp2b_source.outputs.cache-hit != 'true' && steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'BINDER_GET_EXTENDED_ERROR' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BR_ONEWAY_SPAM_SUSPECT' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fq 'BR_TRANSACTION_PENDING_FROZEN' "$KERNEL/include/uapi/linux/android/binder.h"
+          grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Android17 Binder allocator on Linux 4.19
+        if: steps.btp2b_source.outputs.cache-hit != 'true' && steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/84_apply_android17_binder_alloc.sh
+          python3 -m py_compile scripts/84_patch_android17_binder_alloc.py
+          ./scripts/84_apply_android17_binder_alloc.sh
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'struct binder_shrinker_mdata' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'unsigned long vm_start;' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'bool oneway_spam_detected;' "$KERNEL/drivers/android/binder_alloc.h"
+          ! grep -Fq 'struct binder_lru_page' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'static struct shrinker binder_shrinker' "$KERNEL/drivers/android/binder_alloc.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply proven Android FUSE passthrough
+        if: steps.btp2b_source.outputs.cache-hit != 'true' && steps.binder84_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/84_apply_fuse_passthrough_android.py
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq '#define FUSE_PASSTHROUGH' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'fuse_passthrough_setup(fc, ff, &outarg);' "$KERNEL/fs/fuse/file.c"
+          grep -Fq 'fuse_features_group' "$KERNEL/fs/fuse/inode.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Save U17-UCLAMP-P1 prepared source cache
+        if: steps.btp2b_source.outputs.cache-hit != 'true' && steps.binder84_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-binder84-pre-uclamp-${{ runner.os }}-d303dff9-v3
+
+      - name: Apply Android17 uclamp Phase1
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/85_apply_android17_uclamp_phase1.py
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'sched_uclamp_used' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Android17 uclamp CASS Phase2
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/86_apply_uclamp_cass_p2.py
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
+          grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply validated A619 GPU modernization Phase1
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/85_apply_a619_gpu_modernization.py
+          python3 scripts/85_apply_a619_gpu_modernization.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-p1-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A619 GPU modernization: Qualcomm 536bf34a8db3' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'A619 GPU modernization: Qualcomm e94d6c0d8e77' "$KERNEL/drivers/devfreq/governor_gpubw_mon.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply A619 GPU modernization Phase2
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/87_apply_a619_gpu_modernization_p2.py
+          python3 scripts/87_apply_a619_gpu_modernization_p2.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-p2-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'time_is_after_jiffies(device->idle_jiffies)' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'kgsl_mod_idle_timer' "$KERNEL/drivers/gpu/msm/kgsl_device.h"
+          grep -Fq 'A619 GPU P2: Qualcomm 83b408e0f209' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply A619 GPU modernization Phase3
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/90_apply_a619_gpu_modernization_p3.py
+          python3 scripts/90_apply_a619_gpu_modernization_p3.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-p3-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A619 GPU P3: Qualcomm a404f6fde547' "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+          grep -Fq 'bool select_reg_present = false;' "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+          grep -Fq 'A619 GPU P3: Qualcomm 081d5718cff2' "$KERNEL/drivers/devfreq/governor_msm_adreno_tz.c"
+          grep -Fq 'devfreq->profile->max_state == 1' "$KERNEL/drivers/devfreq/governor_msm_adreno_tz.c"
+          grep -Fq 'A619 GPU P3: keep msm-adreno-tz attached' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply A619 GPU modernization Phase4
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/91_apply_a619_gpu_modernization_p4.py
+          python3 scripts/91_apply_a619_gpu_modernization_p4.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-p4-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A619 GPU P4: Qualcomm 96f7537ccfcd' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'ADRENO_RB_SET_PSEUDO_DONE' "$KERNEL/drivers/gpu/msm/adreno_ringbuffer.h"
+          grep -Fq 'test_and_set_bit(ADRENO_RB_SET_PSEUDO_DONE, &rb->flags)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'cp_type7_packet(CP_SET_PSEUDO_REGISTER, 3)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'A619 GPU P4: Qualcomm 06f837b9da4f' "$KERNEL/drivers/gpu/msm/kgsl_gmu.h"
+          grep -Fq 'gmu->num_oob_perfcntr++' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
+          grep -Fq -- '--gmu->num_oob_perfcntr' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply A619 GPU modernization Phase5
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/94_apply_a619_gpu_modernization_p5.py
+          python3 scripts/94_apply_a619_gpu_modernization_p5.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-p5-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/kgsl.h"
+          grep -Fq 'SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RPTR_OFFSET(id) SCRATCH_RB_OFFSET(id, rptr)' "$KERNEL/drivers/gpu/msm/kgsl.h"
+          test "$(grep -F 'SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_iommu.c" | wc -l)" -eq 2
+          grep -Fq 'SCRATCH_RB_OFFSET(next->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'SCRATCH_RB_OFFSET(next->id, contextidr)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          ! grep -R -F -- '->pagetable_desc' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          ! grep -R -F 'adreno_ringbuffer_set_global(' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          grep -Fq 'ADRENO_RB_SET_PSEUDO_DONE' "$KERNEL/drivers/gpu/msm/adreno_ringbuffer.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply validated BBRv3 + Wi-Fi/RMNET FQ
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/87_apply_bbr3_net.sh
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bbr3-fq-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_TCP_CONG_BBR=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_DEFAULT_BBR3=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_DEFAULT_TCP_CONG="bbr3"' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Eq '#define[[:space:]]+BBR_VERSION[[:space:]]+3' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr3",' "$KERNEL/net/ipv4/tcp_bbr3.c"
+          grep -Fq '.name		= "bbr",' "$KERNEL/net/ipv4/tcp_bbr.c"
+          grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' "$KERNEL/include/net/sch_generic.h"
+          grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' "$KERNEL/net/sched/sch_mq.c"
+          grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' "$KERNEL/net/sched/sch_mq.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Bluetooth GENI wake hardening P2A
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/96_apply_bt_geni_wake_hardening.py
+          python3 scripts/96_apply_bt_geni_wake_hardening.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bt-p2a-geni-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 BT-P2A: Qualcomm GENI wake/shutdown hardening' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool wakeup_enabled;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool wakeup_irq_wake_set;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool shutdown_in_progress;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'Ignore wake during shutdown/closed tty' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'port->uport.state && port->uport.state->port.tty' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'irq_set_irq_wake(port->wakeup_irq, 1)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'irq_set_irq_wake(port->wakeup_irq, 0)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'tty_insert_flip_char(tty->port, port->wakeup_byte, TTY_NORMAL);' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'port->edge_count == 2' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Bluetooth GENI asynchronous wake P2B
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/97_apply_bt_geni_async_wake.py
+          python3 scripts/97_apply_bt_geni_async_wake.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bt-p2b-async-wake-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          SRC="$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'A52 BT-P2B: Qualcomm asynchronous real wake-byte handling' "$SRC"
+          grep -Fq 'static void msm_geni_wakeup_work(struct work_struct *work)' "$SRC"
+          grep -Fq 'struct workqueue_struct *wakeup_irq_wq;' "$SRC"
+          grep -Fq 'struct delayed_work wakeup_irq_dwork;' "$SRC"
+          grep -Fq 'atomic_t check_wakeup_byte;' "$SRC"
+          grep -Fq 'struct completion wakeup_comp;' "$SRC"
+          grep -Fq 'msm_geni_find_wakeup_byte' "$SRC"
+          grep -Fq 'Found real wake byte 0x%x' "$SRC"
+          grep -Fq 'queue_delayed_work(port->wakeup_irq_wq' "$SRC"
+          grep -Fq 'complete(&port->wakeup_comp);' "$SRC"
+          grep -Fq 'alloc_workqueue("a52_bt_wake", WQ_HIGHPRI, 1)' "$SRC"
+          ! grep -Fq 'tty_insert_flip_char(tty->port, port->wakeup_byte' "$SRC"
+          ! grep -Fq 'port->edge_count == 2' "$SRC"
+          git -C "$KERNEL" diff --check
+
+      - name: Save BT-P2B prepared source cache
+        if: steps.btp2b_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-bt-p2b-pre-fuse-${{ runner.os }}-f8e6826-v1
+
+      - name: Apply Bluetooth GENI RX/PM synchronization P2C
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/98_apply_bt_geni_rx_pm_sync.py
+          python3 scripts/98_apply_bt_geni_rx_pm_sync.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bt-p2c-rx-pm-sync-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          SRC="$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'A52 BT-P2C: Qualcomm RX-stop and runtime-PM synchronization' "$SRC"
+          grep -Fq 'atomic_t stop_rx_inprogress;' "$SRC"
+          grep -Fq 'atomic_cmpxchg(&port->stop_rx_inprogress, 0, 1)' "$SRC"
+          grep -Fq '#define SYSTEM_DELAY' "$SRC"
+          grep -Fq '#define STALE_DELAY_MAX' "$SRC"
+          grep -Fq 'pending RX data, retry runtime suspend' "$SRC"
+          grep -Fq 'stop_rx still busy, abort runtime suspend' "$SRC"
+          grep -Fq 'RX still active, defer userspace clock-off' "$SRC"
+          ! grep -Fq 'while (iter < STALE_DELAY)' "$SRC"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply boot-proven FUSE Modern P1
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/98_apply_fuse_passthrough_modern_p1.py
+          python3 scripts/98_apply_fuse_passthrough_modern_p1.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/fuse-modern-p1-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq '#define FOPEN_PASSTHROUGH' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'get_current_cred()' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'fuse_passthrough_splice_read' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'fuse_passthrough_splice_write' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply FUSE Modern P2 persistent backing registry
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/99_apply_fuse_passthrough_modern_p2.py
+          python3 scripts/99_apply_fuse_passthrough_modern_p2.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/fuse-modern-p2-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'struct fuse_backing_map' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_BACKING_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_BACKING_CLOSE' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'struct fuse_backing {' "$KERNEL/fs/fuse/fuse_i.h"
+          grep -Fq 'struct idr backing_files_map;' "$KERNEL/fs/fuse/fuse_i.h"
+          grep -Fq 'fuse_backing_take_legacy' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'fuse_backing_lookup' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'fuse_backing_files_init(fc);' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'passthrough.o backing.o' "$KERNEL/fs/fuse/Makefile"
+          ! grep -R -F 'passthrough_req' "$KERNEL/fs/fuse" --include='*.c' --include='*.h'
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Bluetooth BTFM SLIM lifecycle hardening P3
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/100_apply_bt_btfm_slim_lifecycle.py
+          python3 scripts/100_apply_bt_btfm_slim_lifecycle.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bt-p3-btfm-slim-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          SRC="$KERNEL/drivers/bluetooth/btfm_slim.c"
+          CODEC="$KERNEL/drivers/bluetooth/btfm_slim_codec.c"
+          grep -Fq 'A52 BT-P3: BTFM SLIM channel lifecycle hardening' "$SRC"
+          grep -Fq 'vendor init failed ret[%d]' "$SRC"
+          grep -Fq 'enabled_ports++' "$SRC"
+          grep -Fq 'cleanup vendor_port_en failed' "$SRC"
+          grep -Fq 'Always disable the hardware ports' "$SRC"
+          grep -Fq 'vendor_port_en disable failed' "$SRC"
+          grep -Fq 'bt_soc_enable_status = 0;' "$CODEC"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply Bluetooth power lifecycle P4A
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/102_apply_bt_power_lifecycle_safe.py
+          python3 scripts/102_apply_bt_power_lifecycle_safe.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/bt-p4a-power-lifecycle-apply.txt
+          SRC=workspace/touchgrass-a52xq/drivers/bluetooth/bluetooth-power.c
+          grep -Fq 'A52 BT-P4A: Bluetooth power lifecycle hardening with vendor state semantics preserved' "$SRC"
+          grep -Fq 'static DEFINE_MUTEX(bt_power_lock);' "$SRC"
+          grep -Fq 'if (pwr_state != pwr_cntrl)' "$SRC"
+          grep -Fq 'pwr_state = pwr_cntrl;' "$SRC"
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Build BT-P4A + FUSE Modern P2 kernel
+        run: |
+          set -o pipefail
+          echo "=== BUILD HOST ==="
+          echo "nproc=$(nproc)"
+          free -h || true
+          echo "=== CCACHE BEFORE BUILD ==="
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/bt-p4a-fuse-modern-p2-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo "=== CCACHE AFTER BUILD ==="
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit BT-P4A + BT-P3 + FUSE Modern P2 image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fq 'A52 BT-P4A: Bluetooth power lifecycle hardening with vendor state semantics preserved' "$KERNEL/drivers/bluetooth/bluetooth-power.c"
+          grep -Fq 'static DEFINE_MUTEX(bt_power_lock);' "$KERNEL/drivers/bluetooth/bluetooth-power.c"
+          grep -Fq 'if (pwr_state != pwr_cntrl)' "$KERNEL/drivers/bluetooth/bluetooth-power.c"
+          grep -Fq 'pwr_state = pwr_cntrl;' "$KERNEL/drivers/bluetooth/bluetooth-power.c"
+          grep -Fq 'A52 BT-P3: BTFM SLIM channel lifecycle hardening' "$KERNEL/drivers/bluetooth/btfm_slim.c"
+          grep -Fq 'vendor init failed ret[%d]' "$KERNEL/drivers/bluetooth/btfm_slim.c"
+          grep -Fq 'enabled_ports++' "$KERNEL/drivers/bluetooth/btfm_slim.c"
+          grep -Fq 'Always disable the hardware ports' "$KERNEL/drivers/bluetooth/btfm_slim.c"
+          grep -Fq 'bt_soc_enable_status = 0;' "$KERNEL/drivers/bluetooth/btfm_slim_codec.c"
+          grep -Fq 'A52 BT-P2C: Qualcomm RX-stop and runtime-PM synchronization' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'atomic_t stop_rx_inprogress;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'atomic_cmpxchg(&port->stop_rx_inprogress, 0, 1)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq '#define STALE_DELAY_MAX' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq '#define FOPEN_PASSTHROUGH' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_BACKING_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_BACKING_CLOSE' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'struct fuse_backing {' "$KERNEL/fs/fuse/fuse_i.h"
+          grep -Fq 'struct idr backing_files_map;' "$KERNEL/fs/fuse/fuse_i.h"
+          grep -Fq 'fuse_backing_take_legacy' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'fuse_backing_lookup' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'fuse_passthrough_splice_read' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'fuse_passthrough_splice_write' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'fuse_backing_files_init(fc);' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'fuse-$(CONFIG_FUSE_PASSTHROUGH) += passthrough.o backing.o' "$KERNEL/fs/fuse/Makefile"
+          grep -Fq 'A52 BT-P2B: Qualcomm asynchronous real wake-byte handling' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'static void msm_geni_wakeup_work(struct work_struct *work)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'msm_geni_find_wakeup_byte' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'alloc_workqueue("a52_bt_wake", WQ_HIGHPRI, 1)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          ! grep -Fq 'tty_insert_flip_char(tty->port, port->wakeup_byte' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          ! grep -Fq 'port->edge_count == 2' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'A52 BT-P2A: Qualcomm GENI wake/shutdown hardening' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool wakeup_enabled;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool wakeup_irq_wake_set;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fq 'bool shutdown_in_progress;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_DEFAULT_BBR3=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_DEFAULT_TCP_CONG="bbr3"' "$KERNEL/out/.config"
+          grep -Fq 'subsys_initcall(fq_module_init);' "$KERNEL/net/sched/sch_fq.c"
+          grep -Fq 'if (dev->ieee80211_ptr ||' "$KERNEL/include/net/sch_generic.h"
+          grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' "$KERNEL/include/net/sch_generic.h"
+          grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' "$KERNEL/net/sched/sch_mq.c"
+          grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' "$KERNEL/net/sched/sch_mq.c"
+          grep -Fq 'tcp_plb_update_state' "$KERNEL/net/ipv4/tcp_plb.c"
+          grep -Fq 'void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)' "$KERNEL/net/ipv4/tcp_rate.c"
+          grep -Fq 'DEFINE_STATIC_KEY_FALSE(sched_uclamp_used)' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
+          grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'A619 GPU modernization: Qualcomm 536bf34a8db3' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'A619 GPU modernization: Qualcomm e94d6c0d8e77' "$KERNEL/drivers/devfreq/governor_gpubw_mon.c"
+          grep -Fq 'time_is_after_jiffies(device->idle_jiffies)' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'A619 GPU P2: Qualcomm 83b408e0f209' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
+          grep -Fq 'A619 GPU P3: Qualcomm a404f6fde547' "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+          grep -Fq 'A619 GPU P3: Qualcomm 081d5718cff2' "$KERNEL/drivers/devfreq/governor_msm_adreno_tz.c"
+          grep -Fq 'A619 GPU P3: keep msm-adreno-tz attached' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          grep -Fq 'A619 GPU P4: Qualcomm 96f7537ccfcd' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'ADRENO_RB_SET_PSEUDO_DONE' "$KERNEL/drivers/gpu/msm/adreno_ringbuffer.h"
+          grep -Fq 'cp_type7_packet(CP_SET_PSEUDO_REGISTER, 3)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          grep -Fq 'A619 GPU P4: Qualcomm 06f837b9da4f' "$KERNEL/drivers/gpu/msm/kgsl_gmu.h"
+          grep -Fq 'gmu->num_oob_perfcntr++' "$KERNEL/drivers/gpu/msm/adreno_a6xx_gmu.c"
+          grep -Fq 'A619 GPU P5: Qualcomm 48fc67d2bcfb' "$KERNEL/drivers/gpu/msm/kgsl.h"
+          grep -Fq 'SCRATCH_RB_OFFSET(rb->id, current_rb_ptname)' "$KERNEL/drivers/gpu/msm/adreno.h"
+          grep -Fq 'SCRATCH_RB_GPU_ADDR(device, rb->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_iommu.c"
+          grep -Fq 'SCRATCH_RB_OFFSET(next->id, ttbr0)' "$KERNEL/drivers/gpu/msm/adreno_a6xx_preempt.c"
+          ! grep -R -F -- '->pagetable_desc' "$KERNEL/drivers/gpu/msm" --include='*.c' --include='*.h'
+          grep -Fq 'struct binder_shrinker_mdata' "$KERNEL/drivers/android/binder_alloc.h"
+          grep -Fq 'page_private(page)' "$KERNEL/drivers/android/binder_alloc.c"
+          grep -Fq 'oneway_spam_detected' "$KERNEL/drivers/android/binder_alloc.c"
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] (binder_ioctl|binder_open|binder_mmap|binder_alloc_new_buf|binder_alloc_free_buf|binder_alloc_mmap_handler|init_binderfs|unload_binderfs)$' \
+            | tee artifacts/u17-uclamp-p2-vmlinux-symbols.txt
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_(open|setup|read_iter|write_iter|mmap|release)$' \
+            | tee artifacts/u17-uclamp-p2-fuse-vmlinux-symbols.txt
+          grep -Fq 'binder_alloc_new_buf' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
+          grep -Fq 'binder_alloc_mmap_handler' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_open' artifacts/u17-uclamp-p2-fuse-vmlinux-symbols.txt
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] (fuse_backing_open|fuse_backing_close|fuse_backing_lookup|fuse_backing_take_legacy|fuse_backing_put|fuse_backing_files_init|fuse_backing_files_free|fuse_passthrough_splice_read|fuse_passthrough_splice_write)$' | tee artifacts/fuse-modern-p2-vmlinux-symbols.txt
+          grep -Fq 'fuse_backing_open' artifacts/fuse-modern-p2-vmlinux-symbols.txt
+          grep -Fq 'fuse_backing_close' artifacts/fuse-modern-p2-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_splice_read' artifacts/fuse-modern-p2-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_splice_write' artifacts/fuse-modern-p2-vmlinux-symbols.txt
+          {
+            echo phase=bt-p4a-power-safe-plus-fuse-modern-p2
+            echo parent_phase=bt-p3
+            echo parent_phase_commit=c82767575b9296175268a1ffb0c43c90b2093632
+            echo fuse_modern_source_run=34974949126
+            echo fuse_modern_source_commit=d45ba71ff4bc4e814634ea4559bd387fb8c34625
+            echo parent_baseline_run=34947094031
+            echo parent_baseline_commit=9a09106ec6b79a0835fe8b23259f1f30f2f80898
+            echo bt_uart=ttyHS0@884000
+            echo bt_wakeup_irq=gpio64-hs_uart_wakeup
+            echo bt_wakeup_byte=0xfd
+            echo bt_autosuspend_ms=150-retained
+            echo bt_p2a=dynamic-wake-irq-lifecycle-plus-shutdown-tty-race-hardening
+            echo bt_p2b=high-priority-workqueue-plus-real-uart-wake-byte
+            echo bt_p2c=serialized-stop-rx-plus-rpm-resource-guard-plus-dynamic-stale-delay
+            echo bt_p3=btfm-slim-error-propagation-plus-transactional-channel-cleanup
+            echo bt_p3_power_guard=always-disable-enabled-wcn-slim-ports-on-failed-open-or-close
+            echo bt_p4a=serialized-hardware-sequence-with-vendor-rfkill-ioctl-state-semantics-preserved
+            echo bt_p4a_regulators=retention-restore-plus-partial-enable-rollback
+            echo bt_wake_protocol=qualcomm-async-real-0xfd
+            echo bt_synthetic_wake_byte=removed
+            echo network_bbrv1=bbr
+            echo network_bbrv3=bbr3
+            echo default_tcp_cc=bbr3
+            echo wifi_default_qdisc=mq-1-with-fq-leaves
+            echo rmnet_data_default_qdisc=mq-1-with-fq-leaves
+            echo rmnet_ipa_default_qdisc=retained-stock-pfifo_fast
+            echo binder_source=android17-6.18-2026-09_r1
+            echo binder_source_commit=bab5f6aca819542b9dd13a70d3c62271e81b8e85
+            echo binder_core=android17-runtime-proven-phase83
+            echo binder_alloc=android17-native-logic-with-linux-4.19-mm-lru-compat
+            echo binderfs=retained-4.19-with-android17-debug-and-unload-bridges
+            echo fuse_passthrough=phase99-modern-p2-plus-boot-proven-p1
+            echo fuse_legacy_android_ioctl126=preserved-one-shot-shim
+            echo fuse_backing_registry=persistent-refcounted
+            echo fuse_backing_open_close=enabled
+            echo fuse_protocol=7.27-preserved
+            echo fuse_p3_max_stack_depth=deferred
+            echo fuse_feature_probe=/sys/fs/fuse/features/fuse_passthrough
+            echo samsung_freecess=restored
+            echo android_netlink_reporting=deferred
+            echo uclamp=android17-p2-cass-aware
+            echo rt_uclamp_default=sysctl-live-sync
+            echo eevdf=phase77
+            echo cass=walt-safe-plus-uclamp-task-demand
+            echo mglru=phase80-compiled-runtime-switchable
+            echo compiler=vendor-clang-r383902
+            echo kernel=4.19.206
+            echo baseline_run=34833825377
+            echo baseline_commit=e260e4973e90d9f8ca0076645862765532331dbb
+            echo gpu_phase1=qualcomm-bus-order-plus-gpubw-guard
+            echo gpu_phase2=idle-timer-race-plus-rpmh-slumber-votes
+            echo gpu_phase3=perfcounter-lock-contention-plus-single-level-tz-gpubw
+            echo gpu_phase3_source_a=a404f6fde547
+            echo gpu_phase3_source_b=081d5718cff2
+            echo gpu_phase4=pseudo-register-submit-reduction-plus-perfcounter-oob-refcount
+            echo gpu_phase4_source_a=96f7537ccfcd
+            echo gpu_phase4_source_b=06f837b9da4f
+            echo gpu_phase4_deferred_scratch=48fc67d2bcfb
+            echo gpu_phase4_skipped_reclaim=a07afc4e1477
+            echo gpu_phase5=global-ringbuffer-pagetable-scratch-consolidation
+            echo gpu_phase5_source=48fc67d2bcfb
+            echo gpu_phase5_effect=remove-per-ringbuffer-pagetable-allocation
+            echo gpu_phase5_skipped_reclaim=a07afc4e1477
+            echo surfaceflinger_renderengine=skiavkthreaded
+          } | tee artifacts/u17-uclamp-p2-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package BT-P4A + FUSE Modern P2 + GPU P5 + BBRv3 + FQ + Vulkan RE ZIP
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh")
+          s = p.read_text()
+          anchor = "dump_boot;\nwrite_boot;"
+          if s.count(anchor) != 1:
+              raise SystemExit(f"unexpected AnyKernel boot-write anchor count: {s.count(anchor)}")
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 -m py_compile scripts/88_patch_anykernel_vulkan_renderengine.py
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + FUSE-MODERN-P2 + GPU P5 + BBRv3 + WiFi-RMNET-FQ + BT-P4A + Vulkan RE/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FUSE-MODERN-P2-GPU-P5-BBR3-WIFI-RMNET-FQ-BT-P4A-VULKAN-RE-CLANG11.zip/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+          chmod +x scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+
+          ./scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh \
+            4.19.206 \
+            "$IMAGE" \
+            packaging/AnyKernel3 \
+            release
+
+          rm -f scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+
+      - name: Verify packaged BT-P4A + FUSE Modern P2 + GPU P5 + BBRv3 + FQ + Vulkan RE
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq '/data/adb/modules/touchgrass-vulkan-re'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'debug.renderengine.backend=skiavkthreaded'
+          ! unzip -p "$ZIP" anykernel.sh | grep -Fq 'ksud module install'
+          ! unzip -p "$ZIP" anykernel.sh | grep -Fq 'initrc refresh'
+          unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_renderengine=skiavkthreaded'
+          unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_vulkan_integration=kernelsu-direct-system-prop'
+          unzip -l "$ZIP" | tee artifacts/u17-uclamp-p2-package-list.txt
+          sha256sum "$ZIP" | tee artifacts/u17-uclamp-p2-package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-bt-p4a-fusep2-${{ runner.os }}-v1
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/u17-uclamp-p2-kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/u17-uclamp-p2-diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/u17-uclamp-p2-ccache.txt 2>&1 || true
+
+      - name: Upload BT-P4A + FUSE Modern P2 + GPU P5 + BBRv3 + FQ + Vulkan RE ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-FUSE-MODERN-P2-BT-P4A-GPU-P5-BBR3-WIFI-RMNET-FQ-VULKAN-RE-CLANG11-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload U17-UCLAMP-P2 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-android17-uclamp-p2-${{ github.run_number }}-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

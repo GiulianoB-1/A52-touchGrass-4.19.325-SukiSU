@@ -465,7 +465,7 @@ int main(int argc, char **argv)
 
     VkBufferCreateInfo out_bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = 16,
+        .size = 64,
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
@@ -493,7 +493,8 @@ int main(int argc, char **argv)
     if (r != VK_SUCCESS || !mapped) { ret = 32; goto cleanup; }
 
     float *out = (float *)mapped;
-    out[0] = out[1] = out[2] = out[3] = -99.0f;
+    for (unsigned i = 0; i < 16; ++i)
+        out[i] = -99.0f;
     if (!(out_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
         VkMappedMemoryRange range = {
             .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
@@ -557,7 +558,7 @@ int main(int argc, char **argv)
     VkDescriptorBufferInfo dbi = {
         .buffer = out_buffer,
         .offset = 0,
-        .range = 16,
+        .range = 64,
     };
     VkWriteDescriptorSet writes[2] = {
         {
@@ -716,16 +717,40 @@ int main(int argc, char **argv)
 
     printf("yv12_sample.rgba=%.6f,%.6f,%.6f,%.6f\n",
            out[0], out[1], out[2], out[3]);
-    if (tp10_smoke)
-        printf("tp10_sample.rgba=%.6f,%.6f,%.6f,%.6f\n",
-               out[0], out[1], out[2], out[3]);
 
     int sane =
         out[0] >= 0.0f && out[0] <= 1.0f &&
         out[1] >= 0.0f && out[1] <= 1.0f &&
         out[2] >= 0.0f && out[2] <= 1.0f &&
         out[3] >= 0.90f && out[3] <= 1.01f;
-    printf("yv12_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
+
+    if (tp10_smoke) {
+        /* This private TP10 buffer is GPU-only and deliberately uninitialized.
+         * Narrow-range YCbCr conversion is not clamped to [0,1], so arbitrary
+         * YUV code values may legitimately produce negative RGB or RGB > 1.
+         * Validate four real GPU samples for finite/bounded data and alpha.
+         */
+        sane = 1;
+        for (unsigned i = 0; i < 4; ++i) {
+            const float *v = &out[i * 4];
+            printf("tp10_sample.rgba[%u]=%.6f,%.6f,%.6f,%.6f\n",
+                   i, v[0], v[1], v[2], v[3]);
+            int sample_sane =
+                v[0] == v[0] && v[1] == v[1] &&
+                v[2] == v[2] && v[3] == v[3] &&
+                v[0] > -4.0f && v[0] < 4.0f &&
+                v[1] > -4.0f && v[1] < 4.0f &&
+                v[2] > -4.0f && v[2] < 4.0f &&
+                v[3] >= 0.90f && v[3] <= 1.01f;
+            printf("tp10_sample.sample[%u]_sane=%s\n",
+                   i, sample_sane ? "PASS" : "FAIL");
+            if (!sample_sane)
+                sane = 0;
+        }
+        printf("tp10_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
+    } else {
+        printf("yv12_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
+    }
 
     if (!sane) {
         if (tp10_smoke)
@@ -734,7 +759,7 @@ int main(int argc, char **argv)
             printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
         ret = 46;
     } else if (tp10_smoke) {
-        printf("tp10_sample.mode=gpu-only-qti-ubwc-ycbcr-compute-smoke\n");
+        printf("tp10_sample.mode=gpu-only-qti-ubwc-ycbcr-4point-compute-smoke\n");
         printf("TP10_GPU_SAMPLE_STATUS=PASS\n");
         ret = 0;
     } else if (write_ref_path) {

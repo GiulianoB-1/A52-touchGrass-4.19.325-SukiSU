@@ -181,6 +181,15 @@ def repair_merge_shapes() -> None:
 \tif (!count)
 \t\tsugov_clear_global_tunables();
 """
+    merged_exit_core = """\tmutex_lock(&global_tunables_lock);
+
+\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
+\tpolicy->governor_data = NULL;
+\tif (!count) {
+\t\tsugov_tunables_save(policy, tunables);
+\t\tsugov_clear_global_tunables();
+\t}
+"""
     hybrid_exit_core = """\tmutex_lock(&global_tunables_lock);
 
 \t/*
@@ -198,12 +207,12 @@ def repair_merge_shapes() -> None:
         if text.count(vendor_exit_core) != 1:
             raise SystemExit("schedutil vendor exit cleanup is not unique")
         text = text.replace(vendor_exit_core, hybrid_exit_core, 1)
+    elif merged_exit_core in text:
+        if text.count(merged_exit_core) != 1:
+            raise SystemExit("schedutil merged exit cleanup is not unique")
+        text = text.replace(merged_exit_core, hybrid_exit_core, 1)
     elif target_exit_core in text:
-        if "sugov_tunables_save(" not in text:
-            text = text.replace(target_exit_core, hybrid_exit_core, 1)
-        else:
-            # A merged tree with Samsung cache support must save before put.
-            text = text.replace(target_exit_core, hybrid_exit_core, 1)
+        text = text.replace(target_exit_core, hybrid_exit_core, 1)
     elif hybrid_exit_core not in text:
         raise SystemExit("schedutil exit cleanup shape is unrecognized")
 

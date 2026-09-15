@@ -191,6 +191,110 @@ def repair_merge_shapes() -> None:
     if "arm_lpae_install_table(tablep, ptep, blk_pte, cfg, child_cnt)" in iommu_final:
         raise SystemExit("io-pgtable-arm split call still passes cfg")
 
+    # Complete three stable-side fragments that can be separated from their
+    # definitions by the vendor-preservation merge policy.
+
+    # 1) 4.19.250's RNG rewrite renamed rand_initialize() to random_init() and
+    # feeds the kernel command line into early entropy collection. Keep the new
+    # implementation, declaration and start_kernel() call consistent.
+    random_h = KERNEL / "include/linux/random.h"
+    random_h_text = random_h.read_text()
+    old_random_decl = "extern int __init rand_initialize(void);"
+    new_random_decl = "int __init random_init(const char *command_line);"
+    if old_random_decl in random_h_text:
+        if random_h_text.count(old_random_decl) != 1:
+            raise SystemExit("random.h legacy init declaration is not unique")
+        random_h_text = random_h_text.replace(old_random_decl, new_random_decl, 1)
+    elif random_h_text.count(new_random_decl) != 1:
+        raise SystemExit("random.h RNG init declaration is unrecognized")
+    random_h.write_text(random_h_text)
+
+    main_path = KERNEL / "init/main.c"
+    main_text = main_path.read_text()
+    old_random_call = "\trand_initialize();\n"
+    new_random_call = "\trandom_init(command_line);\n"
+    if old_random_call in main_text:
+        if main_text.count(old_random_call) != 1:
+            raise SystemExit("init/main.c legacy RNG init call is not unique")
+        main_text = main_text.replace(old_random_call, new_random_call, 1)
+    elif main_text.count(new_random_call) != 1:
+        raise SystemExit("init/main.c RNG init call is unrecognized")
+    main_path.write_text(main_text)
+
+    random_c_text = (KERNEL / "drivers/char/random.c").read_text()
+    if random_c_text.count("int __init random_init(const char *command_line)") != 1:
+        raise SystemExit("drivers/char/random.c modern random_init implementation is missing")
+
+    # 2) The IOMMU table-descriptor paddr formatting commit can survive in the
+    # call site while its small helper is dropped by the Qualcomm-preservation
+    # policy. Restore the exact stable helper beside arm_lpae_iopte.
+    iommu_path = KERNEL / "drivers/iommu/io-pgtable-arm.c"
+    iommu_text = iommu_path.read_text()
+    paddr_helper_sig = (
+        "static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,\n"
+        "\t\t\t\t     struct arm_lpae_io_pgtable *data)"
+    )
+    paddr_helper = """static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,
+\t\t\t\t     struct arm_lpae_io_pgtable *data)
+{
+\tarm_lpae_iopte pte = paddr;
+
+\t/* Of the bits which overlap, either 51:48 or 15:12 are always RES0 */
+\treturn (pte | (pte >> (48 - 12))) & ARM_LPAE_PTE_ADDR_MASK;
+}
+
+"""
+    if paddr_helper_sig not in iommu_text:
+        typedef_anchor = "typedef u64 arm_lpae_iopte;\n\n"
+        if iommu_text.count(typedef_anchor) != 1:
+            raise SystemExit("io-pgtable-arm arm_lpae_iopte typedef anchor is not unique")
+        iommu_text = iommu_text.replace(
+            typedef_anchor, typedef_anchor + paddr_helper, 1
+        )
+    elif iommu_text.count(paddr_helper_sig) != 1:
+        raise SystemExit("io-pgtable-arm paddr_to_iopte helper is duplicated")
+    iommu_path.write_text(iommu_text)
+
+    # 3) Stable MMC changed the old WARN_ON-only SDIO capability check into a
+    # validating helper that rejects an unusable host. The call merged, but the
+    # helper definition did not. Restore the exact upstream validation while
+    # leaving Samsung's clock-scaling, IPC logging and PM behavior untouched.
+    mmc_host = KERNEL / "drivers/mmc/core/host.c"
+    mmc_text = mmc_host.read_text()
+    mmc_helper_sig = "static int mmc_validate_host_caps(struct mmc_host *host)"
+    mmc_helper = """static int mmc_validate_host_caps(struct mmc_host *host)
+{
+\tif (host->caps & MMC_CAP_SDIO_IRQ && !host->ops->enable_sdio_irq) {
+\t\tdev_warn(host->parent, "missing ->enable_sdio_irq() ops\\n");
+\t\treturn -EINVAL;
+\t}
+
+\treturn 0;
+}
+
+"""
+    if mmc_helper_sig not in mmc_text:
+        add_host_doc = "/**\n *\tmmc_add_host - initialise host hardware\n"
+        if mmc_text.count(add_host_doc) != 1:
+            raise SystemExit("MMC add-host documentation anchor is not unique")
+        mmc_text = mmc_text.replace(add_host_doc, mmc_helper + add_host_doc, 1)
+    elif mmc_text.count(mmc_helper_sig) != 1:
+        raise SystemExit("MMC host-capability validator is duplicated")
+
+    if mmc_text.count("err = mmc_validate_host_caps(host);") != 1:
+        raise SystemExit("MMC add-host validation call is missing or duplicated")
+    mmc_host.write_text(mmc_text)
+
+    # Link-closure postconditions for these three repaired fragments.
+    if "rand_initialize();" in main_path.read_text():
+        raise SystemExit("legacy rand_initialize call remains")
+    if random_h.read_text().count(new_random_decl) != 1:
+        raise SystemExit("random_init declaration postcondition failed")
+    if iommu_path.read_text().count(paddr_helper_sig) != 1:
+        raise SystemExit("paddr_to_iopte helper postcondition failed")
+    if mmc_host.read_text().count(mmc_helper_sig) != 1:
+        raise SystemExit("mmc_validate_host_caps helper postcondition failed")
+
     # Linux 4.19.250 made the tunables kobject own the final free. The Samsung
     # tree still carries its older explicit struct-pointer free helper for its
     # tunables cache. Keeping both creates conflicting C definitions and, if

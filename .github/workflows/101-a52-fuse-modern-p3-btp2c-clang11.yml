@@ -431,7 +431,7 @@ jobs:
           grep -Fq 'backing_id;     /* modern FUSE passthrough */' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'uint32_t	max_stack_depth;' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'int max_stack_depth;' "$KERNEL/fs/fuse/fuse_i.h"
-          grep -Fq 'int max_stack_depth = 1;' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'int max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'fc->max_stack_depth = max_stack_depth;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'backing_sb->s_stack_depth >= fc->max_stack_depth' "$KERNEL/fs/fuse/backing.c"
           grep -Fq 'int backing_id = openarg->backing_id;' "$KERNEL/fs/fuse/passthrough.c"
@@ -465,7 +465,7 @@ jobs:
           grep -Fq 'backing_id;     /* modern FUSE passthrough */' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'uint32_t	max_stack_depth;' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'int max_stack_depth;' "$KERNEL/fs/fuse/fuse_i.h"
-          grep -Fq 'int max_stack_depth = 1;' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'int max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'fc->max_stack_depth = max_stack_depth;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'fc->sb->s_stack_depth = max_stack_depth;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'backing_sb->s_stack_depth >= fc->max_stack_depth' "$KERNEL/fs/fuse/backing.c"
@@ -577,7 +577,7 @@ jobs:
             echo fuse_backing_registry=persistent-refcounted
             echo fuse_backing_open_close=enabled
             echo fuse_open_backing_id_alias=enabled-wire-size-preserved
-            echo fuse_max_stack_depth=1-legacy-safe-per-connection
+            echo fuse_max_stack_depth=legacy-p2-global-limit-plus-modern-negotiation
             echo fuse_protocol=7.27-preserved
             echo fuse_full_7_40_minor_bump=deferred-for-userspace-safety
             echo fuse_feature_probe=/sys/fs/fuse/features/fuse_passthrough

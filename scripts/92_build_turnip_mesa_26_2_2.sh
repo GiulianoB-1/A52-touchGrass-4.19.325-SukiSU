@@ -745,6 +745,63 @@ qcom_text = qcom_text.replace(create_anchor, create_new, 1)
 
 qcom.write_text(qcom_text)
 
+# Trace the generic Android AHB resolution layer directly to stderr for the
+# two private QTI UBWC formats. Android log routing is device/build dependent,
+# while stderr from the standalone probe is deterministic.
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """#include <unistd.h>
+""",
+    """#include <stdio.h>
+#include <unistd.h>
+""",
+    "vk_android QTI AHB trace stdio",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """   struct u_gralloc_buffer_basic_info info;
+   if (u_gralloc_get_buffer_basic_info(vk_android_get_ugralloc(), &gr_handle,
+                                       &info) != 0) {
+      mesa_loge("Failed to get u_gralloc_buffer_basic_info");
+      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   }
+
+   switch (info.drm_fourcc) {
+""",
+    """   struct u_gralloc_buffer_basic_info info;
+   memset(&info, 0, sizeof(info));
+   int tg_basic_ret =
+      u_gralloc_get_buffer_basic_info(vk_android_get_ugralloc(), &gr_handle,
+                                      &info);
+
+   const bool tg_qti_private =
+      desc.format == 0x7fa30c06u || desc.format == 0x7fa30c09u;
+   if (tg_qti_private) {
+      fprintf(stderr,
+              "touchGrass AHB basic hal=0x%08x ret=%d fourcc=0x%08x modifier=0x%016llx planes=%d\\n",
+              desc.format, tg_basic_ret, info.drm_fourcc,
+              (unsigned long long) info.modifier, info.num_planes);
+      if (tg_basic_ret == 0) {
+         for (int i = 0; i < info.num_planes && i < 4; ++i) {
+            fprintf(stderr,
+                    "touchGrass AHB plane[%d] fd=%d off=%d stride=%d\\n",
+                    i, info.fds[i], info.offsets[i], info.strides[i]);
+         }
+      }
+      fflush(stderr);
+   }
+
+   if (tg_basic_ret != 0) {
+      mesa_loge("Failed to get u_gralloc_buffer_basic_info");
+      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   }
+
+   switch (info.drm_fourcc) {
+""",
+    "vk_android QTI AHB basic-info stderr trace",
+)
+
 tu = src / "src/freedreno/vulkan/tu_image.cc"
 text = tu.read_text()
 anchor = """template <chip CHIP>

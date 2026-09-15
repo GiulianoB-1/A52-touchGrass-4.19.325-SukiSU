@@ -156,15 +156,26 @@ fi
 echo "turnip_ahb_probe_exit=$AHB_PROBE_RC"
 echo
 
-echo "=== TURNIP YV12 GPU SAMPLE PROBE ==="
+echo "=== TURNIP YV12 POST-FILL IMPORT PROBE ==="
 if command -v timeout >/dev/null 2>&1; then
     timeout 45 "$YV12_SAMPLE_PROBE" --compare-ref "$YV12_REF"
-    YV12_SAMPLE_RC=$?
+    YV12_POSTFILL_RC=$?
 else
     "$YV12_SAMPLE_PROBE" --compare-ref "$YV12_REF"
-    YV12_SAMPLE_RC=$?
+    YV12_POSTFILL_RC=$?
 fi
-echo "turnip_yv12_sample_exit=$YV12_SAMPLE_RC"
+echo "turnip_yv12_postfill_exit=$YV12_POSTFILL_RC"
+echo
+
+echo "=== TURNIP YV12 IMPORT-FIRST GPU SAMPLE PROBE ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 45 "$YV12_SAMPLE_PROBE" --import-before-fill --compare-ref "$YV12_REF"
+    YV12_IMPORTFIRST_RC=$?
+else
+    "$YV12_SAMPLE_PROBE" --import-before-fill --compare-ref "$YV12_REF"
+    YV12_IMPORTFIRST_RC=$?
+fi
+echo "turnip_yv12_importfirst_exit=$YV12_IMPORTFIRST_RC"
 echo
 
 if [ -n "$WATCH_PID" ]; then
@@ -178,7 +189,8 @@ echo "=== TURNIP KERNEL WATCH TAIL ==="
 tail -250 "$WATCH" 2>/dev/null || true
 echo "probe_exit=$PROBE_RC"
 echo "ahb_probe_exit=$AHB_PROBE_RC"
-echo "yv12_sample_exit=$YV12_SAMPLE_RC"
+echo "yv12_postfill_exit=$YV12_POSTFILL_RC"
+echo "yv12_importfirst_exit=$YV12_IMPORTFIRST_RC"
 echo
 
 echo "=== CMD GPU VKJSON ==="
@@ -194,8 +206,10 @@ dmesg | grep -Ei 'kgsl|adreno|gmu|gpu|iommu|smmu' | grep -Ei 'fault|error|timeou
 echo
 
 echo "=== RESULT ==="
-if [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ] && [ "$YV12_SAMPLE_RC" -eq 0 ]; then
+if [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ] && [ "$YV12_POSTFILL_RC" -eq 0 ] && [ "$YV12_IMPORTFIRST_RC" -eq 0 ]; then
     echo "TURNIP_LIVE_TEST=PASS"
+elif [ "$PROBE_RC" -eq 0 ] && [ "$AHB_PROBE_RC" -eq 0 ] && [ "$YV12_IMPORTFIRST_RC" -eq 0 ]; then
+    echo "TURNIP_LIVE_TEST=PARTIAL_POSTFILL_IMPORT_FAIL"
 else
     echo "TURNIP_LIVE_TEST=FAIL"
 fi
@@ -207,4 +221,7 @@ fi
 if [ "$AHB_PROBE_RC" -ne 0 ]; then
     exit "$AHB_PROBE_RC"
 fi
-exit "$YV12_SAMPLE_RC"
+if [ "$YV12_IMPORTFIRST_RC" -ne 0 ]; then
+    exit "$YV12_IMPORTFIRST_RC"
+fi
+exit "$YV12_POSTFILL_RC"

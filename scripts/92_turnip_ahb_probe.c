@@ -18,6 +18,10 @@
 #define AHARDWAREBUFFER_FORMAT_YV12 0x32315659u
 #endif
 
+#ifndef TOUCHGRASS_ANDROID_NV21
+#define TOUCHGRASS_ANDROID_NV21 0x11u
+#endif
+
 #ifndef TOUCHGRASS_QTI_NV12_UBWC
 #define TOUCHGRASS_QTI_NV12_UBWC 0x7fa30c06u
 #endif
@@ -444,12 +448,14 @@ static int run_ahb_case(VkPhysicalDevice physical,
 
     if (tc->format == AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 ||
         tc->format == AHARDWAREBUFFER_FORMAT_YV12 ||
+        tc->format == TOUCHGRASS_ANDROID_NV21 ||
         tc->format == TOUCHGRASS_QTI_NV12_UBWC ||
         tc->format == TOUCHGRASS_QTI_TP10_UBWC)
         tg_dump_qti_forensics(tc->name, ahb);
 
     if (tc->format == AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 ||
-        tc->format == AHARDWAREBUFFER_FORMAT_YV12) {
+        tc->format == AHARDWAREBUFFER_FORMAT_YV12 ||
+        tc->format == TOUCHGRASS_ANDROID_NV21) {
         tg_dump_candidate_external_format(
             physical, tc->name, "g8_b8_r8_3plane_420",
             VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM);
@@ -886,6 +892,13 @@ int main(void)
             .usage = sampled_usage,
         },
         {
+            .name = "camera_nv21_1440x1080",
+            .format = TOUCHGRASS_ANDROID_NV21,
+            .width = 1440,
+            .height = 1080,
+            .usage = sampled_gpu_only_usage,
+        },
+        {
             .name = "qti_nv12_ubwc_720x1280",
             .format = TOUCHGRASS_QTI_NV12_UBWC,
             .width = 720,
@@ -904,6 +917,7 @@ int main(void)
     unsigned pass = 0, fail = 0;
     int target_yuv420_rc = -1;
     int target_yv12_sf_rc = -1;
+    int target_camera_nv21_rc = -1;
     int target_qti_nv12_ubwc_rc = -1;
     int target_qti_tp10_ubwc_rc = -1;
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
@@ -916,6 +930,8 @@ int main(void)
             target_yuv420_rc = rc;
         if (strcmp(cases[i].name, "yv12_sf_940x1670") == 0)
             target_yv12_sf_rc = rc;
+        if (strcmp(cases[i].name, "camera_nv21_1440x1080") == 0)
+            target_camera_nv21_rc = rc;
         if (strcmp(cases[i].name, "qti_nv12_ubwc_720x1280") == 0)
             target_qti_nv12_ubwc_rc = rc;
         if (strcmp(cases[i].name, "qti_tp10_ubwc_1080x1920") == 0)
@@ -957,6 +973,11 @@ int main(void)
         printf("target_yv12_sf_940x1670_status=PASS\n");
     else
         printf("target_yv12_sf_940x1670_status=FAIL\n");
+    printf("target_camera_nv21_1440x1080_exit=%d\n", target_camera_nv21_rc);
+    if (target_camera_nv21_rc == 0)
+        printf("target_camera_nv21_1440x1080_status=PASS\n");
+    else
+        printf("target_camera_nv21_1440x1080_status=FAIL\n");
     printf("target_qti_nv12_ubwc_720x1280_exit=%d\n",
            target_qti_nv12_ubwc_rc);
     if (target_qti_nv12_ubwc_rc == 0)
@@ -976,5 +997,5 @@ int main(void)
      * vendor-private formats even though camera/video producers can supply
      * such buffers. Persistent SurfaceFlinger is the authoritative private
      * QTI UBWC integration test. */
-    return target_yv12_sf_rc == 0 ? 0 : 30;
+    return target_yv12_sf_rc == 0 && target_camera_nv21_rc == 0 ? 0 : 30;
 }

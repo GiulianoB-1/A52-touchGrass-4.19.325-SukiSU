@@ -169,7 +169,7 @@ jobs:
           grep -Fxq 'probe_api_request=Vulkan-1.4' "$INFO"
           grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
           grep -Fxq 'a619_vulkan14_override=device-id-0x06010900-only' "$INFO"
-          grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-roundtrip' "$INFO"
+          grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-pushdescriptor-maintenance6' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
@@ -238,6 +238,10 @@ jobs:
           strings "$PROBE" | grep -Fq 'vulkan14_device_api_status=PASS'
           strings "$PROBE" | grep -Fq 'vulkan14_feature_enable_status=PASS'
           strings "$PROBE" | grep -Fq 'vulkan14_hostcopy_status=PASS'
+          strings "$PROBE" | grep -Fq 'vulkan14_push_status=PASS'
+          strings "$PROBE" | grep -Fq 'vulkan14_push.push_descriptor_recorded=1'
+          strings "$PROBE" | grep -Fq 'vulkan14_push.push_constants2_recorded=1'
+          strings "$PROBE" | grep -Fq 'vulkan14_push.actual=0x%08x'
           strings "$PROBE" | grep -Fq 'vulkan14_hostcopy.copy_memory_to_image=%d'
           strings "$PROBE" | grep -Fq 'vulkan14_hostcopy.copy_image_to_memory=%d'
           strings "$PROBE" | grep -Fq 'vulkan14_hostcopy.mismatches=%u'
@@ -296,7 +300,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.20.3-vk1.4-hostcopy-validation'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.20.4-vk1.4-pushdescriptor-validation'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.22-vk1.4-kgsl-zero-timeout-poll
+version=0.22-vk1.4-stable-a619
 versionCode=34
 author=touchGrass project
-description=Experimental A52 Turnip Vulkan 1.4 performance build. Based on validated v0.21; fixes legacy KGSL timeout-zero fence polling by reading KGSL_TIMESTAMP_RETIRED instead of blocking RenderThread in WAITTIMESTAMP_CTXTID.
+description=Stable A52 Turnip Vulkan 1.4 baseline for Adreno 619/KGSL. Includes validated Android AHB/YV12/QTI UBWC support, Vulkan 1.4 execution tests, and the legacy-KGSL nonblocking timeout-zero fence poll fix that removes the RenderThread GPU-retirement stall.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -275,7 +275,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.22-vk1.4-kgsl-zero-timeout-poll'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.22-vk1.4-stable-a619'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

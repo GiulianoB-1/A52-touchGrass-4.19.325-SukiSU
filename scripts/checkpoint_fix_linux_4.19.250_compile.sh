@@ -52,6 +52,34 @@ if final.count("\t.macro clearbhb\n") != 1:
     raise SystemExit("arm64 clearbhb postcondition failed")
 print("applied=arm64 clearbhb duplicate removal")
 
+sections = root / "arch/arm64/include/asm/sections.h"
+text = sections.read_text()
+entry_tramp_block = (
+    "static inline size_t entry_tramp_text_size(void)\n"
+    "{\n"
+    "\treturn __entry_tramp_text_end - __entry_tramp_text_start;\n"
+    "}\n"
+)
+entry_tramp_count = text.count(entry_tramp_block)
+if entry_tramp_count == 2:
+    first = text.find(entry_tramp_block)
+    second = text.find(entry_tramp_block, first + len(entry_tramp_block))
+    if first < 0 or second < 0:
+        raise SystemExit("arm64 entry_tramp helper duplicate positions are invalid")
+    text = text[:second] + text[second + len(entry_tramp_block):]
+    sections.write_text(text)
+    print("applied=arm64 entry_tramp_text_size duplicate removal")
+elif entry_tramp_count == 1:
+    print("applied=arm64 entry_tramp_text_size already-single")
+else:
+    raise SystemExit(
+        f"arm64 entry_tramp_text_size helper count is {entry_tramp_count}, expected 1 or 2"
+    )
+
+final = sections.read_text()
+if final.count(entry_tramp_block) != 1:
+    raise SystemExit("arm64 entry_tramp_text_size postcondition failed")
+
 verifier = root / "kernel/bpf/verifier.c"
 text = verifier.read_text()
 start = text.index("static int convert_ctx_accesses(")
@@ -269,6 +297,7 @@ PY
 {
   echo 'target=4.19.250'
   echo 'arm64_clearbhb_definitions=1'
+  echo 'arm64_entry_tramp_text_size_definitions=1'
   echo 'bpf_convert_ctx_access_callback=restored'
   echo 'bpf_socket_pointer_dispatch=reachable'
   echo 'fscrypt_filename_api=touchgrass'

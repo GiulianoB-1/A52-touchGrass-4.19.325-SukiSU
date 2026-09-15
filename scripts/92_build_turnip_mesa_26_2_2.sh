@@ -601,19 +601,26 @@ tu_attachment_store_unaligned(struct tu_cmd_buffer *cmd, uint32_t a)
 clear_text = clear_text[:store_start] + new_store + clear_text[store_end:]
 
 clear.write_text(clear_text)
-PY
 
-grep -Fq 'bool has_explicit_pitch : 1;' "$SRC/src/freedreno/fdl/freedreno_layout.h"
-grep -Fq 'if (level == 0 && layout->has_explicit_pitch)' "$SRC/src/freedreno/fdl/freedreno_layout.h"
-grep -Fq 'pitch_alignment = android_yv12_import ? 16u : 0u' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq '.skip_last_level_padding =' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq 'android_yv12_import || android_exact_linear_color_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq 'tu_is_android_yv12_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq 'android_external_no_gmem_padding' "$SRC/src/freedreno/vulkan/tu_image.h"
-grep -Fq 'tu_is_android_exact_linear_color_import' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq 'Android image binding exceeds dma-buf size' "$SRC/src/freedreno/vulkan/tu_image.cc"
-grep -Fq 'tu_attachment_gmem_edge_unaligned' "$SRC/src/freedreno/vulkan/tu_clear_blit.cc"
-grep -Fq 'bounded_external_load' "$SRC/src/freedreno/vulkan/tu_clear_blit.cc"
+# Keep patch verification inside Python so an audit failure always names the
+# exact missing source marker instead of exiting silently under set -e.
+source_checks = [
+    ("src/freedreno/fdl/freedreno_layout.h", "bool has_explicit_pitch : 1;", "FDL explicit-pitch flag"),
+    ("src/freedreno/fdl/freedreno_layout.h", "if (level == 0 && layout->has_explicit_pitch)", "FDL explicit level-0 pitch"),
+    ("src/freedreno/vulkan/tu_image.cc", "pitch_alignment = android_yv12_import ? 16u : 0u", "YV12 16-byte pitch"),
+    ("src/freedreno/vulkan/tu_image.cc", "android_yv12_import || android_exact_linear_color_import", "exact linear tail-padding policy"),
+    ("src/freedreno/vulkan/tu_image.cc", "tu_is_android_yv12_import", "YV12 import recognizer"),
+    ("src/freedreno/vulkan/tu_image.h", "android_external_no_gmem_padding", "exact linear AHB flag"),
+    ("src/freedreno/vulkan/tu_image.cc", "tu_is_android_exact_linear_color_import", "exact linear AHB recognizer"),
+    ("src/freedreno/vulkan/tu_image.cc", "Android image binding exceeds dma-buf size", "Android dma-buf bounds check"),
+    ("src/freedreno/vulkan/tu_clear_blit.cc", "tu_attachment_gmem_edge_unaligned", "bounded GMEM edge helper"),
+    ("src/freedreno/vulkan/tu_clear_blit.cc", "bounded_external_load", "bounded GMEM load path"),
+]
+for rel, needle, label in source_checks:
+    if needle not in (src / rel).read_text():
+        raise SystemExit(f"source audit failed: {label}: {needle}")
+    print(f"source_audit={label}:PASS")
+PY
 
 echo "==> Cap Turnip bring-up to Vulkan 1.3"
 python3 - "$SRC" <<'PY'

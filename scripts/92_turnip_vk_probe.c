@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
+#include "vulkan14_push_spv.h"
 
 #define TEST_BUFFER_SIZE 4096u
 #define TEST_PATTERN 0xA5C3197Bu
@@ -942,6 +943,348 @@ cleanup:
     return rc;
 }
 
+
+static int run_vulkan14_push_descriptor_probe(VkPhysicalDevice physical,
+                                              VkDevice device,
+                                              VkQueue queue,
+                                              uint32_t queue_family)
+{
+    printf("=== VULKAN 1.4 PUSH DESCRIPTOR + MAINTENANCE6 ===\n");
+
+    PFN_vkCmdPushDescriptorSet pCmdPushDescriptorSet =
+        (PFN_vkCmdPushDescriptorSet)vkGetDeviceProcAddr(
+            device, "vkCmdPushDescriptorSet");
+    PFN_vkCmdPushConstants2 pCmdPushConstants2 =
+        (PFN_vkCmdPushConstants2)vkGetDeviceProcAddr(
+            device, "vkCmdPushConstants2");
+
+    printf("vulkan14_push.push_descriptor_ptr=%s\n",
+           pCmdPushDescriptorSet ? "OK" : "MISSING");
+    printf("vulkan14_push.push_constants2_ptr=%s\n",
+           pCmdPushConstants2 ? "OK" : "MISSING");
+
+    if (!pCmdPushDescriptorSet || !pCmdPushConstants2) {
+        printf("vulkan14_push_status=FAIL_DISPATCH\n");
+        return 140;
+    }
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    VkShaderModule shader = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    void *mapped = NULL;
+    int rc = 0;
+    VkResult r;
+
+    VkBufferCreateInfo bci = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = sizeof(uint32_t),
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    r = vkCreateBuffer(device, &bci, NULL, &buffer);
+    printf("vulkan14_push.vkCreateBuffer=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 141;
+        goto cleanup;
+    }
+
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(device, buffer, &req);
+
+    uint32_t memory_type = 0;
+    VkMemoryPropertyFlags memory_flags = 0;
+    if (choose_memory_type(physical, req.memoryTypeBits,
+                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                           &memory_type, &memory_flags) != 0) {
+        printf("vulkan14_push.memory_type=NONE\n");
+        rc = 142;
+        goto cleanup;
+    }
+    printf("vulkan14_push.memory_type=%u\n", memory_type);
+    printf("vulkan14_push.memory_flags=0x%x\n", memory_flags);
+
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = memory_type,
+    };
+    r = vkAllocateMemory(device, &mai, NULL, &memory);
+    printf("vulkan14_push.vkAllocateMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 143;
+        goto cleanup;
+    }
+
+    r = vkBindBufferMemory(device, buffer, memory, 0);
+    printf("vulkan14_push.vkBindBufferMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 144;
+        goto cleanup;
+    }
+
+    r = vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
+    printf("vulkan14_push.vkMapMemory=%d\n", r);
+    if (r != VK_SUCCESS || mapped == NULL) {
+        rc = 145;
+        goto cleanup;
+    }
+    *(volatile uint32_t *)mapped = 0u;
+
+    VkDescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo dsci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT,
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+    r = vkCreateDescriptorSetLayout(device, &dsci, NULL, &set_layout);
+    printf("vulkan14_push.vkCreateDescriptorSetLayout=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 146;
+        goto cleanup;
+    }
+
+    VkPushConstantRange push_range = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = sizeof(uint32_t),
+    };
+    VkPipelineLayoutCreateInfo plci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_range,
+    };
+    r = vkCreatePipelineLayout(device, &plci, NULL, &pipeline_layout);
+    printf("vulkan14_push.vkCreatePipelineLayout=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 147;
+        goto cleanup;
+    }
+
+    VkShaderModuleCreateInfo smci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = vulkan14_push_spv_size,
+        .pCode = vulkan14_push_spv,
+    };
+    r = vkCreateShaderModule(device, &smci, NULL, &shader);
+    printf("vulkan14_push.vkCreateShaderModule=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 148;
+        goto cleanup;
+    }
+
+    VkPipelineShaderStageCreateInfo stage = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = shader,
+        .pName = "main",
+    };
+    VkComputePipelineCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = stage,
+        .layout = pipeline_layout,
+    };
+    r = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cpci,
+                                 NULL, &pipeline);
+    printf("vulkan14_push.vkCreateComputePipelines=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 149;
+        goto cleanup;
+    }
+
+    VkCommandPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = queue_family,
+    };
+    r = vkCreateCommandPool(device, &pool_ci, NULL, &pool);
+    printf("vulkan14_push.vkCreateCommandPool=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 150;
+        goto cleanup;
+    }
+
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VkCommandBuffer command = VK_NULL_HANDLE;
+    r = vkAllocateCommandBuffers(device, &cbai, &command);
+    printf("vulkan14_push.vkAllocateCommandBuffers=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 151;
+        goto cleanup;
+    }
+
+    VkCommandBufferBeginInfo cbbi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    r = vkBeginCommandBuffer(command, &cbbi);
+    printf("vulkan14_push.vkBeginCommandBuffer=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 152;
+        goto cleanup;
+    }
+
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+
+    VkDescriptorBufferInfo dbi = {
+        .buffer = buffer,
+        .offset = 0,
+        .range = sizeof(uint32_t),
+    };
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &dbi,
+    };
+
+    pCmdPushDescriptorSet(command,
+                          VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipeline_layout,
+                          0,
+                          1,
+                          &write);
+    printf("vulkan14_push.push_descriptor_recorded=1\n");
+
+    const uint32_t expected = 0xA6191401u;
+    VkPushConstantsInfo push_info = {
+        .sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+        .layout = pipeline_layout,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = sizeof(expected),
+        .pValues = &expected,
+    };
+    pCmdPushConstants2(command, &push_info);
+    printf("vulkan14_push.push_constants2_recorded=1\n");
+
+    vkCmdDispatch(command, 1, 1, 1);
+
+    VkBufferMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buffer,
+        .offset = 0,
+        .size = sizeof(uint32_t),
+    };
+    vkCmdPipelineBarrier(command,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         0,
+                         0, NULL,
+                         1, &barrier,
+                         0, NULL);
+
+    r = vkEndCommandBuffer(command);
+    printf("vulkan14_push.vkEndCommandBuffer=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 153;
+        goto cleanup;
+    }
+
+    VkFenceCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    r = vkCreateFence(device, &fci, NULL, &fence);
+    printf("vulkan14_push.vkCreateFence=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 154;
+        goto cleanup;
+    }
+
+    VkSubmitInfo si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command,
+    };
+    r = vkQueueSubmit(queue, 1, &si, fence);
+    printf("vulkan14_push.vkQueueSubmit=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 155;
+        goto cleanup;
+    }
+
+    r = vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ULL);
+    printf("vulkan14_push.vkWaitForFences=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 156;
+        goto cleanup;
+    }
+
+    if (!(memory_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+        VkMappedMemoryRange range = {
+            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+            .memory = memory,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE,
+        };
+        r = vkInvalidateMappedMemoryRanges(device, 1, &range);
+        printf("vulkan14_push.vkInvalidateMappedMemoryRanges=%d\n", r);
+        if (r != VK_SUCCESS) {
+            rc = 157;
+            goto cleanup;
+        }
+    } else {
+        printf("vulkan14_push.vkInvalidateMappedMemoryRanges=SKIP_COHERENT\n");
+    }
+
+    uint32_t actual = *(volatile uint32_t *)mapped;
+    printf("vulkan14_push.expected=0x%08x\n", expected);
+    printf("vulkan14_push.actual=0x%08x\n", actual);
+    if (actual != expected) {
+        printf("vulkan14_push_status=FAIL_COMPARE\n");
+        rc = 158;
+        goto cleanup;
+    }
+
+    printf("vulkan14_push_status=PASS\n");
+
+cleanup:
+    if (fence != VK_NULL_HANDLE)
+        vkDestroyFence(device, fence, NULL);
+    if (pool != VK_NULL_HANDLE)
+        vkDestroyCommandPool(device, pool, NULL);
+    if (pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(device, pipeline, NULL);
+    if (shader != VK_NULL_HANDLE)
+        vkDestroyShaderModule(device, shader, NULL);
+    if (pipeline_layout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device, pipeline_layout, NULL);
+    if (set_layout != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(device, set_layout, NULL);
+    if (mapped != NULL)
+        vkUnmapMemory(device, memory);
+    if (memory != VK_NULL_HANDLE)
+        vkFreeMemory(device, memory, NULL);
+    if (buffer != VK_NULL_HANDLE)
+        vkDestroyBuffer(device, buffer, NULL);
+
+    printf("vulkan14_push_exit=%d\n", rc);
+    return rc;
+}
+
 static int run_submit_probe(VkPhysicalDevice physical)
 {
     VkResult r;
@@ -1096,6 +1439,20 @@ static int run_submit_probe(VkPhysicalDevice physical)
     } else {
         printf("vulkan14_hostcopy_status=SKIP_UNSUPPORTED\n");
         printf("vulkan14_hostcopy_exit=0\n");
+    }
+
+    if (vulkan14_supported &&
+        v14_features.pushDescriptor &&
+        v14_features.maintenance6) {
+        int push_rc = run_vulkan14_push_descriptor_probe(
+            physical, device, queue, queue_family);
+        if (push_rc != 0) {
+            vkDestroyDevice(device, NULL);
+            return push_rc;
+        }
+    } else {
+        printf("vulkan14_push_status=SKIP_UNSUPPORTED\n");
+        printf("vulkan14_push_exit=0\n");
     }
 
     printf("=== NO-OP GPU SUBMISSION ===\n");

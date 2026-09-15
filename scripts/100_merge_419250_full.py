@@ -165,56 +165,80 @@ def repair_merge_shapes() -> None:
     elif text.count(target_fail) != 1:
         raise SystemExit("schedutil fail cleanup is neither vendor nor target-safe")
 
-    vendor_exit_core = """\tmutex_lock(&global_tunables_lock);
+    # Normalize only the lifetime-critical section of sugov_exit().  Stable
+    # 4.19.250 can merge comments/braces from its kobject-lifetime conversion
+    # into Samsung's cached-tunables exit path, so matching the whole block is
+    # too brittle.  Validate the function shape, then emit one reviewed core.
+    exit_sig = "static void sugov_exit(struct cpufreq_policy *policy)"
+    if text.count(exit_sig) != 1:
+        raise SystemExit("schedutil exit function is not unique")
+    exit_start = text.index(exit_sig)
+    exit_end = function_end(text, exit_start)
+    exit_body = text[exit_start:exit_end]
 
-\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
-\tpolicy->governor_data = NULL;
-\tif (!count) {
-\t\tsugov_tunables_save(policy, tunables);
-\t\tsugov_tunables_free(tunables);
-\t}
-"""
-    target_exit_core = """\tmutex_lock(&global_tunables_lock);
+    required_exit_tokens = (
+        "mutex_lock(&global_tunables_lock);",
+        "gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);",
+        "policy->governor_data = NULL;",
+        "mutex_unlock(&global_tunables_lock);",
+    )
+    for token in required_exit_tokens:
+        if exit_body.count(token) != 1:
+            raise SystemExit(
+                f"schedutil exit token count for {token!r} is "
+                f"{exit_body.count(token)}, expected 1"
+            )
+    if "sugov_tunables_save(policy, tunables);" not in exit_body:
+        raise SystemExit("schedutil Samsung tunables cache save is missing")
+    if not (
+        "sugov_tunables_free(tunables);" in exit_body
+        or "sugov_clear_global_tunables();" in exit_body
+    ):
+        raise SystemExit("schedutil exit has no recognized final cleanup")
 
-\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
-\tpolicy->governor_data = NULL;
-\tif (!count)
-\t\tsugov_clear_global_tunables();
-"""
-    merged_exit_core = """\tmutex_lock(&global_tunables_lock);
-
-\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
-\tpolicy->governor_data = NULL;
-\tif (!count) {
-\t\tsugov_tunables_save(policy, tunables);
-\t\tsugov_clear_global_tunables();
-\t}
-"""
-    hybrid_exit_core = """\tmutex_lock(&global_tunables_lock);
+    lock_line = "\tmutex_lock(&global_tunables_lock);\n"
+    unlock_line = "\tmutex_unlock(&global_tunables_lock);\n"
+    lock_pos = exit_body.index(lock_line)
+    unlock_pos = exit_body.index(unlock_line, lock_pos)
+    canonical_exit_core = """\tmutex_lock(&global_tunables_lock);
 
 \t/*
-\t * Preserve Samsung's per-policy cache before gov_attr_set_put() can
-\t * release and free the tunables kobject. The helper is a no-op for
-\t * shared/global governor tunables.
+\t * The 4.19.250 kobject release callback can free tunables from
+\t * gov_attr_set_put(). Preserve Samsung's per-policy cached values only
+\t * when this is the final user, and do so before dropping that reference.
 \t */
-\tsugov_tunables_save(policy, tunables);
+\tif (tunables->attr_set.usage_count == 1)
+\t\tsugov_tunables_save(policy, tunables);
+
 \tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
 \tpolicy->governor_data = NULL;
 \tif (!count)
 \t\tsugov_clear_global_tunables();
+
 """
-    if vendor_exit_core in text:
-        if text.count(vendor_exit_core) != 1:
-            raise SystemExit("schedutil vendor exit cleanup is not unique")
-        text = text.replace(vendor_exit_core, hybrid_exit_core, 1)
-    elif merged_exit_core in text:
-        if text.count(merged_exit_core) != 1:
-            raise SystemExit("schedutil merged exit cleanup is not unique")
-        text = text.replace(merged_exit_core, hybrid_exit_core, 1)
-    elif target_exit_core in text:
-        text = text.replace(target_exit_core, hybrid_exit_core, 1)
-    elif hybrid_exit_core not in text:
-        raise SystemExit("schedutil exit cleanup shape is unrecognized")
+    exit_body = (
+        exit_body[:lock_pos]
+        + canonical_exit_core
+        + exit_body[unlock_pos:]
+    )
+    text = text[:exit_start] + exit_body + text[exit_end:]
+
+    # Postconditions: no pointer-based free may remain in the exit path, the
+    # cache save must precede the potentially freeing put, and cleanup is once.
+    exit_end = function_end(text, exit_start)
+    repaired_exit = text[exit_start:exit_end]
+    if "sugov_tunables_free(tunables);" in repaired_exit:
+        raise SystemExit("schedutil exit still uses pointer-based tunables free")
+    if repaired_exit.count("sugov_tunables_save(policy, tunables);") != 1:
+        raise SystemExit("schedutil exit cache-save count is not one")
+    if repaired_exit.count("sugov_clear_global_tunables();") != 1:
+        raise SystemExit("schedutil exit global-clear count is not one")
+    if repaired_exit.count("tunables->attr_set.usage_count == 1") != 1:
+        raise SystemExit("schedutil exit final-user guard count is not one")
+    if repaired_exit.index("sugov_tunables_save(policy, tunables);") > repaired_exit.index(
+        "gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);"
+    ):
+        raise SystemExit("schedutil cache save still occurs after kobject put")
 
     path.write_text(text)
     final = path.read_text()

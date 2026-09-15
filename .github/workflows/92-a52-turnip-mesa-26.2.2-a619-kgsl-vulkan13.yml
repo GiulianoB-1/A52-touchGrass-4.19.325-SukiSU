@@ -220,6 +220,8 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
+          strings "$AHB_PROBE" | grep -Fq 'vkCreateImageView_external=%d:%s'
+          strings "$AHB_PROBE" | grep -Fq 'EXTERNAL_IMAGE_VIEW_FAIL'
           strings "$AHB_PROBE" | grep -Fq 'AHB_CASES_FAIL=%u'
           strings "$AHB_PROBE" | grep -Fq 'stress_rgba8_passed=%u/32'
           strings "$AHB_PROBE" | grep -Fq 'target_yv12_sf_940x1670_status=PASS'

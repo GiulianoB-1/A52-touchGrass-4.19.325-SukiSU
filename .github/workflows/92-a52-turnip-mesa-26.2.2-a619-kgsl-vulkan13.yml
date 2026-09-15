@@ -160,7 +160,7 @@ jobs:
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
-          grep -Fxq 'yv12_sample_mode=940x1670-stock-reference-vs-turnip-compute-sample-readback' "$INFO"
+          grep -Fxq 'yv12_sample_mode=940x1670-postfill-vs-importfirst-stock-reference' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-16byte-pitch' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
 
@@ -176,6 +176,8 @@ jobs:
           strings "$YV12_PROBE" | grep -Fq 'YV12 940x1670 GPU SAMPLE PROBE'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.before_vkQueueSubmit=1'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_match=%s'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.import_before_fill=%d'
+          strings "$YV12_PROBE" | grep -Fq 'offset_from_plane0='
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
@@ -214,14 +216,16 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.12-vk1.3-yv12-stockref-no-boot-hook'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.13-vk1.3-yv12-import-order'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP ANDROID HARDWARE BUFFER IMPORT PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM YV12 GPU SAMPLE BASELINE'
-          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP YV12 GPU SAMPLE PROBE'
-          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'turnip_yv12_sample_exit='
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP YV12 POST-FILL IMPORT PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP YV12 IMPORT-FIRST GPU SAMPLE PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'turnip_yv12_postfill_exit='
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'turnip_yv12_importfirst_exit='
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq -- '--write-ref "$YV12_REF"'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq -- '--compare-ref "$YV12_REF"'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP KERNEL WATCH'

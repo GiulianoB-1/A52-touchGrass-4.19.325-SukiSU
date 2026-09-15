@@ -1698,12 +1698,38 @@ file "$DIST/vulkan.adreno.so" | tee "$OUT/file.txt"
 file "$DIST/vulkan.adreno.so" | grep -Fq 'ARM aarch64'
 sha256sum "$DIST/vulkan.adreno.so" | tee "$OUT/vulkan.adreno.so.sha256"
 
+echo "==> Build Vulkan 1.4 push-descriptor compute shader"
+V14_PUSH_SHADER_SRC="$ROOT/scripts/92_turnip_vulkan14_push.comp"
+V14_PUSH_SPV="$OUT/vulkan14_push.spv"
+V14_PUSH_HDR="$OUT/vulkan14_push_spv.h"
+test -s "$V14_PUSH_SHADER_SRC"
+glslangValidator -V --target-env vulkan1.1 -S comp \
+  "$V14_PUSH_SHADER_SRC" -o "$V14_PUSH_SPV"
+python3 - "$V14_PUSH_SPV" "$V14_PUSH_HDR" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+spv = Path(sys.argv[1]).read_bytes()
+if len(spv) % 4:
+    raise SystemExit("Vulkan 1.4 push SPIR-V size is not uint32 aligned")
+words = struct.unpack("<%dI" % (len(spv) // 4), spv)
+with open(sys.argv[2], "w") as out:
+    out.write("#pragma once\n#include <stddef.h>\n#include <stdint.h>\n")
+    out.write("static const uint32_t vulkan14_push_spv[] = {\n")
+    for i in range(0, len(words), 8):
+        chunk = words[i:i+8]
+        out.write("    " + ", ".join(f"0x{w:08x}u" for w in chunk) + ",\n")
+    out.write("};\n")
+    out.write("static const size_t vulkan14_push_spv_size = sizeof(vulkan14_push_spv);\n")
+PY
+
 echo "==> Build on-device Vulkan probe"
 PROBE_SRC="$ROOT/scripts/92_turnip_vk_probe.c"
 PROBE="$DIST/turnip-vk-probe"
 test -s "$PROBE_SRC"
 "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
-  -O2 -Wall -Wextra -Werror \
+  -O2 -Wall -Wextra -Werror -I"$OUT" \
   "$PROBE_SRC" -o "$PROBE" -lvulkan
 "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$PROBE"
 chmod 0755 "$PROBE"
@@ -1786,7 +1812,7 @@ soname=vulkan.adreno.so
 architecture=aarch64
 probe=turnip-vk-probe
 probe_api_request=Vulkan-1.4
-probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-roundtrip
+probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-pushdescriptor-maintenance6
 ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe

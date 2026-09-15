@@ -1,4 +1,4 @@
-name: 87 - A52 BBRv3 + FQ Network P1 Clang11
+name: 87 - A52 BBRv3 + Wi-Fi FQ Native Defaults Clang11
 # Samsung TCP semantic conflict fixes: 4720521
 
 on:
@@ -31,7 +31,7 @@ env:
 
 jobs:
   build:
-    name: Build BBRv3 + FQ Network P1
+    name: Build BBRv3 + Wi-Fi FQ Native Defaults
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -237,6 +237,13 @@ jobs:
           grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_NET_SCH_FQ=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_DEFAULT_BBR3=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_DEFAULT_TCP_CONG="bbr3"' "$KERNEL/out/.config"
+          grep -Fq 'subsys_initcall(fq_module_init);' "$KERNEL/net/sched/sch_fq.c"
+          grep -Fq 'if (dev->ieee80211_ptr)' "$KERNEL/include/net/sch_generic.h"
+          grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' "$KERNEL/net/sched/sch_mq.c"
           grep -Fq 'DEFINE_STATIC_KEY_FALSE(sched_uclamp_used)' "$KERNEL/kernel/sched/core.c"
           grep -Fq 'sysctl_sched_uclamp_util_min_rt_default' "$KERNEL/kernel/sched/core.c"
           grep -Fq 'uclamp_is_used' "$KERNEL/kernel/sched/sched.h"
@@ -262,7 +269,9 @@ jobs:
             echo bbrv3_google_source_commit=cb31f3d02b1d7cd7cfdff4dd2b8b9d38879904af
             echo bbrv3_linux419_compat=kucingoranye-b249b8278b9691b73fc806ed379bd0c20c823b69
             echo fq=enabled
-            echo default_tcp_cc=retained-existing-bic-for-first-hwtest
+            echo wifi_default_qdisc=mq-1-with-fq-leaves
+            echo mobile_default_qdisc=retained-stock-pending-validation
+            echo default_tcp_cc=bbr3
             echo binder_source=android17-6.18-2026-09_r1
             echo binder_source_commit=bab5f6aca819542b9dd13a70d3c62271e81b8e85
             echo binder_core=android17-runtime-proven-phase83
@@ -316,8 +325,8 @@ jobs:
           p.write_text(s)
           PY
 
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BBRv3 FQ Net P1/' scripts/.package-bbr3-net-p1.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BBR3-FQ-NET-P1-CLANG11.zip/' scripts/.package-bbr3-net-p1.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BBRv3 WiFi-FQ Native/' scripts/.package-bbr3-net-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BBR3-WIFI-FQ-NATIVE-CLANG11.zip/' scripts/.package-bbr3-net-p1.sh
           chmod +x scripts/.package-bbr3-net-p1.sh
 
           ./scripts/.package-bbr3-net-p1.sh \
@@ -358,7 +367,7 @@ jobs:
       - name: Upload BBRv3 + FQ Network P1 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.206-BBR3-FQ-NET-P1-CLANG11-${{ github.run_number }}
+          name: A52XQ-4.19.206-BBR3-WIFI-FQ-NATIVE-CLANG11-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14

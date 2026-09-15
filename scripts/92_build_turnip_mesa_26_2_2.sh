@@ -1173,10 +1173,18 @@ replace_once(
     """   case DRM_FORMAT_NV12:
       external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
       break;
+   case DRM_FORMAT_P010:
+      external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      break;
    default:;
 """,
     """   case DRM_FORMAT_NV12:
       external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      break;
+   case DRM_FORMAT_P010:
+      external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
       break;
    case DRM_FORMAT_NV15:
       /* Qualcomm TP10 UBWC.  Keep format=UNDEFINED because this private

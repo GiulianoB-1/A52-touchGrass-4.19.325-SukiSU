@@ -36,10 +36,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-yv12-sample-probe" > "$OUT_DIR/module/yv
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.13-vk1.3-yv12-import-order
-versionCode=13
+version=0.14-vk1.3-yv12-qcom-mapped-fix
+versionCode=14
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Zero boot hooks: Turnip code runs only from the KernelSU Action. Diagnoses post-fill versus import-first 940x1670 YV12 handling, prints exact plane offsets, and compares Turnip sampling against stock Qualcomm.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Zero boot hooks: Turnip code runs only from the KernelSU Action. Adds a narrow Samsung/QCOM legacy-gralloc fix that normalizes mapped YV12 android_ycbcr pointers after CPU lock/unlock, then requires both post-fill and import-first 940x1670 sampling to match stock Qualcomm.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'

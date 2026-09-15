@@ -266,6 +266,7 @@ replace_once(
 """,
     """   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 2, DRM_FORMAT_NV12},
    {HAL_PIXEL_FORMAT_YCbCr_420_888, YCrCb, 2, DRM_FORMAT_NV21},
+   {HAL_PIXEL_FORMAT_YCrCb_420_SP, YCrCb, 2, DRM_FORMAT_NV21},
    {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 1, DRM_FORMAT_YUV420},
 """,
     "flexible YUV420 NV21 fourcc",
@@ -294,8 +295,11 @@ replace_once(
    const bool mapped_flexible_420 =
       hnd->hal_format == HAL_PIXEL_FORMAT_YCbCr_420_888 &&
       ycbcr->chroma_step == 2;
+   const bool mapped_explicit_nv21 =
+      hnd->hal_format == HAL_PIXEL_FORMAT_YCrCb_420_SP &&
+      ycbcr->chroma_step == 2;
 
-   if ((mapped_yv12 || mapped_flexible_420) &&
+   if ((mapped_yv12 || mapped_flexible_420 || mapped_explicit_nv21) &&
        y_ptr > INT_MAX && cb_ptr >= y_ptr && cr_ptr >= y_ptr) {
       cb_ptr -= y_ptr;
       cr_ptr -= y_ptr;
@@ -308,6 +312,8 @@ replace_once(
 
       if (mapped_yv12)
          mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");
+      else if (mapped_explicit_nv21)
+         mesa_logi("touchGrass: normalized mapped QCOM explicit NV21 android_ycbcr pointers");
       else
          mesa_logi("touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers");
    }
@@ -2203,6 +2209,7 @@ nv21_sample_mode=256x256-cbcr-asymmetric-four-point-stock-reference-compare
 tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_flexible_yuv420_nv21_fix=YCrCb-step2-DRM-NV21-plus-opaque-external-format-swap
+android_explicit_nv21_camera_fix=HAL_YCrCb_420_SP-0x11-to-DRM-NV21
 android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06
 qti_tp10_ubwc_fix=native-FMT6-TP10-NV15-QCOM-COMPRESSED-48x4-24x4-ubwc

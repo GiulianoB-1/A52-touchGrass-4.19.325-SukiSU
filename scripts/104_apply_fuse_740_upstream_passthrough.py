@@ -158,6 +158,139 @@ replace_once(
     "android_relax_backing_close_cap_sys_admin",
 )
 
+
+# Diagnostic probes for the native BACKING_OPEN ioctl path. These are kept
+# low-volume because they only fire when userspace attempts registration.
+replace_once(
+    "fs/fuse/dev.c",
+    """	case FUSE_DEV_IOC_BACKING_OPEN: {
+		struct fuse_backing_map map;
+
+		err = -EFAULT;
+		if (!copy_from_user(&map, (void __user *)arg, sizeof(map))) {
+			fud = fuse_get_dev(file);
+			err = fud ? fuse_backing_open(fud->fc, &map) : -EINVAL;
+		}
+		break;
+	}
+""",
+    """	case FUSE_DEV_IOC_BACKING_OPEN: {
+		struct fuse_backing_map map;
+
+		err = -EFAULT;
+		if (copy_from_user(&map, (void __user *)arg, sizeof(map))) {
+			pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN copy_from_user_failed err=%d\\n",
+					    err);
+			break;
+		}
+
+		fud = fuse_get_dev(file);
+		if (!fud) {
+			err = -EINVAL;
+			pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN no_fud err=%d\\n",
+					    err);
+			break;
+		}
+
+		err = fuse_backing_open(fud->fc, &map);
+		pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN fd=%d flags=0x%x padding=%llu ret=%d\\n",
+				    map.fd, map.flags,
+				    (unsigned long long)map.padding, err);
+		break;
+	}
+""",
+    "backing_open_ioctl_diagnostics",
+)
+
+replace_once(
+    "fs/fuse/backing.c",
+    """	if (!fc->passthrough)
+		return -EPERM;
+
+	/*
+	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+	 * Access to this ioctl is already restricted by Android's /dev/fuse
+	 * ownership/SELinux policy, matching Android common's passthrough patch.
+	 */
+
+	if (flags || padding)
+		return -EINVAL;
+
+	file = fget(fd);
+	if (!file)
+		return -EBADF;
+
+	if (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
+		ret = -EBADF;
+		goto out_fput;
+	}
+
+	/* Modern persistent registrations are limited to regular files. */
+	if (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
+		ret = -EINVAL;
+		goto out_fput;
+	}
+
+	backing_sb = file_inode(file)->i_sb;
+	if (fc->max_stack_depth <= 0 ||
+	    backing_sb->s_stack_depth >= fc->max_stack_depth) {
+		ret = -ELOOP;
+		goto out_fput;
+	}
+""",
+    """	if (!fc->passthrough) {
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=no_passthrough fd=%d err=%d\\n",
+				    fd, -EPERM);
+		return -EPERM;
+	}
+
+	/*
+	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+	 * Access to this ioctl is already restricted by Android's /dev/fuse
+	 * ownership/SELinux policy, matching Android common's passthrough patch.
+	 */
+
+	if (flags || padding) {
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=map_flags fd=%d flags=0x%x padding=%llu err=%d\\n",
+				    fd, flags, (unsigned long long)padding, -EINVAL);
+		return -EINVAL;
+	}
+
+	file = fget(fd);
+	if (!file) {
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=bad_fd fd=%d err=%d\\n",
+				    fd, -EBADF);
+		return -EBADF;
+	}
+
+	if (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
+		ret = -EOPNOTSUPP;
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_ops fd=%d mode=0%o err=%d\\n",
+				    fd, file_inode(file)->i_mode, ret);
+		goto out_fput;
+	}
+
+	/* Modern persistent registrations are limited to regular files. */
+	if (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
+		ret = S_ISDIR(file_inode(file)->i_mode) ? -EISDIR : -EINVAL;
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_type fd=%d mode=0%o err=%d\\n",
+				    fd, file_inode(file)->i_mode, ret);
+		goto out_fput;
+	}
+
+	backing_sb = file_inode(file)->i_sb;
+	if (fc->max_stack_depth <= 0 ||
+	    backing_sb->s_stack_depth >= fc->max_stack_depth) {
+		ret = -ELOOP;
+		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=stack_depth fd=%d backing_depth=%d limit=%d err=%d\\n",
+				    fd, backing_sb->s_stack_depth,
+				    fc->max_stack_depth, ret);
+		goto out_fput;
+	}
+""",
+    "backing_open_rejection_diagnostics",
+)
+
 replace_once(
     "fs/fuse/backing.c",
     """	ret = fuse_backing_id_alloc(fc, backing);
@@ -217,9 +350,13 @@ checks = {
         "!(arg->flags & FUSE_WRITEBACK_CACHE)",
     ],
     "fs/fuse/backing.c": [
+        "FUSE_740_BACKING_REJECT",
         "FUSE_740_BACKING_OPEN",
         "backing_sb->s_stack_depth >= fc->max_stack_depth",
         "Android MediaProvider is intentionally not granted CAP_SYS_ADMIN",
+    ],
+    "fs/fuse/dev.c": [
+        "FUSE_740_IOCTL_BACKING_OPEN",
     ],
     "fs/fuse/passthrough.c": [
         "FUSE_740_PASSTHROUGH_SETUP",

@@ -490,12 +490,15 @@ get_default_qdisc_ops(const struct net_device *dev, int ntx)
 
 #ifdef CONFIG_NET_SCH_FQ
 	/*
-	 * A52 Wi-Fi devices publish ieee80211_ptr before registration.
-	 * Keep Samsung's mq root/hardware queues, but use FQ as each active
-	 * Wi-Fi TX queue's default leaf.  Non-Wi-Fi devices (including rmnet)
-	 * retain the existing global default until separately validated.
+	 * Hardware validation on the A52 proved FQ works correctly beneath
+	 * Samsung's Wi-Fi mq root and beneath the Qualcomm rmnet_data VND mq.
+	 *
+	 * Keep the lower IPA transport (rmnet_ipa0) on its stock qdisc: by the
+	 * time packets reach it they have already passed rmnet MAP processing,
+	 * so per-flow FQ belongs on rmnet_data*, not the physical IPA device.
 	 */
-	if (dev->ieee80211_ptr)
+	if (dev->ieee80211_ptr ||
+	    !strncmp(dev->name, "rmnet_data", 10))
 		return &fq_qdisc_ops;
 #endif
 
@@ -520,11 +523,14 @@ replacement = '''	if (!netif_is_multiqueue(dev))
 #ifdef CONFIG_NET_SCH_FQ
 	/*
 	 * The stock auto-created mq root has handle 0:, which prevents old
-	 * Android tc from addressing its child classes.  Our hardware test
-	 * proved mq 1: + FQ on 1:1..1:N works correctly.  Assign that handle
-	 * natively for Wi-Fi before the child qdiscs are constructed.
+	 * Android tc from addressing its child classes.  Hardware tests proved
+	 * mq 1: + FQ works on both A52 Wi-Fi and Qualcomm rmnet_data VNDs.
+	 * Assign the addressable handle before child qdiscs are constructed.
+	 * Deliberately do not match rmnet_ipa0.
 	 */
-	if (!sch->handle && dev->ieee80211_ptr)
+	if (!sch->handle &&
+	    (dev->ieee80211_ptr ||
+	     !strncmp(dev->name, "rmnet_data", 10)))
 		sch->handle = TC_H_MAKE(0x00010000U, 0);
 #endif
 
@@ -580,7 +586,9 @@ grep -Fq 'config DEFAULT_BBR3' net/ipv4/Kconfig
 grep -Fq 'default "bbr3" if DEFAULT_BBR3' net/ipv4/Kconfig
 grep -Fq 'struct Qdisc_ops fq_qdisc_ops __read_mostly' net/sched/sch_fq.c
 grep -Fq 'subsys_initcall(fq_module_init);' net/sched/sch_fq.c
-grep -Fq 'if (dev->ieee80211_ptr)' include/net/sch_generic.h
+grep -Fq 'if (dev->ieee80211_ptr ||' include/net/sch_generic.h
+grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' include/net/sch_generic.h
+grep -Fq '!strncmp(dev->name, "rmnet_data", 10)' net/sched/sch_mq.c
 grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' net/sched/sch_mq.c
 grep -Fq 'tcp_plb_update_state' net/ipv4/tcp_plb.c
 grep -Fq 'TCP_CONG_WANTS_CE_EVENTS' include/net/tcp.h
@@ -600,3 +608,5 @@ echo "bbrv3_4.19_compat_ref=$PATCH_REF"
 echo "fq=enabled"
 echo "default_cc=bbr3"
 echo "wifi_qdisc=mq-1-with-fq-leaves"
+echo "rmnet_data_qdisc=mq-1-with-fq-leaves"
+echo "rmnet_ipa_qdisc=retained-stock"

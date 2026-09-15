@@ -76,7 +76,6 @@ jobs:
             a52xq-bbr3-ccache-${{ runner.os }}-
             a52xq-u17-ccache-${{ runner.os }}-
             a52xq-binder84-${{ runner.os }}-
-            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
 
       - name: Configure compiler cache
         run: |

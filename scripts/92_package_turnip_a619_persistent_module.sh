@@ -24,10 +24,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.16-vk1.3-persistent-linear-ahb-ccu-fix
-versionCode=16
+version=0.17-vk1.3-persistent-qti-nv12-ubwc
+versionCode=17
 author=touchGrass project
-description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds the exact-size linear Android AHB GMEM/CCU bounds fix from Turnip-Enhanced commit 76a4087d, on top of the proven YV12 fixes, with same_process_hal_file SELinux staging and automatic boot diagnostics.
+description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds validated import of Qualcomm private NV12 Venus UBWC AHardwareBuffers (0x7fa30c06), while retaining the v0.16 exact-size AHB/CCU fix and proven YV12 fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -215,7 +215,7 @@ EOF
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
 touchGrass Turnip A619 Mesa 26.2.2 persistent SurfaceFlinger test
 
-This persistent arm64 test adds bounded GMEM handling for exact-size linear Android AHBs after the synthetic Vulkan/AHB suite
+This persistent arm64 test adds the QTI private NV12 Venus UBWC import path discovered from the v0.16 SurfaceFlinger crash, while retaining bounded GMEM handling for exact-size linear Android AHBs. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
   - Vulkan 1.3 device creation and real KGSL command submission
   - GPU memory fill/readback
@@ -224,6 +224,7 @@ proved all of the following on the A52 / Adreno 619:
   - real YV12 GPU sampling matching stock Qualcomm exactly
   - post-CPU-touch YV12 import after QCOM mapped-pointer normalization
   - exact-size linear Android AHBs use bounded GMEM edge paths to avoid CCU overrun
+  - QTI 0x7fa30c06 NV12 Venus UBWC buffers are validated through legacy PlaneLayoutInfo metadata
 
 At post-fs-data the module:
   1. copies Turnip to /dev tmpfs
@@ -241,7 +242,7 @@ Action diagnostics:
   /data/adb/modules/touchgrass_turnip_a619/turnip-persistent-status.txt
 
 Recovery rollback:
-  adb shell "touch /data/adb/modules/touchgrass_turnip_a619/disable"
+  adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/disable"
   adb reboot
 
 The original vendor partition is never modified.

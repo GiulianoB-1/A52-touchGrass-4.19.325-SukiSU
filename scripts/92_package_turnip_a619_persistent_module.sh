@@ -27,8 +27,8 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.18.1-vk1.3-persistent-qti-tp10-ubwc-diag
-versionCode=19
+version=0.18.2-vk1.3-persistent-qti-tp10-forensics
+versionCode=20
 author=touchGrass project
 description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds Qualcomm private TP10 UBWC AHardwareBuffer import (0x7fa30c09 as DRM NV15), while retaining validated NV12 Venus UBWC (0x7fa30c06), exact-size AHB/CCU and YV12 fixes.
 EOF
@@ -271,7 +271,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.18.1-vk1.3-persistent-qti-tp10-ubwc-diag'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.18.2-vk1.3-persistent-qti-tp10-forensics'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

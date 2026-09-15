@@ -36,10 +36,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-yv12-sample-probe" > "$OUT_DIR/module/yv
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.14-vk1.3-yv12-qcom-mapped-fix
-versionCode=14
+version=0.20-vk1.4-action-safe
+versionCode=26
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Zero boot hooks: Turnip code runs only from the KernelSU Action. Adds a narrow Samsung/QCOM legacy-gralloc fix that normalizes mapped YV12 android_ycbcr pointers after CPU lock/unlock, then requires both post-fill and import-first 940x1670 sampling to match stock Qualcomm.
+description=Mesa 26.2.2 Turnip Vulkan 1.4 action-only validation for Adreno 619/KGSL. Zero boot hooks. Retains the validated A52 YV12, exact-size AHB/CCU, QTI NV12 UBWC and native TP10 UBWC fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -47,7 +47,7 @@ SKIPUNZIP=0
 
 ui_print "***************************************"
 ui_print " touchGrass Turnip A619 / Mesa 26.2.2"
-ui_print " Vulkan 1.3 / KGSL / arm64 bring-up"
+ui_print " Vulkan 1.4 / KGSL / arm64 bring-up"
 ui_print "***************************************"
 
 DEVICE="$(getprop ro.product.device)"
@@ -87,7 +87,7 @@ AHB_PROBE="$MODDIR/tools/turnip-ahb-probe"
 YV12_PROBE="$MODDIR/tools/turnip-yv12-sample-probe"
 LIVE="$MODDIR/tools/turnip-live-test.sh"
 
-echo "touchGrass Turnip A619 Vulkan 1.3 YV12 fix validation"
+echo "touchGrass Turnip A619 Vulkan 1.4 YV12 fix validation"
 echo "No persistent Vulkan override is active."
 echo "A temporary bind mount will be created only for this test and removed on exit."
 echo
@@ -143,7 +143,7 @@ Target:
 
 Driver:
   Mesa 26.2.2 Turnip
-  Vulkan API deliberately capped to 1.3 for the first bring-up
+  Vulkan API: upstream Mesa 26.2.2 Turnip Vulkan 1.4
   64-bit HAL override only
 
 This revision has NO post-fs-data.sh and NO service.sh.
@@ -172,10 +172,10 @@ chmod +x "$OUT_DIR/module/action.sh" "$OUT_DIR/module/uninstall.sh"
 
 (
   cd "$OUT_DIR/module"
-  zip -9 -r "../touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-KSU.zip" .
+  zip -9 -r "../touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-KSU.zip" .
 )
 
-ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-KSU.zip"
+ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-KSU.zip"
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'

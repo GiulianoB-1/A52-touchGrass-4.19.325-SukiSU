@@ -117,6 +117,47 @@ replace_once(
     "negotiate_upstream_passthrough",
 )
 
+
+# Android's MediaProvider daemon is intentionally not granted CAP_SYS_ADMIN.
+# Android common carries an explicit relaxation for BACKING_OPEN/CLOSE because
+# /dev/fuse access and MediaProvider policy already gate this interface.
+replace_once(
+    "fs/fuse/backing.c",
+    """	if (!fc->passthrough)
+		return -EPERM;
+
+	/*
+	 * Preserve the proven Android ioctl-126 behavior.  The new persistent
+	 * API follows upstream and requires privilege.
+	 */
+	if (!legacy_once && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+""",
+    """	if (!fc->passthrough)
+		return -EPERM;
+
+	/*
+	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+	 * Access to this ioctl is already restricted by Android's /dev/fuse
+	 * ownership/SELinux policy, matching Android common's passthrough patch.
+	 */
+""",
+    "android_relax_backing_open_cap_sys_admin",
+)
+
+replace_once(
+    "fs/fuse/backing.c",
+    """	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if (backing_id <= 0)
+""",
+    """	if (!fc->passthrough)
+		return -EPERM;
+	if (backing_id <= 0)
+""",
+    "android_relax_backing_close_cap_sys_admin",
+)
+
 replace_once(
     "fs/fuse/backing.c",
     """	ret = fuse_backing_id_alloc(fc, backing);
@@ -178,6 +219,7 @@ checks = {
     "fs/fuse/backing.c": [
         "FUSE_740_BACKING_OPEN",
         "backing_sb->s_stack_depth >= fc->max_stack_depth",
+        "Android MediaProvider is intentionally not granted CAP_SYS_ADMIN",
     ],
     "fs/fuse/passthrough.c": [
         "FUSE_740_PASSTHROUGH_SETUP",

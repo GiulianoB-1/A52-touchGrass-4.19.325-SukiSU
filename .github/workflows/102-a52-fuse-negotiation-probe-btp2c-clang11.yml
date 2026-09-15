@@ -1,9 +1,9 @@
-name: 102 - A52 FUSE Negotiation Probe + BT-P2C Clang11
+name: 103 - A52 FUSE 7.40 INIT Compat + BT-P2C Clang11
 
 on:
   push:
     branches:
-      - agent/a52-fuse-negotiation-probe-btp2c-v1
+      - agent/a52-fuse-740-init-btp2c-v1
     paths:
       - .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml
       - scripts/81_*
@@ -22,13 +22,14 @@ on:
       - scripts/99_*
       - scripts/101_*
       - scripts/102_*
+      - scripts/103_*
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-fuse-neg-probe-btp2c-${{ github.ref }}
+  group: a52-fuse-740-init-btp2c-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -40,7 +41,7 @@ env:
 
 jobs:
   build:
-    name: Build FUSE Negotiation Probe + BT-P2C
+    name: Build FUSE 7.40 INIT Compat + BT-P2C
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -453,7 +454,20 @@ jobs:
           grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 27' "$KERNEL/include/uapi/linux/fuse.h"
           git -C "$KERNEL" diff --check
 
-      - name: Build FUSE Negotiation Probe + BT-P2C kernel
+      - name: Apply FUSE 7.40 INIT compatibility phase
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/103_apply_fuse_740_init_compat.py
+          python3 scripts/103_apply_fuse_740_init_compat.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/fuse-740-init-compat-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq '#define FUSE_INIT_EXT' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'arg->flags2 = 0;' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'arg->minor < 36 && (arg->flags & FUSE_PASSTHROUGH)' "$KERNEL/fs/fuse/inode.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Build FUSE 7.40 INIT Compat + BT-P2C kernel
         run: |
           set -o pipefail
           echo "=== BUILD HOST ==="
@@ -471,12 +485,16 @@ jobs:
           ccache --show-stats || true
           exit "$RC"
 
-      - name: Audit FUSE Negotiation Probe + BT-P2C image
+      - name: Audit FUSE 7.40 INIT Compat + BT-P2C image
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq '#define FUSE_INIT_EXT' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq '#define FUSE_PASSTHROUGH_UPSTREAM' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'arg->flags2 = 0;' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'FUSE_NEGOTIATION_PROBE dev=%u:%u' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'userspace_reply=%u.%u' "$KERNEL/fs/fuse/inode.c"
           grep -Fq 'probe_payload_len' "$KERNEL/fs/fuse/inode.c"
@@ -493,7 +511,7 @@ jobs:
           grep -Fq 'FUSE_DEV_IOC_BACKING_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'FUSE_DEV_IOC_BACKING_CLOSE' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'FUSE_DEV_IOC_PASSTHROUGH_OPEN' "$KERNEL/include/uapi/linux/fuse.h"
-          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 27' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
           grep -Fq 'A52 BT-P2C: Qualcomm RX-stop and runtime-PM synchronization' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
           grep -Fq 'atomic_t stop_rx_inprogress;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
           grep -Fq 'atomic_cmpxchg(&port->stop_rx_inprogress, 0, 1)' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
@@ -599,7 +617,10 @@ jobs:
             echo fuse_backing_open_close=enabled
             echo fuse_open_backing_id_alias=enabled-wire-size-preserved
             echo fuse_max_stack_depth=legacy-p2-global-limit-plus-modern-negotiation
-            echo fuse_protocol=7.27-preserved
+            echo fuse_protocol=7.40-init-compat
+            echo fuse_init_ext=enabled
+            echo fuse_flags2_offer=zero
+            echo fuse_modern_passthrough=deferred-next-phase
             echo fuse_negotiation_probe=enabled-diagnostics-only
             echo fuse_negotiation_probe_tag=FUSE_NEGOTIATION_PROBE
             echo fuse_full_7_40_minor_bump=deferred-for-userspace-safety

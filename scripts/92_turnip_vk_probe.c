@@ -653,6 +653,295 @@ cleanup:
     return rc;
 }
 
+
+static int run_vulkan14_host_image_copy_probe(VkPhysicalDevice physical,
+                                               VkDevice device)
+{
+    printf("=== VULKAN 1.4 HOST IMAGE COPY ===\n");
+
+    PFN_vkTransitionImageLayout pTransitionImageLayout =
+        (PFN_vkTransitionImageLayout)vkGetDeviceProcAddr(
+            device, "vkTransitionImageLayout");
+    PFN_vkCopyMemoryToImage pCopyMemoryToImage =
+        (PFN_vkCopyMemoryToImage)vkGetDeviceProcAddr(
+            device, "vkCopyMemoryToImage");
+    PFN_vkCopyImageToMemory pCopyImageToMemory =
+        (PFN_vkCopyImageToMemory)vkGetDeviceProcAddr(
+            device, "vkCopyImageToMemory");
+
+    printf("vulkan14_hostcopy.transition_ptr=%s\n",
+           pTransitionImageLayout ? "OK" : "MISSING");
+    printf("vulkan14_hostcopy.copy_in_ptr=%s\n",
+           pCopyMemoryToImage ? "OK" : "MISSING");
+    printf("vulkan14_hostcopy.copy_out_ptr=%s\n",
+           pCopyImageToMemory ? "OK" : "MISSING");
+
+    if (!pTransitionImageLayout || !pCopyMemoryToImage ||
+        !pCopyImageToMemory) {
+        printf("vulkan14_hostcopy_status=FAIL_DISPATCH\n");
+        return 120;
+    }
+
+    VkPhysicalDeviceVulkan14Features f14 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+    };
+    VkPhysicalDeviceFeatures2 f2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &f14,
+    };
+    vkGetPhysicalDeviceFeatures2(physical, &f2);
+    printf("vulkan14_hostcopy.feature=%u\n", f14.hostImageCopy);
+    if (!f14.hostImageCopy) {
+        printf("vulkan14_hostcopy_status=SKIP_UNSUPPORTED\n");
+        return 0;
+    }
+
+    VkPhysicalDeviceVulkan14Properties p14 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 p2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &p14,
+    };
+    vkGetPhysicalDeviceProperties2(physical, &p2);
+
+    printf("vulkan14_hostcopy.src_layout_count=%u\n",
+           p14.copySrcLayoutCount);
+    printf("vulkan14_hostcopy.dst_layout_count=%u\n",
+           p14.copyDstLayoutCount);
+
+    if (!p14.copySrcLayoutCount || !p14.copyDstLayoutCount) {
+        printf("vulkan14_hostcopy_status=FAIL_NO_LAYOUTS\n");
+        return 121;
+    }
+
+    VkImageLayout *src_layouts =
+        calloc(p14.copySrcLayoutCount, sizeof(*src_layouts));
+    VkImageLayout *dst_layouts =
+        calloc(p14.copyDstLayoutCount, sizeof(*dst_layouts));
+    if (!src_layouts || !dst_layouts) {
+        free(src_layouts);
+        free(dst_layouts);
+        return 122;
+    }
+
+    uint32_t src_cap = p14.copySrcLayoutCount;
+    uint32_t dst_cap = p14.copyDstLayoutCount;
+    p14.pCopySrcLayouts = src_layouts;
+    p14.pCopyDstLayouts = dst_layouts;
+    p14.copySrcLayoutCount = src_cap;
+    p14.copyDstLayoutCount = dst_cap;
+    vkGetPhysicalDeviceProperties2(physical, &p2);
+
+    VkImageLayout src_layout = src_layouts[0];
+    VkImageLayout dst_layout = dst_layouts[0];
+    for (uint32_t i = 0; i < p14.copySrcLayoutCount; ++i) {
+        printf("vulkan14_hostcopy.src_layout[%u]=%d\n", i, src_layouts[i]);
+        if (src_layouts[i] == VK_IMAGE_LAYOUT_GENERAL)
+            src_layout = VK_IMAGE_LAYOUT_GENERAL;
+    }
+    for (uint32_t i = 0; i < p14.copyDstLayoutCount; ++i) {
+        printf("vulkan14_hostcopy.dst_layout[%u]=%d\n", i, dst_layouts[i]);
+        if (dst_layouts[i] == VK_IMAGE_LAYOUT_GENERAL)
+            dst_layout = VK_IMAGE_LAYOUT_GENERAL;
+    }
+    free(src_layouts);
+    free(dst_layouts);
+
+    printf("vulkan14_hostcopy.chosen_src_layout=%d\n", src_layout);
+    printf("vulkan14_hostcopy.chosen_dst_layout=%d\n", dst_layout);
+
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    int rc = 0;
+
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {4, 4, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_HOST_TRANSFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    VkResult r = vkCreateImage(device, &ici, NULL, &image);
+    printf("vulkan14_hostcopy.vkCreateImage=%d\n", r);
+    if (r != VK_SUCCESS) {
+        printf("vulkan14_hostcopy_status=FAIL_CREATE_IMAGE\n");
+        return 123;
+    }
+
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(device, image, &req);
+    printf("vulkan14_hostcopy.memory_size=%llu\n",
+           (unsigned long long)req.size);
+    printf("vulkan14_hostcopy.memory_type_bits=0x%x\n",
+           req.memoryTypeBits);
+
+    uint32_t memory_type = 0;
+    if (choose_image_memory_type(physical, req.memoryTypeBits,
+                                 &memory_type) != 0) {
+        printf("vulkan14_hostcopy_status=FAIL_MEMORY_TYPE\n");
+        rc = 124;
+        goto cleanup;
+    }
+
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = memory_type,
+    };
+
+    r = vkAllocateMemory(device, &mai, NULL, &memory);
+    printf("vulkan14_hostcopy.vkAllocateMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 125;
+        goto cleanup;
+    }
+
+    r = vkBindImageMemory(device, image, memory, 0);
+    printf("vulkan14_hostcopy.vkBindImageMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 126;
+        goto cleanup;
+    }
+
+    VkHostImageLayoutTransitionInfo transition = {
+        .sType = VK_STRUCTURE_TYPE_HOST_IMAGE_LAYOUT_TRANSITION_INFO,
+        .image = image,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = dst_layout,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    r = pTransitionImageLayout(device, 1, &transition);
+    printf("vulkan14_hostcopy.transition_to_dst=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 127;
+        goto cleanup;
+    }
+
+    uint8_t src[4 * 4 * 4];
+    uint8_t dst[4 * 4 * 4];
+    for (unsigned i = 0; i < sizeof(src); ++i)
+        src[i] = (uint8_t)((i * 37u + 11u) & 0xffu);
+    memset(dst, 0, sizeof(dst));
+
+    VkMemoryToImageCopy in_region = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY,
+        .pHostPointer = src,
+        .memoryRowLength = 0,
+        .memoryImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {4, 4, 1},
+    };
+    VkCopyMemoryToImageInfo in_info = {
+        .sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_IMAGE_INFO,
+        .dstImage = image,
+        .dstImageLayout = dst_layout,
+        .regionCount = 1,
+        .pRegions = &in_region,
+    };
+
+    r = pCopyMemoryToImage(device, &in_info);
+    printf("vulkan14_hostcopy.copy_memory_to_image=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 128;
+        goto cleanup;
+    }
+
+    if (src_layout != dst_layout) {
+        transition.oldLayout = dst_layout;
+        transition.newLayout = src_layout;
+        r = pTransitionImageLayout(device, 1, &transition);
+        printf("vulkan14_hostcopy.transition_to_src=%d\n", r);
+        if (r != VK_SUCCESS) {
+            rc = 129;
+            goto cleanup;
+        }
+    } else {
+        printf("vulkan14_hostcopy.transition_to_src=SKIP_SAME_LAYOUT\n");
+    }
+
+    VkImageToMemoryCopy out_region = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_TO_MEMORY_COPY,
+        .pHostPointer = dst,
+        .memoryRowLength = 0,
+        .memoryImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {4, 4, 1},
+    };
+    VkCopyImageToMemoryInfo out_info = {
+        .sType = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_MEMORY_INFO,
+        .srcImage = image,
+        .srcImageLayout = src_layout,
+        .regionCount = 1,
+        .pRegions = &out_region,
+    };
+
+    r = pCopyImageToMemory(device, &out_info);
+    printf("vulkan14_hostcopy.copy_image_to_memory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 130;
+        goto cleanup;
+    }
+
+    unsigned mismatches = 0;
+    for (unsigned i = 0; i < sizeof(src); ++i) {
+        if (src[i] != dst[i]) {
+            if (mismatches < 8)
+                printf("vulkan14_hostcopy.mismatch[%u]=%u/%u\n",
+                       i, src[i], dst[i]);
+            mismatches++;
+        }
+    }
+
+    printf("vulkan14_hostcopy.bytes=%zu\n", sizeof(src));
+    printf("vulkan14_hostcopy.mismatches=%u\n", mismatches);
+    if (mismatches) {
+        printf("vulkan14_hostcopy_status=FAIL_COMPARE\n");
+        rc = 131;
+        goto cleanup;
+    }
+
+    printf("vulkan14_hostcopy_status=PASS\n");
+
+cleanup:
+    if (memory != VK_NULL_HANDLE)
+        vkFreeMemory(device, memory, NULL);
+    if (image != VK_NULL_HANDLE)
+        vkDestroyImage(device, image, NULL);
+
+    if (rc)
+        printf("vulkan14_hostcopy_exit=%d\n", rc);
+    else
+        printf("vulkan14_hostcopy_exit=0\n");
+    return rc;
+}
+
 static int run_submit_probe(VkPhysicalDevice physical)
 {
     VkResult r;
@@ -795,6 +1084,18 @@ static int run_submit_probe(VkPhysicalDevice physical)
         printf("vulkan14_dispatch_present=%u/%u\n",
                v14_dispatch_present, v14_dispatch_count);
         printf("vulkan14_feature_enable_status=PASS\n");
+    }
+
+    if (vulkan14_supported && v14_features.hostImageCopy) {
+        int hostcopy_rc =
+            run_vulkan14_host_image_copy_probe(physical, device);
+        if (hostcopy_rc != 0) {
+            vkDestroyDevice(device, NULL);
+            return hostcopy_rc;
+        }
+    } else {
+        printf("vulkan14_hostcopy_status=SKIP_UNSUPPORTED\n");
+        printf("vulkan14_hostcopy_exit=0\n");
     }
 
     printf("=== NO-OP GPU SUBMISSION ===\n");

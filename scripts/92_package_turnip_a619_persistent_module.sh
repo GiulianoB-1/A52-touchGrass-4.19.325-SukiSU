@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.26-vk1.4-nv21-fix
-versionCode=38
+version=0.27-vk1.4-nv21-sample-validation
+versionCode=39
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.26. Adds generic Android flexible YUV_420_888 CrCb/NV21 import support for Qualcomm gralloc, preserving NV21 chroma ordering through a private external-format token and YCbCr conversion mapping. Retains the v0.22 legacy-KGSL timeout-zero fix plus validated YV12/NV12 UBWC/TP10 paths.
+description=A52 Turnip Vulkan 1.4 v0.27 validation build. Driver is the v0.26 NV21 fix; adds stock-vs-Turnip four-point NV21 GPU sampling comparison to verify CrCb chroma ordering while retaining all validated Vulkan 1.4, YV12, NV12 UBWC, TP10 and KGSL fixes.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -71,7 +71,119 @@ set_perm "$MODPATH/payload/vulkan.adreno.so" 0 0 0644
 set_perm "$MODPATH/tools/turnip-vk-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-ahb-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-yv12-sample-probe" 0 0 0755
+set_perm "$MODPATH/tools/turnip-nv21-ab-test.sh" 0 0 0755
 EOF
+
+cat > "$OUT_DIR/module/tools/turnip-nv21-ab-test.sh" <<'EOF'
+#!/system/bin/sh
+MODDIR=${0%/*}
+MODDIR=${MODDIR%/tools}
+TARGET=/vendor/lib64/hw/vulkan.adreno.so
+STAGE=/dev/touchgrass-turnip-a619/vulkan.adreno.so
+PROBE="$MODDIR/tools/turnip-yv12-sample-probe"
+REF="$MODDIR/nv21-stock-ref.txt"
+OUT="$MODDIR/nv21-ab-result.txt"
+REMOUNT_NEEDED=0
+
+restore_turnip() {
+    if [ "$REMOUNT_NEEDED" = "1" ]; then
+        mount -o bind "$STAGE" "$TARGET" 2>/dev/null || true
+        REMOUNT_NEEDED=0
+    fi
+}
+
+trap restore_turnip EXIT HUP INT TERM
+
+exec >"$OUT" 2>&1
+
+echo "========== NV21 STOCK-vs-TURNIP GPU SAMPLE =========="
+date
+echo "target=$TARGET"
+echo "stage=$STAGE"
+echo "probe=$PROBE"
+echo
+
+if [ ! -x "$PROBE" ]; then
+    echo "NV21_AB_STATUS=FAIL_PROBE_MISSING"
+    exit 10
+fi
+if [ ! -f "$STAGE" ]; then
+    echo "NV21_AB_STATUS=FAIL_STAGE_MISSING"
+    exit 11
+fi
+if ! cat /proc/mounts | grep -F "$TARGET" | grep -Fq "$STAGE"; then
+    echo "NV21_AB_STATUS=FAIL_TURNIP_BIND_NOT_ACTIVE"
+    exit 12
+fi
+
+echo "=== ACTIVE TURNIP HAL ==="
+ls -lZ "$TARGET" 2>/dev/null || true
+sha256sum "$TARGET" 2>/dev/null || true
+echo
+
+echo "=== STOCK QUALCOMM REFERENCE ==="
+umount "$TARGET" || {
+    echo "NV21_AB_STATUS=FAIL_UNMOUNT"
+    exit 13
+}
+REMOUNT_NEEDED=1
+
+echo "stock_hal_after_unmount:"
+ls -lZ "$TARGET" 2>/dev/null || true
+sha256sum "$TARGET" 2>/dev/null || true
+
+if command -v timeout >/dev/null 2>&1; then
+    timeout 90 "$PROBE" --nv21 --write-ref "$REF"
+    STOCK_RC=$?
+else
+    "$PROBE" --nv21 --write-ref "$REF"
+    STOCK_RC=$?
+fi
+echo "stock_nv21_exit=$STOCK_RC"
+
+restore_turnip
+
+echo
+echo "=== RESTORED TURNIP HAL ==="
+ls -lZ "$TARGET" 2>/dev/null || true
+sha256sum "$TARGET" 2>/dev/null || true
+if ! cat /proc/mounts | grep -F "$TARGET" | grep -Fq "$STAGE"; then
+    echo "NV21_AB_STATUS=FAIL_REMOUNT"
+    exit 14
+fi
+
+if [ "$STOCK_RC" -ne 0 ]; then
+    echo "NV21_AB_STATUS=FAIL_STOCK_REFERENCE"
+    exit 15
+fi
+
+echo
+echo "=== TURNIP NV21 COMPARISON ==="
+if command -v timeout >/dev/null 2>&1; then
+    timeout 90 "$PROBE" --nv21 --compare-ref "$REF"
+    TURNIP_RC=$?
+else
+    "$PROBE" --nv21 --compare-ref "$REF"
+    TURNIP_RC=$?
+fi
+echo "turnip_nv21_exit=$TURNIP_RC"
+
+echo
+echo "=== GPU/KGSL FAILURES ==="
+dmesg | grep -Ei 'kgsl|adreno|gmu|gpu|iommu|smmu' | \
+    grep -Ei 'fault|error|timeout|hang|recover|reset|panic|oops|BUG|WARN' | \
+    tail -250 || true
+
+if [ "$TURNIP_RC" -eq 0 ]; then
+    echo "NV21_AB_STATUS=PASS"
+    exit 0
+fi
+
+echo "NV21_AB_STATUS=FAIL_TURNIP_COMPARE"
+exit "$TURNIP_RC"
+EOF
+
+chmod 0755 "$OUT_DIR/module/tools/turnip-nv21-ab-test.sh"
 
 cat > "$OUT_DIR/module/post-fs-data.sh" <<'EOF'
 #!/system/bin/sh
@@ -229,7 +341,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 v0.26 NV21 compatibility fix
+touchGrass Turnip A619 Mesa 26.2.2 v0.27 NV21 sample validation
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
@@ -275,7 +387,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.26-vk1.4-nv21-fix'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.27-vk1.4-nv21-sample-validation'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
@@ -283,6 +395,8 @@ unzip -l "$ZIP" | grep -Fq 'service.sh'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-ahb-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-yv12-sample-probe'
+unzip -l "$ZIP" | grep -Fq 'tools/turnip-nv21-ab-test.sh'
+unzip -p "$ZIP" tools/turnip-nv21-ab-test.sh | grep -Fq 'NV21_AB_STATUS=PASS'
 unzip -p "$ZIP" action.sh | grep -Fq '=== DIRECT AHB IMPORT PROBE ==='
 unzip -p "$ZIP" service.sh | grep -Fq 'Could not initialize Vulkan RenderEngine'
 unzip -p "$ZIP" service.sh | grep -Fq 'PAGE FAULT'

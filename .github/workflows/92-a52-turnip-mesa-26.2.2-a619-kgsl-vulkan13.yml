@@ -3,7 +3,7 @@ name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4
 on:
   push:
     branches:
-      - agent/a52-turnip-mesa-26.2.2-a619-kgsl-vulkan14-v3
+      - agent/a52-turnip-vulkan14-capability-validation-v1
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -169,7 +169,7 @@ jobs:
           grep -Fxq 'probe_api_request=Vulkan-1.4' "$INFO"
           grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
           grep -Fxq 'a619_vulkan14_override=device-id-0x06010900-only' "$INFO"
-          grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
+          grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
           grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
@@ -236,6 +236,10 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'target_yv12_sf_940x1670_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT'
           strings "$PROBE" | grep -Fq 'vulkan14_device_api_status=PASS'
+          strings "$PROBE" | grep -Fq 'vulkan14_feature_enable_status=PASS'
+          strings "$PROBE" | grep -Fq 'vulkan14_dispatch_present=%u/%u'
+          strings "$PROBE" | grep -Fq 'vulkan14_enable.maintenance5=%u'
+          strings "$PROBE" | grep -Fq 'vulkan14_enable.hostImageCopy=%u'
           strings "$PROBE" | grep -Fq 'vulkan14_query=PASS'
           strings "$PROBE" | grep -Fq 'vulkan14.maintenance5=%u'
           strings "$PROBE" | grep -Fq 'vulkan14.maintenance6=%u'
@@ -288,7 +292,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.20.1-vk1.4-a619-api-override'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.20.2-vk1.4-capability-validation'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

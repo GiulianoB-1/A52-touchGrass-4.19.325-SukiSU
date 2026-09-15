@@ -24,10 +24,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.15-vk1.3-persistent-sf-yv12fix
-versionCode=15
+version=0.16-vk1.3-persistent-linear-ahb-ccu-fix
+versionCode=16
 author=touchGrass project
-description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 SurfaceFlinger test for Adreno 619/KGSL. Includes the proven 940x1670 YV12 16-byte-pitch fix and mapped-QCOM android_ycbcr normalization, with same_process_hal_file SELinux staging and automatic boot diagnostics.
+description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.3 test for Adreno 619/KGSL. Adds the exact-size linear Android AHB GMEM/CCU bounds fix from Turnip-Enhanced commit 76a4087d, on top of the proven YV12 fixes, with same_process_hal_file SELinux staging and automatic boot diagnostics.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -215,7 +215,7 @@ EOF
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
 touchGrass Turnip A619 Mesa 26.2.2 persistent SurfaceFlinger test
 
-This is the first persistent arm64 test after the synthetic Vulkan/AHB suite
+This persistent arm64 test adds bounded GMEM handling for exact-size linear Android AHBs after the synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
   - Vulkan 1.3 device creation and real KGSL command submission
   - GPU memory fill/readback
@@ -223,6 +223,7 @@ proved all of the following on the A52 / Adreno 619:
   - exact 940x1670 Android YV12 import with 960/480 byte pitches
   - real YV12 GPU sampling matching stock Qualcomm exactly
   - post-CPU-touch YV12 import after QCOM mapped-pointer normalization
+  - exact-size linear Android AHBs use bounded GMEM edge paths to avoid CCU overrun
 
 At post-fs-data the module:
   1. copies Turnip to /dev tmpfs
@@ -257,7 +258,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.15-vk1.3-persistent-sf-yv12fix'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.16-vk1.3-persistent-linear-ahb-ccu-fix'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

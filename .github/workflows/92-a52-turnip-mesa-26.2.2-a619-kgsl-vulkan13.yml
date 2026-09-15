@@ -169,13 +169,14 @@ jobs:
           grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
-          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-ubwc-import-bind-lifetime-forensics' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-ubwc-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
           grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
           grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
           grep -Fxq 'qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06' "$INFO"
+          grep -Fxq 'qti_tp10_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c09-drm-nv15' "$INFO"
           grep -Fxq 'qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
@@ -196,6 +197,7 @@ jobs:
           strings "$DRIVER" | grep -Fq 'Android image binding exceeds dma-buf size'
           strings "$DRIVER" | grep -Fq 'touchGrass: QTI legacy PlaneLayoutInfo helper available'
           strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo'
+          strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI TP10 UBWC 0x7fa30c09 as NV15 via legacy PlaneLayoutInfo'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
@@ -204,6 +206,9 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'qti_nv12_ubwc_720x1280'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=DIAGNOSTIC_FAIL'
+          strings "$AHB_PROBE" | grep -Fq 'qti_tp10_ubwc_1080x1920'
+          strings "$AHB_PROBE" | grep -Fq 'target_qti_tp10_ubwc_1080x1920_status=PASS'
+          strings "$AHB_PROBE" | grep -Fq 'target_qti_tp10_ubwc_1080x1920_status=DIAGNOSTIC_FAIL'
           strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
@@ -259,7 +264,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.17-vk1.3-persistent-qti-nv12-ubwc'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18-vk1.3-persistent-qti-tp10-ubwc'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

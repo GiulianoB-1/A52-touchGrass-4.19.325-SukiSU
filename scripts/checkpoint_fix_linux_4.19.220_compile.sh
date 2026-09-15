@@ -237,9 +237,18 @@ first_helper_kdp = (
     "\treturn false;\n"
     "}\n\n"
 )
-if text.count(first_helper) != 1:
-    raise SystemExit("fs/namespace.c: expected one upstream locked-child helper")
-text = text.replace(first_helper, first_helper_kdp, 1)
+upstream_helper_count = text.count(first_helper)
+kdp_helper_count = text.count(first_helper_kdp)
+if upstream_helper_count == 1 and kdp_helper_count == 0:
+    text = text.replace(first_helper, first_helper_kdp, 1)
+    rows.append("namespace_primary_locked_child_helper=converted-to-kdp\n")
+elif upstream_helper_count == 0 and kdp_helper_count == 1:
+    rows.append("namespace_primary_locked_child_helper=already-kdp\n")
+else:
+    raise SystemExit(
+        f"fs/namespace.c: unrecognized primary locked-child helper shape "
+        f"(upstream={upstream_helper_count}, kdp={kdp_helper_count})"
+    )
 
 duplicate_helper = (
     "static bool has_locked_children(struct mount *mnt, struct dentry *dentry)\n"
@@ -258,9 +267,16 @@ duplicate_helper = (
     "\treturn false;\n"
     "}\n\n"
 )
-if text.count(duplicate_helper) != 1:
-    raise SystemExit("fs/namespace.c: expected one duplicate KDP locked-child helper")
-text = text.replace(duplicate_helper, "", 1)
+duplicate_count = text.count(duplicate_helper)
+if duplicate_count == 1:
+    text = text.replace(duplicate_helper, "", 1)
+    rows.append("namespace_duplicate_locked_child_helper=removed\n")
+elif duplicate_count == 0:
+    rows.append("namespace_duplicate_locked_child_helper=absent\n")
+else:
+    raise SystemExit(
+        f"fs/namespace.c: duplicate KDP locked-child helper count is {duplicate_count}"
+    )
 
 clone_return = (
     "#ifdef CONFIG_KDP_NS\n"
@@ -283,9 +299,18 @@ clone_fixed = (
     "}\n"
     "EXPORT_SYMBOL_GPL(clone_private_mount);\n"
 )
-if text.count(clone_return) != 1:
-    raise SystemExit("fs/namespace.c: expected one clone_private_mount return anchor")
-text = text.replace(clone_return, clone_fixed, 1)
+clone_return_count = text.count(clone_return)
+clone_fixed_count = text.count(clone_fixed)
+if clone_return_count == 1 and clone_fixed_count == 0:
+    text = text.replace(clone_return, clone_fixed, 1)
+    rows.append("clone_private_mount_invalid_exit=repaired\n")
+elif clone_return_count == 0 and clone_fixed_count == 1:
+    rows.append("clone_private_mount_invalid_exit=already-present\n")
+else:
+    raise SystemExit(
+        f"fs/namespace.c: unrecognized clone_private_mount exit shape "
+        f"(plain={clone_return_count}, fixed={clone_fixed_count})"
+    )
 if text.count("static bool has_locked_children(struct mount *mnt, struct dentry *dentry)") != 1:
     raise SystemExit("fs/namespace.c: locked-child helper count is not one")
 if text.count("invalid:\n\tup_read(&namespace_sem);") != 1:

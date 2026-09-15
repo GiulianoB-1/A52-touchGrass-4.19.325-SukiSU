@@ -248,8 +248,8 @@ def main() -> None:
     candidate_version = kernel_version()
     if candidate_version != "4.19.220":
         raise SystemExit(f"merged tree reports {candidate_version}, expected 4.19.220")
-    run(str(FIX_TEMPLATE))
-    run(str(FIX_TEMPLATE_ROUND2))
+    run("bash", str(FIX_TEMPLATE))
+    run("bash", str(FIX_TEMPLATE_ROUND2))
 
     repair_merge_shapes()
     run("git", "-C", str(KERNEL), "diff", "--check")

@@ -89,40 +89,11 @@ def repair_merge_shapes() -> None:
 
     path = KERNEL / "kernel/sched/cpufreq_schedutil.c"
     text = path.read_text()
-    call = "sugov_clear_global_tunables();"
-    definition = "static void sugov_clear_global_tunables(void)"
-    anchor = "static void sugov_exit("
-    if call in text and definition not in text:
-        if anchor not in text:
-            raise SystemExit("schedutil exit anchor missing")
-        helper = """static void sugov_clear_global_tunables(void)
-{
-\tif (!have_governor_per_policy())
-\t\tglobal_tunables = NULL;
-}
-
-"""
-        text = text.replace(anchor, helper + anchor, 1)
-    elif call not in text:
-        raise SystemExit("schedutil cleanup call missing after generic repair")
-
-    # The 4.19.250 generic compatibility repair can expose the same Samsung
-    # cleanup helper twice: once from the vendor tree and once from the merged
-    # upstream shape.  Keep the first implementation only, but refuse to delete
-    # anything unless all duplicate function bodies are byte-identical.
-    starts = []
-    pos = 0
-    while True:
-        pos = text.find(definition, pos)
-        if pos < 0:
-            break
-        starts.append(pos)
-        pos += len(definition)
 
     def function_end(source: str, start: int) -> int:
         brace = source.find("{", start)
         if brace < 0:
-            raise SystemExit("schedutil cleanup helper opening brace missing")
+            raise SystemExit("schedutil helper opening brace missing")
         depth = 0
         for index in range(brace, len(source)):
             if source[index] == "{":
@@ -134,20 +105,162 @@ def repair_merge_shapes() -> None:
                     while end < len(source) and source[end] == "\n":
                         end += 1
                     return end
-        raise SystemExit("schedutil cleanup helper closing brace missing")
+        raise SystemExit("schedutil helper closing brace missing")
 
-    if len(starts) > 1:
-        first_body = text[starts[0]:function_end(text, starts[0])]
-        for start in starts[1:]:
-            body = text[start:function_end(text, start)]
-            if body != first_body:
-                raise SystemExit("schedutil duplicate cleanup helpers are not identical")
-        for start in reversed(starts[1:]):
-            text = text[:start] + text[function_end(text, start):]
+    # Linux 4.19.250 made the tunables kobject own the final free. The Samsung
+    # tree still carries its older explicit struct-pointer free helper for its
+    # tunables cache. Keeping both creates conflicting C definitions and, if
+    # merely renamed, would double-free after gov_attr_set_put().
+    kobj_free_sig = "static void sugov_tunables_free(struct kobject *kobj)"
+    vendor_free_sig = "static void sugov_tunables_free(struct sugov_tunables *tunables)"
+    if text.count(kobj_free_sig) != 1:
+        raise SystemExit(
+            f"schedutil kobject tunables free count is {text.count(kobj_free_sig)}, expected 1"
+        )
+    if text.count(vendor_free_sig) == 1:
+        vendor_start = text.index(vendor_free_sig)
+        text = text[:vendor_start] + text[function_end(text, vendor_start):]
+    elif text.count(vendor_free_sig) != 0:
+        raise SystemExit("schedutil vendor tunables free helper count is not 0 or 1")
+
+    release_line = "\t.release = &sugov_tunables_free,\n"
+    if text.count(release_line) != 1:
+        raise SystemExit("schedutil kobject release callback is missing or duplicated")
+
+    clear_def = "static void sugov_clear_global_tunables(void)"
+    clear_body = """static void sugov_clear_global_tunables(void)
+{
+\tif (!have_governor_per_policy())
+\t\tglobal_tunables = NULL;
+}
+
+"""
+    # Remove any previously inserted copies, then place exactly one before
+    # sugov_init so both its fail path and sugov_exit see a declaration.
+    while clear_def in text:
+        pos = text.index(clear_def)
+        existing = text[pos:function_end(text, pos)]
+        if existing.strip() != clear_body.strip():
+            raise SystemExit("schedutil clear-global helper has an unknown body")
+        text = text[:pos] + text[function_end(text, pos):]
+    init_anchor = "static int sugov_init(struct cpufreq_policy *policy)"
+    if text.count(init_anchor) != 1:
+        raise SystemExit("schedutil init anchor is not unique")
+    text = text.replace(init_anchor, clear_body + init_anchor, 1)
+
+    vendor_fail = """fail:
+\tkobject_put(&tunables->attr_set.kobj);
+\tpolicy->governor_data = NULL;
+\tsugov_tunables_free(tunables);
+"""
+    target_fail = """fail:
+\tkobject_put(&tunables->attr_set.kobj);
+\tpolicy->governor_data = NULL;
+\tsugov_clear_global_tunables();
+"""
+    if vendor_fail in text:
+        if text.count(vendor_fail) != 1:
+            raise SystemExit("schedutil vendor fail cleanup is not unique")
+        text = text.replace(vendor_fail, target_fail, 1)
+    elif text.count(target_fail) != 1:
+        raise SystemExit("schedutil fail cleanup is neither vendor nor target-safe")
+
+    vendor_exit_core = """\tmutex_lock(&global_tunables_lock);
+
+\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
+\tpolicy->governor_data = NULL;
+\tif (!count) {
+\t\tsugov_tunables_save(policy, tunables);
+\t\tsugov_tunables_free(tunables);
+\t}
+"""
+    target_exit_core = """\tmutex_lock(&global_tunables_lock);
+
+\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
+\tpolicy->governor_data = NULL;
+\tif (!count)
+\t\tsugov_clear_global_tunables();
+"""
+    hybrid_exit_core = """\tmutex_lock(&global_tunables_lock);
+
+\t/*
+\t * Preserve Samsung's per-policy cache before gov_attr_set_put() can
+\t * release and free the tunables kobject. The helper is a no-op for
+\t * shared/global governor tunables.
+\t */
+\tsugov_tunables_save(policy, tunables);
+\tcount = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
+\tpolicy->governor_data = NULL;
+\tif (!count)
+\t\tsugov_clear_global_tunables();
+"""
+    if vendor_exit_core in text:
+        if text.count(vendor_exit_core) != 1:
+            raise SystemExit("schedutil vendor exit cleanup is not unique")
+        text = text.replace(vendor_exit_core, hybrid_exit_core, 1)
+    elif target_exit_core in text:
+        if "sugov_tunables_save(" not in text:
+            text = text.replace(target_exit_core, hybrid_exit_core, 1)
+        else:
+            # A merged tree with Samsung cache support must save before put.
+            text = text.replace(target_exit_core, hybrid_exit_core, 1)
+    elif hybrid_exit_core not in text:
+        raise SystemExit("schedutil exit cleanup shape is unrecognized")
 
     path.write_text(text)
-    if text.count(definition) != 1:
-        raise SystemExit(f"schedutil cleanup helper count is {text.count(definition)}, expected 1")
+    final = path.read_text()
+    if final.count(kobj_free_sig) != 1 or vendor_free_sig in final:
+        raise SystemExit("schedutil tunables lifetime repair failed")
+    if final.count(clear_def) != 1:
+        raise SystemExit("schedutil clear-global helper count is not one")
+    if final.index(clear_def) > final.index(init_anchor):
+        raise SystemExit("schedutil clear-global helper is declared too late")
+    if final.count(hybrid_exit_core) != 1:
+        raise SystemExit("schedutil Samsung-cache/kobject exit repair failed")
+
+    # The late compatibility helper repairs the procfs header/root path to the
+    # stable three-argument proc_fill_super ABI. The generic merge can still
+    # retain Samsung's one-argument inode.c implementation, producing a type
+    # conflict. Upgrade only the function ABI and stable option validation while
+    # retaining the Samsung inode body.
+    proc_inode = KERNEL / "fs/proc/inode.c"
+    proc_text = proc_inode.read_text()
+    old_proc_prefix = """int proc_fill_super(struct super_block *s)
+{
+\tstruct inode *root_inode;
+\tint ret;
+"""
+    new_proc_prefix = """int proc_fill_super(struct super_block *s, void *data, int silent)
+{
+\tstruct pid_namespace *ns = get_pid_ns(s->s_fs_info);
+\tstruct inode *root_inode;
+\tint ret;
+
+\tif (!proc_parse_options(data, ns))
+\t\treturn -EINVAL;
+"""
+    if old_proc_prefix in proc_text:
+        if proc_text.count(old_proc_prefix) != 1:
+            raise SystemExit("proc_fill_super old implementation is not unique")
+        proc_text = proc_text.replace(old_proc_prefix, new_proc_prefix, 1)
+    elif proc_text.count(new_proc_prefix) != 1:
+        raise SystemExit("proc_fill_super implementation ABI is unrecognized")
+
+    old_iflags = "\ts->s_iflags |= SB_I_USERNS_VISIBLE | SB_I_NODEV;\n"
+    new_iflags = "\ts->s_iflags |= SB_I_USERNS_VISIBLE | SB_I_NOEXEC | SB_I_NODEV;\n"
+    if old_iflags in proc_text:
+        if proc_text.count(old_iflags) != 1:
+            raise SystemExit("proc_fill_super iflags anchor is not unique")
+        proc_text = proc_text.replace(old_iflags, new_iflags, 1)
+    elif proc_text.count(new_iflags) != 1:
+        raise SystemExit("proc_fill_super iflags shape is unrecognized")
+
+    proc_inode.write_text(proc_text)
+    proc_final = proc_inode.read_text()
+    if proc_final.count("int proc_fill_super(struct super_block *s, void *data, int silent)") != 1:
+        raise SystemExit("proc_fill_super stable ABI postcondition failed")
+    if proc_final.count("if (!proc_parse_options(data, ns))") != 1:
+        raise SystemExit("proc_fill_super option validation postcondition failed")
 
     # Samsung's legacy drivers/char/Kconfig opens "Character devices" without
     # closing it locally. With the 4.19.250 drivers/Kconfig layout, that causes

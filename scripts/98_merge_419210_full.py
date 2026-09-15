@@ -96,9 +96,52 @@ def repair_merge_shapes() -> None:
 }
 
 """
-        path.write_text(text.replace(anchor, helper + anchor, 1))
+        text = text.replace(anchor, helper + anchor, 1)
     elif call not in text:
         raise SystemExit("schedutil cleanup call missing after generic repair")
+
+    # The 4.19.210 generic compatibility repair can expose the same Samsung
+    # cleanup helper twice: once from the vendor tree and once from the merged
+    # upstream shape.  Keep the first implementation only, but refuse to delete
+    # anything unless all duplicate function bodies are byte-identical.
+    starts = []
+    pos = 0
+    while True:
+        pos = text.find(definition, pos)
+        if pos < 0:
+            break
+        starts.append(pos)
+        pos += len(definition)
+
+    def function_end(source: str, start: int) -> int:
+        brace = source.find("{", start)
+        if brace < 0:
+            raise SystemExit("schedutil cleanup helper opening brace missing")
+        depth = 0
+        for index in range(brace, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    while end < len(source) and source[end] == "\n":
+                        end += 1
+                    return end
+        raise SystemExit("schedutil cleanup helper closing brace missing")
+
+    if len(starts) > 1:
+        first_body = text[starts[0]:function_end(text, starts[0])]
+        for start in starts[1:]:
+            body = text[start:function_end(text, start)]
+            if body != first_body:
+                raise SystemExit("schedutil duplicate cleanup helpers are not identical")
+        for start in reversed(starts[1:]):
+            text = text[:start] + text[function_end(text, start):]
+
+    path.write_text(text)
+    if text.count(definition) != 1:
+        raise SystemExit(f"schedutil cleanup helper count is {text.count(definition)}, expected 1")
 
 
 def main() -> None:

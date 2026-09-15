@@ -198,6 +198,10 @@ jobs:
           strings "$DRIVER" | grep -Fq 'touchGrass: QTI legacy PlaneLayoutInfo helper available'
           strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo'
           strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI TP10 UBWC 0x7fa30c09 as NV15 via legacy PlaneLayoutInfo'
+          strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=plane_query'
+          strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=plane_validation'
+          strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=plane_order'
+          strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=ycbcr_crosscheck'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
@@ -266,7 +270,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.2-vk1.3-persistent-qti-tp10-forensics'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.3-vk1.3-persistent-qti-tp10-reject-trace'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

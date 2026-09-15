@@ -142,10 +142,13 @@ ssize_t fuse_passthrough_splice_read(struct file *in, loff_t *ppos,
         return 0;
 
     old_cred = override_creds(ff->passthrough.cred);
-    if (lower->f_op->splice_read)
-        ret = lower->f_op->splice_read(lower, ppos, pipe, len, flags);
-    else
-        ret = generic_file_splice_read(lower, ppos, pipe, len, flags);
+    ret = rw_verify_area(READ, lower, ppos, len);
+    if (!ret) {
+        if (lower->f_op->splice_read)
+            ret = lower->f_op->splice_read(lower, ppos, pipe, len, flags);
+        else
+            ret = generic_file_splice_read(lower, ppos, pipe, len, flags);
+    }
     revert_creds(old_cred);
 
     fuse_file_accessed(in, lower);
@@ -169,19 +172,22 @@ ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
     fuse_copyattr(out, lower);
 
     old_cred = override_creds(ff->passthrough.cred);
-    file_start_write(lower);
+    ret = rw_verify_area(WRITE, lower, ppos, len);
+    if (!ret) {
+        file_start_write(lower);
 
-    /*
-     * Keep the 2024 upstream fix: filesystems may provide a specialized
-     * splice_write implementation, so prefer it instead of forcing the
-     * generic write_iter bridge.
-     */
-    if (lower->f_op->splice_write)
-        ret = lower->f_op->splice_write(pipe, lower, ppos, len, flags);
-    else
-        ret = iter_file_splice_write(pipe, lower, ppos, len, flags);
+        /*
+         * Keep the 2024 upstream fix: filesystems may provide a specialized
+         * splice_write implementation, so prefer it instead of forcing the
+         * generic write_iter bridge.
+         */
+        if (lower->f_op->splice_write)
+            ret = lower->f_op->splice_write(pipe, lower, ppos, len, flags);
+        else
+            ret = iter_file_splice_write(pipe, lower, ppos, len, flags);
 
-    file_end_write(lower);
+        file_end_write(lower);
+    }
     revert_creds(old_cred);
 
     if (ret > 0)

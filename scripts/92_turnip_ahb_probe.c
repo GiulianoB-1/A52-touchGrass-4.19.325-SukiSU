@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
@@ -112,6 +114,75 @@ static void tg_dump_qti_forensics(const char *name, const AHardwareBuffer *ahb)
     printf("%s.forensics.handle.version=%d\n", name, h->version);
     printf("%s.forensics.handle.numFds=%d\n", name, h->numFds);
     printf("%s.forensics.handle.numInts=%d\n", name, h->numInts);
+
+    for (int i = 0; i < h->numFds; ++i) {
+        const int fd = h->data[i];
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        int stat_rc = fstat(fd, &st);
+        printf("%s.forensics.fd[%d].value=%d\n", name, i, fd);
+        printf("%s.forensics.fd[%d].fstat=%d\n", name, i, stat_rc);
+        if (stat_rc == 0) {
+            printf("%s.forensics.fd[%d].size=%" PRIu64 "\n",
+                   name, i, (uint64_t)st.st_size);
+            printf("%s.forensics.fd[%d].inode=%" PRIu64 "\n",
+                   name, i, (uint64_t)st.st_ino);
+        }
+
+        char proc_path[64];
+        char link_target[256];
+        snprintf(proc_path, sizeof(proc_path), "/proc/self/fd/%d", fd);
+        ssize_t link_len = readlink(proc_path, link_target,
+                                    sizeof(link_target) - 1);
+        if (link_len >= 0) {
+            link_target[link_len] = '\0';
+            printf("%s.forensics.fd[%d].target=%s\n",
+                   name, i, link_target);
+        } else {
+            printf("%s.forensics.fd[%d].target=READLINK_FAIL\n",
+                   name, i);
+        }
+    }
+
+    AHardwareBuffer_Desc forensic_desc = {0};
+    AHardwareBuffer_describe(ahb, &forensic_desc);
+    const uint64_t cpu_usage =
+        forensic_desc.usage & AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY
+            ? AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY
+            : (forensic_desc.usage & AHARDWAREBUFFER_USAGE_CPU_READ_RARELY
+                   ? AHARDWAREBUFFER_USAGE_CPU_READ_RARELY
+                   : 0);
+    if (cpu_usage != 0) {
+        AHardwareBuffer_Planes lock_planes;
+        memset(&lock_planes, 0, sizeof(lock_planes));
+        int lock_rc = AHardwareBuffer_lockPlanes(
+            (AHardwareBuffer *)ahb, cpu_usage, -1, NULL, &lock_planes);
+        printf("%s.forensics.lockPlanes.ret=%d\n", name, lock_rc);
+        if (lock_rc == 0) {
+            printf("%s.forensics.lockPlanes.count=%u\n",
+                   name, lock_planes.planeCount);
+            uintptr_t plane0 =
+                lock_planes.planeCount > 0
+                    ? (uintptr_t)lock_planes.planes[0].data
+                    : 0;
+            for (uint32_t i = 0; i < lock_planes.planeCount && i < 4; ++i) {
+                uintptr_t ptr = (uintptr_t)lock_planes.planes[i].data;
+                printf("%s.forensics.lockPlane[%u].rowStride=%u\n",
+                       name, i, lock_planes.planes[i].rowStride);
+                printf("%s.forensics.lockPlane[%u].pixelStride=%u\n",
+                       name, i, lock_planes.planes[i].pixelStride);
+                printf("%s.forensics.lockPlane[%u].offsetFromPlane0=%" PRIu64 "\n",
+                       name, i,
+                       plane0 && ptr >= plane0 ? (uint64_t)(ptr - plane0) : 0);
+            }
+            int unlock_rc = AHardwareBuffer_unlock(
+                (AHardwareBuffer *)ahb, NULL);
+            printf("%s.forensics.unlock.ret=%d\n", name, unlock_rc);
+        }
+    } else {
+        printf("%s.forensics.lockPlanes.ret=SKIP_NO_CPU_USAGE\n", name);
+    }
+
     const int total = h->numFds + h->numInts;
     const int dump = total < 32 ? total : 32;
     for (int i = 0; i < dump; ++i)
@@ -264,6 +335,56 @@ static int choose_memory_type(uint32_t bits, uint32_t *index)
     return -1;
 }
 
+static void tg_dump_candidate_external_format(VkPhysicalDevice physical,
+                                              const char *name,
+                                              const char *label,
+                                              VkFormat format)
+{
+    VkPhysicalDeviceExternalImageFormatInfo external_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+        .handleType =
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
+    };
+    VkPhysicalDeviceImageFormatInfo2 image_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .pNext = &external_info,
+        .format = format,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+        .flags = 0,
+    };
+    VkExternalImageFormatProperties external_props = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+    };
+    VkImageFormatProperties2 image_props = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+        .pNext = &external_props,
+    };
+
+    VkResult r = vkGetPhysicalDeviceImageFormatProperties2(
+        physical, &image_info, &image_props);
+    printf("%s.forensics.candidate.%s.format=%d\n",
+           name, label, format);
+    printf("%s.forensics.candidate.%s.result=%d:%s\n",
+           name, label, r, vk_result_name(r));
+    if (r == VK_SUCCESS) {
+        const VkExternalMemoryProperties *ep =
+            &external_props.externalMemoryProperties;
+        printf("%s.forensics.candidate.%s.externalMemoryFeatures=0x%08x\n",
+               name, label, ep->externalMemoryFeatures);
+        printf("%s.forensics.candidate.%s.exportFromImported=0x%08x\n",
+               name, label, ep->exportFromImportedHandleTypes);
+        printf("%s.forensics.candidate.%s.compatibleHandles=0x%08x\n",
+               name, label, ep->compatibleHandleTypes);
+        printf("%s.forensics.candidate.%s.maxExtent=%ux%ux%u\n",
+               name, label,
+               image_props.imageFormatProperties.maxExtent.width,
+               image_props.imageFormatProperties.maxExtent.height,
+               image_props.imageFormatProperties.maxExtent.depth);
+    }
+}
+
 struct ahb_case {
     const char *name;
     uint32_t format;
@@ -321,9 +442,21 @@ static int run_ahb_case(VkPhysicalDevice physical,
     printf("%s.desc.usage=0x%" PRIx64 "\n", tc->name, got.usage);
     printf("%s.desc.stride=%u\n", tc->name, got.stride);
 
-    if (tc->format == TOUCHGRASS_QTI_NV12_UBWC ||
+    if (tc->format == AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 ||
+        tc->format == AHARDWAREBUFFER_FORMAT_YV12 ||
+        tc->format == TOUCHGRASS_QTI_NV12_UBWC ||
         tc->format == TOUCHGRASS_QTI_TP10_UBWC)
         tg_dump_qti_forensics(tc->name, ahb);
+
+    if (tc->format == AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 ||
+        tc->format == AHARDWAREBUFFER_FORMAT_YV12) {
+        tg_dump_candidate_external_format(
+            physical, tc->name, "g8_b8_r8_3plane_420",
+            VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM);
+        tg_dump_candidate_external_format(
+            physical, tc->name, "g8_b8r8_2plane_420",
+            VK_FORMAT_G8_B8R8_2PLANE_420_UNORM);
+    }
 
     VkAndroidHardwareBufferFormatPropertiesANDROID fmt = {
         .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
@@ -337,10 +470,13 @@ static int run_ahb_case(VkPhysicalDevice physical,
     printf("%s.vkGetAndroidHardwareBufferPropertiesANDROID=%d:%s\n",
            tc->name, r, vk_result_name(r));
     if (r != VK_SUCCESS) {
+        printf("%s.forensics.failure_stage=vkGetAndroidHardwareBufferPropertiesANDROID\n",
+               tc->name);
         AHardwareBuffer_release(ahb);
         printf("%s.status=GET_PROPS_FAIL\n", tc->name);
         return 2;
     }
+    printf("%s.forensics.failure_stage=NONE_GET_PROPS_PASS\n", tc->name);
 
     printf("%s.props.allocationSize=%" PRIu64 "\n",
            tc->name, (uint64_t)props.allocationSize);

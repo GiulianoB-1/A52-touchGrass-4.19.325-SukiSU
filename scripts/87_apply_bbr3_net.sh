@@ -343,6 +343,9 @@ bbr3 = root / "net/ipv4/tcp_bbr3.c"
 kconfig = root / "net/ipv4/Kconfig"
 makefile = root / "net/ipv4/Makefile"
 defconfig = root / "arch/arm64/configs/a52xq_defconfig"
+sch_fq = root / "net/sched/sch_fq.c"
+sch_generic_h = root / "include/net/sch_generic.h"
+sch_mq = root / "net/sched/sch_mq.c"
 
 s = bbr3.read_text()
 if '#define BBR_VERSION' not in s or not re.search(r'#define\s+BBR_VERSION\s+3\b', s):
@@ -381,6 +384,21 @@ config TCP_CONG_BBR3
 
 '''
     k = k[:pos] + '\n' + block + k[pos:]
+# Make BBRv3 a first-class default choice, while retaining BBRv1/BIC.
+if 'config DEFAULT_BBR3' not in k:
+    anchor = '\tconfig DEFAULT_BBR\n\t\tbool "BBR" if TCP_CONG_BBR=y\n'
+    if anchor not in k:
+        raise SystemExit("Kconfig DEFAULT_BBR anchor missing")
+    k = k.replace(
+        anchor,
+        anchor + '\n\tconfig DEFAULT_BBR3\n\t\tbool "BBRv3" if TCP_CONG_BBR3=y\n',
+        1,
+    )
+if 'default "bbr3" if DEFAULT_BBR3' not in k:
+    anchor = '\tdefault "bbr" if DEFAULT_BBR\n'
+    if anchor not in k:
+        raise SystemExit("Kconfig DEFAULT_TCP_CONG BBR anchor missing")
+    k = k.replace(anchor, anchor + '\tdefault "bbr3" if DEFAULT_BBR3\n', 1)
 kconfig.write_text(k)
 
 d = defconfig.read_text()
@@ -399,7 +417,107 @@ if fq_off in d:
 elif 'CONFIG_NET_SCH_FQ=y' not in d:
     raise SystemExit("defconfig FQ anchor missing")
 
+# Promote the validated BBRv3 implementation to the boot-time default.
+# Handle the current Samsung default explicitly and keep the edit deterministic.
+if 'CONFIG_DEFAULT_BIC=y\n' in d:
+    d = d.replace('CONFIG_DEFAULT_BIC=y\n', '# CONFIG_DEFAULT_BIC is not set\n', 1)
+if '# CONFIG_DEFAULT_BBR3 is not set\n' in d:
+    d = d.replace('# CONFIG_DEFAULT_BBR3 is not set\n', 'CONFIG_DEFAULT_BBR3=y\n', 1)
+elif 'CONFIG_DEFAULT_BBR3=y\n' not in d:
+    anchor = '# CONFIG_DEFAULT_RENO is not set\n'
+    if anchor not in d:
+        raise SystemExit("defconfig default congestion-control anchor missing")
+    d = d.replace(anchor, 'CONFIG_DEFAULT_BBR3=y\n' + anchor, 1)
+
+if 'CONFIG_DEFAULT_TCP_CONG="bic"\n' in d:
+    d = d.replace('CONFIG_DEFAULT_TCP_CONG="bic"\n',
+                  'CONFIG_DEFAULT_TCP_CONG="bbr3"\n', 1)
+elif 'CONFIG_DEFAULT_TCP_CONG="bbr3"\n' not in d:
+    raise SystemExit("defconfig DEFAULT_TCP_CONG anchor missing")
+
 defconfig.write_text(d)
+
+# Expose FQ's qdisc ops to the generic scheduler so Wi-Fi mq queues can
+# instantiate FQ directly without userspace tc intervention.
+fq = sch_fq.read_text()
+if 'struct Qdisc_ops fq_qdisc_ops __read_mostly' not in fq:
+    fq = fq.replace('static struct Qdisc_ops fq_qdisc_ops __read_mostly',
+                    'struct Qdisc_ops fq_qdisc_ops __read_mostly', 1)
+if 'static struct Qdisc_ops fq_qdisc_ops __read_mostly' in fq:
+    raise SystemExit("sch_fq: fq_qdisc_ops still static")
+sch_fq.write_text(fq)
+
+h = sch_generic_h.read_text()
+if 'extern struct Qdisc_ops fq_qdisc_ops;' not in h:
+    anchor = 'extern struct Qdisc_ops mq_qdisc_ops;\n'
+    if anchor not in h:
+        raise SystemExit("sch_generic: mq qdisc declaration anchor missing")
+    h = h.replace(anchor,
+                  anchor + '#ifdef CONFIG_NET_SCH_FQ\n'
+                           'extern struct Qdisc_ops fq_qdisc_ops;\n'
+                           '#endif\n',
+                  1)
+
+old = '''static inline const struct Qdisc_ops *
+get_default_qdisc_ops(const struct net_device *dev, int ntx)
+{
+	return ntx < dev->real_num_tx_queues ?
+			default_qdisc_ops : &pfifo_fast_ops;
+}
+'''
+new = '''static inline const struct Qdisc_ops *
+get_default_qdisc_ops(const struct net_device *dev, int ntx)
+{
+	if (ntx >= dev->real_num_tx_queues)
+		return &pfifo_fast_ops;
+
+#ifdef CONFIG_NET_SCH_FQ
+	/*
+	 * A52 Wi-Fi devices publish ieee80211_ptr before registration.
+	 * Keep Samsung's mq root/hardware queues, but use FQ as each active
+	 * Wi-Fi TX queue's default leaf.  Non-Wi-Fi devices (including rmnet)
+	 * retain the existing global default until separately validated.
+	 */
+	if (dev->ieee80211_ptr)
+		return &fq_qdisc_ops;
+#endif
+
+	return default_qdisc_ops;
+}
+'''
+if old in h:
+    h = h.replace(old, new, 1)
+elif new not in h:
+    raise SystemExit("sch_generic: default qdisc selector anchor missing")
+sch_generic_h.write_text(h)
+
+mq = sch_mq.read_text()
+needle = '''	if (!netif_is_multiqueue(dev))
+		return -EOPNOTSUPP;
+
+	/* pre-allocate qdiscs, attachment can't fail */
+'''
+replacement = '''	if (!netif_is_multiqueue(dev))
+		return -EOPNOTSUPP;
+
+#ifdef CONFIG_NET_SCH_FQ
+	/*
+	 * The stock auto-created mq root has handle 0:, which prevents old
+	 * Android tc from addressing its child classes.  Our hardware test
+	 * proved mq 1: + FQ on 1:1..1:N works correctly.  Assign that handle
+	 * natively for Wi-Fi before the child qdiscs are constructed.
+	 */
+	if (!sch->handle && dev->ieee80211_ptr)
+		sch->handle = TC_H_MAKE(0x00010000U, 0);
+#endif
+
+	/* pre-allocate qdiscs, attachment can't fail */
+'''
+if needle in mq:
+    mq = mq.replace(needle, replacement, 1)
+elif replacement not in mq:
+    raise SystemExit("sch_mq: init anchor missing")
+sch_mq.write_text(mq)
 PY
 
 echo "==> Normalizing whitespace from upstream BBRv3 compatibility patch"
@@ -439,6 +557,13 @@ grep -Fq 'CONFIG_TCP_CONG_BBR3' net/ipv4/Makefile
 grep -Fxq 'CONFIG_TCP_CONG_BBR=y' arch/arm64/configs/a52xq_defconfig
 grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' arch/arm64/configs/a52xq_defconfig
 grep -Fxq 'CONFIG_NET_SCH_FQ=y' arch/arm64/configs/a52xq_defconfig
+grep -Fxq 'CONFIG_DEFAULT_BBR3=y' arch/arm64/configs/a52xq_defconfig
+grep -Fxq 'CONFIG_DEFAULT_TCP_CONG="bbr3"' arch/arm64/configs/a52xq_defconfig
+grep -Fq 'config DEFAULT_BBR3' net/ipv4/Kconfig
+grep -Fq 'default "bbr3" if DEFAULT_BBR3' net/ipv4/Kconfig
+grep -Fq 'struct Qdisc_ops fq_qdisc_ops __read_mostly' net/sched/sch_fq.c
+grep -Fq 'if (dev->ieee80211_ptr)' include/net/sch_generic.h
+grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' net/sched/sch_mq.c
 grep -Fq 'tcp_plb_update_state' net/ipv4/tcp_plb.c
 grep -Fq 'TCP_CONG_WANTS_CE_EVENTS' include/net/tcp.h
 grep -Fq 'void tcp_set_tx_in_flight(struct sock *sk, struct sk_buff *skb)' net/ipv4/tcp_rate.c
@@ -455,4 +580,5 @@ echo "bbrv3=bbr3"
 echo "bbrv3_google_source_commit=$GOOGLE_BBR_COMMIT"
 echo "bbrv3_4.19_compat_ref=$PATCH_REF"
 echo "fq=enabled"
-echo "default_cc=retained-existing"
+echo "default_cc=bbr3"
+echo "wifi_qdisc=mq-1-with-fq-leaves"

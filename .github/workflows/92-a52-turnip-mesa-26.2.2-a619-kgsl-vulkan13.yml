@@ -1,9 +1,9 @@
-name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.24 SyncFD A-B
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.25 YUV420 Forensics
 
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-syncfd-ab-v024
+      - agent/a52-turnip-vulkan14-yuv420-forensics-v025
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -172,7 +172,7 @@ jobs:
           grep -Fxq 'kgsl_zero_timeout_poll=retired-timestamp-nonblocking' "$INFO"
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-pushdescriptor-maintenance6-syncfd-ab-workload-scaling' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
-          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
           grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix-plus-tp10-smoke' "$INFO"
           grep -Fxq 'tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke' "$INFO"
@@ -227,6 +227,14 @@ jobs:
           strings "$AHB_PROBE" | grep -Fq 'target_qti_tp10_ubwc_1080x1920_status=DIAGNOSTIC_FAIL'
           strings "$AHB_PROBE" | grep -Fq 'forensics.GetYUVPlaneInfo.count=%d'
           strings "$AHB_PROBE" | grep -Fq 'forensics.private_format=0x%08x'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.fd[%d].size=%'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.lockPlanes.ret=%d'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.lockPlane[%u].rowStride=%u'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.lockPlane[%u].pixelStride=%u'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.candidate.%s.result=%d:%s'
+          strings "$AHB_PROBE" | grep -Fq 'g8_b8_r8_3plane_420'
+          strings "$AHB_PROBE" | grep -Fq 'g8_b8r8_2plane_420'
+          strings "$AHB_PROBE" | grep -Fq 'forensics.failure_stage=vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
           strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
           strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
@@ -309,7 +317,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.24-vk1.4-syncfd-ab-diagnostic'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.25-vk1.4-yuv420-forensics'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

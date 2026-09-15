@@ -1,4 +1,5 @@
 #include <android/hardware_buffer.h>
+#include <dlfcn.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -27,6 +28,173 @@
 #define TEST_H 256u
 #define SF_YV12_W 940u
 #define SF_YV12_H 1670u
+
+#define TG_QTI_HANDLE_FLAGS_INDEX 3
+#define TG_QTI_HANDLE_WIDTH_INDEX 4
+#define TG_QTI_HANDLE_HEIGHT_INDEX 5
+#define TG_QTI_HANDLE_UNALIGNED_WIDTH_INDEX 6
+#define TG_QTI_HANDLE_UNALIGNED_HEIGHT_INDEX 7
+#define TG_QTI_HANDLE_FORMAT_INDEX 8
+#define TG_QTI_HANDLE_LAYER_COUNT_INDEX 10
+#define TG_QTI_HANDLE_USAGE_INDEX 13
+#define TG_QTI_HANDLE_SIZE_INDEX 15
+#define TG_QTI_HANDLE_OFFSET_INDEX 16
+#define TG_QTI_HANDLE_BASE_INDEX 18
+
+#define TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL \
+    "_ZN7gralloc15GetYUVPlaneInfoERKNS_10BufferInfoEiiiiPiPNS_15PlaneLayoutInfoE"
+
+struct tg_native_handle {
+    int version;
+    int numFds;
+    int numInts;
+    int data[0];
+};
+
+struct tg_qti_buffer_info {
+    int32_t width;
+    int32_t height;
+    int32_t format;
+    int32_t layer_count;
+    uint64_t usage;
+};
+
+struct tg_qti_plane_layout_info {
+    uint32_t component;
+    uint32_t horizontal_subsampling;
+    uint32_t vertical_subsampling;
+    uint32_t offset;
+    int32_t step;
+    int32_t stride;
+    int32_t stride_bytes;
+    int32_t scanlines;
+    uint32_t size;
+};
+
+typedef const struct tg_native_handle *(*tg_get_native_handle_t)(
+    const AHardwareBuffer *buffer);
+typedef int (*tg_qti_get_yuv_plane_layouts_t)(
+    const struct tg_qti_buffer_info *info, int32_t format, int32_t width,
+    int32_t height, int32_t flags, int *plane_count,
+    struct tg_qti_plane_layout_info *plane_info);
+
+static uint64_t tg_read_u64_words(const int *data, int index)
+{
+    uint64_t value = 0;
+    memcpy(&value, &data[index], sizeof(value));
+    return value;
+}
+
+static void tg_dump_qti_forensics(const char *name, const AHardwareBuffer *ahb)
+{
+    void *nw = dlopen("libnativewindow.so", RTLD_NOW | RTLD_LOCAL);
+    if (!nw) {
+        printf("%s.forensics.nativewindow=DL_OPEN_FAIL\n", name);
+        return;
+    }
+
+    tg_get_native_handle_t get_native = NULL;
+    void *sym = dlsym(nw, "AHardwareBuffer_getNativeHandle");
+    memcpy(&get_native, &sym, sizeof(get_native));
+    if (!get_native) {
+        printf("%s.forensics.getNativeHandle=NULL\n", name);
+        dlclose(nw);
+        return;
+    }
+
+    const struct tg_native_handle *h = get_native(ahb);
+    if (!h) {
+        printf("%s.forensics.native_handle=NULL\n", name);
+        dlclose(nw);
+        return;
+    }
+
+    printf("%s.forensics.handle.version=%d\n", name, h->version);
+    printf("%s.forensics.handle.numFds=%d\n", name, h->numFds);
+    printf("%s.forensics.handle.numInts=%d\n", name, h->numInts);
+    const int total = h->numFds + h->numInts;
+    const int dump = total < 32 ? total : 32;
+    for (int i = 0; i < dump; ++i)
+        printf("%s.forensics.handle.data[%d]=0x%08x (%d)\n",
+               name, i, (uint32_t)h->data[i], h->data[i]);
+
+    if (h->numFds == 2 && h->numInts >= 22) {
+        printf("%s.forensics.flags=0x%08x\n", name,
+               (uint32_t)h->data[TG_QTI_HANDLE_FLAGS_INDEX]);
+        printf("%s.forensics.aligned=%dx%d\n", name,
+               h->data[TG_QTI_HANDLE_WIDTH_INDEX],
+               h->data[TG_QTI_HANDLE_HEIGHT_INDEX]);
+        printf("%s.forensics.unaligned=%dx%d\n", name,
+               h->data[TG_QTI_HANDLE_UNALIGNED_WIDTH_INDEX],
+               h->data[TG_QTI_HANDLE_UNALIGNED_HEIGHT_INDEX]);
+        printf("%s.forensics.private_format=0x%08x\n", name,
+               (uint32_t)h->data[TG_QTI_HANDLE_FORMAT_INDEX]);
+        printf("%s.forensics.layer_count=%d\n", name,
+               h->data[TG_QTI_HANDLE_LAYER_COUNT_INDEX]);
+        printf("%s.forensics.usage64=0x%016" PRIx64 "\n", name,
+               tg_read_u64_words(h->data, TG_QTI_HANDLE_USAGE_INDEX));
+        printf("%s.forensics.declared_size=%u\n", name,
+               (uint32_t)h->data[TG_QTI_HANDLE_SIZE_INDEX]);
+        printf("%s.forensics.offset=%d\n", name,
+               h->data[TG_QTI_HANDLE_OFFSET_INDEX]);
+        printf("%s.forensics.base=0x%016" PRIx64 "\n", name,
+               tg_read_u64_words(h->data, TG_QTI_HANDLE_BASE_INDEX));
+
+        void *gu = dlopen("libgrallocutils.so", RTLD_NOW | RTLD_LOCAL);
+        if (!gu) {
+            printf("%s.forensics.grallocutils=DL_OPEN_FAIL\n", name);
+        } else {
+            tg_qti_get_yuv_plane_layouts_t get_planes = NULL;
+            void *ps = dlsym(gu, TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL);
+            memcpy(&get_planes, &ps, sizeof(get_planes));
+            if (!get_planes) {
+                printf("%s.forensics.GetYUVPlaneInfo=NULL\n", name);
+            } else {
+                struct tg_qti_buffer_info info = {
+                    .width = h->data[TG_QTI_HANDLE_UNALIGNED_WIDTH_INDEX],
+                    .height = h->data[TG_QTI_HANDLE_UNALIGNED_HEIGHT_INDEX],
+                    .format = h->data[TG_QTI_HANDLE_FORMAT_INDEX],
+                    .layer_count = h->data[TG_QTI_HANDLE_LAYER_COUNT_INDEX],
+                    .usage = tg_read_u64_words(h->data, TG_QTI_HANDLE_USAGE_INDEX),
+                };
+                struct tg_qti_plane_layout_info planes[8];
+                memset(planes, 0, sizeof(planes));
+                int count = 0;
+                int ret = get_planes(
+                    &info, info.format,
+                    h->data[TG_QTI_HANDLE_WIDTH_INDEX],
+                    h->data[TG_QTI_HANDLE_HEIGHT_INDEX],
+                    0, &count, planes);
+                printf("%s.forensics.GetYUVPlaneInfo.ret=%d\n", name, ret);
+                printf("%s.forensics.GetYUVPlaneInfo.count=%d\n", name, count);
+                if (ret == 0 && count >= 0 && count <= 8) {
+                    for (int i = 0; i < count; ++i) {
+                        printf("%s.forensics.plane[%d].component=0x%08x\n",
+                               name, i, planes[i].component);
+                        printf("%s.forensics.plane[%d].subsampling=%u,%u\n",
+                               name, i, planes[i].horizontal_subsampling,
+                               planes[i].vertical_subsampling);
+                        printf("%s.forensics.plane[%d].offset=%u\n",
+                               name, i, planes[i].offset);
+                        printf("%s.forensics.plane[%d].step=%d\n",
+                               name, i, planes[i].step);
+                        printf("%s.forensics.plane[%d].stride=%d\n",
+                               name, i, planes[i].stride);
+                        printf("%s.forensics.plane[%d].stride_bytes=%d\n",
+                               name, i, planes[i].stride_bytes);
+                        printf("%s.forensics.plane[%d].scanlines=%d\n",
+                               name, i, planes[i].scanlines);
+                        printf("%s.forensics.plane[%d].size=%u\n",
+                               name, i, planes[i].size);
+                    }
+                }
+            }
+            dlclose(gu);
+        }
+    }
+
+    dlclose(nw);
+}
 
 static const char *vk_result_name(VkResult r)
 {
@@ -152,6 +320,10 @@ static int run_ahb_case(VkPhysicalDevice physical,
     printf("%s.desc.format_hex=0x%08x\n", tc->name, got.format);
     printf("%s.desc.usage=0x%" PRIx64 "\n", tc->name, got.usage);
     printf("%s.desc.stride=%u\n", tc->name, got.stride);
+
+    if (tc->format == TOUCHGRASS_QTI_NV12_UBWC ||
+        tc->format == TOUCHGRASS_QTI_TP10_UBWC)
+        tg_dump_qti_forensics(tc->name, ahb);
 
     VkAndroidHardwareBufferFormatPropertiesANDROID fmt = {
         .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,

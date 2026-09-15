@@ -2199,6 +2199,7 @@ ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics-nv21-fix
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix-plus-tp10-smoke
+nv21_sample_mode=256x256-cbcr-asymmetric-four-point-stock-reference-compare
 tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_flexible_yuv420_nv21_fix=YCrCb-step2-DRM-NV21-plus-opaque-external-format-swap

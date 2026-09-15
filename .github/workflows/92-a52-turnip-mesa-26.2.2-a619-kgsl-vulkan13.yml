@@ -1,9 +1,9 @@
-name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.27 NV21 Sample
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.28 Camera NV21
 
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-nv21-sample-v027
+      - agent/a52-turnip-vulkan14-camera-nv21-v028
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -178,6 +178,7 @@ jobs:
           grep -Fxq 'tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
           grep -Fxq 'android_flexible_yuv420_nv21_fix=YCrCb-step2-DRM-NV21-plus-opaque-external-format-swap' "$INFO"
+          grep -Fxq 'android_explicit_nv21_camera_fix=HAL_YCrCb_420_SP-0x11-to-DRM-NV21' "$INFO"
           grep -Fxq 'nv21_sample_mode=256x256-cbcr-asymmetric-four-point-stock-reference-compare' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
           grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
@@ -211,6 +212,7 @@ jobs:
           strings "$YV12_PROBE" | grep -Fq 'offset_from_plane0='
           strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers'
           strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers'
+          strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM explicit NV21 android_ycbcr pointers'
           strings "$DRIVER" | grep -Fq 'touchGrass: resolved flexible Android YUV420 CrCb as NV21'
           strings "$DRIVER" | grep -Fq 'Android image binding exceeds dma-buf size'
           strings "$DRIVER" | grep -Fq 'touchGrass: QTI legacy PlaneLayoutInfo helper available'
@@ -227,6 +229,8 @@ jobs:
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
           strings "$AHB_PROBE" | grep -Fq 'TURNIP/STOCK AHB IMPORT PROBE'
           strings "$AHB_PROBE" | grep -Fq 'yv12_sf_940x1670'
+          strings "$AHB_PROBE" | grep -Fq 'camera_nv21_1440x1080'
+          strings "$AHB_PROBE" | grep -Fq 'target_camera_nv21_1440x1080_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'qti_nv12_ubwc_720x1280'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=PASS'
           strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=DIAGNOSTIC_FAIL'
@@ -327,7 +331,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.27-vk1.4-nv21-sample-validation'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.28-vk1.4-camera-nv21-fix'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

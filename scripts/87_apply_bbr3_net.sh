@@ -440,11 +440,13 @@ defconfig.write_text(d)
 # Expose FQ's qdisc ops to the generic scheduler so Wi-Fi mq queues can
 # instantiate FQ directly without userspace tc intervention.
 fq = sch_fq.read_text()
-if 'struct Qdisc_ops fq_qdisc_ops __read_mostly' not in fq:
+if 'static struct Qdisc_ops fq_qdisc_ops __read_mostly' in fq:
     fq = fq.replace('static struct Qdisc_ops fq_qdisc_ops __read_mostly',
                     'struct Qdisc_ops fq_qdisc_ops __read_mostly', 1)
 if 'static struct Qdisc_ops fq_qdisc_ops __read_mostly' in fq:
     raise SystemExit("sch_fq: fq_qdisc_ops still static")
+if 'struct Qdisc_ops fq_qdisc_ops __read_mostly' not in fq:
+    raise SystemExit("sch_fq: fq_qdisc_ops declaration missing")
 sch_fq.write_text(fq)
 
 h = sch_generic_h.read_text()

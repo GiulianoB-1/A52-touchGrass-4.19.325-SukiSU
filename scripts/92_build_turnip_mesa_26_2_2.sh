@@ -289,6 +289,7 @@ struct qcom_gralloc {
     r"""/* Using this gralloc is not recommended for new distributions. */
 
 #define TG_QTI_NV12_UBWC_FORMAT 0x7fa30c06
+#define TG_QTI_TP10_UBWC_FORMAT 0x7fa30c09
 #define TG_QTI_HANDLE_NUM_FDS 2
 #define TG_QTI_HANDLE_MIN_INTS 22
 #define TG_QTI_HANDLE_MAX_INTS 26
@@ -407,7 +408,7 @@ tg_qti_plane_range_valid(const struct tg_qti_plane_layout_info *plane,
    if (plane->component != component ||
        plane->horizontal_subsampling != hsub ||
        plane->vertical_subsampling != vsub ||
-       plane->step != step ||
+       (step >= 0 && plane->step != step) ||
        plane->stride != aligned_width ||
        plane->stride_bytes <= 0 || plane->scanlines <= 0 ||
        plane->size == 0 || plane->offset > INT_MAX)
@@ -426,12 +427,13 @@ tg_qti_plane_range_valid(const struct tg_qti_plane_layout_info *plane,
    return true;
 }
 
-/* Return -EAGAIN when the handle is not the private NV12-UBWC allocation we
- * own.  Once the private format is positively identified, every inconsistency
- * is a hard failure so it can never fall through and be guessed as linear.
+/* Return -EAGAIN when the handle is not one of the private QTI UBWC
+ * allocations we own. Once a supported private format is positively
+ * identified, every inconsistency is a hard failure so it can never fall
+ * through and be guessed as linear.
  */
 static int
-tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
+tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
                            struct u_gralloc_buffer_handle *hnd,
                            struct u_gralloc_buffer_basic_info *out)
 {
@@ -448,13 +450,25 @@ tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
       return -EAGAIN;
 
    const int32_t private_format = handle->data[TG_QTI_HANDLE_FORMAT_INDEX];
-   if (private_format != TG_QTI_NV12_UBWC_FORMAT)
+   const bool is_nv12_ubwc = private_format == TG_QTI_NV12_UBWC_FORMAT;
+   const bool is_tp10_ubwc = private_format == TG_QTI_TP10_UBWC_FORMAT;
+   if (!is_nv12_ubwc && !is_tp10_ubwc)
       return -EAGAIN;
 
    if (hnd->hal_format != TG_QTI_NV12_UBWC_FORMAT &&
+       hnd->hal_format != TG_QTI_TP10_UBWC_FORMAT &&
        hnd->hal_format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED &&
        hnd->hal_format != HAL_PIXEL_FORMAT_YCbCr_420_888)
       return -EINVAL;
+
+   /* Qualcomm TP10 UBWC is packed 10-bit 4:2:0. Its UV plane advances
+    * three bytes per chroma pair. Some vendor PlaneLayoutInfo revisions do
+    * not initialize the Y-plane step for TP10, so do not use that field as
+    * a validity gate for TP10. All byte strides, offsets, sizes and the
+    * handle-aware android_ycbcr view are still independently validated.
+    */
+   const int expected_y_step = is_tp10_ubwc ? -1 : 1;
+   const int expected_uv_step = is_tp10_ubwc ? 3 : 2;
 
    const uint32_t flags =
       (uint32_t) handle->data[TG_QTI_HANDLE_FLAGS_INDEX];
@@ -511,11 +525,11 @@ tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
    const struct tg_qti_plane_layout_info *uv_meta = &planes[3];
 
    if (!tg_qti_plane_range_valid(
-          y, TG_QTI_PLANE_Y, 0, 0, 1, width,
+          y, TG_QTI_PLANE_Y, 0, 0, expected_y_step, width,
           declared_size, dma_size) ||
        !tg_qti_plane_range_valid(
-          uv, TG_QTI_PLANE_CB | TG_QTI_PLANE_CR, 1, 1, 2, width,
-          declared_size, dma_size) ||
+          uv, TG_QTI_PLANE_CB | TG_QTI_PLANE_CR, 1, 1,
+          expected_uv_step, width, declared_size, dma_size) ||
        !tg_qti_plane_range_valid(
           y_meta, TG_QTI_PLANE_META | TG_QTI_PLANE_Y, 0, 0, 0, width,
           declared_size, dma_size) ||
@@ -556,14 +570,14 @@ tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
        ycbcr[1].chroma_step ||
        ycbcr[0].ystride != (size_t) y->stride_bytes ||
        ycbcr[0].cstride != (size_t) uv->stride_bytes ||
-       ycbcr[0].chroma_step != 2 ||
+       ycbcr[0].chroma_step != (size_t) expected_uv_step ||
        !tg_qti_pointer_matches(base, y->offset, ycbcr[0].y) ||
        !tg_qti_pointer_matches(base, uv->offset, ycbcr[0].cb) ||
        uv->offset == UINT32_MAX ||
        !tg_qti_pointer_matches(base, uv->offset + 1, ycbcr[0].cr))
       return -EINVAL;
 
-   out->drm_fourcc = DRM_FORMAT_NV12;
+   out->drm_fourcc = is_tp10_ubwc ? DRM_FORMAT_NV15 : DRM_FORMAT_NV12;
    out->modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
    out->num_planes = 2;
    out->fds[0] = out->fds[1] = handle->data[0];
@@ -576,7 +590,10 @@ tg_qcom_get_nv12_ubwc_info(struct qcom_gralloc *gr,
    out->strides[0] = y->stride_bytes;
    out->strides[1] = uv->stride_bytes;
 
-   mesa_logi("touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo");
+   if (is_tp10_ubwc)
+      mesa_logi("touchGrass: imported QTI TP10 UBWC 0x7fa30c09 as NV15 via legacy PlaneLayoutInfo");
+   else
+      mesa_logi("touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo");
    return 0;
 }
 
@@ -593,11 +610,11 @@ get_info_anchor = """   int out_flag = 0;
 get_info_new = """   int out_flag = 0;
    int err;
 
-   /* Intercept only positively identified private QTI NV12 UBWC handles.
-    * -EAGAIN means this is an ordinary allocation and the Mesa 26.2.2 path
-    * below remains untouched.
+   /* Intercept only positively identified private QTI NV12/TP10 UBWC
+    * handles. -EAGAIN means this is an ordinary allocation and the Mesa
+    * 26.2.2 path below remains untouched.
     */
-   int qti_ret = tg_qcom_get_nv12_ubwc_info(gr, hnd, out);
+   int qti_ret = tg_qcom_get_qti_ubwc_info(gr, hnd, out);
    if (qti_ret != -EAGAIN)
       return qti_ret;
 
@@ -639,7 +656,8 @@ create_new = r"""   if (out_stride == 0)
    /* Prefer the helper already loaded with the active gralloc module.  If the
     * dependency is not in that lookup scope, try the process-wide scope and
     * finally take an explicit reference.  Failure is non-fatal for ordinary
-    * buffers; only private 0x7fa30c06 imports require this helper.
+    * buffers; only the supported private QTI UBWC imports require this
+    * helper.
     */
    void *plane_symbol =
       dlsym(gr->gralloc_module->dso, TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL);
@@ -1038,8 +1056,11 @@ source_checks = [
     ("src/freedreno/vulkan/tu_clear_blit.cc", "tu_attachment_gmem_edge_unaligned", "bounded GMEM edge helper"),
     ("src/freedreno/vulkan/tu_clear_blit.cc", "bounded_external_load", "bounded GMEM load path"),
     ("src/util/u_gralloc/u_gralloc_qcom.c", "TG_QTI_NV12_UBWC_FORMAT 0x7fa30c06", "QTI private NV12 UBWC format"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "TG_QTI_TP10_UBWC_FORMAT 0x7fa30c09", "QTI private TP10 UBWC format"),
     ("src/util/u_gralloc/u_gralloc_qcom.c", "TG_QTI_GET_YUV_PLANE_LAYOUTS_SYMBOL", "QTI PlaneLayoutInfo runtime ABI"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "DRM_FORMAT_NV15", "QTI TP10 NV15 mapping"),
     ("src/util/u_gralloc/u_gralloc_qcom.c", "touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo", "QTI NV12 UBWC import path"),
+    ("src/util/u_gralloc/u_gralloc_qcom.c", "touchGrass: imported QTI TP10 UBWC 0x7fa30c09 as NV15 via legacy PlaneLayoutInfo", "QTI TP10 UBWC import path"),
 ]
 for rel, needle, label in source_checks:
     if needle not in (src / rel).read_text():
@@ -1213,12 +1234,13 @@ probe=turnip-vk-probe
 probe_api_request=Vulkan-1.3
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
-ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-ubwc-import-bind-lifetime-forensics
+ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-ubwc-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06
+qti_tp10_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c09-drm-nv15
 qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac

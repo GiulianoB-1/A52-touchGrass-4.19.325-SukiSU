@@ -127,13 +127,28 @@ sha256sum "$TARGET" 2>/dev/null || true
 echo
 
 echo "=== STOCK QUALCOMM REFERENCE ==="
-umount -l "$TARGET" || {
-    echo "NV21_AB_STATUS=FAIL_UNMOUNT"
-    exit 13
-}
-REMOUNT_NEEDED=1
+# Multiple Turnip bind layers can exist if a previous manual test remounted
+# over an already-active module mount. Peel at most 8 layers until the target
+# hash differs from the staged Turnip HAL.
+DETACH_COUNT=0
+while [ "$DETACH_COUNT" -lt 8 ]; do
+    STOCK_SHA="$(sha256sum "$TARGET" 2>/dev/null | awk '{print $1}')"
+    echo "detach[$DETACH_COUNT].target_sha=$STOCK_SHA"
+    if [ -n "$STOCK_SHA" ] && [ "$STOCK_SHA" != "$STAGE_SHA" ]; then
+        break
+    fi
+
+    if ! umount -l "$TARGET"; then
+        echo "NV21_AB_STATUS=FAIL_UNMOUNT"
+        exit 13
+    fi
+
+    REMOUNT_NEEDED=1
+    DETACH_COUNT=$((DETACH_COUNT + 1))
+done
 
 STOCK_SHA="$(sha256sum "$TARGET" 2>/dev/null | awk '{print $1}')"
+echo "detach_count=$DETACH_COUNT"
 echo "stock_target_sha=$STOCK_SHA"
 if [ -z "$STOCK_SHA" ] || [ "$STOCK_SHA" = "$STAGE_SHA" ]; then
     echo "NV21_AB_STATUS=FAIL_STOCK_NOT_EXPOSED"

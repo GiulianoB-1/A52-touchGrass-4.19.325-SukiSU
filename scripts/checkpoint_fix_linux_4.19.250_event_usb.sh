@@ -10,6 +10,7 @@ test "$(kernel_version)" = "$TARGET_VERSION" || fail "Expected Linux $TARGET_VER
 
 python3 - "$KERNEL_DIR" "$REPORT" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1]).resolve()
@@ -67,32 +68,61 @@ replace_once(
 # declarations. Restore the declarations without changing the surrounding
 # Samsung gadget implementation.
 dwc3_gadget = root / "drivers/usb/dwc3/gadget.c"
-replace_once(
-    dwc3_gadget,
-    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
-    "{\n"
-    "\tu8\t\t\ttrbs_left;\n",
-    "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
-    "{\n"
-    "\tstruct dwc3_trb\t*tmp;\n"
-    "\tu8\t\t\ttrbs_left;\n",
-    "dwc3_gadget=restored-previous-trb-declaration",
-)
-replace_once(
-    dwc3_gadget,
-    "{\n"
-    "\tstruct dwc3 *dwc = dep->dwc;\n"
-    "\tint ret;\n\n"
-    "\t/*\n"
-    "\t * If the HWO is set, it implies the TRB is still being\n",
-    "{\n"
-    "\tstruct dwc3 *dwc = dep->dwc;\n"
-    "\tint request_status;\n"
-    "\tint ret;\n\n"
-    "\t/*\n"
-    "\t * If the HWO is set, it implies the TRB is still being\n",
-    "dwc3_gadget=restored-request-status-declaration",
-)
+text = dwc3_gadget.read_text()
+
+# dwc3_calc_trbs_left() exists in several Samsung formatting variants. The
+# semantic requirement is exactly one local tmp pointer whenever the retained
+# Samsung previous-TRB check uses it.
+func_marker = "static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)\n"
+if text.count(func_marker) != 1:
+    raise SystemExit("drivers/usb/dwc3/gadget.c: dwc3_calc_trbs_left anchor is not unique")
+func_start = text.index(func_marker)
+func_end = text.find("\nstatic ", func_start + len(func_marker))
+if func_end < 0:
+    raise SystemExit("drivers/usb/dwc3/gadget.c: dwc3_calc_trbs_left end anchor missing")
+segment = text[func_start:func_end]
+if "tmp = dwc3_ep_prev_trb(dep, dep->trb_enqueue);" not in segment:
+    raise SystemExit("drivers/usb/dwc3/gadget.c: Samsung previous-TRB check is missing")
+tmp_decl_re = re.compile(r"^[ \t]*struct[ \t]+dwc3_trb[ \t]+\*tmp;[ \t]*$", re.MULTILINE)
+tmp_decls = list(tmp_decl_re.finditer(segment))
+if len(tmp_decls) == 0:
+    brace = segment.find("{\n")
+    if brace < 0:
+        raise SystemExit("drivers/usb/dwc3/gadget.c: TRB function opening brace missing")
+    insert = "\tstruct dwc3_trb\t*tmp;\n"
+    segment = segment[:brace + 2] + insert + segment[brace + 2:]
+    text = text[:func_start] + segment + text[func_end:]
+    repairs.append("dwc3_gadget=restored-previous-trb-declaration")
+elif len(tmp_decls) == 1:
+    repairs.append("dwc3_gadget=previous-trb-declaration-already-present")
+else:
+    raise SystemExit(
+        f"drivers/usb/dwc3/gadget.c: temporary TRB declaration count is {len(tmp_decls)}"
+    )
+
+# request_status is another Samsung-local declaration that can survive the merge
+# with different surrounding formatting. Add it only when the identifier is used
+# in the gadget source but no declaration exists.
+request_decl_re = re.compile(r"^[ \t]*int[ \t]+request_status;[ \t]*$", re.MULTILINE)
+request_decls = list(request_decl_re.finditer(text))
+request_used = "request_status" in request_decl_re.sub("", text)
+if len(request_decls) == 0 and request_used:
+    anchor = "\tstruct dwc3 *dwc = dep->dwc;\n"
+    anchor_count = text.count(anchor)
+    if anchor_count != 1:
+        raise SystemExit(
+            f"drivers/usb/dwc3/gadget.c: request_status insertion anchor count is {anchor_count}"
+        )
+    text = text.replace(anchor, anchor + "\tint request_status;\n", 1)
+    repairs.append("dwc3_gadget=restored-request-status-declaration")
+elif len(request_decls) == 1:
+    repairs.append("dwc3_gadget=request-status-declaration-already-present")
+elif len(request_decls) > 1:
+    raise SystemExit(
+        f"drivers/usb/dwc3/gadget.c: request_status declaration count is {len(request_decls)}"
+    )
+
+dwc3_gadget.write_text(text)
 
 # Match the Linux 4.19.250 implementation, which accepts a 64-bit timeout.
 xhci_h = root / "drivers/usb/host/xhci.h"
@@ -115,9 +145,9 @@ if hub_text.count("bool retry_locked;") != 1:
     raise SystemExit("hub retry_locked declaration count is not one")
 
 gadget_text = dwc3_gadget.read_text()
-if gadget_text.count("struct dwc3_trb\t*tmp;") != 1:
+if len(re.findall(r"^[ \\t]*struct[ \\t]+dwc3_trb[ \\t]+\\*tmp;[ \\t]*$", gadget_text, re.MULTILINE)) != 1:
     raise SystemExit("DWC3 tmp declaration count is not one")
-if gadget_text.count("int request_status;") != 1:
+if "request_status" in gadget_text and len(re.findall(r"^[ \\t]*int[ \\t]+request_status;[ \\t]*$", gadget_text, re.MULTILINE)) != 1:
     raise SystemExit("DWC3 request_status declaration count is not one")
 
 xhci_text = xhci_h.read_text()

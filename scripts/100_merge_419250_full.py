@@ -211,15 +211,75 @@ def repair_merge_shapes() -> None:
 
     main_path = KERNEL / "init/main.c"
     main_text = main_path.read_text()
-    old_random_call = "\trand_initialize();\n"
-    new_random_call = "\trandom_init(command_line);\n"
-    if old_random_call in main_text:
-        if main_text.count(old_random_call) != 1:
-            raise SystemExit("init/main.c legacy RNG init call is not unique")
-        main_text = main_text.replace(old_random_call, new_random_call, 1)
-    elif main_text.count(new_random_call) != 1:
-        raise SystemExit("init/main.c RNG init call is unrecognized")
+
+    # Samsung moved the legacy rand_initialize()/latent/cmdline entropy block
+    # before time_init(), while Linux 4.19.249 moved the new random_init()
+    # after time_init(). A three-way merge can retain BOTH blocks without a
+    # textual conflict. That creates a boot-only hybrid which calls the new
+    # RNG too early and potentially twice. Canonicalize the whole interval to
+    # the upstream/GKI ordering used by the working Android 5.10 kernel.
+    start_sig = "asmlinkage __visible void __init start_kernel(void)"
+    if main_text.count(start_sig) != 1:
+        raise SystemExit("init/main.c start_kernel signature is not unique")
+    start_begin = main_text.index(start_sig)
+    start_end = function_end(main_text, start_begin)
+    start_fn = main_text[start_begin:start_end]
+
+    rng_region_begin = start_fn.find("\ttimekeeping_init();\n")
+    rng_region_end = start_fn.find("\tperf_event_init();\n")
+    if rng_region_begin < 0 or rng_region_end < 0 or rng_region_end <= rng_region_begin:
+        raise SystemExit("init/main.c early RNG/timekeeping region is unrecognized")
+
+    canonical_rng_region = """\ttimekeeping_init();
+\ttime_init();
+
+\t/*
+\t * For best initial stack canary entropy, prepare it after:
+\t * - setup_arch() for any UEFI RNG entropy and boot cmdline access
+\t * - timekeeping_init() for ktime entropy used in random_init()
+\t * - time_init() for making random_get_entropy() work on some platforms
+\t * - random_init() to initialize the RNG from early entropy sources
+\t */
+\trandom_init(command_line);
+\tboot_init_stack_canary();
+
+"""
+    start_fn = (
+        start_fn[:rng_region_begin]
+        + canonical_rng_region
+        + start_fn[rng_region_end:]
+    )
+    main_text = main_text[:start_begin] + start_fn + main_text[start_end:]
     main_path.write_text(main_text)
+
+    # Boot-order postconditions: exactly one modern RNG init, after time_init,
+    # and no remnants of Samsung's legacy split entropy setup in start_kernel.
+    main_post = main_path.read_text()
+    post_begin = main_post.index(start_sig)
+    post_end = function_end(main_post, post_begin)
+    post_fn = main_post[post_begin:post_end]
+    if post_fn.count("\ttimekeeping_init();\n") != 1:
+        raise SystemExit("start_kernel timekeeping_init postcondition failed")
+    if post_fn.count("\ttime_init();\n") != 1:
+        raise SystemExit("start_kernel time_init postcondition failed")
+    if post_fn.count("\trandom_init(command_line);\n") != 1:
+        raise SystemExit("start_kernel random_init postcondition failed")
+    if post_fn.count("\tboot_init_stack_canary();\n") != 1:
+        raise SystemExit("start_kernel stack canary postcondition failed")
+    if "rand_initialize();" in post_fn:
+        raise SystemExit("legacy rand_initialize remains in start_kernel")
+    if "\tadd_latent_entropy();\n" in post_fn:
+        raise SystemExit("legacy add_latent_entropy remains in start_kernel")
+    if "\tadd_device_randomness(command_line, strlen(command_line));\n" in post_fn:
+        raise SystemExit("legacy command-line entropy call remains in start_kernel")
+    if not (
+        post_fn.index("\ttimekeeping_init();\n")
+        < post_fn.index("\ttime_init();\n")
+        < post_fn.index("\trandom_init(command_line);\n")
+        < post_fn.index("\tboot_init_stack_canary();\n")
+        < post_fn.index("\tperf_event_init();\n")
+    ):
+        raise SystemExit("start_kernel RNG/timekeeping ordering postcondition failed")
 
     random_c_text = (KERNEL / "drivers/char/random.c").read_text()
     if random_c_text.count("int __init random_init(const char *command_line)") != 1:

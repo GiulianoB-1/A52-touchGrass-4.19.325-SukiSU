@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <vulkan/vulkan.h>
 #include "vulkan14_push_spv.h"
 
@@ -1285,6 +1287,341 @@ cleanup:
     return rc;
 }
 
+
+static uint64_t monotonic_ns(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static int cmp_u64(const void *a, const void *b)
+{
+    uint64_t av = *(const uint64_t *)a;
+    uint64_t bv = *(const uint64_t *)b;
+    return (av > bv) - (av < bv);
+}
+
+static void print_timing_stats(const char *name, uint64_t *samples, uint32_t count)
+{
+    if (!count)
+        return;
+
+    qsort(samples, count, sizeof(samples[0]), cmp_u64);
+
+    long double sum = 0.0;
+    for (uint32_t i = 0; i < count; ++i)
+        sum += samples[i];
+
+    uint32_t p50_i = (count - 1u) * 50u / 100u;
+    uint32_t p95_i = (count - 1u) * 95u / 100u;
+    double mean_us = (double)(sum / count) / 1000.0;
+
+    printf("syncfd.%s.min_us=%.3f\n", name, samples[0] / 1000.0);
+    printf("syncfd.%s.p50_us=%.3f\n", name, samples[p50_i] / 1000.0);
+    printf("syncfd.%s.p95_us=%.3f\n", name, samples[p95_i] / 1000.0);
+    printf("syncfd.%s.max_us=%.3f\n", name, samples[count - 1u] / 1000.0);
+    printf("syncfd.%s.mean_us=%.3f\n", name, mean_us);
+}
+
+static int device_has_extension(VkPhysicalDevice physical, const char *name)
+{
+    uint32_t count = 0;
+    VkResult r = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL);
+    if (r != VK_SUCCESS || count == 0)
+        return 0;
+
+    VkExtensionProperties *exts = calloc(count, sizeof(*exts));
+    if (!exts)
+        return 0;
+
+    r = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, exts);
+    if (r != VK_SUCCESS) {
+        free(exts);
+        return 0;
+    }
+
+    int found = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (strcmp(exts[i].extensionName, name) == 0) {
+            found = 1;
+            break;
+        }
+    }
+
+    free(exts);
+    return found;
+}
+
+static int run_syncfd_profile(VkPhysicalDevice physical,
+                              VkDevice device,
+                              VkQueue queue,
+                              uint32_t queue_family)
+{
+    enum {
+        WARMUP = 12,
+        SAMPLES = 120,
+        WORK_BYTES = 16 * 1024 * 1024
+    };
+
+    printf("=== SYNC FD EXPORT PROFILE ===\n");
+    printf("syncfd.work_bytes=%u\n", (unsigned)WORK_BYTES);
+
+    PFN_vkGetSemaphoreFdKHR pGetSemaphoreFdKHR =
+        (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(
+            device, "vkGetSemaphoreFdKHR");
+    printf("syncfd.vkGetSemaphoreFdKHR_ptr=%s\n",
+           pGetSemaphoreFdKHR ? "OK" : "MISSING");
+    if (!pGetSemaphoreFdKHR) {
+        printf("syncfd_status=FAIL_DISPATCH\n");
+        return 160;
+    }
+
+    VkResult r;
+    int rc = 0;
+    VkBuffer work = VK_NULL_HANDLE;
+    VkDeviceMemory work_memory = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer command = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+
+    VkBufferCreateInfo bci = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = WORK_BYTES,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    r = vkCreateBuffer(device, &bci, NULL, &work);
+    printf("syncfd.vkCreateWorkBuffer=%d\n", r);
+    if (r != VK_SUCCESS)
+        return 161;
+
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(device, work, &req);
+
+    uint32_t memory_type = 0;
+    if (choose_image_memory_type(physical, req.memoryTypeBits,
+                                 &memory_type) != 0) {
+        printf("syncfd.work_memory_type=NONE\n");
+        rc = 162;
+        goto cleanup;
+    }
+    printf("syncfd.work_memory_type=%u\n", memory_type);
+
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = memory_type,
+    };
+    r = vkAllocateMemory(device, &mai, NULL, &work_memory);
+    printf("syncfd.vkAllocateWorkMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 163;
+        goto cleanup;
+    }
+
+    r = vkBindBufferMemory(device, work, work_memory, 0);
+    printf("syncfd.vkBindWorkMemory=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 164;
+        goto cleanup;
+    }
+
+    VkCommandPoolCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = queue_family,
+    };
+    r = vkCreateCommandPool(device, &cpci, NULL, &pool);
+    printf("syncfd.vkCreateCommandPool=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 165;
+        goto cleanup;
+    }
+
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    r = vkAllocateCommandBuffers(device, &cbai, &command);
+    printf("syncfd.vkAllocateCommandBuffers=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 166;
+        goto cleanup;
+    }
+
+    VkCommandBufferBeginInfo cbbi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
+    };
+    r = vkBeginCommandBuffer(command, &cbbi);
+    printf("syncfd.vkBeginCommandBuffer=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 167;
+        goto cleanup;
+    }
+
+    vkCmdFillBuffer(command, work, 0, WORK_BYTES, 0x61914021u);
+
+    r = vkEndCommandBuffer(command);
+    printf("syncfd.vkEndCommandBuffer=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 168;
+        goto cleanup;
+    }
+
+    VkFenceCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    r = vkCreateFence(device, &fci, NULL, &fence);
+    printf("syncfd.vkCreateFence=%d\n", r);
+    if (r != VK_SUCCESS) {
+        rc = 169;
+        goto cleanup;
+    }
+
+    uint64_t create_ns[SAMPLES];
+    uint64_t submit_ns[SAMPLES];
+    uint64_t getfd_ns[SAMPLES];
+    uint64_t getfd_real_ns[SAMPLES];
+    uint64_t wait_ns[SAMPLES];
+    memset(create_ns, 0, sizeof(create_ns));
+    memset(submit_ns, 0, sizeof(submit_ns));
+    memset(getfd_ns, 0, sizeof(getfd_ns));
+    memset(getfd_real_ns, 0, sizeof(getfd_real_ns));
+    memset(wait_ns, 0, sizeof(wait_ns));
+
+    uint32_t real_fd_count = 0;
+    uint32_t already_signaled_count = 0;
+
+    for (uint32_t iter = 0; iter < (uint32_t)(WARMUP + SAMPLES); ++iter) {
+        r = vkResetFences(device, 1, &fence);
+        if (r != VK_SUCCESS) {
+            printf("syncfd.vkResetFences[%u]=%d\n", iter, r);
+            rc = 170;
+            goto cleanup;
+        }
+
+        VkExportSemaphoreCreateInfo export_info = {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+            .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        VkSemaphoreCreateInfo sci = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &export_info,
+        };
+
+        VkSemaphore semaphore = VK_NULL_HANDLE;
+        uint64_t t0 = monotonic_ns();
+        r = vkCreateSemaphore(device, &sci, NULL, &semaphore);
+        uint64_t t1 = monotonic_ns();
+        if (r != VK_SUCCESS) {
+            printf("syncfd.vkCreateSemaphore[%u]=%d\n", iter, r);
+            rc = 171;
+            goto cleanup;
+        }
+
+        VkSubmitInfo submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &command,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &semaphore,
+        };
+
+        uint64_t t2 = monotonic_ns();
+        r = vkQueueSubmit(queue, 1, &submit, fence);
+        uint64_t t3 = monotonic_ns();
+        if (r != VK_SUCCESS) {
+            printf("syncfd.vkQueueSubmit[%u]=%d\n", iter, r);
+            vkDestroySemaphore(device, semaphore, NULL);
+            rc = 172;
+            goto cleanup;
+        }
+
+        VkSemaphoreGetFdInfoKHR fd_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+            .semaphore = semaphore,
+            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+
+        int fd = -1;
+        uint64_t t4 = monotonic_ns();
+        r = pGetSemaphoreFdKHR(device, &fd_info, &fd);
+        uint64_t t5 = monotonic_ns();
+        if (r != VK_SUCCESS) {
+            printf("syncfd.vkGetSemaphoreFdKHR[%u]=%d fd=%d\n",
+                   iter, r, fd);
+            if (fd >= 0)
+                close(fd);
+            vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull);
+            vkDestroySemaphore(device, semaphore, NULL);
+            rc = 173;
+            goto cleanup;
+        }
+
+        uint64_t t6 = monotonic_ns();
+        r = vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull);
+        uint64_t t7 = monotonic_ns();
+
+        if (iter >= WARMUP) {
+            uint32_t s = iter - WARMUP;
+            create_ns[s] = t1 - t0;
+            submit_ns[s] = t3 - t2;
+            getfd_ns[s] = t5 - t4;
+            wait_ns[s] = t7 - t6;
+
+            if (fd >= 0) {
+                getfd_real_ns[real_fd_count++] = t5 - t4;
+            } else {
+                already_signaled_count++;
+            }
+        }
+
+        if (fd >= 0)
+            close(fd);
+        vkDestroySemaphore(device, semaphore, NULL);
+
+        if (r != VK_SUCCESS) {
+            printf("syncfd.vkWaitForFences[%u]=%d\n", iter, r);
+            rc = 174;
+            goto cleanup;
+        }
+    }
+
+    printf("syncfd.samples=%u\n", (unsigned)SAMPLES);
+    printf("syncfd.real_fd_count=%u\n", real_fd_count);
+    printf("syncfd.already_signaled_count=%u\n", already_signaled_count);
+    print_timing_stats("create_semaphore", create_ns, SAMPLES);
+    print_timing_stats("queue_submit", submit_ns, SAMPLES);
+    print_timing_stats("get_semaphore_fd_all", getfd_ns, SAMPLES);
+    if (real_fd_count)
+        print_timing_stats("get_semaphore_fd_real", getfd_real_ns,
+                           real_fd_count);
+    print_timing_stats("post_export_fence_wait", wait_ns, SAMPLES);
+
+    if (real_fd_count == 0) {
+        printf("syncfd_status=PASS_ALL_ALREADY_SIGNALED\n");
+    } else {
+        printf("syncfd_status=PASS\n");
+    }
+
+cleanup:
+    if (fence != VK_NULL_HANDLE)
+        vkDestroyFence(device, fence, NULL);
+    if (pool != VK_NULL_HANDLE)
+        vkDestroyCommandPool(device, pool, NULL);
+    if (work_memory != VK_NULL_HANDLE)
+        vkFreeMemory(device, work_memory, NULL);
+    if (work != VK_NULL_HANDLE)
+        vkDestroyBuffer(device, work, NULL);
+
+    return rc;
+}
+
 static int run_submit_probe(VkPhysicalDevice physical)
 {
     VkResult r;
@@ -1368,6 +1705,16 @@ static int run_submit_probe(VkPhysicalDevice physical)
                v14_features.pipelineRobustness);
     }
 
+    int syncfd_supported =
+        device_has_extension(physical, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+    printf("syncfd.extension_supported=%d\n", syncfd_supported);
+
+    const char *device_extensions[1];
+    uint32_t device_extension_count = 0;
+    if (syncfd_supported)
+        device_extensions[device_extension_count++] =
+            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME;
+
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = dynamic_rendering_supported
@@ -1375,6 +1722,9 @@ static int run_submit_probe(VkPhysicalDevice physical)
                     : (vulkan14_supported ? (const void *)&v14_features : NULL),
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
+        .enabledExtensionCount = device_extension_count,
+        .ppEnabledExtensionNames =
+            device_extension_count ? device_extensions : NULL,
     };
 
     VkDevice device = VK_NULL_HANDLE;
@@ -1391,6 +1741,17 @@ static int run_submit_probe(VkPhysicalDevice physical)
         return 44;
     }
     printf("vkGetDeviceQueue_result=OK\n");
+
+    if (syncfd_supported) {
+        int syncfd_rc = run_syncfd_profile(
+            physical, device, queue, queue_family);
+        if (syncfd_rc != 0) {
+            vkDestroyDevice(device, NULL);
+            return syncfd_rc;
+        }
+    } else {
+        printf("syncfd_status=SKIP_UNSUPPORTED\n");
+    }
 
     if (vulkan14_supported) {
         const char *v14_dispatch_names[] = {

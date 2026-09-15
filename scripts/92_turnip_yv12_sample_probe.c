@@ -13,8 +13,14 @@
 #define AHARDWAREBUFFER_FORMAT_YV12 0x32315659u
 #endif
 
+#ifndef TOUCHGRASS_QTI_TP10_UBWC
+#define TOUCHGRASS_QTI_TP10_UBWC 0x7fa30c09u
+#endif
+
 #define TEST_W 940u
 #define TEST_H 1670u
+#define TP10_W 1080u
+#define TP10_H 1920u
 
 static const char *vk_result_name(VkResult r)
 {
@@ -151,11 +157,14 @@ static int read_reference(const char *path, float rgba[4])
 int main(int argc, char **argv)
 {
     int import_before_fill = 0;
+    int tp10_smoke = 0;
     const char *write_ref_path = NULL;
     const char *compare_ref_path = NULL;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--import-before-fill") == 0) {
             import_before_fill = 1;
+        } else if (strcmp(argv[i], "--tp10-smoke") == 0) {
+            tp10_smoke = 1;
         } else if (strcmp(argv[i], "--write-ref") == 0 && i + 1 < argc) {
             write_ref_path = argv[++i];
         } else if (strcmp(argv[i], "--compare-ref") == 0 && i + 1 < argc) {
@@ -163,9 +172,19 @@ int main(int argc, char **argv)
         }
     }
 
+    if (tp10_smoke) {
+        /* QTI TP10 UBWC is a GPU/compositor allocation.  Never CPU-touch it:
+         * CPU usage can change or invalidate the physical private layout.
+         */
+        import_before_fill = 0;
+        write_ref_path = NULL;
+        compare_ref_path = NULL;
+    }
+
     setvbuf(stdout, NULL, _IONBF, 0);
-    printf("========== YV12 940x1670 GPU SAMPLE PROBE ==========\n");
+    printf("========== YV12 / QTI TP10 GPU SAMPLE PROBE ==========\n");
     printf("yv12_sample.import_before_fill=%d\n", import_before_fill);
+    printf("tp10_sample.enabled=%d\n", tp10_smoke);
 
     VkInstance instance = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -189,7 +208,7 @@ int main(int argc, char **argv)
 
     VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "touchGrass-YV12-Sample",
+        .pApplicationName = tp10_smoke ? "touchGrass-TP10-Sample" : "touchGrass-YV12-Sample",
         .applicationVersion = 1,
         .pEngineName = "touchGrass",
         .engineVersion = 1,
@@ -274,13 +293,19 @@ int main(int argc, char **argv)
     vkGetDeviceQueue(device, qfi, 0, &queue);
 
     AHardwareBuffer_Desc desc = {
-        .width = TEST_W,
-        .height = TEST_H,
+        .width = tp10_smoke ? TP10_W : TEST_W,
+        .height = tp10_smoke ? TP10_H : TEST_H,
         .layers = 1,
-        .format = AHARDWAREBUFFER_FORMAT_YV12,
+        .format = tp10_smoke ? TOUCHGRASS_QTI_TP10_UBWC
+                             : AHARDWAREBUFFER_FORMAT_YV12,
         .usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
-                 AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY,
+                 (tp10_smoke ? 0 : AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY),
     };
+    if (tp10_smoke) {
+        printf("tp10_sample.format=0x%08x\n", desc.format);
+        printf("tp10_sample.extent=%ux%u\n", desc.width, desc.height);
+        printf("tp10_sample.usage=0x%" PRIx64 "\n", desc.usage);
+    }
     printf("yv12_sample.ahb_is_supported=%d\n", AHardwareBuffer_isSupported(&desc));
     int ahb_rc = AHardwareBuffer_allocate(&desc, &ahb);
     printf("yv12_sample.ahb_allocate=%d\n", ahb_rc);
@@ -290,7 +315,7 @@ int main(int argc, char **argv)
     AHardwareBuffer_describe(ahb, &got);
     printf("yv12_sample.desc_stride=%u\n", got.stride);
 
-    if (!import_before_fill) {
+    if (!tp10_smoke && !import_before_fill) {
         if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
     }
 
@@ -312,6 +337,9 @@ int main(int argc, char **argv)
     if (r != VK_SUCCESS) { ret = 20; goto cleanup; }
 
     printf("yv12_sample.externalFormat=%" PRIu64 "\n", (uint64_t)fmt.externalFormat);
+    if (tp10_smoke)
+        printf("tp10_sample.externalFormat=%" PRIu64 "\n",
+               (uint64_t)fmt.externalFormat);
     printf("yv12_sample.ycbcrModel=%d\n", fmt.suggestedYcbcrModel);
     printf("yv12_sample.ycbcrRange=%d\n", fmt.suggestedYcbcrRange);
     printf("yv12_sample.xChromaOffset=%d\n", fmt.suggestedXChromaOffset);
@@ -331,7 +359,7 @@ int main(int argc, char **argv)
         .pNext = &external_mem,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = VK_FORMAT_UNDEFINED,
-        .extent = { TEST_W, TEST_H, 1 },
+        .extent = { desc.width, desc.height, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -371,7 +399,7 @@ int main(int argc, char **argv)
     printf("yv12_sample.vkBindImageMemory=%d:%s\n", r, vk_result_name(r));
     if (r != VK_SUCCESS) { ret = 24; goto cleanup; }
 
-    if (import_before_fill) {
+    if (!tp10_smoke && import_before_fill) {
         printf("yv12_sample.fill_after_bind=1\n");
         if (fill_yv12_pattern(ahb) != 0) { ret = 18; goto cleanup; }
     }
@@ -668,10 +696,14 @@ int main(int argc, char **argv)
     printf("yv12_sample.before_vkQueueSubmit=1\n");
     r = vkQueueSubmit(queue, 1, &submit, fence);
     printf("yv12_sample.vkQueueSubmit=%d:%s\n", r, vk_result_name(r));
+    if (tp10_smoke)
+        printf("tp10_sample.vkQueueSubmit=%d:%s\n", r, vk_result_name(r));
     if (r != VK_SUCCESS) { ret = 44; goto cleanup; }
 
     r = vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ULL);
     printf("yv12_sample.vkWaitForFences=%d:%s\n", r, vk_result_name(r));
+    if (tp10_smoke)
+        printf("tp10_sample.vkWaitForFences=%d:%s\n", r, vk_result_name(r));
     if (r != VK_SUCCESS) { ret = 45; goto cleanup; }
 
     if (!(out_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
@@ -684,6 +716,9 @@ int main(int argc, char **argv)
 
     printf("yv12_sample.rgba=%.6f,%.6f,%.6f,%.6f\n",
            out[0], out[1], out[2], out[3]);
+    if (tp10_smoke)
+        printf("tp10_sample.rgba=%.6f,%.6f,%.6f,%.6f\n",
+               out[0], out[1], out[2], out[3]);
 
     int sane =
         out[0] >= 0.0f && out[0] <= 1.0f &&
@@ -693,8 +728,15 @@ int main(int argc, char **argv)
     printf("yv12_sample.output_sane=%s\n", sane ? "PASS" : "FAIL");
 
     if (!sane) {
-        printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
+        if (tp10_smoke)
+            printf("TP10_GPU_SAMPLE_STATUS=FAIL\n");
+        else
+            printf("YV12_GPU_SAMPLE_STATUS=FAIL\n");
         ret = 46;
+    } else if (tp10_smoke) {
+        printf("tp10_sample.mode=gpu-only-qti-ubwc-ycbcr-compute-smoke\n");
+        printf("TP10_GPU_SAMPLE_STATUS=PASS\n");
+        ret = 0;
     } else if (write_ref_path) {
         int wr = write_reference(write_ref_path, out);
         printf("yv12_sample.reference_write=%s\n", wr == 0 ? "PASS" : "FAIL");
@@ -733,6 +775,8 @@ int main(int argc, char **argv)
     }
 
 cleanup:
+    if (tp10_smoke && ret != 0)
+        printf("TP10_GPU_SAMPLE_STATUS=FAIL\n");
     if (device != VK_NULL_HANDLE)
         vkDeviceWaitIdle(device);
     if (mapped && device != VK_NULL_HANDLE && out_mem != VK_NULL_HANDLE)
@@ -756,6 +800,8 @@ cleanup:
     if (instance) vkDestroyInstance(instance, NULL);
 
     printf("yv12_sample.exit=%d\n", ret);
-    printf("========== END YV12 GPU SAMPLE PROBE ==========\n");
+    if (tp10_smoke)
+        printf("tp10_sample.exit=%d\n", ret);
+    printf("========== END YV12 / QTI TP10 GPU SAMPLE PROBE ==========\n");
     return ret;
 }

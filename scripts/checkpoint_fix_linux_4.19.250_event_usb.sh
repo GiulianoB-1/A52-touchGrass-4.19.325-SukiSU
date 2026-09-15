@@ -197,7 +197,25 @@ if xhci_text.count(
 ) != 1:
     raise SystemExit("xHCI 64-bit handshake prototype count is not one")
 
-lib_makefile = (root / "lib/Makefile").read_text()
+lib_makefile_path = root / "lib/Makefile"
+lib_makefile = lib_makefile_path.read_text()
+stable_core = "sha1.o chacha20.o irq_regs.o"
+vendor_core = "sha1.o chacha.o irq_regs.o"
+stable_count = lib_makefile.count(stable_core)
+vendor_count = lib_makefile.count(vendor_core)
+
+if stable_count == 0 and vendor_count == 1:
+    lib_makefile = lib_makefile.replace(vendor_core, stable_core, 1)
+    lib_makefile_path.write_text(lib_makefile)
+    repairs.append("lib_makefile=restored-stable-chacha20-core-object")
+elif stable_count == 1 and vendor_count == 0:
+    repairs.append("lib_makefile=stable-chacha20-core-object-already-present")
+else:
+    raise SystemExit(
+        f"lib/Makefile chacha core slot is unrecognized "
+        f"(stable={stable_count}, vendor={vendor_count})"
+    )
+
 chacha20_object_count = sum(
     token == "chacha20.o"
     for token in lib_makefile.replace("\\\n", " ").split()

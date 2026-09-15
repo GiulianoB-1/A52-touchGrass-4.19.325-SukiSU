@@ -230,6 +230,19 @@ def repair_merge_shapes() -> None:
     # policy. Restore the exact stable helper beside arm_lpae_iopte.
     iommu_path = KERNEL / "drivers/iommu/io-pgtable-arm.c"
     iommu_text = iommu_path.read_text()
+    paddr_mask = "#define ARM_LPAE_PTE_ADDR_MASK\t\tGENMASK_ULL(47,12)"
+    if paddr_mask not in iommu_text:
+        pte_page_anchor = "#define ARM_LPAE_PTE_TYPE_PAGE\t\t3\n"
+        if iommu_text.count(pte_page_anchor) != 1:
+            raise SystemExit("io-pgtable-arm PTE type anchor is not unique")
+        iommu_text = iommu_text.replace(
+            pte_page_anchor,
+            pte_page_anchor + "\n" + paddr_mask + "\n",
+            1,
+        )
+    elif iommu_text.count(paddr_mask) != 1:
+        raise SystemExit("io-pgtable-arm PTE address mask is duplicated")
+
     paddr_helper_sig = (
         "static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,\n"
         "\t\t\t\t     struct arm_lpae_io_pgtable *data)"
@@ -290,7 +303,10 @@ def repair_merge_shapes() -> None:
         raise SystemExit("legacy rand_initialize call remains")
     if random_h.read_text().count(new_random_decl) != 1:
         raise SystemExit("random_init declaration postcondition failed")
-    if iommu_path.read_text().count(paddr_helper_sig) != 1:
+    iommu_post = iommu_path.read_text()
+    if iommu_post.count(paddr_mask) != 1:
+        raise SystemExit("ARM_LPAE_PTE_ADDR_MASK postcondition failed")
+    if iommu_post.count(paddr_helper_sig) != 1:
         raise SystemExit("paddr_to_iopte helper postcondition failed")
     if mmc_host.read_text().count(mmc_helper_sig) != 1:
         raise SystemExit("mmc_validate_host_caps helper postcondition failed")

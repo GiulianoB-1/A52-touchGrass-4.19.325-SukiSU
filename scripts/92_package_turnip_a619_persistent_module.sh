@@ -127,24 +127,40 @@ sha256sum "$TARGET" 2>/dev/null || true
 echo
 
 echo "=== STOCK QUALCOMM REFERENCE ==="
-umount "$TARGET" || {
+umount -l "$TARGET" || {
     echo "NV21_AB_STATUS=FAIL_UNMOUNT"
     exit 13
 }
 REMOUNT_NEEDED=1
 
+STOCK_SHA="$(sha256sum "$TARGET" 2>/dev/null | awk '{print $1}')"
+echo "stock_target_sha=$STOCK_SHA"
+if [ -z "$STOCK_SHA" ] || [ "$STOCK_SHA" = "$STAGE_SHA" ]; then
+    echo "NV21_AB_STATUS=FAIL_STOCK_NOT_EXPOSED"
+    exit 13
+fi
+
 echo "stock_hal_after_unmount:"
 ls -lZ "$TARGET" 2>/dev/null || true
 sha256sum "$TARGET" 2>/dev/null || true
 
+STOCK_LOG="$MODDIR/nv21-stock-probe.txt"
 if command -v timeout >/dev/null 2>&1; then
-    timeout 90 "$PROBE" --nv21 --write-ref "$REF"
+    timeout 90 "$PROBE" --nv21 --write-ref "$REF" >"$STOCK_LOG" 2>&1
     STOCK_RC=$?
 else
-    "$PROBE" --nv21 --write-ref "$REF"
+    "$PROBE" --nv21 --write-ref "$REF" >"$STOCK_LOG" 2>&1
     STOCK_RC=$?
 fi
+cat "$STOCK_LOG"
 echo "stock_nv21_exit=$STOCK_RC"
+
+if grep -Fq 'device_name=Turnip Adreno' "$STOCK_LOG" ||
+   ! grep -Fq 'device_name=' "$STOCK_LOG"; then
+    echo "NV21_AB_STATUS=FAIL_STOCK_DRIVER_ID"
+    restore_turnip
+    exit 16
+fi
 
 restore_turnip
 

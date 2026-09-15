@@ -791,7 +791,8 @@ ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
-android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization\nandroid_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
+android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
+android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF

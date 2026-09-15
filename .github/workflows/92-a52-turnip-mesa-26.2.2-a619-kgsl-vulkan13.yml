@@ -265,7 +265,7 @@ jobs:
 
           unzip -tq "$ZIP"
           unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.14-vk1.3-yv12-qcom-mapped-fix'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.20-vk1.4-action-safe'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
           unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'

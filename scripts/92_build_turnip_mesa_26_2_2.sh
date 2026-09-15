@@ -247,6 +247,267 @@ replace_once(
 )
 
 
+
+# v0.26: support Qualcomm/Samsung flexible YUV_420_888 allocations that
+# resolve to semiplanar CrCb (NV21).  The A52 gralloc returns private format
+# 0x113 (NV21_ZSL) for AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420, but the public
+# android_ycbcr description is sufficient: Y plane + interleaved CrCb plane,
+# chroma_step=2.  Mesa 26.2.2 only has the YCbCr/NV12 table entry, so its
+# generic legacy-qcom gralloc path rejects the otherwise valid allocation.
+#
+# Preserve the physical NV21 ordering all the way through Vulkan by using a
+# Mesa-private opaque Android externalFormat token.  Images resolve the token
+# to VK_FORMAT_G8_B8R8_2PLANE_420_UNORM for storage/layout, while the common
+# YCbCr conversion state records an R/B swap so Turnip samples CrCb correctly.
+replace_once(
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    """   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 2, DRM_FORMAT_NV12},
+   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 1, DRM_FORMAT_YUV420},
+""",
+    """   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 2, DRM_FORMAT_NV12},
+   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCrCb, 2, DRM_FORMAT_NV21},
+   {HAL_PIXEL_FORMAT_YCbCr_420_888, YCbCr, 1, DRM_FORMAT_YUV420},
+""",
+    "flexible YUV420 NV21 fourcc",
+)
+
+replace_once(
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    """   if (hnd->hal_format == HAL_PIXEL_FORMAT_YV12 &&
+       ycbcr->chroma_step == 1 &&
+       y_ptr > INT_MAX && cb_ptr >= y_ptr && cr_ptr >= y_ptr) {
+      cb_ptr -= y_ptr;
+      cr_ptr -= y_ptr;
+      y_ptr = 0;
+
+      if (cb_ptr > INT_MAX || cr_ptr > INT_MAX) {
+         mesa_logw("YV12 mapped plane offsets exceed Mesa import range");
+         return -EINVAL;
+      }
+
+      mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");
+   }
+""",
+    """   const bool mapped_yv12 =
+      hnd->hal_format == HAL_PIXEL_FORMAT_YV12 &&
+      ycbcr->chroma_step == 1;
+   const bool mapped_flexible_420 =
+      hnd->hal_format == HAL_PIXEL_FORMAT_YCbCr_420_888 &&
+      ycbcr->chroma_step == 2;
+
+   if ((mapped_yv12 || mapped_flexible_420) &&
+       y_ptr > INT_MAX && cb_ptr >= y_ptr && cr_ptr >= y_ptr) {
+      cb_ptr -= y_ptr;
+      cr_ptr -= y_ptr;
+      y_ptr = 0;
+
+      if (cb_ptr > INT_MAX || cr_ptr > INT_MAX) {
+         mesa_logw("mapped QCOM YUV plane offsets exceed Mesa import range");
+         return -EINVAL;
+      }
+
+      if (mapped_yv12)
+         mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");
+      else
+         mesa_logi("touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers");
+   }
+""",
+    "mapped flexible YUV420 pointer normalization",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.h",
+    """struct u_gralloc;
+struct vk_device;
+struct vk_image;
+""",
+    """/* Mesa's Android runtime historically uses VkFormat values directly as
+ * externalFormat tokens.  NV12 and NV21 share the same Vulkan storage format,
+ * so use one private opaque token to preserve the physical CrCb distinction.
+ */
+#define VK_ANDROID_EXTERNAL_FORMAT_TOUCHGRASS_NV21 0x4d4553414e563231ull
+
+static inline bool
+vk_android_external_format_is_touchgrass_nv21(uint64_t external_format)
+{
+   return external_format == VK_ANDROID_EXTERNAL_FORMAT_TOUCHGRASS_NV21;
+}
+
+static inline VkFormat
+vk_android_external_format_to_vk_format(uint64_t external_format)
+{
+   if (vk_android_external_format_is_touchgrass_nv21(external_format))
+      return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+
+   return (VkFormat) external_format;
+}
+
+struct u_gralloc;
+struct vk_device;
+struct vk_image;
+""",
+    "Android NV21 external-format token",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """   VkFormat external_format = p->format;
+""",
+    """   uint64_t external_format = p->format;
+   VkFormat resolved_external_format = p->format;
+""",
+    "AHB external/resolved format split",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """   switch (info.drm_fourcc) {
+   case DRM_FORMAT_YVU420:
+      /* Assuming that U and V planes are swapped earlier */
+      external_format = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+      break;
+   case DRM_FORMAT_NV12:
+      external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      break;
+   case DRM_FORMAT_P010:
+      external_format = VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      break;
+   case DRM_FORMAT_XBGR8888:
+      /* This can be resolved from IMPLEMENTATION_DEFINED AHB format */
+      external_format = VK_FORMAT_R8G8B8A8_UNORM;
+      break;
+   default:
+      mesa_loge("Unsupported external DRM format: %d", info.drm_fourcc);
+      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   }
+""",
+    """   switch (info.drm_fourcc) {
+   case DRM_FORMAT_YVU420:
+      /* Assuming that U and V planes are swapped earlier */
+      resolved_external_format = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+      external_format = resolved_external_format;
+      break;
+   case DRM_FORMAT_NV12:
+      resolved_external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      external_format = resolved_external_format;
+      break;
+   case DRM_FORMAT_NV21:
+      resolved_external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      external_format = VK_ANDROID_EXTERNAL_FORMAT_TOUCHGRASS_NV21;
+      mesa_logi("touchGrass: resolved flexible Android YUV420 CrCb as NV21");
+      break;
+   case DRM_FORMAT_P010:
+      resolved_external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      external_format = resolved_external_format;
+      break;
+   case DRM_FORMAT_XBGR8888:
+      /* This can be resolved from IMPLEMENTATION_DEFINED AHB format */
+      resolved_external_format = VK_FORMAT_R8G8B8A8_UNORM;
+      external_format = resolved_external_format;
+      break;
+   default:
+      mesa_loge("Unsupported external DRM format: %d", info.drm_fourcc);
+      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   }
+""",
+    "AHB NV21 external-format resolution",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """   device->physical->dispatch_table.GetPhysicalDeviceFormatProperties2(
+      (VkPhysicalDevice)device->physical, external_format, &format_properties);
+
+   p->formatFeatures = format_properties.formatProperties.optimalTilingFeatures;
+   p->externalFormat = external_format;
+""",
+    """   device->physical->dispatch_table.GetPhysicalDeviceFormatProperties2(
+      (VkPhysicalDevice)device->physical, resolved_external_format,
+      &format_properties);
+
+   p->formatFeatures = format_properties.formatProperties.optimalTilingFeatures;
+   p->externalFormat = external_format;
+""",
+    "AHB resolved-format feature query",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """         const uint32_t num_bits = vk_format_get_component_bits(
+            format_prop2->externalFormat, UTIL_FORMAT_COLORSPACE_RGB, 1);
+""",
+    """         const VkFormat resolved_format =
+            vk_android_external_format_to_vk_format(
+               format_prop2->externalFormat);
+         const uint32_t num_bits = vk_format_get_component_bits(
+            resolved_format, UTIL_FORMAT_COLORSPACE_RGB, 1);
+""",
+    "AHB external-format resolve bits",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_image.c",
+    """      vk_image_set_format(image, (VkFormat)ext_format->externalFormat);
+""",
+    """      vk_image_set_format(
+         image,
+         vk_android_external_format_to_vk_format(ext_format->externalFormat));
+""",
+    "vk_image NV21 external-format resolution",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_ycbcr_conversion.c",
+    """#include "vk_ycbcr_conversion.h"
+
+#include <vulkan/vulkan_android.h>
+""",
+    """#include "vk_ycbcr_conversion.h"
+
+#include "vk_android.h"
+
+#include <vulkan/vulkan_android.h>
+""",
+    "YCbCr Android external-format helper include",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_ycbcr_conversion.c",
+    """   /* We assume that Android externalFormat is just a VkFormat */
+   if (android_ext_info && android_ext_info->externalFormat) {
+      assert(pCreateInfo->format == VK_FORMAT_UNDEFINED);
+      state->format = android_ext_info->externalFormat;
+   } else {
+""",
+    """   /* Most Mesa Android externalFormat values are VkFormat values.  Keep
+    * that behavior, but resolve the private NV21 token and install the
+    * component swap required for physical CrCb (NV21) storage.
+    */
+   if (android_ext_info && android_ext_info->externalFormat) {
+      assert(pCreateInfo->format == VK_FORMAT_UNDEFINED);
+      state->format =
+         vk_android_external_format_to_vk_format(
+            android_ext_info->externalFormat);
+
+      if (vk_android_external_format_is_touchgrass_nv21(
+             android_ext_info->externalFormat)) {
+         state->mapping[0] = VK_COMPONENT_SWIZZLE_B;
+         state->mapping[1] = VK_COMPONENT_SWIZZLE_IDENTITY;
+         state->mapping[2] = VK_COMPONENT_SWIZZLE_R;
+         state->mapping[3] = VK_COMPONENT_SWIZZLE_IDENTITY;
+      } else {
+         state->mapping[0] = VK_COMPONENT_SWIZZLE_IDENTITY;
+         state->mapping[1] = VK_COMPONENT_SWIZZLE_IDENTITY;
+         state->mapping[2] = VK_COMPONENT_SWIZZLE_IDENTITY;
+         state->mapping[3] = VK_COMPONENT_SWIZZLE_IDENTITY;
+      }
+   } else {
+""",
+    "YCbCr NV21 external-format component mapping",
+)
+
+
 # v0.17: import QTI's private NV12 Venus UBWC Android buffers
 # (HAL format 0x7fa30c06) through the legacy Qualcomm PlaneLayoutInfo ABI.
 #
@@ -1929,11 +2190,12 @@ probe=turnip-vk-probe
 probe_api_request=Vulkan-1.4
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback-vulkan14-feature-enable-dispatch-hostcopy-pushdescriptor-maintenance6-syncfd-ab-workload-scaling
 ahb_probe=turnip-ahb-probe
-ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics
+ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-yuv420-deep-forensics-nv21-fix
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix-plus-tp10-smoke
 tp10_sample_mode=1080x1920-gpu-only-qti-ubwc-ycbcr-4point-compute-smoke
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
+android_flexible_yuv420_nv21_fix=YCrCb-step2-DRM-NV21-plus-opaque-external-format-swap
 android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06
 qti_tp10_ubwc_fix=native-FMT6-TP10-NV15-QCOM-COMPRESSED-48x4-24x4-ubwc

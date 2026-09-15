@@ -39,10 +39,6 @@ if text.count(start_marker) != 1 or text.count(end_marker) != 1:
 start = text.index(start_marker)
 end = text.index(end_marker, start)
 old_region = text[start:end]
-if "hdev = hci_pi(sk)->hdev;" not in old_region:
-    raise SystemExit("net/bluetooth/hci_sock.c: expected partially activated bind body")
-if "return 0;" not in old_region:
-    raise SystemExit("net/bluetooth/hci_sock.c: vendor bind stub return is missing")
 new_region = (
     "static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,\n"
     "\t\t\t int addr_len)\n"
@@ -51,11 +47,23 @@ new_region = (
     "\treturn 0;\n"
     "}\n\n"
 )
-text = text[:start] + new_region + text[end:]
+
+if "hdev = hci_pi(sk)->hdev;" in old_region:
+    if "return 0;" not in old_region:
+        raise SystemExit("net/bluetooth/hci_sock.c: partial bind body lost vendor return")
+    text = text[:start] + new_region + text[end:]
+    rows.append("hci_sock_bind=vendor_stub_restored\n")
+elif "return 0;" in old_region:
+    # Current-stack merge already preserved Samsung's disabled bind policy.
+    # Canonicalize only this function region to the reviewed vendor stub.
+    text = text[:start] + new_region + text[end:]
+    rows.append("hci_sock_bind=vendor_stub_already-present\n")
+else:
+    raise SystemExit("net/bluetooth/hci_sock.c: unrecognized bind implementation")
+
 if text.count("static int hci_sock_bind(") != 1:
     raise SystemExit("net/bluetooth/hci_sock.c: bind definition count is not one")
 hci_sock.write_text(text)
-rows.append("hci_sock_bind=vendor_stub_restored\n")
 
 # timerqueue_head switched from separate head/next members to rb_root_cached.
 # Keep the per-CPU Qualcomm queue and initialize it through the new field.

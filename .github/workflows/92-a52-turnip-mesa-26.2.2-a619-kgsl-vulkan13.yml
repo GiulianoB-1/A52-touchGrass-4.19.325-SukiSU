@@ -194,7 +194,7 @@ jobs:
           readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
           readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
           readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
-          strings "$YV12_PROBE" | grep -Fq 'YV12 / QTI TP10 GPU SAMPLE PROBE'
+          strings "$YV12_PROBE" | grep -Fq 'YV12 / NV21 / QTI TP10 GPU SAMPLE PROBE'
           strings "$YV12_PROBE" | grep -Fq -- '--tp10-smoke'
           strings "$YV12_PROBE" | grep -Fq 'TP10_GPU_SAMPLE_STATUS=PASS'
           strings "$YV12_PROBE" | grep -Fq 'nv21_sample.enabled=%d'

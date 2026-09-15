@@ -149,6 +149,38 @@ def repair_merge_shapes() -> None:
     if text.count(definition) != 1:
         raise SystemExit(f"schedutil cleanup helper count is {text.count(definition)}, expected 1")
 
+    # Samsung's legacy drivers/char/Kconfig opens "Character devices" without
+    # closing it locally. With the 4.19.250 drivers/Kconfig layout, that causes
+    # the parent file's final endmenu to close the child menu instead, leaving
+    # "Device Drivers" unterminated. Restore the upstream-local menu closure
+    # while preserving all Samsung char options.
+    char_kconfig = KERNEL / "drivers/char/Kconfig"
+    char_text = char_kconfig.read_text()
+    menu_marker = 'menu "Character devices"'
+    menu_count = char_text.count(menu_marker)
+    endmenu_count = sum(
+        1 for line in char_text.splitlines() if line.strip() == "endmenu"
+    )
+    if menu_count != 1:
+        raise SystemExit(
+            f"drivers/char/Kconfig Character devices menu count is {menu_count}, expected 1"
+        )
+    if endmenu_count == 0:
+        if not char_text.endswith("\n"):
+            char_text += "\n"
+        char_text += "\nendmenu\n"
+        char_kconfig.write_text(char_text)
+    elif endmenu_count != 1:
+        raise SystemExit(
+            f"drivers/char/Kconfig endmenu count is {endmenu_count}, expected 0 or 1"
+        )
+
+    drivers_kconfig = (KERNEL / "drivers/Kconfig").read_text()
+    if drivers_kconfig.count('menu "Device Drivers"') != 1:
+        raise SystemExit("drivers/Kconfig Device Drivers menu anchor is not unique")
+    if sum(1 for line in drivers_kconfig.splitlines() if line.strip() == "endmenu") != 1:
+        raise SystemExit("drivers/Kconfig top-level endmenu count is not one")
+
 
 def main() -> None:
     if not (KERNEL / ".git").is_dir():

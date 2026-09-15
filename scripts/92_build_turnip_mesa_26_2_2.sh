@@ -1572,7 +1572,7 @@ native_tp10_checks = [
     ("src/freedreno/fdl/freedreno_layout.h", "touchgrass_tp10_plane", "FDL TP10 plane marker"),
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 48;", "TP10 Y metadata geometry"),
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 24;", "TP10 UV metadata geometry"),
-    ("src/freedreno/fdl/fd6_layout.c", "FDL TP10 NPOT", "TP10 NPOT UBWC comments"),
+    ("src/freedreno/fdl/fd6_layout.c", "if (layout->touchgrass_tp10_plane) {", "TP10 NPOT UBWC path"),
     ("src/freedreno/vulkan/tu_image.cc", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 native FDL pipe format"),
     ("src/freedreno/fdl/fd6_format_table.c", "_T_(R10_G10B10_420_UNORM, TP10, WZYX)", "native FMT6_TP10 mapping"),
     ("src/freedreno/fdl/fd6_view.cc", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 multi-plane descriptor"),

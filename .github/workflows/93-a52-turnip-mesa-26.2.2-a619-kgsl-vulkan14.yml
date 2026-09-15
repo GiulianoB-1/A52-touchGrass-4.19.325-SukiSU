@@ -1,0 +1,314 @@
+name: 93 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4
+
+on:
+  push:
+    branches:
+      - agent/a52-turnip-mesa-26.2.2-a619-kgsl-vulkan14-v1
+    paths:
+      - .github/workflows/93-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan14.yml
+      - scripts/92_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-turnip-mesa-26.2.2-a619-kgsl-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: 30.0.16248370
+  GLSLANG_VERSION: 16.6.0
+  GLSLANG_COMMIT: e1b562a8bed273a02f30b59b66a5d499793cede5
+  CCACHE_DIR: ${{ github.workspace }}/.ccache-turnip
+  CCACHE_MAXSIZE: 4G
+
+jobs:
+  build:
+    name: Build Mesa 26.2.2 Turnip A619 KGSL Vulkan 1.4
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl xz-utils zip unzip file binutils patchelf ccache pkg-config cmake \
+            python3 python3-pip python3-setuptools python3-wheel \
+            flex bison git ca-certificates
+          python3 -m pip install --user --upgrade "meson>=1.4" ninja mako pyyaml packaging
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build pinned glslang >= 12.2
+        run: |
+          set -Eeuo pipefail
+          SRC="$RUNNER_TEMP/glslang-src"
+          BUILD="$RUNNER_TEMP/glslang-build"
+          DEST="$HOME/.local/bin"
+
+          rm -rf "$SRC" "$BUILD"
+          git clone --filter=blob:none https://github.com/KhronosGroup/glslang.git "$SRC"
+          git -C "$SRC" checkout --detach "$GLSLANG_COMMIT"
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$GLSLANG_COMMIT"
+
+          cmake -S "$SRC" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXTERNAL=OFF \
+            -DENABLE_OPT=OFF \
+            -DENABLE_HLSL=OFF \
+            -DGLSLANG_TESTS=OFF \
+            -DGLSLANG_ENABLE_INSTALL=OFF \
+            -DENABLE_GLSLANG_BINARIES=ON
+
+          cmake --build "$BUILD" --target glslang-standalone --parallel 2
+
+          GLSLANG_VALIDATOR="$BUILD/StandAlone/glslangValidator"
+          test -x "$GLSLANG_VALIDATOR"
+          mkdir -p "$DEST"
+          cp -L "$GLSLANG_VALIDATOR" "$DEST/glslangValidator"
+          chmod 0755 "$DEST/glslangValidator"
+
+          echo "$DEST" >> "$GITHUB_PATH"
+          "$DEST/glslangValidator" --version
+
+      - name: Locate Android SDK
+        run: |
+          set -Eeuo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort | tail -1)"
+          test -n "$SDKMANAGER"
+          test -x "$SDKMANAGER"
+          echo "SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "sdk_root=$SDK_ROOT"
+          echo "sdkmanager=$SDKMANAGER"
+
+      - name: Install pinned Android NDK r30
+        run: |
+          set -Eeuo pipefail
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;$NDK_VERSION"
+          NDK_ROOT="$SDK_ROOT/ndk/$NDK_VERSION"
+          test -d "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
+          "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android36-clang" --version
+
+      - name: Restore Turnip compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-turnip
+          key: a52-turnip-26.2.2-ndk30-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52-turnip-26.2.2-ndk30-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Build Mesa 26.2.2 Turnip for A619 KGSL
+        run: |
+          set -o pipefail
+          chmod +x scripts/92_build_turnip_mesa_26_2_2.sh
+          mkdir -p artifacts
+          ./scripts/92_build_turnip_mesa_26_2_2.sh "$GITHUB_WORKSPACE" "$NDK_ROOT" \
+            "$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2" \
+            2>&1 | tee artifacts/turnip-mesa-26.2.2-build.log
+
+      - name: Package reversible KernelSU module
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/92_package_turnip_a619_module.sh
+          ./scripts/92_package_turnip_a619_module.sh \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2" \
+            "$GITHUB_WORKSPACE/release-turnip"
+
+      - name: Package persistent SurfaceFlinger test module
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/92_package_turnip_a619_persistent_module.sh
+          ./scripts/92_package_turnip_a619_persistent_module.sh \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2" \
+            "$GITHUB_WORKSPACE/release-turnip-persistent"
+
+      - name: Audit Turnip HAL and package
+        run: |
+          set -Eeuo pipefail
+          DRIVER=artifacts/turnip-mesa-26.2.2/dist/vulkan.adreno.so
+          PROBE=artifacts/turnip-mesa-26.2.2/dist/turnip-vk-probe
+          AHB_PROBE=artifacts/turnip-mesa-26.2.2/dist/turnip-ahb-probe
+          YV12_PROBE=artifacts/turnip-mesa-26.2.2/dist/turnip-yv12-sample-probe
+          INFO=artifacts/turnip-mesa-26.2.2/BUILD-INFO.txt
+          ZIP=release-turnip/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-KSU.zip
+          PERSIST_ZIP=release-turnip-persistent/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.zip
+
+          test -s "$DRIVER"
+          test -s "$PROBE"
+          test -s "$AHB_PROBE"
+          test -s "$YV12_PROBE"
+          test -s "$ZIP"
+          test -s "$PERSIST_ZIP"
+          grep -Fxq 'mesa_version=26.2.2' "$INFO"
+          grep -Fxq 'gpu=Adreno 619' "$INFO"
+          grep -Fxq 'kmd=KGSL' "$INFO"
+          grep -Fxq 'android_api=36' "$INFO"
+          grep -Fxq 'turnip_api_cap=Vulkan-1.4' "$INFO"
+          grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
+          grep -Fxq 'probe_api_request=Vulkan-1.4' "$INFO"
+          grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
+          grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-ubwc-import-bind-lifetime-forensics' "$INFO"
+          grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
+          grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix' "$INFO"
+          grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
+          grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
+          grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
+          grep -Fxq 'qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06' "$INFO"
+          grep -Fxq 'qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9' "$INFO"
+
+          file "$DRIVER" | grep -Fq 'ARM aarch64'
+          file "$PROBE" | grep -Fq 'ARM aarch64'
+          file "$AHB_PROBE" | grep -Fq 'ARM aarch64'
+          file "$YV12_PROBE" | grep -Fq 'ARM aarch64'
+          readelf -d "$PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$AHB_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
+          readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$YV12_PROBE" | grep -Fq 'Shared library: [libandroid.so]'
+          strings "$YV12_PROBE" | grep -Fq 'YV12 940x1670 GPU SAMPLE PROBE'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.before_vkQueueSubmit=1'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_match=%s'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.import_before_fill=%d'
+          strings "$YV12_PROBE" | grep -Fq 'offset_from_plane0='
+          strings "$DRIVER" | grep -Fq 'touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers'
+          strings "$DRIVER" | grep -Fq 'Android image binding exceeds dma-buf size'
+          strings "$DRIVER" | grep -Fq 'touchGrass: QTI legacy PlaneLayoutInfo helper available'
+          strings "$DRIVER" | grep -Fq 'touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
+          strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
+          strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
+          strings "$AHB_PROBE" | grep -Fq 'TURNIP/STOCK AHB IMPORT PROBE'
+          strings "$AHB_PROBE" | grep -Fq 'yv12_sf_940x1670'
+          strings "$AHB_PROBE" | grep -Fq 'qti_nv12_ubwc_720x1280'
+          strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=PASS'
+          strings "$AHB_PROBE" | grep -Fq 'target_qti_nv12_ubwc_720x1280_status=DIAGNOSTIC_FAIL'
+          strings "$AHB_PROBE" | grep -Fq 'vkGetAndroidHardwareBufferPropertiesANDROID'
+          strings "$AHB_PROBE" | grep -Fq 'vkAllocateMemory_AHB'
+          strings "$AHB_PROBE" | grep -Fq 'vkBindImageMemory'
+          strings "$AHB_PROBE" | grep -Fq 'AHB_CASES_FAIL=%u'
+          strings "$AHB_PROBE" | grep -Fq 'stress_rgba8_passed=%u/32'
+          strings "$AHB_PROBE" | grep -Fq 'target_yv12_sf_940x1670_status=PASS'
+          strings "$AHB_PROBE" | grep -Fq 'VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT'
+          strings "$PROBE" | grep -Fq 'vulkan14_device_status=PASS'
+          strings "$PROBE" | grep -Fq 'gpu_submit_status=PASS'
+          strings "$PROBE" | grep -Fq 'verify_mismatches=%u'
+          strings "$PROBE" | grep -Fq 'noop_submit_status=PASS'
+          strings "$PROBE" | grep -Fq 'noop_before_vkQueueSubmit=1'
+          strings "$PROBE" | grep -Fq 'fill_before_vkQueueSubmit=1'
+          strings "$PROBE" | grep -Fq 'pre_submit_vkMapMemory_begin=1'
+          strings "$PROBE" | grep -Fq 'pre_submit_cpu_sentinel_write=PASS'
+          strings "$PROBE" | grep -Fq 'post_submit_reuse_existing_mapping=1'
+          strings "$PROBE" | grep -Fq 'memory_type_count=%u'
+          strings "$PROBE" | grep -Fq '=== OFFSCREEN DYNAMIC RENDERING ==='
+          strings "$PROBE" | grep -Fq 'render_before_vkCmdBeginRendering=1'
+          strings "$PROBE" | grep -Fq 'render_before_vkQueueSubmit=1'
+          strings "$PROBE" | grep -Fq 'render_verify_pixels=%u'
+          strings "$PROBE" | grep -Fq 'render_verify_mismatches=%u'
+          strings "$PROBE" | grep -Fq 'offscreen_render_status=PASS'
+          strings "$PROBE" | grep -Fq 'vkQueueSubmit_result=%d'
+          strings "$PROBE" | grep -Fq 'vkWaitForFences_result=%d'
+          readelf -d "$DRIVER" | grep -Fq 'vulkan.adreno.so'
+          ! readelf -d "$DRIVER" | grep -Fq '(RUNPATH)'
+          readelf -Ws "$DRIVER" | grep -Eq '[[:space:]]HMI$'
+          for lib in libhardware.so liblog.so libnativewindow.so libsync.so libc.so; do
+            readelf -d "$DRIVER" | grep -Fq "Shared library: [$lib]"
+          done
+
+          unzip -tq "$ZIP"
+          unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.18-vk1.4-live-validation'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM SUBMISSION BASELINE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP VULKAN SUBMISSION PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM AHB IMPORT BASELINE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP ANDROID HARDWARE BUFFER IMPORT PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'STOCK QUALCOMM YV12 GPU SAMPLE BASELINE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP YV12 POST-FILL IMPORT PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP YV12 IMPORT-FIRST GPU SAMPLE PROBE'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'turnip_yv12_postfill_exit='
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'turnip_yv12_importfirst_exit='
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq -- '--write-ref "$YV12_REF"'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq -- '--compare-ref "$YV12_REF"'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'TURNIP KERNEL WATCH'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'timeout 25 "$PROBE"'
+          unzip -p "$ZIP" tools/turnip-live-test.sh | grep -Fq 'timeout 45 "$AHB_PROBE"'
+          ! unzip -l "$ZIP" | grep -Fq 'post-fs-data.sh'
+          ! unzip -l "$ZIP" | grep -Fq 'service.sh'
+          unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
+          unzip -p "$ZIP" README.txt | grep -Fq '32-bit Vulkan applications continue using the stock Qualcomm 32-bit driver'
+
+          unzip -tq "$PERSIST_ZIP"
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18-vk1.4-persistent-qti-nv12-ubwc'
+          unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
+          unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
+          ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
+          unzip -l "$PERSIST_ZIP" | grep -Fq 'service.sh'
+          unzip -l "$PERSIST_ZIP" | grep -Fq 'tools/turnip-vk-probe'
+          unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'Could not initialize Vulkan RenderEngine'
+          unzip -p "$PERSIST_ZIP" service.sh | grep -Fq 'PAGE FAULT'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-ahb-probe'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-yv12-sample-probe'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-live-test.sh'
+
+          sha256sum "$DRIVER" "$PROBE" "$AHB_PROBE" "$YV12_PROBE" "$ZIP" "$PERSIST_ZIP" | tee artifacts/turnip-final-sha256.txt
+          unzip -l "$ZIP" | tee artifacts/turnip-module-list.txt
+          ccache --show-stats | tee artifacts/turnip-ccache.txt
+
+      - name: Save Turnip compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-turnip
+          key: a52-turnip-26.2.2-ndk30-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload Turnip KernelSU module
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TURNIP-MESA-26.2.2-A619-KGSL-VULKAN-1.4-KSU-${{ github.run_number }}
+          path: |
+            release-turnip/*.zip
+            release-turnip/*.sha256
+            release-turnip-persistent/*.zip
+            release-turnip-persistent/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Turnip build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-turnip-mesa-26.2.2-${{ github.run_number }}-diagnostics
+          path: |
+            artifacts/turnip-mesa-26.2.2/BUILD-INFO.txt
+            artifacts/turnip-mesa-26.2.2/*.txt
+            artifacts/turnip-mesa-26.2.2/*.sha256
+            artifacts/turnip-mesa-26.2.2-build.log
+            artifacts/turnip-final-sha256.txt
+            artifacts/turnip-module-list.txt
+            artifacts/turnip-ccache.txt
+          if-no-files-found: warn
+          retention-days: 14

@@ -162,6 +162,90 @@ replace_once(
     "fdl imported tail padding",
 )
 
+# Samsung/QCOM's legacy GRALLOC_MODULE_PERFORM_GET_YUV_PLANE_INFO can
+# return android_ycbcr pointers as offsets when the buffer is unmapped, but
+# as absolute mapped virtual addresses after a CPU lock/unlock. Mesa 26.2.2
+# assumes the former unconditionally and truncates those addresses into the
+# int offset fields, which makes a previously CPU-touched YV12 import fail.
+# Normalize only the exact planar YV12 case, using the Y pointer as the base.
+replace_once(
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    """#include <hardware/gralloc.h>
+#include <errno.h>
+""",
+    """#include <hardware/gralloc.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+""",
+    "u_gralloc mapped YV12 includes",
+)
+
+replace_once(
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    """   enum chroma_order chroma_order =
+      ((size_t)ycbcr->cr < (size_t)ycbcr->cb) ? YCrCb : YCbCr;
+
+   /* .chroma_step is the byte distance between the same chroma channel
+""",
+    """   uintptr_t y_ptr = (uintptr_t)ycbcr->y;
+   uintptr_t cb_ptr = (uintptr_t)ycbcr->cb;
+   uintptr_t cr_ptr = (uintptr_t)ycbcr->cr;
+
+   enum chroma_order chroma_order =
+      (cr_ptr < cb_ptr) ? YCrCb : YCbCr;
+
+   /* The legacy QCOM perform API may return offsets from a null base while
+    * the allocation is unmapped, then return real process virtual addresses
+    * after AHardwareBuffer_lockPlanes()/unlock().  This is reproducible on
+    * the A52 YV12 path.  Preserve the ordinary offset mode, but for the exact
+    * 3-plane YV12 shape normalize a mapped address triplet back to offsets.
+    */
+   if (hnd->hal_format == HAL_PIXEL_FORMAT_YV12 &&
+       ycbcr->chroma_step == 1 &&
+       y_ptr > INT_MAX && cb_ptr >= y_ptr && cr_ptr >= y_ptr) {
+      cb_ptr -= y_ptr;
+      cr_ptr -= y_ptr;
+      y_ptr = 0;
+
+      if (cb_ptr > INT_MAX || cr_ptr > INT_MAX) {
+         mesa_logw("YV12 mapped plane offsets exceed Mesa import range");
+         return -EINVAL;
+      }
+
+      mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");
+   }
+
+   /* .chroma_step is the byte distance between the same chroma channel
+""",
+    "u_gralloc mapped YV12 normalize",
+)
+
+replace_once(
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    """   out->offsets[0] = (size_t)ycbcr->y;
+   /* We assume here that all the planes are located in one DMA-buf. */
+   if (chroma_order == YCrCb) {
+      out->offsets[1] = (size_t)ycbcr->cr;
+      out->offsets[2] = (size_t)ycbcr->cb;
+   } else {
+      out->offsets[1] = (size_t)ycbcr->cb;
+      out->offsets[2] = (size_t)ycbcr->cr;
+   }
+""",
+    """   out->offsets[0] = (int)y_ptr;
+   /* We assume here that all the planes are located in one DMA-buf. */
+   if (chroma_order == YCrCb) {
+      out->offsets[1] = (int)cr_ptr;
+      out->offsets[2] = (int)cb_ptr;
+   } else {
+      out->offsets[1] = (int)cb_ptr;
+      out->offsets[2] = (int)cr_ptr;
+   }
+""",
+    "u_gralloc normalized YV12 offsets",
+)
+
 tu = src / "src/freedreno/vulkan/tu_image.cc"
 text = tu.read_text()
 anchor = """template <chip CHIP>
@@ -432,8 +516,8 @@ probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
 ahb_probe_mode=rgba-yuv420-yv12-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe
-yv12_sample_mode=940x1670-postfill-vs-importfirst-stock-reference
-android_yv12_fix=mesa-26.2.2-explicit-layout-16byte-pitch
+yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
+android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac
 EOF

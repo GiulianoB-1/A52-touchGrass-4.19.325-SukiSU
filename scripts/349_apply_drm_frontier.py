@@ -237,32 +237,27 @@ def patch_kms(text: str) -> str:
         return text
     text = add_extern(text, "sde_kms")
 
+    # This vendor tree enforces declaration-before-statement. Keep the
+    # inherited A52_ACKFR_SCOPE where it is, and place our executable marker
+    # only after the complete local declaration block.
     text = one(
         text,
-        'static void sde_kms_prepare_commit(struct msm_kms *kms,\n'
-        '\t\tstruct drm_atomic_state *state)\n'
-        '{\n'
-        '\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_prepare_commit");\n',
-        'static void sde_kms_prepare_commit(struct msm_kms *kms,\n'
-        '\t\tstruct drm_atomic_state *state)\n'
-        '{\n'
-        '\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_prepare_commit");\n'
-        '\ta52_p349_mark(7U, 0U, 0U, 0U, 0U);\n',
-        "SDE prepare enter",
+        '\tint i, rc;\n\n'
+        '\ta52_ackfr_record("P276 296K p");\n',
+        '\tint i, rc;\n\n'
+        '\ta52_p349_mark(7U, 0U, 0U, 0U, 0U);\n'
+        '\ta52_ackfr_record("P276 296K p");\n',
+        "SDE prepare enter after declarations",
     )
 
     text = one(
         text,
-        'static void sde_kms_commit(struct msm_kms *kms,\n'
-        '\t\tstruct drm_atomic_state *old_state)\n'
-        '{\n'
-        '\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_commit");\n',
-        'static void sde_kms_commit(struct msm_kms *kms,\n'
-        '\t\tstruct drm_atomic_state *old_state)\n'
-        '{\n'
-        '\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_commit");\n'
-        '\ta52_p349_mark(8U, 0U, 0U, 0U, 0U);\n',
-        "SDE commit enter",
+        '\tint i;\n\n'
+        '\ta52_ackfr_record("P276 296K c");\n',
+        '\tint i;\n\n'
+        '\ta52_p349_mark(8U, 0U, 0U, 0U, 0U);\n'
+        '\ta52_ackfr_record("P276 296K c");\n',
+        "SDE commit enter after declarations",
     )
     return text
 
@@ -285,21 +280,27 @@ def patch_ctrl(text: str) -> str:
 {
 	int rc = 0;
 '''
-    repl = '''static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
-			  const struct mipi_dsi_msg *msg,
-			  u32 *flags)
-{
-	int rc = 0;
-'''
     if text.count(anchor) != 1:
         raise SystemExit(f"Phase349 dsi_message_tx anchor count {text.count(anchor)}")
 
-    # Insert after the declaration block, immediately before Samsung debug code.
+    # CONFIG_DISPLAY_SAMSUNG contributes a local declaration after cmdbuf.
+    # Split that declaration from its first debug statement so our executable
+    # marker remains at the function frontier without violating the old C
+    # declaration ordering enforced by this kernel.
     exec_anchor = '''	u8 *cmdbuf;
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd = ss_get_vdd(dsi_ctrl->cell_index);
+	if (vdd->debug_data && vdd->debug_data->print_cmds)
+		print_cmd_desc(msg, vdd);
+#endif
+
 '''
     exec_repl = '''	u8 *cmdbuf;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd = ss_get_vdd(dsi_ctrl->cell_index);
+#endif
 
 	a52_p349_mark(9U,
 		msg ? (u32)msg->type : 0xffffffffU,
@@ -308,8 +309,12 @@ def patch_ctrl(text: str) -> str:
 		flags ? *flags : 0xffffffffU);
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (vdd->debug_data && vdd->debug_data->print_cmds)
+		print_cmd_desc(msg, vdd);
+#endif
+
 '''
-    return one(text, exec_anchor, exec_repl, "DSI message enter")
+    return one(text, exec_anchor, exec_repl, "DSI message enter after declarations")
 
 
 def validate(before: dict[Path, str], after: dict[Path, str]) -> None:
@@ -333,6 +338,19 @@ def validate(before: dict[Path, str], after: dict[Path, str]) -> None:
     ):
         if token not in combined:
             raise SystemExit("Phase349 required token missing: " + token)
+
+
+    kms = after[KMS]
+    ctrl = after[CTRL]
+    if 'a52_p349_mark(7U, 0U, 0U, 0U, 0U);\n\tstruct sde_kms *sde_kms;' in kms:
+        raise SystemExit("Phase349 prepare marker precedes declarations")
+    if 'a52_p349_mark(8U, 0U, 0U, 0U, 0U);\n\tstruct sde_kms *sde_kms;' in kms:
+        raise SystemExit("Phase349 commit marker precedes declarations")
+    if 'a52_p349_mark(9U,' in ctrl:
+        marker = ctrl.index('a52_p349_mark(9U,')
+        samsung_decl = ctrl.index('struct samsung_display_driver_data *vdd =', ctrl.index('static int dsi_message_tx('))
+        if marker < samsung_decl:
+            raise SystemExit("Phase349 DSI marker precedes Samsung declaration")
 
     protected = (
         "DSI_W32(", "DSI_R32(", "wait_for_completion_timeout(",

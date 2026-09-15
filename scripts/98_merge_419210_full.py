@@ -10,9 +10,9 @@ ROOT = Path.cwd()
 WORKSPACE = ROOT / "workspace"
 KERNEL = WORKSPACE / "touchgrass-a52xq"
 ARTIFACTS = ROOT / "artifacts"
-STABLE = WORKSPACE / "linux-stable-4.19.207-full210-current"
+STABLE = WORKSPACE / "linux-stable-4.19.210-full-current"
 BASE_TREE = WORKSPACE / "linux-base-4.19.206-full210-current"
-THEIRS_TREE = WORKSPACE / "linux-theirs-4.19.207-full210-current"
+THEIRS_TREE = WORKSPACE / "linux-theirs-4.19.210-full-current"
 
 GOOD_TAG = "v4.19.206"
 BAD_TAG = "v4.19.210"
@@ -156,7 +156,7 @@ def main() -> None:
         "git", "-C", str(STABLE), "log", "--reverse", "--first-parent",
         "--format=%H%x09%s", f"{GOOD_TAG}..{BAD_TAG}", capture=True,
     )
-    (ARTIFACTS / "phase98-linux-4.19.207-commit-list.tsv").write_text(commit_list + "\n")
+    (ARTIFACTS / "phase98-linux-4.19.210-commit-list.tsv").write_text(commit_list + "\n")
 
     archive(STABLE, GOOD_TAG, BASE_TREE)
     archive(STABLE, test_sha, THEIRS_TREE)

@@ -1158,6 +1158,326 @@ clear_text = clear_text[:store_start] + new_store + clear_text[store_end:]
 
 clear.write_text(clear_text)
 
+# Native Qualcomm TP10 UBWC support for the A52.
+#
+# Android's private 0x7fa30c09 allocation is exposed by the validated QCOM
+# gralloc path as DRM_FORMAT_NV15 + DRM_FORMAT_MOD_QCOM_COMPRESSED.  NV15 is
+# tightly packed 10-bit 4:2:0 and must not be interpreted as P010 storage.
+#
+# Vulkan's standard 10-bit 2-plane format is used only for YCbCr semantics.
+# Turnip then marks this private external-format image and overrides its
+# storage/view path to native A6xx FMT6_TP10 with Qualcomm's actual UBWC
+# metadata geometry: Y 48x4, UV 24x4.
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """   case DRM_FORMAT_NV12:
+      external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      break;
+   default:;
+""",
+    """   case DRM_FORMAT_NV12:
+      external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+      break;
+   case DRM_FORMAT_NV15:
+      /* Qualcomm TP10 UBWC.  Keep format=UNDEFINED because this private
+       * Android format is not Vulkan's P010 storage layout.  We use the
+       * standard 10-bit two-plane VkFormat only as the external-format
+       * semantic token; Turnip recognizes that token on an AHB external
+       * image and programs native FMT6_TP10 storage.
+       */
+      external_format =
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+      break;
+   default:;
+""",
+    "vk_android NV15 external semantic format",
+)
+
+replace_once(
+    "src/vulkan/runtime/vk_android.c",
+    """finish:
+
+   device->physical->dispatch_table.GetPhysicalDeviceFormatProperties2(
+      (VkPhysicalDevice)device->physical, external_format, &format_properties);
+""",
+    """finish:
+
+   /* Freedreno does not advertise ordinary P010 storage on this A6xx path,
+    * but the private TP10 image uses the same Vulkan YCbCr sampling
+    * capabilities as NV12.  Query NV12 only for the external-format feature
+    * mask; the image/view storage is handled by the native TP10 path.
+    */
+   VkFormat properties_format = external_format;
+   if (p->format == VK_FORMAT_UNDEFINED &&
+       external_format ==
+          VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16)
+      properties_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+
+   device->physical->dispatch_table.GetPhysicalDeviceFormatProperties2(
+      (VkPhysicalDevice)device->physical, properties_format, &format_properties);
+""",
+    "vk_android NV15 feature proxy",
+)
+
+# Mark the exact private external-format image in Turnip.  Standard AHB P010
+# uses Android's equivalence-table path (pCreateInfo->format is not
+# UNDEFINED), so this only matches the private TP10 external-format route.
+replace_once(
+    "src/freedreno/vulkan/tu_image.h",
+    """   bool android_external_no_gmem_padding;
+
+   /* Set when bound */
+""",
+    """   bool android_external_no_gmem_padding;
+
+   /* Private Qualcomm HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC imported through
+    * Android external-format semantics.  Storage is native A6xx TP10, not
+    * Vulkan P010.
+    */
+   bool touchgrass_tp10_ubwc;
+
+   /* Set when bound */
+""",
+    "tu_image TP10 flag",
+)
+
+# Carry a per-plane TP10 marker into FDL so UBWC metadata geometry can differ
+# from ordinary R16/R16G16 semantic plane layouts.
+replace_once(
+    "src/freedreno/fdl/freedreno_layout.h",
+    """   bool is_mutable : 1;
+   bool has_explicit_pitch : 1;
+
+   /* Note that for tiled textures""",
+    """   bool is_mutable : 1;
+   bool has_explicit_pitch : 1;
+
+   /* 0 = ordinary layout, 1 = TP10 Y, 2 = TP10 UV. */
+   uint8_t touchgrass_tp10_plane;
+
+   /* Note that for tiled textures""",
+    "FDL TP10 plane marker",
+)
+
+replace_once(
+    "src/freedreno/fdl/fd6_layout.c",
+    """   /* special case for r8g8: */
+   if (is_r8g8(layout)) {
+""",
+    """   /* Qualcomm TP10 UBWC metadata covers 48x4 luma samples per Y
+    * metadata block and 24x4 chroma sample-pairs per UV metadata block.
+    * These values reproduce the vendor Venus allocation byte-for-byte.
+    */
+   if (layout->touchgrass_tp10_plane == 1) {
+      *blockwidth = 48;
+      *blockheight = 4;
+      return;
+   }
+   if (layout->touchgrass_tp10_plane == 2) {
+      *blockwidth = 24;
+      *blockheight = 4;
+      return;
+   }
+
+   /* special case for r8g8: */
+   if (is_r8g8(layout)) {
+""",
+    "FDL TP10 UBWC geometry",
+)
+
+replace_once(
+    "src/freedreno/fdl/fd6_format_table.c",
+    """   _T_(R8_G8B8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Gallium NV12 */
+   _T_(G8_B8R8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Vulkan NV12 */
+   _T_(G8_B8_R8_420_UNORM, R8_G8_B8_3PLANE_420_UNORM, WZYX),
+""",
+    """   _T_(R8_G8B8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Gallium NV12 */
+   _T_(G8_B8R8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Vulkan NV12 */
+   _T_(G8_B8_R8_420_UNORM, R8_G8_B8_3PLANE_420_UNORM, WZYX),
+   _T_(R10_G10B10_420_UNORM, TP10, WZYX), /* QCOM tightly-packed 10-bit 420 */
+""",
+    "A6xx native TP10 texture format",
+)
+
+replace_once(
+    "src/freedreno/fdl/fd6_view.c",
+    """   if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+       args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+       args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
+""",
+    """   if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+       args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+       args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
+       args->format == PIPE_FORMAT_R10_G10B10_420_UNORM) {
+""",
+    "FDL TP10 multi-plane view",
+)
+
+# Turnip image/view integration.
+tu = src / "src/freedreno/vulkan/tu_image.cc"
+text = tu.read_text()
+
+create_flag_anchor = """   if (!image)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   if (pCreateInfo->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT) {
+"""
+create_flag_new = """   if (!image)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   const VkExternalFormatANDROID *tg_external_format =
+      vk_find_struct_const(pCreateInfo->pNext, EXTERNAL_FORMAT_ANDROID);
+   image->touchgrass_tp10_ubwc =
+      pCreateInfo->format == VK_FORMAT_UNDEFINED &&
+      tg_external_format && tg_external_format->externalFormat ==
+         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 &&
+      (image->vk.external_handle_types &
+       VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID);
+
+   if (pCreateInfo->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT) {
+"""
+if text.count(create_flag_anchor) != 1:
+    raise SystemExit(
+        f"TP10 CreateImage flag anchor count: {text.count(create_flag_anchor)}"
+    )
+text = text.replace(create_flag_anchor, create_flag_new, 1)
+
+init_anchor = """   if (TU_DEBUG(NOUBWC)) {
+      image->ubwc_enabled = false;
+   }
+
+   return VK_SUCCESS;
+}
+"""
+init_new = """   if (TU_DEBUG(NOUBWC)) {
+      image->ubwc_enabled = false;
+   }
+
+   if (image->touchgrass_tp10_ubwc) {
+      /* The v0.17 SurfaceFlinger failure was a read-only sampled 2D TP10
+       * external texture.  Keep this support deliberately narrow until it is
+       * validated on-device.
+       */
+      if (pCreateInfo->imageType != VK_IMAGE_TYPE_2D ||
+          pCreateInfo->samples != VK_SAMPLE_COUNT_1_BIT ||
+          pCreateInfo->mipLevels != 1 ||
+          pCreateInfo->arrayLayers != 1 ||
+          pCreateInfo->extent.depth != 1 ||
+          pCreateInfo->usage != VK_IMAGE_USAGE_SAMPLED_BIT)
+         return vk_error(device, VK_ERROR_FORMAT_NOT_SUPPORTED);
+
+      image->force_linear_tile = false;
+      image->ubwc_enabled = true;
+      image->is_mutable = false;
+   }
+
+   return VK_SUCCESS;
+}
+"""
+if text.count(init_anchor) != 1:
+    raise SystemExit(f"TP10 image-init anchor count: {text.count(init_anchor)}")
+text = text.replace(init_anchor, init_new, 1)
+
+layout_validate_anchor = """   /* Android YV12 guarantees 16-byte row-pitch alignment. Only relax the
+    * imported-layout validation for the exact sampled-only linear AHB shape.
+    */
+   const bool android_yv12_import =
+"""
+layout_validate_new = """   if (image->touchgrass_tp10_ubwc) {
+      if (!plane_layouts || modifier != DRM_FORMAT_MOD_QCOM_COMPRESSED ||
+          tu6_plane_count(image->vk.format) != 2 ||
+          plane_layouts[0].offset != 0 ||
+          plane_layouts[0].rowPitch == 0 ||
+          plane_layouts[1].rowPitch != plane_layouts[0].rowPitch)
+         return vk_error(
+            device, VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
+
+      const uint64_t width = image->vk.extent.width;
+      const uint64_t height = image->vk.extent.height;
+      const uint64_t pitch = plane_layouts[0].rowPitch;
+      const uint64_t y_meta_pitch = ALIGN_POT(DIV_ROUND_UP(width, 48), 64);
+      const uint64_t y_meta_rows = ALIGN_POT(DIV_ROUND_UP(height, 4), 16);
+      const uint64_t y_meta_size =
+         ALIGN_POT(y_meta_pitch * y_meta_rows, 4096);
+      const uint64_t y_rows = ALIGN_POT(height, 16);
+      const uint64_t expected_uv_meta = y_meta_size + pitch * y_rows;
+
+      if (expected_uv_meta > UINT32_MAX ||
+          plane_layouts[1].offset != expected_uv_meta)
+         return vk_error(
+            device, VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
+
+      mesa_logi("touchGrass: validated native TP10 UBWC layout pitch=%" PRIu64
+                " uv_meta=%" PRIu64, pitch, expected_uv_meta);
+   }
+
+   /* Android YV12 guarantees 16-byte row-pitch alignment. Only relax the
+    * imported-layout validation for the exact sampled-only linear AHB shape.
+    */
+   const bool android_yv12_import =
+"""
+if text.count(layout_validate_anchor) != 1:
+    raise SystemExit(
+        f"TP10 layout validation anchor count: {text.count(layout_validate_anchor)}"
+    )
+text = text.replace(layout_validate_anchor, layout_validate_new, 1)
+
+layout_marker_anchor = """      layout->tile_mode = tile_mode;
+      layout->ubwc = image->ubwc_enabled;
+
+      if (!fdl6_layout(layout,"""
+layout_marker_new = """      layout->tile_mode = tile_mode;
+      layout->ubwc = image->ubwc_enabled;
+      layout->touchgrass_tp10_plane =
+         image->touchgrass_tp10_ubwc ? (uint8_t)(i + 1) : 0;
+
+      if (!fdl6_layout(layout,"""
+if text.count(layout_marker_anchor) != 1:
+    raise SystemExit(
+        f"TP10 FDL marker anchor count: {text.count(layout_marker_anchor)}"
+    )
+text = text.replace(layout_marker_anchor, layout_marker_new, 1)
+
+view_format_anchor = """   enum pipe_format format;
+   if (vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+      format = tu_aspects_to_plane(vk_format, aspect_mask);
+   else
+      format = vk_format_to_pipe_format(vk_format);
+"""
+view_format_new = """   enum pipe_format format;
+   if (image->touchgrass_tp10_ubwc &&
+       aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT)
+      format = PIPE_FORMAT_R10_G10B10_420_UNORM;
+   else if (vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+      format = tu_aspects_to_plane(vk_format, aspect_mask);
+   else
+      format = vk_format_to_pipe_format(vk_format);
+"""
+if text.count(view_format_anchor) != 1:
+    raise SystemExit(
+        f"TP10 image-view format anchor count: {text.count(view_format_anchor)}"
+    )
+text = text.replace(view_format_anchor, view_format_new, 1)
+
+tu.write_text(text)
+
+# Native TP10 source audits.
+native_tp10_checks = [
+    ("src/vulkan/runtime/vk_android.c", "case DRM_FORMAT_NV15:", "Android NV15 acceptance"),
+    ("src/vulkan/runtime/vk_android.c", "VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16", "TP10 semantic VkFormat"),
+    ("src/freedreno/vulkan/tu_image.h", "touchgrass_tp10_ubwc", "Turnip TP10 image marker"),
+    ("src/freedreno/fdl/freedreno_layout.h", "touchgrass_tp10_plane", "FDL TP10 plane marker"),
+    ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 48;", "TP10 Y metadata geometry"),
+    ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 24;", "TP10 UV metadata geometry"),
+    ("src/freedreno/fdl/fd6_format_table.c", "_T_(R10_G10B10_420_UNORM, TP10, WZYX)", "native FMT6_TP10 mapping"),
+    ("src/freedreno/fdl/fd6_view.c", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 multi-plane descriptor"),
+    ("src/freedreno/vulkan/tu_image.cc", "validated native TP10 UBWC layout", "TP10 exact-layout validation"),
+]
+for rel, needle, label in native_tp10_checks:
+    if needle not in (src / rel).read_text():
+        raise SystemExit(f"native TP10 source audit failed: {label}: {needle}")
+    print(f"source_audit={label}:PASS")
+
 # Keep patch verification inside Python so an audit failure always names the
 # exact missing source marker instead of exiting silently under set -e.
 source_checks = [
@@ -1350,13 +1670,13 @@ probe=turnip-vk-probe
 probe_api_request=Vulkan-1.3
 probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback
 ahb_probe=turnip-ahb-probe
-ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-ubwc-import-bind-lifetime-forensics
+ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics
 yv12_sample_probe=turnip-yv12-sample-probe
 yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix
 android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization
 android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528
 qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06
-qti_tp10_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c09-drm-nv15
+qti_tp10_ubwc_fix=native-FMT6-TP10-NV15-QCOM-COMPRESSED-48x4-24x4-ubwc
 qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9
 android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d
 build_id=15799e6d32f2965a70353013be22dc22a9d57c012b9085f860e94bd349821eac

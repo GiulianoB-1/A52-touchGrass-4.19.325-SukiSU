@@ -458,8 +458,11 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
    if (hnd->hal_format != TG_QTI_NV12_UBWC_FORMAT &&
        hnd->hal_format != TG_QTI_TP10_UBWC_FORMAT &&
        hnd->hal_format != HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED &&
-       hnd->hal_format != HAL_PIXEL_FORMAT_YCbCr_420_888)
+       hnd->hal_format != HAL_PIXEL_FORMAT_YCbCr_420_888) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=hal_format hal=0x%x", hnd->hal_format);
       return -EINVAL;
+   }
 
    /* Qualcomm TP10 UBWC is packed 10-bit 4:2:0. Its UV plane advances
     * three bytes per chroma pair. Some vendor PlaneLayoutInfo revisions do
@@ -487,6 +490,11 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
    const uintptr_t base =
       (uintptr_t) tg_qti_read_u64(handle, TG_QTI_HANDLE_BASE_INDEX);
 
+   if (is_tp10_ubwc)
+      mesa_loge("touchGrass TP10 handle flags=0x%x aligned=%dx%d unaligned=%dx%d layers=%d size=%d usage=0x%llx",
+                flags, width, height, unaligned_width, unaligned_height,
+                layer_count, declared_size_i, (unsigned long long) usage);
+
    if (width <= 0 || height <= 0 ||
        unaligned_width <= 0 || unaligned_height <= 0 ||
        width < unaligned_width || height < unaligned_height ||
@@ -494,13 +502,23 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
        handle->data[TG_QTI_HANDLE_OFFSET_INDEX] != 0 ||
        !(flags & TG_QTI_FLAG_UBWC_ALIGNED) ||
        (flags & (TG_QTI_FLAG_UBWC_ALIGNED_PI |
-                 TG_QTI_FLAG_SECURE_BUFFER)))
+                 TG_QTI_FLAG_SECURE_BUFFER))) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=handle_validation offset=%d",
+                   handle->data[TG_QTI_HANDLE_OFFSET_INDEX]);
       return -EINVAL;
+   }
 
    const uint64_t declared_size = (uint32_t) declared_size_i;
    off_t dma_end = lseek(handle->data[0], 0, SEEK_END);
-   if (dma_end <= 0 || declared_size > (uint64_t) dma_end)
+   if (is_tp10_ubwc)
+      mesa_loge("touchGrass TP10 dma declared=%llu actual=%lld",
+                (unsigned long long) declared_size, (long long) dma_end);
+   if (dma_end <= 0 || declared_size > (uint64_t) dma_end) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=dma_size");
       return -EINVAL;
+   }
    const uint64_t dma_size = (uint64_t) dma_end;
 
    struct tg_qti_buffer_info info = {
@@ -516,28 +534,51 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
 
    int ret = gr->get_yuv_plane_layouts(
       &info, private_format, width, height, 0, &plane_count, planes);
-   if (ret != 0 || plane_count != 4)
+   if (is_tp10_ubwc) {
+      mesa_loge("touchGrass TP10 GetYUVPlaneInfo ret=%d count=%d", ret, plane_count);
+      if (ret == 0 && plane_count >= 0 && plane_count <= 8) {
+         for (int i = 0; i < plane_count; ++i) {
+            mesa_loge("touchGrass TP10 plane[%d] comp=0x%x sub=%u,%u off=%u step=%d stride=%d bytes=%d scan=%d size=%u",
+                      i, planes[i].component,
+                      planes[i].horizontal_subsampling,
+                      planes[i].vertical_subsampling,
+                      planes[i].offset, planes[i].step,
+                      planes[i].stride, planes[i].stride_bytes,
+                      planes[i].scanlines, planes[i].size);
+         }
+      }
+   }
+   if (ret != 0 || plane_count != 4) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=plane_query");
       return -EINVAL;
+   }
 
    const struct tg_qti_plane_layout_info *y = &planes[0];
    const struct tg_qti_plane_layout_info *uv = &planes[1];
    const struct tg_qti_plane_layout_info *y_meta = &planes[2];
    const struct tg_qti_plane_layout_info *uv_meta = &planes[3];
 
-   if (!tg_qti_plane_range_valid(
-          y, TG_QTI_PLANE_Y, 0, 0, expected_y_step, width,
-          declared_size, dma_size) ||
-       !tg_qti_plane_range_valid(
-          uv, TG_QTI_PLANE_CB | TG_QTI_PLANE_CR, 1, 1,
-          expected_uv_step, width, declared_size, dma_size) ||
-       !tg_qti_plane_range_valid(
-          y_meta, TG_QTI_PLANE_META | TG_QTI_PLANE_Y, 0, 0, 0, width,
-          declared_size, dma_size) ||
-       !tg_qti_plane_range_valid(
-          uv_meta,
-          TG_QTI_PLANE_META | TG_QTI_PLANE_CB | TG_QTI_PLANE_CR,
-          0, 0, 0, width, declared_size, dma_size))
+   const bool y_valid = tg_qti_plane_range_valid(
+      y, TG_QTI_PLANE_Y, 0, 0, expected_y_step, width,
+      declared_size, dma_size);
+   const bool uv_valid = tg_qti_plane_range_valid(
+      uv, TG_QTI_PLANE_CB | TG_QTI_PLANE_CR, 1, 1,
+      expected_uv_step, width, declared_size, dma_size);
+   const bool y_meta_valid = tg_qti_plane_range_valid(
+      y_meta, TG_QTI_PLANE_META | TG_QTI_PLANE_Y, 0, 0, 0, width,
+      declared_size, dma_size);
+   const bool uv_meta_valid = tg_qti_plane_range_valid(
+      uv_meta, TG_QTI_PLANE_META | TG_QTI_PLANE_CB | TG_QTI_PLANE_CR,
+      0, 0, 0, width, declared_size, dma_size);
+   if (is_tp10_ubwc)
+      mesa_loge("touchGrass TP10 plane_valid y=%d uv=%d ym=%d uvm=%d",
+                y_valid, uv_valid, y_meta_valid, uv_meta_valid);
+   if (!y_valid || !uv_valid || !y_meta_valid || !uv_meta_valid) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=plane_validation");
       return -EINVAL;
+   }
 
    const uint64_t y_meta_end =
       (uint64_t) y_meta->offset + y_meta->size;
@@ -549,12 +590,22 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
    /* Progressive QTI NV12 UBWC is physically:
     * Y metadata -> Y data -> UV metadata -> UV data.
     */
+   if (is_tp10_ubwc)
+      mesa_loge("touchGrass TP10 ordering ym=%u y=%u uvm=%u uv=%u ends=%llu,%llu,%llu,%llu",
+                y_meta->offset, y->offset, uv_meta->offset, uv->offset,
+                (unsigned long long) y_meta_end,
+                (unsigned long long) y_end,
+                (unsigned long long) uv_meta_end,
+                (unsigned long long) uv_end);
    if (y_meta->offset != 0 ||
        (uint64_t) y->offset != y_meta_end ||
        (uint64_t) uv_meta->offset != y_end ||
        (uint64_t) uv->offset != uv_meta_end ||
-       uv_end > declared_size || uv_end > dma_size)
+       uv_end > declared_size || uv_end > dma_size) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=plane_order");
       return -EINVAL;
+   }
 
    /* Independently cross-check the layout against the handle-aware vendor
     * query used by the stock gralloc module.
@@ -564,6 +615,11 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
    ret = gr->perform(gr->perform_handle,
                      GRALLOC_MODULE_PERFORM_GET_YUV_PLANE_INFO,
                      handle, ycbcr);
+   if (is_tp10_ubwc)
+      mesa_loge("touchGrass TP10 ycbcr ret=%d y=%p cb=%p cr=%p ys=%zu cs=%zu step=%zu base=0x%llx",
+                ret, ycbcr[0].y, ycbcr[0].cb, ycbcr[0].cr,
+                ycbcr[0].ystride, ycbcr[0].cstride,
+                ycbcr[0].chroma_step, (unsigned long long) base);
    if (ret != 0 ||
        ycbcr[1].y || ycbcr[1].cb || ycbcr[1].cr ||
        ycbcr[1].ystride || ycbcr[1].cstride ||
@@ -574,8 +630,11 @@ tg_qcom_get_qti_ubwc_info(struct qcom_gralloc *gr,
        !tg_qti_pointer_matches(base, y->offset, ycbcr[0].y) ||
        !tg_qti_pointer_matches(base, uv->offset, ycbcr[0].cb) ||
        uv->offset == UINT32_MAX ||
-       !tg_qti_pointer_matches(base, uv->offset + 1, ycbcr[0].cr))
+       !tg_qti_pointer_matches(base, uv->offset + 1, ycbcr[0].cr)) {
+      if (is_tp10_ubwc)
+         mesa_loge("touchGrass TP10 reject=ycbcr_crosscheck");
       return -EINVAL;
+   }
 
    out->drm_fourcc = is_tp10_ubwc ? DRM_FORMAT_NV15 : DRM_FORMAT_NV12;
    out->modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;

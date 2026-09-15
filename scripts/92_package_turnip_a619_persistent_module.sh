@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.21-vk1.4-stable-a619
-versionCode=31
+version=0.21.1-vk1.4-syncfd-profile
+versionCode=32
 author=touchGrass project
-description=Persistent arm64 Mesa 26.2.2 Turnip Vulkan 1.4 stable baseline for Adreno 619/KGSL. Validated on A52 5G with Vulkan 1.4 device creation, real GPU submission/rendering, YV12, QTI NV12/TP10 UBWC, TP10 GPU sampling, host image copy, push descriptors and maintenance6.
+description=Diagnostic build based on the validated v0.21 A619 Vulkan 1.4 baseline. Driver behavior is unchanged; turnip-vk-probe adds per-call profiling for exportable semaphore creation, queue submit, vkGetSemaphoreFdKHR sync-fd export, and post-export fence wait.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -275,7 +275,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.21-vk1.4-stable-a619'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.21.1-vk1.4-syncfd-profile'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

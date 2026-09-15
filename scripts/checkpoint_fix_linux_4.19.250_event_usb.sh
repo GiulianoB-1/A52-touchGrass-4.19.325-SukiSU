@@ -198,8 +198,9 @@ if xhci_text.count(
     raise SystemExit("xHCI 64-bit handshake prototype count is not one")
 
 lib_makefile = (root / "lib/Makefile").read_text()
-chacha20_object_count = len(
-    re.findall(r"(?<!\\S)chacha20\\.o(?!\\S)", lib_makefile)
+chacha20_object_count = sum(
+    token == "chacha20.o"
+    for token in lib_makefile.replace("\\\n", " ").split()
 )
 if chacha20_object_count != 1:
     raise SystemExit(

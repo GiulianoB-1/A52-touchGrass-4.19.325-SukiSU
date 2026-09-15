@@ -160,10 +160,33 @@ if hub_text.count("bool retry_locked;") != 1:
     raise SystemExit("hub retry_locked declaration count is not one")
 
 gadget_text = dwc3_gadget.read_text()
-if len(re.findall(r"^[ \\t]*struct[ \\t]+dwc3_trb[ \\t]+\\*tmp;[ \\t]*$", gadget_text, re.MULTILINE)) != 1:
-    raise SystemExit("DWC3 tmp declaration count is not one")
-if "request_status" in gadget_text and len(re.findall(r"^[ \\t]*int[ \\t]+request_status;[ \\t]*$", gadget_text, re.MULTILINE)) != 1:
-    raise SystemExit("DWC3 request_status declaration count is not one")
+
+# Validate tmp only inside dwc3_calc_trbs_left(); other DWC3 functions have
+# legitimate locals with the same name.
+calc_start = gadget_text.index(func_marker)
+calc_end = gadget_text.find("\nstatic ", calc_start + len(func_marker))
+if calc_end < 0:
+    raise SystemExit("DWC3 calc_trbs_left validation end anchor missing")
+calc_segment = gadget_text[calc_start:calc_end]
+calc_tmp_count = len(
+    re.findall(
+        r"^[ \\t]*struct[ \\t]+dwc3_trb[ \\t]+\\*tmp;[ \\t]*$",
+        calc_segment,
+        re.MULTILINE,
+    )
+)
+if calc_tmp_count != 1:
+    raise SystemExit(
+        f"DWC3 calc_trbs_left tmp declaration count is {calc_tmp_count}, expected 1"
+    )
+
+# request_status should have one declaration for the single retained use path.
+request_use_count = len(re.findall(r"\\brequest_status\\b", request_decl_re.sub("", gadget_text)))
+request_decl_count = len(request_decl_re.findall(gadget_text))
+if request_use_count and request_decl_count != 1:
+    raise SystemExit(
+        f"DWC3 request_status declaration count is {request_decl_count}, expected 1"
+    )
 
 xhci_text = xhci_h.read_text()
 if "xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec)" in xhci_text:

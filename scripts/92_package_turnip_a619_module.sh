@@ -36,10 +36,10 @@ sha256sum "$OUT_DIR/module/tools/turnip-yv12-sample-probe" > "$OUT_DIR/module/yv
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2
-version=0.11-vk1.3-yv12-stockref
-versionCode=11
+version=0.12-vk1.3-yv12-stockref-no-boot-hook
+versionCode=12
 author=touchGrass project
-description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Captures stock Qualcomm 940x1670 YV12 sampling as the runtime reference, then compares Turnip output with tolerance while keeping the override temporary.
+description=Mesa 26.2.2 Turnip Vulkan 1.3 YV12 GPU-sampling validation for Adreno 619/KGSL. Zero boot hooks: Turnip code runs only from the KernelSU Action. Captures stock Qualcomm 940x1670 YV12 sampling as runtime reference, then compares Turnip output with tolerance.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -68,7 +68,6 @@ ui_print "- SAFE MODE: no Vulkan HAL replacement during boot"
 ui_print "- Use Action for stock baseline + Turnip offscreen rendering"
 ui_print "- Original vendor partition will not be modified"
 
-set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/payload/vulkan.adreno.so" 0 0 0644
@@ -76,20 +75,6 @@ set_perm "$MODPATH/tools/turnip-vk-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-ahb-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-yv12-sample-probe" 0 0 0755
 set_perm "$MODPATH/tools/turnip-live-test.sh" 0 0 0755
-EOF
-
-cat > "$OUT_DIR/module/post-fs-data.sh" <<'EOF'
-#!/system/bin/sh
-MODDIR=${0%/*}
-LOG="$MODDIR/turnip-mount.log"
-
-{
-  echo "=== touchGrass Turnip safe bring-up $(date) ==="
-  echo "boot_override=disabled"
-  echo "stock_hal=/vendor/lib64/hw/vulkan.adreno.so"
-  echo "Turnip is NOT bind-mounted during boot."
-  echo "Use the module Action button for a temporary live probe."
-} >> "$LOG" 2>&1
 EOF
 
 cat > "$OUT_DIR/module/action.sh" <<'EOF'
@@ -161,8 +146,8 @@ Driver:
   Vulkan API deliberately capped to 1.3 for the first bring-up
   64-bit HAL override only
 
-This revision deliberately DOES NOT replace Vulkan during boot.
-post-fs-data.sh is a no-op logger.
+This revision has NO post-fs-data.sh and NO service.sh.
+It executes no Turnip or Vulkan code during boot.
 
 Use the KernelSU/SukiSU module Action button to run a temporary live test.
 The test stages Turnip under /dev, bind-mounts it over the 64-bit stock HAL,
@@ -183,7 +168,7 @@ Safer first test before installing the module:
      and unmounts automatically on exit.
 EOF
 
-chmod +x "$OUT_DIR/module/post-fs-data.sh" "$OUT_DIR/module/action.sh" "$OUT_DIR/module/uninstall.sh"
+chmod +x "$OUT_DIR/module/action.sh" "$OUT_DIR/module/uninstall.sh"
 
 (
   cd "$OUT_DIR/module"
@@ -194,8 +179,8 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.3-KSU.zip"
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'boot_override=disabled'
-! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind'
+! unzip -l "$ZIP" | grep -Fq 'post-fs-data.sh'
+! unzip -l "$ZIP" | grep -Fq 'service.sh'
 unzip -p "$ZIP" action.sh | grep -Fq 'turnip-live-test.sh'
 unzip -l "$ZIP" | grep -Fq 'payload/vulkan.adreno.so'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'

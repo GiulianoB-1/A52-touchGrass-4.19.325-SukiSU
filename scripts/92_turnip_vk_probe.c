@@ -701,8 +701,12 @@ static int run_submit_probe(VkPhysicalDevice physical)
     VkPhysicalDeviceProperties submit_props;
     vkGetPhysicalDeviceProperties(physical, &submit_props);
 
+    VkPhysicalDeviceVulkan14Features v14_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+    };
     VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+        .pNext = &v14_features,
     };
     VkPhysicalDeviceFeatures2 features2 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
@@ -713,15 +717,30 @@ static int run_submit_probe(VkPhysicalDevice physical)
     int dynamic_rendering_supported =
         submit_props.apiVersion >= VK_API_VERSION_1_3 &&
         dynamic_rendering.dynamicRendering == VK_TRUE;
+    int vulkan14_supported =
+        submit_props.apiVersion >= VK_API_VERSION_1_4;
 
     printf("dynamic_rendering_feature=%u\n",
            dynamic_rendering.dynamicRendering);
     printf("dynamic_rendering_probe_supported=%d\n",
            dynamic_rendering_supported);
+    printf("vulkan14_enable_supported=%d\n", vulkan14_supported);
+    if (vulkan14_supported) {
+        printf("vulkan14_enable.maintenance5=%u\n", v14_features.maintenance5);
+        printf("vulkan14_enable.maintenance6=%u\n", v14_features.maintenance6);
+        printf("vulkan14_enable.dynamicRenderingLocalRead=%u\n",
+               v14_features.dynamicRenderingLocalRead);
+        printf("vulkan14_enable.hostImageCopy=%u\n", v14_features.hostImageCopy);
+        printf("vulkan14_enable.pushDescriptor=%u\n", v14_features.pushDescriptor);
+        printf("vulkan14_enable.pipelineRobustness=%u\n",
+               v14_features.pipelineRobustness);
+    }
 
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = dynamic_rendering_supported ? &dynamic_rendering : NULL,
+        .pNext = dynamic_rendering_supported
+                    ? &dynamic_rendering
+                    : (vulkan14_supported ? &v14_features : NULL),
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
     };
@@ -740,6 +759,43 @@ static int run_submit_probe(VkPhysicalDevice physical)
         return 44;
     }
     printf("vkGetDeviceQueue_result=OK\n");
+
+    if (vulkan14_supported) {
+        const char *v14_dispatch_names[] = {
+            "vkCmdPushDescriptorSet",
+            "vkCmdPushDescriptorSetKHR",
+            "vkCmdBindIndexBuffer2",
+            "vkCmdBindIndexBuffer2KHR",
+            "vkGetRenderingAreaGranularity",
+            "vkGetRenderingAreaGranularityKHR",
+            "vkCmdBindDescriptorSets2",
+            "vkCmdBindDescriptorSets2KHR",
+            "vkCmdPushConstants2",
+            "vkCmdPushConstants2KHR",
+            "vkCopyMemoryToImage",
+            "vkCopyMemoryToImageEXT",
+            "vkCopyImageToMemory",
+            "vkCopyImageToMemoryEXT",
+            "vkTransitionImageLayout",
+            "vkTransitionImageLayoutEXT",
+        };
+        unsigned v14_dispatch_present = 0;
+        const unsigned v14_dispatch_count =
+            sizeof(v14_dispatch_names) / sizeof(v14_dispatch_names[0]);
+
+        for (unsigned i = 0; i < v14_dispatch_count; ++i) {
+            PFN_vkVoidFunction fn =
+                vkGetDeviceProcAddr(device, v14_dispatch_names[i]);
+            printf("vulkan14_dispatch.%s=%s\n",
+                   v14_dispatch_names[i], fn ? "PRESENT" : "MISSING");
+            if (fn)
+                v14_dispatch_present++;
+        }
+
+        printf("vulkan14_dispatch_present=%u/%u\n",
+               v14_dispatch_present, v14_dispatch_count);
+        printf("vulkan14_feature_enable_status=PASS\n");
+    }
 
     printf("=== NO-OP GPU SUBMISSION ===\n");
     fflush(stdout);

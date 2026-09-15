@@ -1036,8 +1036,8 @@ int main(void)
 
     print_version("loader_instance_version", loader_version);
 
-    uint32_t requested = loader_version < VK_API_VERSION_1_3
-        ? loader_version : VK_API_VERSION_1_3;
+    uint32_t requested = loader_version < VK_API_VERSION_1_4
+        ? loader_version : VK_API_VERSION_1_4;
     print_version("requested_instance_version", requested);
 
     VkApplicationInfo app = {
@@ -1092,6 +1092,52 @@ int main(void)
         print_version("device_api_version", p.apiVersion);
         printf("device[%u].driver_version_raw=%u\n", i, p.driverVersion);
 
+#ifdef VK_VERSION_1_4
+        if (p.apiVersion >= VK_API_VERSION_1_4) {
+            VkPhysicalDeviceVulkan14Features v14_features = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+            };
+            VkPhysicalDeviceFeatures2 v14_features2 = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                .pNext = &v14_features,
+            };
+            vkGetPhysicalDeviceFeatures2(devices[i], &v14_features2);
+
+            VkPhysicalDeviceVulkan14Properties v14_props = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES,
+            };
+            VkPhysicalDeviceProperties2 v14_props2 = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                .pNext = &v14_props,
+            };
+            vkGetPhysicalDeviceProperties2(devices[i], &v14_props2);
+
+            printf("device[%u].vulkan14_query=PASS\n", i);
+            printf("device[%u].vulkan14.maintenance5=%u\n",
+                   i, v14_features.maintenance5);
+            printf("device[%u].vulkan14.maintenance6=%u\n",
+                   i, v14_features.maintenance6);
+            printf("device[%u].vulkan14.dynamicRenderingLocalRead=%u\n",
+                   i, v14_features.dynamicRenderingLocalRead);
+            printf("device[%u].vulkan14.hostImageCopy=%u\n",
+                   i, v14_features.hostImageCopy);
+            printf("device[%u].vulkan14.pushDescriptor=%u\n",
+                   i, v14_features.pushDescriptor);
+            printf("device[%u].vulkan14.pipelineRobustness=%u\n",
+                   i, v14_features.pipelineRobustness);
+            printf("device[%u].vulkan14.maxPushDescriptors=%u\n",
+                   i, v14_props.maxPushDescriptors);
+            printf("device[%u].vulkan14.maxVertexAttribDivisor=%u\n",
+                   i, v14_props.maxVertexAttribDivisor);
+            printf("device[%u].vulkan14.identicalMemoryTypeRequirements=%u\n",
+                   i, v14_props.identicalMemoryTypeRequirements);
+        } else {
+            printf("device[%u].vulkan14_query=FAIL_API_TOO_LOW\n", i);
+        }
+#else
+        printf("device[%u].vulkan14_query=FAIL_HEADERS_TOO_OLD\n", i);
+#endif
+
         uint32_t ext_count = 0;
         VkResult er = vkEnumerateDeviceExtensionProperties(
             devices[i], NULL, &ext_count, NULL);
@@ -1131,6 +1177,16 @@ int main(void)
             }
         }
     }
+
+    VkPhysicalDeviceProperties primary_props;
+    vkGetPhysicalDeviceProperties(devices[0], &primary_props);
+    if (primary_props.apiVersion < VK_API_VERSION_1_4) {
+        printf("vulkan14_device_api_status=FAIL\n");
+        free(devices);
+        vkDestroyInstance(instance, NULL);
+        return 33;
+    }
+    printf("vulkan14_device_api_status=PASS\n");
 
     printf("=== GPU COMMAND SUBMISSION ===\n");
     int submit_rc = run_submit_probe(devices[0]);

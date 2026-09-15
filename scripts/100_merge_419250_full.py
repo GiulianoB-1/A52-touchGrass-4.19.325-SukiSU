@@ -248,8 +248,15 @@ def repair_merge_shapes() -> None:
         raise SystemExit("schedutil clear-global helper count is not one")
     if final.index(clear_def) > final.index(init_anchor):
         raise SystemExit("schedutil clear-global helper is declared too late")
-    if final.count(hybrid_exit_core) != 1:
-        raise SystemExit("schedutil Samsung-cache/kobject exit repair failed")
+    final_exit_start = final.index(exit_sig)
+    final_exit_end = function_end(final, final_exit_start)
+    final_exit = final[final_exit_start:final_exit_end]
+    if final_exit.count("tunables->attr_set.usage_count == 1") != 1:
+        raise SystemExit("schedutil final exit guard count is not one")
+    if final_exit.count("sugov_tunables_save(policy, tunables);") != 1:
+        raise SystemExit("schedutil final exit cache-save count is not one")
+    if final_exit.count("sugov_clear_global_tunables();") != 1:
+        raise SystemExit("schedutil final exit cleanup count is not one")
 
     # The late compatibility helper repairs the procfs header/root path to the
     # stable three-argument proc_fill_super ABI. The generic merge can still

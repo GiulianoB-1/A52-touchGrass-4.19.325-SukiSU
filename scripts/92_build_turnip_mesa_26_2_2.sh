@@ -1240,8 +1240,25 @@ replace_once(
     "tu_image TP10 flag",
 )
 
-# Carry a per-plane TP10 marker into FDL so UBWC metadata geometry can differ
-# from ordinary R16/R16G16 semantic plane layouts.
+# Carry a per-plane TP10 marker through fdl_image_params.  fdl6_layout_image()
+# memset()s the destination layout, so setting the layout marker before that
+# call would be lost.
+replace_once(
+    "src/freedreno/fdl/freedreno_layout.h",
+    """   bool force_disable_linear_fallback;
+
+   uint32_t plane;
+};""",
+    """   bool force_disable_linear_fallback;
+
+   uint32_t plane;
+
+   /* 0 = ordinary layout, 1 = TP10 Y, 2 = TP10 UV. */
+   uint8_t touchgrass_tp10_plane;
+};""",
+    "FDL TP10 params marker",
+)
+
 replace_once(
     "src/freedreno/fdl/freedreno_layout.h",
     """   bool is_mutable : 1;
@@ -1255,13 +1272,12 @@ replace_once(
    uint8_t touchgrass_tp10_plane;
 
    /* Note that for tiled textures""",
-    "FDL TP10 plane marker",
+    "FDL TP10 layout marker",
 )
 
 replace_once(
     "src/freedreno/fdl/fd6_layout.c",
-    """   /* special case for r8g8: */
-   if (is_r8g8(layout)) {
+    """   /* special case for r8g8 and plane 1 of r8_g8b8_420_unorm (NV12) */
 """,
     """   /* Qualcomm TP10 UBWC metadata covers 48x4 luma samples per Y
     * metadata block and 24x4 chroma sample-pairs per UV metadata block.
@@ -1278,10 +1294,23 @@ replace_once(
       return;
    }
 
-   /* special case for r8g8: */
-   if (is_r8g8(layout)) {
+   /* special case for r8g8 and plane 1 of r8_g8b8_420_unorm (NV12) */
 """,
     "FDL TP10 UBWC geometry",
+)
+
+replace_once(
+    "src/freedreno/fdl/fd6_layout.c",
+    """   layout->tile_mode = params->tile_mode;
+   layout->plane = params->plane;
+   uint32_t sparse_blocksize = 65536;
+""",
+    """   layout->tile_mode = params->tile_mode;
+   layout->plane = params->plane;
+   layout->touchgrass_tp10_plane = params->touchgrass_tp10_plane;
+   uint32_t sparse_blocksize = 65536;
+""",
+    "FDL TP10 marker propagation",
 )
 
 replace_once(
@@ -1299,15 +1328,15 @@ replace_once(
 )
 
 replace_once(
-    "src/freedreno/fdl/fd6_view.c",
-    """   if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
-       args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
-       args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
+    "src/freedreno/fdl/fd6_view.cc",
+    """      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+          args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
 """,
-    """   if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
-       args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
-       args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
-       args->format == PIPE_FORMAT_R10_G10B10_420_UNORM) {
+    """      if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+          args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
+          args->format == PIPE_FORMAT_R10_G10B10_420_UNORM) {
 """,
     "FDL TP10 multi-plane view",
 )
@@ -1365,9 +1394,9 @@ init_new = """   if (TU_DEBUG(NOUBWC)) {
           pCreateInfo->usage != VK_IMAGE_USAGE_SAMPLED_BIT)
          return vk_error(device, VK_ERROR_FORMAT_NOT_SUPPORTED);
 
-      image->force_linear_tile = false;
-      image->ubwc_enabled = true;
-      image->is_mutable = false;
+      force_linear_tile = false;
+      ubwc_enabled = true;
+      is_mutable = false;
    }
 
    return VK_SUCCESS;
@@ -1421,36 +1450,36 @@ if text.count(layout_validate_anchor) != 1:
     )
 text = text.replace(layout_validate_anchor, layout_validate_new, 1)
 
-layout_marker_anchor = """      layout->tile_mode = tile_mode;
-      layout->ubwc = image->ubwc_enabled;
-
-      if (!fdl6_layout(layout,"""
-layout_marker_new = """      layout->tile_mode = tile_mode;
-      layout->ubwc = image->ubwc_enabled;
-      layout->touchgrass_tp10_plane =
-         image->touchgrass_tp10_ubwc ? (uint8_t)(i + 1) : 0;
-
-      if (!fdl6_layout(layout,"""
-if text.count(layout_marker_anchor) != 1:
+params_anchor = """         .force_disable_linear_fallback = force_disable_linear_fallback,
+         .plane = i,
+      };
+"""
+params_new = """         .force_disable_linear_fallback = force_disable_linear_fallback,
+         .plane = i,
+         .touchgrass_tp10_plane =
+            image->touchgrass_tp10_ubwc ? (uint8_t)(i + 1) : 0,
+      };
+"""
+if text.count(params_anchor) != 1:
     raise SystemExit(
-        f"TP10 FDL marker anchor count: {text.count(layout_marker_anchor)}"
+        f"TP10 FDL params anchor count: {text.count(params_anchor)}"
     )
-text = text.replace(layout_marker_anchor, layout_marker_new, 1)
+text = text.replace(params_anchor, params_new, 1)
 
 view_format_anchor = """   enum pipe_format format;
-   if (vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT)
-      format = tu_aspects_to_plane(vk_format, aspect_mask);
+   if (iview->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+      format = tu_aspects_to_plane(iview->vk.format, aspect_mask);
    else
-      format = vk_format_to_pipe_format(vk_format);
+      format = vk_format_to_pipe_format(iview->vk.format);
 """
 view_format_new = """   enum pipe_format format;
    if (image->touchgrass_tp10_ubwc &&
        aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT)
       format = PIPE_FORMAT_R10_G10B10_420_UNORM;
-   else if (vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT)
-      format = tu_aspects_to_plane(vk_format, aspect_mask);
+   else if (iview->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+      format = tu_aspects_to_plane(iview->vk.format, aspect_mask);
    else
-      format = vk_format_to_pipe_format(vk_format);
+      format = vk_format_to_pipe_format(iview->vk.format);
 """
 if text.count(view_format_anchor) != 1:
     raise SystemExit(
@@ -1469,7 +1498,7 @@ native_tp10_checks = [
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 48;", "TP10 Y metadata geometry"),
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 24;", "TP10 UV metadata geometry"),
     ("src/freedreno/fdl/fd6_format_table.c", "_T_(R10_G10B10_420_UNORM, TP10, WZYX)", "native FMT6_TP10 mapping"),
-    ("src/freedreno/fdl/fd6_view.c", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 multi-plane descriptor"),
+    ("src/freedreno/fdl/fd6_view.cc", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 multi-plane descriptor"),
     ("src/freedreno/vulkan/tu_image.cc", "validated native TP10 UBWC layout", "TP10 exact-layout validation"),
 ]
 for rel, needle, label in native_tp10_checks:

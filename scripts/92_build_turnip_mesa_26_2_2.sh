@@ -1347,6 +1347,75 @@ replace_once(
     "FDL TP10 A6xx multi-plane view",
 )
 
+# Native TP10 uses 4 pixels in 5 bytes, so allow this one marked
+# NPOT-block format through A6xx UBWC FDL and give it the vendor's 256-byte
+# pitch alignment.
+replace_once(
+    "src/freedreno/fdl/fd6_layout.c",
+    """static void
+fdl6_tile_alignment(struct fdl_layout *layout, uint32_t *heightalign)
+{
+   layout->pitchalign = fdl_cpp_shift(layout);
+""",
+    """static void
+fdl6_tile_alignment(struct fdl_layout *layout, uint32_t *heightalign)
+{
+   if (layout->touchgrass_tp10_plane) {
+      layout->cpp_shift = 2;
+      layout->pitchalign = 2; /* fdl_set_pitchalign() later adds 6 => 256B */
+      *heightalign = 16;
+      layout->base_align = 4096;
+      return;
+   }
+
+   layout->pitchalign = fdl_cpp_shift(layout);
+""",
+    "FDL TP10 tile alignment",
+)
+
+replace_once(
+    "src/freedreno/fdl/fd6_layout.c",
+    """   if (!util_is_power_of_two_or_zero(layout->cpp)) {
+      /* R8G8B8 and other 3 component formats don't get UBWC: */
+      ubwc_blockwidth = ubwc_blockheight = 0;
+      layout->ubwc = false;
+   } else {
+""",
+    """   if (layout->touchgrass_tp10_plane) {
+      /* A6xx has native TP10 UBWC even though cpp is the NPOT 5-byte
+       * packed block size. Sparse residency is not used by this AHB path.
+       */
+      fdl6_get_ubwc_blockwidth(layout, &ubwc_blockwidth, &ubwc_blockheight);
+      sparse_blockwidth = sparse_blockheight = 1;
+   } else if (!util_is_power_of_two_or_zero(layout->cpp)) {
+      /* R8G8B8 and other 3 component formats don't get UBWC: */
+      ubwc_blockwidth = ubwc_blockheight = 0;
+      layout->ubwc = false;
+   } else {
+""",
+    "FDL TP10 NPOT UBWC",
+)
+
+# The Vulkan external-format token is P010-like only for YCbCr semantics.
+# FDL must lay out both storage planes with Mesa's native packed TP10 pipe
+# format so the explicit 1536-byte vendor pitch and 5-byte/4-pixel packing
+# are interpreted correctly.
+replace_once(
+    "src/freedreno/vulkan/tu_image.cc",
+    """      struct fdl_layout *layout = &image->layout[i];
+      enum pipe_format format = tu6_plane_format(image->vk.format, i);
+      uint32_t width0 = vk_format_get_plane_width(image->vk.format, i, image->vk.extent.width);
+""",
+    """      struct fdl_layout *layout = &image->layout[i];
+      enum pipe_format format =
+         image->touchgrass_tp10_ubwc
+            ? PIPE_FORMAT_R10_G10B10_420_UNORM
+            : tu6_plane_format(image->vk.format, i);
+      uint32_t width0 = vk_format_get_plane_width(image->vk.format, i, image->vk.extent.width);
+""",
+    "TP10 native FDL pipe format",
+)
+
 # Turnip image/view integration.
 tu = src / "src/freedreno/vulkan/tu_image.cc"
 text = tu.read_text()
@@ -1354,7 +1423,8 @@ text = tu.read_text()
 create_flag_anchor = """   if (!image)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   if (pCreateInfo->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT) {
+   if (vk_image_is_android_native_buffer_alias(&image->vk) ||
+       vk_image_is_android_hardware_buffer(&image->vk)) {
 """
 create_flag_new = """   if (!image)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -1368,7 +1438,8 @@ create_flag_new = """   if (!image)
       (image->vk.external_handle_types &
        VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID);
 
-   if (pCreateInfo->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT) {
+   if (vk_image_is_android_native_buffer_alias(&image->vk) ||
+       vk_image_is_android_hardware_buffer(&image->vk)) {
 """
 if text.count(create_flag_anchor) != 1:
     raise SystemExit(
@@ -1377,19 +1448,18 @@ if text.count(create_flag_anchor) != 1:
 text = text.replace(create_flag_anchor, create_flag_new, 1)
 
 init_anchor = """   if (TU_DEBUG(NOUBWC)) {
-      image->ubwc_enabled = false;
+      ubwc_enabled = false;
    }
 
-   return VK_SUCCESS;
-}
+   /* Layout computation begins here */
 """
 init_new = """   if (TU_DEBUG(NOUBWC)) {
-      image->ubwc_enabled = false;
+      ubwc_enabled = false;
    }
 
    if (image->touchgrass_tp10_ubwc) {
       /* The v0.17 SurfaceFlinger failure was a read-only sampled 2D TP10
-       * external texture.  Keep this support deliberately narrow until it is
+       * external texture. Keep this support deliberately narrow until it is
        * validated on-device.
        */
       if (pCreateInfo->imageType != VK_IMAGE_TYPE_2D ||
@@ -1405,8 +1475,7 @@ init_new = """   if (TU_DEBUG(NOUBWC)) {
       is_mutable = false;
    }
 
-   return VK_SUCCESS;
-}
+   /* Layout computation begins here */
 """
 if text.count(init_anchor) != 1:
     raise SystemExit(f"TP10 image-init anchor count: {text.count(init_anchor)}")
@@ -1503,6 +1572,8 @@ native_tp10_checks = [
     ("src/freedreno/fdl/freedreno_layout.h", "touchgrass_tp10_plane", "FDL TP10 plane marker"),
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 48;", "TP10 Y metadata geometry"),
     ("src/freedreno/fdl/fd6_layout.c", "*blockwidth = 24;", "TP10 UV metadata geometry"),
+    ("src/freedreno/fdl/fd6_layout.c", "FDL TP10 NPOT", "TP10 NPOT UBWC comments"),
+    ("src/freedreno/vulkan/tu_image.cc", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 native FDL pipe format"),
     ("src/freedreno/fdl/fd6_format_table.c", "_T_(R10_G10B10_420_UNORM, TP10, WZYX)", "native FMT6_TP10 mapping"),
     ("src/freedreno/fdl/fd6_view.cc", "PIPE_FORMAT_R10_G10B10_420_UNORM", "TP10 multi-plane descriptor"),
     ("src/freedreno/vulkan/tu_image.cc", "validated native TP10 UBWC layout", "TP10 exact-layout validation"),

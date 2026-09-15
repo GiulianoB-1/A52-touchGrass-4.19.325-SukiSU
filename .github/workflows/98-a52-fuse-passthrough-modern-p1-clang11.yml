@@ -5,7 +5,7 @@ on:
     branches:
       - agent/a52-fuse-modern-p1-v1
     paths:
-      - .github/workflows/96-a52-bt-p2a-geni-wake-hardening-clang11.yml
+      - .github/workflows/98-a52-fuse-passthrough-modern-p1-clang11.yml
       - scripts/81_*
       - scripts/82_*
       - scripts/84_*
@@ -325,7 +325,7 @@ jobs:
           grep -Fq 'fuse_passthrough_splice_read' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'fuse_passthrough_splice_write' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'lower->f_op->splice_write' "$KERNEL/fs/fuse/passthrough.c"
-          grep -Fq '.splice_write\t= fuse_file_splice_write_pt,' "$KERNEL/fs/fuse/file.c"
+          grep -Fq 'fuse_file_splice_write_pt' "$KERNEL/fs/fuse/file.c"
           git -C "$KERNEL" diff --check
 
       - name: Build FUSE Modern P1 + BT-P2A kernel
@@ -358,8 +358,8 @@ jobs:
           grep -Fq 'fuse_passthrough_splice_read' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'fuse_passthrough_splice_write' "$KERNEL/fs/fuse/passthrough.c"
           grep -Fq 'lower->f_op->splice_write' "$KERNEL/fs/fuse/passthrough.c"
-          grep -Fq '.splice_read\t= fuse_file_splice_read_pt,' "$KERNEL/fs/fuse/file.c"
-          grep -Fq '.splice_write\t= fuse_file_splice_write_pt,' "$KERNEL/fs/fuse/file.c"
+          grep -Fq 'fuse_file_splice_read_pt' "$KERNEL/fs/fuse/file.c"
+          grep -Fq 'fuse_file_splice_write_pt' "$KERNEL/fs/fuse/file.c"
           grep -Fq 'A52 BT-P2A: Qualcomm GENI wake/shutdown hardening' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
           grep -Fq 'bool wakeup_enabled;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
           grep -Fq 'bool wakeup_irq_wake_set;' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
@@ -415,7 +415,11 @@ jobs:
           grep -Fq 'binder_alloc_new_buf' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
           grep -Fq 'binder_alloc_mmap_handler' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
           grep -Fq 'fuse_passthrough_open' artifacts/u17-uclamp-p2-fuse-vmlinux-symbols.txt
-          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_splice_(read|write)          {
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_splice_(read|write)$' \\
+            | tee artifacts/fuse-modern-p1-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_splice_read' artifacts/fuse-modern-p1-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_splice_write' artifacts/fuse-modern-p1-vmlinux-symbols.txt
+          {
             echo phase=bt-p2a-geni-wake-hardening
             echo parent_baseline_run=34947094031
             echo parent_baseline_commit=9a09106ec6b79a0835fe8b23259f1f30f2f80898
@@ -557,161 +561,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-4.19.206-FUSE-MODERN-P1-BT-P2A-GPU-P5-BBR3-WIFI-RMNET-FQ-VULKAN-RE-CLANG11-${{ github.run_number }}
-          path: release/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload U17-UCLAMP-P2 diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: a52xq-android17-uclamp-p2-${{ github.run_number }}-diagnostics
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- \
-            | tee artifacts/fuse-modern-p1-vmlinux-symbols.txt
-          grep -Fq 'fuse_passthrough_splice_read' artifacts/fuse-modern-p1-vmlinux-symbols.txt
-          grep -Fq 'fuse_passthrough_splice_write' artifacts/fuse-modern-p1-vmlinux-symbols.txt
-          {
-            echo phase=bt-p2a-geni-wake-hardening
-            echo parent_baseline_run=34947094031
-            echo parent_baseline_commit=9a09106ec6b79a0835fe8b23259f1f30f2f80898
-            echo bt_uart=ttyHS0@884000
-            echo bt_wakeup_irq=gpio64-hs_uart_wakeup
-            echo bt_wakeup_byte=0xfd
-            echo bt_autosuspend_ms=150-retained
-            echo bt_p2a=dynamic-wake-irq-lifecycle-plus-shutdown-tty-race-hardening
-            echo bt_wake_protocol=samsung-edge-count-synthetic-0xfd-retained
-            echo network_bbrv1=bbr
-            echo network_bbrv3=bbr3
-            echo default_tcp_cc=bbr3
-            echo wifi_default_qdisc=mq-1-with-fq-leaves
-            echo rmnet_data_default_qdisc=mq-1-with-fq-leaves
-            echo rmnet_ipa_default_qdisc=retained-stock-pfifo_fast
-            echo binder_source=android17-6.18-2026-09_r1
-            echo binder_source_commit=bab5f6aca819542b9dd13a70d3c62271e81b8e85
-            echo binder_core=android17-runtime-proven-phase83
-            echo binder_alloc=android17-native-logic-with-linux-4.19-mm-lru-compat
-            echo binderfs=retained-4.19-with-android17-debug-and-unload-bridges
-            echo fuse_passthrough=phase87-android-v2-ioctl-126
-            echo fuse_feature_probe=/sys/fs/fuse/features/fuse_passthrough
-            echo samsung_freecess=restored
-            echo android_netlink_reporting=deferred
-            echo uclamp=android17-p2-cass-aware
-            echo rt_uclamp_default=sysctl-live-sync
-            echo eevdf=phase77
-            echo cass=walt-safe-plus-uclamp-task-demand
-            echo mglru=phase80-compiled-runtime-switchable
-            echo compiler=vendor-clang-r383902
-            echo kernel=4.19.206
-            echo baseline_run=34833825377
-            echo baseline_commit=e260e4973e90d9f8ca0076645862765532331dbb
-            echo gpu_phase1=qualcomm-bus-order-plus-gpubw-guard
-            echo gpu_phase2=idle-timer-race-plus-rpmh-slumber-votes
-            echo gpu_phase3=perfcounter-lock-contention-plus-single-level-tz-gpubw
-            echo gpu_phase3_source_a=a404f6fde547
-            echo gpu_phase3_source_b=081d5718cff2
-            echo gpu_phase4=pseudo-register-submit-reduction-plus-perfcounter-oob-refcount
-            echo gpu_phase4_source_a=96f7537ccfcd
-            echo gpu_phase4_source_b=06f837b9da4f
-            echo gpu_phase4_deferred_scratch=48fc67d2bcfb
-            echo gpu_phase4_skipped_reclaim=a07afc4e1477
-            echo gpu_phase5=global-ringbuffer-pagetable-scratch-consolidation
-            echo gpu_phase5_source=48fc67d2bcfb
-            echo gpu_phase5_effect=remove-per-ringbuffer-pagetable-allocation
-            echo gpu_phase5_skipped_reclaim=a07afc4e1477
-            echo surfaceflinger_renderengine=skiavkthreaded
-          } | tee artifacts/u17-uclamp-p2-audit.txt
-
-      - name: Check out pinned AnyKernel3
-        uses: actions/checkout@v4
-        with:
-          repository: osm0sis/AnyKernel3
-          ref: ${{ env.ANYKERNEL_COMMIT }}
-          path: packaging/AnyKernel3
-          fetch-depth: 1
-
-      - name: Package BT-P2A + GPU P5 + BBRv3 + FQ + Vulkan RE ZIP
-        run: |
-          set -Eeuo pipefail
-          mkdir -p release
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-
-          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh")
-          s = p.read_text()
-          anchor = "dump_boot;\nwrite_boot;"
-          if s.count(anchor) != 1:
-              raise SystemExit(f"unexpected AnyKernel boot-write anchor count: {s.count(anchor)}")
-          s = s.replace(
-              anchor,
-              'dump_boot;\n'
-              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
-              'patch_cmdline "sched_cass" "sched_cass=1";\n'
-              'write_boot;',
-              1,
-          )
-          p.write_text(s)
-          PY
-
-          python3 -m py_compile scripts/88_patch_anykernel_vulkan_renderengine.py
-          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + GPU P5 + BBRv3 + WiFi-RMNET-FQ + BT-P2A + Vulkan RE/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-GPU-P5-BBR3-WIFI-RMNET-FQ-BT-P2A-VULKAN-RE-CLANG11.zip/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-          chmod +x scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-
-          ./scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh \
-            4.19.206 \
-            "$IMAGE" \
-            packaging/AnyKernel3 \
-            release
-
-          rm -f scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-
-      - name: Verify packaged BT-P2A + GPU P5 + BBRv3 + FQ + Vulkan RE
-        run: |
-          set -Eeuo pipefail
-          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
-          test -s "$ZIP"
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq '/data/adb/modules/touchgrass-vulkan-re'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'debug.renderengine.backend=skiavkthreaded'
-          ! unzip -p "$ZIP" anykernel.sh | grep -Fq 'ksud module install'
-          ! unzip -p "$ZIP" anykernel.sh | grep -Fq 'initrc refresh'
-          unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_renderengine=skiavkthreaded'
-          unzip -p "$ZIP" BUILD-INFO.txt | grep -Fxq 'surfaceflinger_vulkan_integration=kernelsu-direct-system-prop'
-          unzip -l "$ZIP" | tee artifacts/u17-uclamp-p2-package-list.txt
-          sha256sum "$ZIP" | tee artifacts/u17-uclamp-p2-package-sha256.txt
-
-      - name: Save compiler cache
-        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .ccache
-          key: a52xq-fuse-modern-p1-${{ runner.os }}-v1
-
-      - name: Record diagnostics
-        if: always()
-        run: |
-          mkdir -p artifacts
-          if [ -d workspace/touchgrass-a52xq/.git ]; then
-            git -C workspace/touchgrass-a52xq status --short > artifacts/u17-uclamp-p2-kernel-status.txt || true
-            git -C workspace/touchgrass-a52xq diff --check > artifacts/u17-uclamp-p2-diff-check.txt 2>&1 || true
-          fi
-          ccache --show-stats > artifacts/u17-uclamp-p2-ccache.txt 2>&1 || true
-
-      - name: Upload BT-P2A + GPU P5 + BBRv3 + FQ + Vulkan RE ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-4.19.206-BT-P2A-GPU-P5-BBR3-WIFI-RMNET-FQ-VULKAN-RE-CLANG11-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14

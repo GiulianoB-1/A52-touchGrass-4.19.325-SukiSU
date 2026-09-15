@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.24-vk1.4-syncfd-ab-diagnostic
-versionCode=36
+version=0.25-vk1.4-yuv420-forensics
+versionCode=37
 author=touchGrass project
-description=Diagnostic build based exactly on the v0.22 golden A52 Turnip Vulkan 1.4 driver. Driver behavior is unchanged; turnip-vk-probe compares plain-fence completion against immediate Android sync-fd export at 256 KiB, 1 MiB, 4 MiB, and 16 MiB GPU transfer workloads.
+description=Diagnostic build based exactly on the v0.22 golden A52 Turnip Vulkan 1.4 driver. Driver behavior is unchanged; turnip-ahb-probe adds deep generic YUV_420_888 forensics including native handle, dma-buf, CPU plane-stride, Qualcomm plane-layout, and Vulkan external-format capability diagnostics.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -229,7 +229,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 v0.24 sync-fd A/B diagnostic
+touchGrass Turnip A619 Mesa 26.2.2 v0.25 YUV420 forensic diagnostic
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
@@ -275,7 +275,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.24-vk1.4-syncfd-ab-diagnostic'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.25-vk1.4-yuv420-forensics'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

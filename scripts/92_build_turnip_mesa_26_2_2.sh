@@ -1170,33 +1170,24 @@ clear.write_text(clear_text)
 # metadata geometry: Y 48x4, UV 24x4.
 replace_once(
     "src/vulkan/runtime/vk_android.c",
-    """   case DRM_FORMAT_NV12:
-      external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+    """   case DRM_FORMAT_P010:
+      external_format = VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
       break;
-   case DRM_FORMAT_P010:
-      external_format =
-         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
-      break;
-   default:;
+   case DRM_FORMAT_XBGR8888:
 """,
-    """   case DRM_FORMAT_NV12:
-      external_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
-      break;
-   case DRM_FORMAT_P010:
-      external_format =
-         VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+    """   case DRM_FORMAT_P010:
+      external_format = VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
       break;
    case DRM_FORMAT_NV15:
-      /* Qualcomm TP10 UBWC.  Keep format=UNDEFINED because this private
-       * Android format is not Vulkan's P010 storage layout.  We use the
-       * standard 10-bit two-plane VkFormat only as the external-format
-       * semantic token; Turnip recognizes that token on an AHB external
-       * image and programs native FMT6_TP10 storage.
+      /* Qualcomm TP10 UBWC.  This is tightly packed 10-bit storage, not
+       * Vulkan P010.  The standard 10-bit two-plane VkFormat is carried only
+       * as the Android external-format YCbCr semantic token; Turnip's A52
+       * path programs native A6xx FMT6_TP10 storage/view descriptors.
        */
       external_format =
          VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
       break;
-   default:;
+   case DRM_FORMAT_XBGR8888:
 """,
     "vk_android NV15 external semantic format",
 )

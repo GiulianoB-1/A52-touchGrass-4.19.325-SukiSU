@@ -169,14 +169,14 @@ jobs:
           grep -Fxq 'turnip_upstream_api=Vulkan-1.4' "$INFO"
           grep -Fxq 'probe_mode=device-submit-memory-verify-offscreen-dynamic-render-readback' "$INFO"
           grep -Fxq 'ahb_probe=turnip-ahb-probe' "$INFO"
-          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-ubwc-import-bind-lifetime-forensics' "$INFO"
+          grep -Fxq 'ahb_probe_mode=rgba-yuv420-yv12-qti-nv12-tp10-native-import-bind-lifetime-forensics' "$INFO"
           grep -Fxq 'yv12_sample_probe=turnip-yv12-sample-probe' "$INFO"
           grep -Fxq 'yv12_sample_mode=940x1670-postfill-importfirst-stock-reference-qcom-mapped-fix' "$INFO"
           grep -Fxq 'android_yv12_fix=mesa-26.2.2-explicit-layout-plus-qcom-mapped-pointer-normalization' "$INFO"
           grep -Fxq 'android_yv12_reference_commit=aeaf924c56adf7eddb0a9033b33474b48367e33d' "$INFO"
           grep -Fxq 'android_linear_ahb_ccu_fix=76a4087d9e26fd2470936fae698827b6a2872528' "$INFO"
           grep -Fxq 'qti_nv12_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c06' "$INFO"
-          grep -Fxq 'qti_tp10_ubwc_fix=legacy-PlaneLayoutInfo-0x7fa30c09-drm-nv15' "$INFO"
+          grep -Fxq 'qti_tp10_ubwc_fix=native-FMT6-TP10-NV15-QCOM-COMPRESSED-48x4-24x4-ubwc' "$INFO"
           grep -Fxq 'qti_nv12_ubwc_reference_commit=6255156b8e6b868992ad085e3c4ddedcfb3b65f9' "$INFO"
 
           file "$DRIVER" | grep -Fq 'ARM aarch64'
@@ -203,6 +203,7 @@ jobs:
           strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=plane_order'
           strings "$DRIVER" | grep -Fq 'touchGrass TP10 reject=ycbcr_crosscheck'
           strings "$DRIVER" | grep -Fq 'touchGrass AHB basic hal=0x%08x ret=%d fourcc=0x%08x modifier=0x%016llx planes=%d'
+          strings "$DRIVER" | grep -Fq 'touchGrass: validated native TP10 UBWC layout pitch=%'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_max_diff=%.6f'
           strings "$YV12_PROBE" | grep -Fq 'yv12_sample.reference_tolerance=0.030000'
           strings "$YV12_PROBE" | grep -Fq 'YV12_GPU_SAMPLE_STATUS=%s'
@@ -271,7 +272,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.18.4-vk1.3-persistent-qti-ahb-dispatch-trace'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.19-vk1.3-persistent-qti-tp10-native'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'

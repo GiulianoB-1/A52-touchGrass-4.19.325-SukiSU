@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.22-vk1.4-stable-a619
-versionCode=34
+version=0.23-vk1.4-syncfd-diagnostic
+versionCode=35
 author=touchGrass project
-description=Stable A52 Turnip Vulkan 1.4 baseline for Adreno 619/KGSL. Includes validated Android AHB/YV12/QTI UBWC support, Vulkan 1.4 execution tests, and the legacy-KGSL nonblocking timeout-zero fence poll fix that removes the RenderThread GPU-retirement stall.
+description=Diagnostic build based exactly on the v0.22 golden A52 Turnip Vulkan 1.4 driver. Driver behavior is unchanged; turnip-vk-probe adds pending-work Android sync-fd profiling using a real 16 MiB GPU transfer workload while retaining the validated legacy-KGSL timeout-zero poll fix.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -201,7 +201,7 @@ AHB_PROBE="$MODDIR/tools/turnip-ahb-probe"
   echo
   echo "=== DIRECT TURNIP PROBE ==="
   if [ -x "$PROBE" ]; then
-    timeout 30 "$PROBE" 2>&1 || true
+    timeout 90 "$PROBE" 2>&1 || true
   fi
   echo
   echo "=== DIRECT AHB IMPORT PROBE ==="
@@ -229,7 +229,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 persistent SurfaceFlinger test
+touchGrass Turnip A619 Mesa 26.2.2 v0.23 sync-fd diagnostic
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:

@@ -447,6 +447,21 @@ if 'static struct Qdisc_ops fq_qdisc_ops __read_mostly' in fq:
     raise SystemExit("sch_fq: fq_qdisc_ops still static")
 if 'struct Qdisc_ops fq_qdisc_ops __read_mostly' not in fq:
     raise SystemExit("sch_fq: fq_qdisc_ops declaration missing")
+
+# Built-in Wi-Fi may instantiate FQ during device registration.  Ensure the
+# FQ flow slab and qdisc registration exist before device_initcall drivers.
+if '#ifndef MODULE\nsubsys_initcall(fq_module_init);' not in fq:
+    if 'module_init(fq_module_init)\n' not in fq:
+        raise SystemExit("sch_fq: module_init anchor missing")
+    fq = fq.replace(
+        'module_init(fq_module_init)\n',
+        '#ifndef MODULE\n'
+        'subsys_initcall(fq_module_init);\n'
+        '#else\n'
+        'module_init(fq_module_init)\n'
+        '#endif\n',
+        1,
+    )
 sch_fq.write_text(fq)
 
 h = sch_generic_h.read_text()
@@ -564,6 +579,7 @@ grep -Fxq 'CONFIG_DEFAULT_TCP_CONG="bbr3"' arch/arm64/configs/a52xq_defconfig
 grep -Fq 'config DEFAULT_BBR3' net/ipv4/Kconfig
 grep -Fq 'default "bbr3" if DEFAULT_BBR3' net/ipv4/Kconfig
 grep -Fq 'struct Qdisc_ops fq_qdisc_ops __read_mostly' net/sched/sch_fq.c
+grep -Fq 'subsys_initcall(fq_module_init);' net/sched/sch_fq.c
 grep -Fq 'if (dev->ieee80211_ptr)' include/net/sch_generic.h
 grep -Fq 'sch->handle = TC_H_MAKE(0x00010000U, 0);' net/sched/sch_mq.c
 grep -Fq 'tcp_plb_update_state' net/ipv4/tcp_plb.c

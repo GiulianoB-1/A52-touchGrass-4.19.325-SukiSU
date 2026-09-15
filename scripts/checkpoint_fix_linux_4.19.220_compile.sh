@@ -158,7 +158,45 @@ else:
     )
 if text.count("static void sugov_tunables_release(struct kobject *kobj)") != 1:
     raise SystemExit("cpufreq_schedutil.c: kobject release callback count is not one")
-if text.count("static void sugov_clear_global_tunables(void)") != 1:
+
+definition = "static void sugov_clear_global_tunables(void)"
+starts = []
+pos = 0
+while True:
+    pos = text.find(definition, pos)
+    if pos < 0:
+        break
+    starts.append(pos)
+    pos += len(definition)
+
+def function_end(source: str, start: int) -> int:
+    brace = source.find("{", start)
+    if brace < 0:
+        raise SystemExit("cpufreq_schedutil.c: cleanup helper opening brace missing")
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                while end < len(source) and source[end] == "\n":
+                    end += 1
+                return end
+    raise SystemExit("cpufreq_schedutil.c: cleanup helper closing brace missing")
+
+if len(starts) > 1:
+    first_body = text[starts[0]:function_end(text, starts[0])]
+    for start in starts[1:]:
+        body = text[start:function_end(text, start)]
+        if body != first_body:
+            raise SystemExit("cpufreq_schedutil.c: duplicate cleanup helpers are not identical")
+    for start in reversed(starts[1:]):
+        text = text[:start] + text[function_end(text, start):]
+    rows.append(f"schedutil_duplicate_cleanup_helpers_removed={len(starts)-1}\n")
+
+if text.count(definition) != 1:
     raise SystemExit("cpufreq_schedutil.c: global cleanup helper count is not one")
 if "sugov_tunables_free(" in text:
     raise SystemExit("cpufreq_schedutil.c: ambiguous sugov_tunables_free name remains")

@@ -415,7 +415,8 @@ jobs:
           grep -Fq 'binder_alloc_new_buf' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
           grep -Fq 'binder_alloc_mmap_handler' artifacts/u17-uclamp-p2-vmlinux-symbols.txt
           grep -Fq 'fuse_passthrough_open' artifacts/u17-uclamp-p2-fuse-vmlinux-symbols.txt
-          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_splice_(read|write)
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] fuse_passthrough_splice_(read|write)$' | tee artifacts/fuse-modern-p1-vmlinux-symbols.txt
+          grep -Fq 'fuse_passthrough_splice_read' artifacts/fuse-modern-p1-vmlinux-symbols.txt
           grep -Fq 'fuse_passthrough_splice_write' artifacts/fuse-modern-p1-vmlinux-symbols.txt
           {
             echo phase=bt-p2a-geni-wake-hardening

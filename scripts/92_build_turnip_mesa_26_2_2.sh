@@ -2469,7 +2469,8 @@ turnip_upstream_api=Vulkan-1.4
 a619_vulkan14_override=device-id-0x06010900-only
 kgsl_zero_timeout_poll=retired-timestamp-nonblocking
 kgsl_virtual_bo_probe=disabled-known-legacy-a52xq
-runtime_logging=errors-warnings-only-no-bringup-success-traces\nkgsl_sync_merge=fixed-mixed-ts-syncfd-and-cross-queue-ts
+runtime_logging=errors-warnings-only-no-bringup-success-traces
+kgsl_sync_merge=fixed-mixed-ts-syncfd-and-cross-queue-ts
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64

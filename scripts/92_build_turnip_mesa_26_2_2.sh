@@ -1996,6 +1996,97 @@ grep -Fq 'Vulkan timeout=0 is a non-blocking poll' \
 grep -Fq 'IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID' \
   "$SRC/src/freedreno/vulkan/tu_knl_kgsl.cc"
 
+echo "==> Fix KGSL mixed timestamp/sync-FD merge"
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+path = src / "src/freedreno/vulkan/tu_knl_kgsl.cc"
+text = path.read_text()
+
+# Mesa 26.2.2 has two object-selection bugs in kgsl_syncobj_merge().
+#
+# 1) TS + TS from different queues:
+#    it changes ret to FD state before converting ret's timestamp and then
+#    tries to merge ret.fd even though ret was a timestamp sync object.
+#
+# 2) TS + FD:
+#    it calls kgsl_syncobj_ts_to_fd(sync) on the incoming FD object instead
+#    of converting ret, the timestamp object.  Release builds compile out the
+#    state assert, so timestamp_to_fd() dereferences sync->queue.  Imported
+#    sync-FD objects do not have a queue, producing the Warframe null-pointer
+#    crash observed at vulkan.adreno.so+0xa5ce44.
+#
+# Convert the actual TS object(s) first, then change the merged result to FD.
+
+old_cross_queue = """            } else {
+               ret.state = KGSL_SYNCOBJ_STATE_FD;
+               int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+               ret.fd = sync_merge_close("tu_sync", ret.fd, sync_fd, true);
+               assert(ret.fd >= 0);
+            }
+"""
+new_cross_queue = """            } else {
+               int ret_fd = kgsl_syncobj_ts_to_fd(&ret);
+               int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+               ret.state = KGSL_SYNCOBJ_STATE_FD;
+               ret.fd =
+                  sync_merge_close("tu_sync", ret_fd, sync_fd, true);
+               assert(ret.fd >= 0);
+            }
+"""
+if text.count(old_cross_queue) != 1:
+    raise SystemExit(
+        f"KGSL cross-queue TS merge anchor count: {text.count(old_cross_queue)}")
+text = text.replace(old_cross_queue, new_cross_queue, 1)
+
+old_ts_fd = """         } else if (ret.state == KGSL_SYNCOBJ_STATE_TS) {
+            ret.state = KGSL_SYNCOBJ_STATE_FD;
+            int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+            ret.fd = sync_merge_close("tu_sync", ret.fd, sync_fd, true);
+            assert(ret.fd >= 0);
+         } else {
+"""
+new_ts_fd = """         } else if (ret.state == KGSL_SYNCOBJ_STATE_TS) {
+            int ret_fd = kgsl_syncobj_ts_to_fd(&ret);
+            ret.state = KGSL_SYNCOBJ_STATE_FD;
+            ret.fd =
+               sync_merge_close("tu_sync", ret_fd, sync->fd, false);
+            assert(ret.fd >= 0);
+         } else {
+"""
+if text.count(old_ts_fd) != 1:
+    raise SystemExit(
+        f"KGSL TS+FD merge anchor count: {text.count(old_ts_fd)}")
+text = text.replace(old_ts_fd, new_ts_fd, 1)
+
+path.write_text(text)
+
+patched = path.read_text()
+for needle in (
+    "int ret_fd = kgsl_syncobj_ts_to_fd(&ret);",
+    'sync_merge_close("tu_sync", ret_fd, sync->fd, false)',
+    'sync_merge_close("tu_sync", ret_fd, sync_fd, true)',
+):
+    if needle not in patched:
+        raise SystemExit(f"KGSL sync merge source audit failed: {needle}")
+
+# The known-bad release-build path must be gone.
+if """ret.state = KGSL_SYNCOBJ_STATE_FD;
+            int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+            ret.fd = sync_merge_close("tu_sync", ret.fd, sync_fd, true);""" in patched:
+    raise SystemExit("known-bad KGSL TS+FD merge survived")
+
+print("source_audit=KGSL mixed TS/sync-FD merge fix:PASS")
+print("source_audit=KGSL cross-queue TS/TS merge fix:PASS")
+PY
+
+grep -Fq 'sync_merge_close("tu_sync", ret_fd, sync->fd, false)' \
+  "$SRC/src/freedreno/vulkan/tu_knl_kgsl.cc"
+grep -Fq 'sync_merge_close("tu_sync", ret_fd, sync_fd, true)' \
+  "$SRC/src/freedreno/vulkan/tu_knl_kgsl.cc"
+
 echo "==> Keep upstream Turnip Vulkan 1.4 API"
 grep -Fq '#define TU_API_VERSION VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION)' \
   "$SRC/src/freedreno/vulkan/tu_device.cc"
@@ -2378,7 +2469,7 @@ turnip_upstream_api=Vulkan-1.4
 a619_vulkan14_override=device-id-0x06010900-only
 kgsl_zero_timeout_poll=retired-timestamp-nonblocking
 kgsl_virtual_bo_probe=disabled-known-legacy-a52xq
-runtime_logging=errors-warnings-only-no-bringup-success-traces
+runtime_logging=errors-warnings-only-no-bringup-success-traces\nkgsl_sync_merge=fixed-mixed-ts-syncfd-and-cross-queue-ts
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64

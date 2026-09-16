@@ -6,6 +6,7 @@ on:
       - agent/a52-mglru-modern-p1-v1
     paths:
       - .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml
+      - .github/workflows/106-a52-mglru-modern-p1-clang11.yml
       - scripts/05a_*
       - scripts/81_*
       - scripts/82_*

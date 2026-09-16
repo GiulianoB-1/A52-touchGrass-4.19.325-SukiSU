@@ -1,9 +1,9 @@
-name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.29 Efficiency
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.30 NAP Efficiency
 
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-efficiency-v029
+      - agent/a52-turnip-vulkan14-nap-v030
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -333,9 +333,12 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.29-vk1.4-efficiency'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.30-vk1.4-nap-efficiency'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
+          unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap'
+          unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'echo 0 > "$NAP_NODE"'
+          unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'KGSL NAP enabled: force_no_nap=0'
           ! unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
           unzip -l "$PERSIST_ZIP" | grep -Fq 'service.sh'
           unzip -p "$PERSIST_ZIP" service.sh | grep -Fq '[ -f "$MODDIR/enable_boot_diagnostics" ] || exit 0'

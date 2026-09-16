@@ -27,8 +27,13 @@ info "Fetching official Linux stable tags $FROM_TAG and $TO_TAG"
 rm -rf "$STABLE_DIR"
 git init -q "$STABLE_DIR"
 git -C "$STABLE_DIR" remote add origin "$LINUX_STABLE_REPO"
-git -C "$STABLE_DIR" fetch --quiet --depth=1000 origin "refs/tags/$TO_TAG:refs/tags/$TO_TAG"
-git -C "$STABLE_DIR" fetch --quiet --depth=1 origin "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"
+# Fetch both checkpoint endpoints atomically. Two sequential shallow fetches
+# rewrite .git/shallow and can race internally on GitHub runners, producing:
+#   fatal: shallow file has changed since we read it
+# A single fetch preserves the exact same tag endpoints without that race.
+git -C "$STABLE_DIR" -c maintenance.auto=false fetch --quiet --depth=1000 origin \
+  "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG" \
+  "refs/tags/$TO_TAG:refs/tags/$TO_TAG"
 
 from_sha=$(git -C "$STABLE_DIR" rev-parse "$FROM_TAG^{commit}")
 to_sha=$(git -C "$STABLE_DIR" rev-parse "$TO_TAG^{commit}")

@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.29-vk1.4-efficiency
-versionCode=41
+version=0.30-vk1.4-nap-efficiency
+versionCode=42
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.29 efficiency build. Retains the validated v0.28 camera/NV21 compatibility fixes while removing unsupported legacy-KGSL virtual-BO probing, successful-import log spam and automatic heavy boot diagnostics.
+description=A52 Turnip Vulkan 1.4 v0.30 NAP efficiency build. Retains v0.29 cleanup and enables the KGSL NAP power state by clearing force_no_nap at boot; no GPU clocks, governor, power levels or idle timer are changed.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -278,6 +278,22 @@ if ! ls -lZ "$TARGET" 2>/dev/null | grep -Fq 'u:object_r:same_process_hal_file:s
 fi
 
 echo "Turnip bind mount active"
+
+# v0.30 efficiency policy: enable KGSL NAP. The stock device exposes
+# force_no_nap=1, which disables this intermediate idle state. Manual A/B
+# testing on-device was stable with force_no_nap=0. Do not alter clocks,
+# pwrlevels, governor or idle_timer here.
+NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap
+if [ -w "$NAP_NODE" ]; then
+    if echo 0 > "$NAP_NODE" 2>/dev/null &&
+       [ "$(cat "$NAP_NODE" 2>/dev/null)" = "0" ]; then
+        echo "KGSL NAP enabled: force_no_nap=0"
+    else
+        echo "WARNING: unable to enable KGSL NAP"
+    fi
+else
+    echo "WARNING: KGSL force_no_nap node unavailable"
+fi
 EOF
 
 cat > "$OUT_DIR/module/service.sh" <<'EOF'
@@ -301,6 +317,7 @@ sleep 18
   echo
   echo "=== PROPERTIES ==="
   echo "renderengine_backend=$(getprop debug.renderengine.backend)"
+  echo "force_no_nap=$(cat /sys/class/kgsl/kgsl-3d0/force_no_nap 2>/dev/null)"
   echo "vulkan_hw=$(getprop ro.hardware.vulkan)"
   echo
   echo "=== HAL MOUNT / LABEL ==="
@@ -383,7 +400,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 v0.29 efficiency
+touchGrass Turnip A619 Mesa 26.2.2 v0.30 NAP efficiency
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
@@ -397,6 +414,8 @@ proved all of the following on the A52 / Adreno 619:
   - QTI 0x7fa30c06 NV12 Venus UBWC buffers are validated through legacy PlaneLayoutInfo metadata
 
 At post-fs-data the module:
+- enables KGSL NAP by setting /sys/class/kgsl/kgsl-3d0/force_no_nap to 0
+- does not modify GPU frequencies, governor, pwrlevels, or idle_timer
   1. copies Turnip to /dev tmpfs
   2. applies u:object_r:same_process_hal_file:s0
   3. verifies the label
@@ -437,9 +456,12 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.29-vk1.4-efficiency'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.30-vk1.4-nap-efficiency'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'echo 0 > "$NAP_NODE"'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'KGSL NAP enabled: force_no_nap=0'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
 unzip -l "$ZIP" | grep -Fq 'service.sh'
 unzip -p "$ZIP" service.sh | grep -Fq '[ -f "$MODDIR/enable_boot_diagnostics" ] || exit 0'

@@ -1,9 +1,9 @@
-name: 105 - A52 A619 GPU Undervolt P1 Diagnostics
+name: 106 - A52 A619 GPU Undervolt P1 Stock Control
 
 on:
   push:
     branches:
-      - agent/a52-gpu-undervolt-p1-diag-v1
+      - agent/a52-gpu-undervolt-p1-stock-control-v1
     paths:
       - .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml
       - scripts/05a_*
@@ -26,13 +26,14 @@ on:
       - scripts/103_*
       - scripts/104_*
       - scripts/105_*
+      - scripts/106_*
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-gpu-uv-p1-diag-${{ github.ref }}
+  group: a52-gpu-uv-p1-stock-control-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -494,6 +495,18 @@ jobs:
           grep -Fq '&dev_attr_a52_gpu_uv_p1.attr' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
           git -C "$KERNEL" diff --check
 
+      - name: Restore A619 top OPP to stock ARC for A/B control
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/106_apply_a619_gpu_uv_p1_stock_control.py
+          python3 scripts/106_apply_a619_gpu_uv_p1_stock_control.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a619-gpu-uv-p1-stock-control-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 A619 GPU UV P1 STOCK CONTROL: keep top OPP at stock ARC' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'a52_gpu_uv_p1_applied = 0;' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'vlvl_tbl[top] = resolved;' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          git -C "$KERNEL" diff --check
+
       - name: Build FUSE 7.40 INIT Compat + BT-P2C kernel
         run: |
           set -o pipefail
@@ -688,7 +701,7 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-DIAG + BBRv3 + FQ + Vulkan RE ZIP
+      - name: Package FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-STOCK-CONTROL + BBRv3 + FQ + Vulkan RE ZIP
         run: |
           set -Eeuo pipefail
           mkdir -p release
@@ -718,8 +731,8 @@ jobs:
           python3 -m py_compile scripts/88_patch_anykernel_vulkan_renderengine.py
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
 
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + FUSE-MODERN-P3 + FUSE-NEG-PROBE + GPU P5 + UV-P1-DIAG + BBRv3 + WiFi-RMNET-FQ + BT-P2C + Vulkan RE/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FUSE-MODERN-P3-NEG-PROBE-GPU-P5-UV-P1-DIAG-BBR3-WIFI-RMNET-FQ-BT-P2C-VULKAN-RE-CLANG11.zip/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + FUSE-MODERN-P3 + FUSE-NEG-PROBE + GPU P5 + UV-P1-STOCK-CONTROL + BBRv3 + WiFi-RMNET-FQ + BT-P2C + Vulkan RE/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-FUSE-MODERN-P3-NEG-PROBE-GPU-P5-UV-P1-STOCK-CONTROL-BBR3-WIFI-RMNET-FQ-BT-P2C-VULKAN-RE-CLANG11.zip/' scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
           chmod +x scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
 
           ./scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh \
@@ -730,7 +743,7 @@ jobs:
 
           rm -f scripts/.package-gpu-p5-bbr3-fq-vulkan-re.sh
 
-      - name: Verify packaged FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-DIAG + BBRv3 + FQ + Vulkan RE
+      - name: Verify packaged FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-STOCK-CONTROL + BBRv3 + FQ + Vulkan RE
         run: |
           set -Eeuo pipefail
           ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
@@ -764,10 +777,10 @@ jobs:
           fi
           ccache --show-stats > artifacts/u17-uclamp-p2-ccache.txt 2>&1 || true
 
-      - name: Upload FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-DIAG + BBRv3 + FQ + Vulkan RE ZIP
+      - name: Upload FUSE Negotiation Probe + BT-P2C + GPU P5 + UV-P1-STOCK-CONTROL + BBRv3 + FQ + Vulkan RE ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-4.19.206-FUSE-MODERN-P3-NEG-PROBE-BT-P2C-GPU-P5-UV-P1-DIAG-BBR3-WIFI-RMNET-FQ-VULKAN-RE-CLANG11-${{ github.run_number }}
+          name: A52XQ-4.19.206-FUSE-MODERN-P3-NEG-PROBE-BT-P2C-GPU-P5-UV-P1-STOCK-CONTROL-BBR3-WIFI-RMNET-FQ-VULKAN-RE-CLANG11-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14

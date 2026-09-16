@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.31-vk1.4-nap-idle40
-versionCode=43
+version=0.32-vk1.4-syncmerge-fix
+versionCode=44
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.31 NAP+idle40 efficiency build. Retains v0.30 NAP enablement and sets KGSL idle_timer from 80 ms to 40 ms after trace A/B showed the same immediate NAP entry, earlier SLUMBER escalation and no added GPU faults or sleep/wake churn.
+description=A52 Turnip Vulkan 1.4 v0.32 sync-merge fix. Retains v0.31 efficiency policy and fixes Mesa 26.2.2 KGSL mixed timestamp/sync-FD merge bugs that caused a release-build null dereference in Warframe.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -474,7 +474,7 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.31-vk1.4-nap-idle40'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.32-vk1.4-syncmerge-fix'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap'

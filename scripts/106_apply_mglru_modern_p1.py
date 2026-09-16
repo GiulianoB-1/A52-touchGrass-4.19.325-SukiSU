@@ -51,8 +51,9 @@ s = replace_once(
     """static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_control *sc,
 		      int tier_idx)
 {
+	bool success;
 """,
-    "sort_page signature and obsolete success variable",
+    "sort_page signature",
 )
 
 s = replace_once(

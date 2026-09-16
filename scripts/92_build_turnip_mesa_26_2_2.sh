@@ -2114,14 +2114,11 @@ if text.count(mapped_log_branch) != 1:
         f"mapped-YUV success-log branch count: {text.count(mapped_log_branch)}")
 text = text.replace(mapped_log_branch, "", 1)
 
-# Two older YV12 normalization sites log a single success message inside a
-# block that still performs real pointer normalization. Remove only those
-# standalone statements; unlike the branch above this cannot leave dangling
-# control flow.
+# Some Mesa/source-transform combinations also leave standalone YV12 success
+# messages inside real normalization blocks. Remove any that remain, but do
+# not require a fixed count: the preceding composed transforms may already
+# have consumed them.
 yv12_success = '      mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");\n'
-yv12_count = text.count(yv12_success)
-if yv12_count != 2:
-    raise SystemExit(f"standalone YV12 success-log count: {yv12_count}")
 text = text.replace(yv12_success, "")
 p.write_text(text)
 

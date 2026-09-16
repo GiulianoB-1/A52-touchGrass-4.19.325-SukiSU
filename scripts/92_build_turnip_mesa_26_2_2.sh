@@ -2161,6 +2161,28 @@ diag_count = text.count("if (is_tp10_ubwc)")
 if diag_count < 8:
     raise SystemExit(f"unexpected TP10 diagnostic guard count: {diag_count}")
 text = text.replace("if (is_tp10_ubwc)", "if (false && is_tp10_ubwc)")
+
+# Restore only the guards that lead to an actual rejection. Those execute
+# solely on failure, so they retain high diagnostic value without polluting
+# successful camera/video workloads.
+for marker in (
+    "touchGrass TP10 reject=hal_format",
+    "touchGrass TP10 reject=handle_validation",
+    "touchGrass TP10 reject=dma_size",
+    "touchGrass TP10 reject=plane_query",
+    "touchGrass TP10 reject=plane_validation",
+    "touchGrass TP10 reject=plane_order",
+    "touchGrass TP10 reject=ycbcr_crosscheck",
+):
+    pos = text.find(marker)
+    if pos < 0:
+        raise SystemExit(f"TP10 rejection marker missing: {marker}")
+    guard = text.rfind("if (false && is_tp10_ubwc)", 0, pos)
+    if guard < 0 or pos - guard > 500:
+        raise SystemExit(f"TP10 rejection guard not found near: {marker}")
+    text = text[:guard] + text[guard:].replace(
+        "if (false && is_tp10_ubwc)", "if (is_tp10_ubwc)", 1)
+
 p.write_text(text)
 
 p = src / "src/freedreno/vulkan/tu_image.cc"

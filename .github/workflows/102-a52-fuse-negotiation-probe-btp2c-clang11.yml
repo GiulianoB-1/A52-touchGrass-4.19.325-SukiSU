@@ -6,6 +6,7 @@ on:
       - agent/a52-gpu-undervolt-p1-diag-v1
     paths:
       - .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml
+      - scripts/05a_*
       - scripts/81_*
       - scripts/82_*
       - scripts/84_*

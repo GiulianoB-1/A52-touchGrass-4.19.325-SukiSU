@@ -2102,19 +2102,27 @@ print("source_audit=legacy KGSL virtual-BO probe skipped:PASS")
 # Keep warnings/errors that indicate an actual import failure.
 p = src / "src/util/u_gralloc/u_gralloc_internal.c"
 text = p.read_text()
-success_logs = [
-    '         mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");\n',
-    '         mesa_logi("touchGrass: normalized mapped QCOM explicit NV21 android_ycbcr pointers");\n',
-    '         mesa_logi("touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers");\n',
-]
-removed = 0
-for line in success_logs:
-    count = text.count(line)
-    if count:
-        text = text.replace(line, "")
-        removed += count
-if removed < 3:
-    raise SystemExit(f"expected mapped-YUV success logs, removed only {removed}")
+mapped_log_branch = """      if (mapped_yv12)
+         mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");
+      else if (mapped_explicit_nv21)
+         mesa_logi("touchGrass: normalized mapped QCOM explicit NV21 android_ycbcr pointers");
+      else
+         mesa_logi("touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers");
+"""
+if text.count(mapped_log_branch) != 1:
+    raise SystemExit(
+        f"mapped-YUV success-log branch count: {text.count(mapped_log_branch)}")
+text = text.replace(mapped_log_branch, "", 1)
+
+# Two older YV12 normalization sites log a single success message inside a
+# block that still performs real pointer normalization. Remove only those
+# standalone statements; unlike the branch above this cannot leave dangling
+# control flow.
+yv12_success = '      mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");\n'
+yv12_count = text.count(yv12_success)
+if yv12_count != 2:
+    raise SystemExit(f"standalone YV12 success-log count: {yv12_count}")
+text = text.replace(yv12_success, "")
 p.write_text(text)
 
 p = src / "src/vulkan/runtime/vk_android.c"

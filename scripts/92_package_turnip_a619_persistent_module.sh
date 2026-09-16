@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.28-vk1.4-camera-nv21-fix
-versionCode=40
+version=0.29-vk1.4-efficiency
+versionCode=41
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.28 camera compatibility build. Adds explicit Android HAL_PIXEL_FORMAT_YCrCb_420_SP (0x11) NV21 import support for Samsung camera preview, on top of the validated generic YUV_420_888/NV21, YV12, NV12 UBWC, TP10 and legacy-KGSL fixes.
+description=A52 Turnip Vulkan 1.4 v0.29 efficiency build. Retains the validated v0.28 camera/NV21 compatibility fixes while removing unsupported legacy-KGSL virtual-BO probing, successful-import log spam and automatic heavy boot diagnostics.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -235,7 +235,7 @@ STAGE_DIR=/dev/touchgrass-turnip-a619
 STAGE="$STAGE_DIR/vulkan.adreno.so"
 LOG="$MODDIR/turnip-mount.log"
 
-exec >>"$LOG" 2>&1
+exec >"$LOG" 2>&1
 echo "=== touchGrass Turnip persistent mount $(date) ==="
 echo "target=$TARGET"
 echo "driver=$DRIVER"
@@ -278,17 +278,18 @@ if ! ls -lZ "$TARGET" 2>/dev/null | grep -Fq 'u:object_r:same_process_hal_file:s
 fi
 
 echo "Turnip bind mount active"
-echo "mounted_target_label:"
-ls -lZ "$TARGET" 2>/dev/null || true
-echo "mounted_target_sha256:"
-sha256sum "$TARGET" 2>/dev/null || true
-echo "renderengine_backend=$(getprop debug.renderengine.backend)"
 EOF
 
 cat > "$OUT_DIR/module/service.sh" <<'EOF'
 #!/system/bin/sh
 MODDIR=${0%/*}
 OUT="$MODDIR/turnip-boot-diagnostic.txt"
+
+# Daily-driver default: do no delayed boot-time diagnostics. The previous
+# bring-up service woke after 18 seconds and scanned SurfaceFlinger, logcat,
+# dmesg and tombstones on every boot. Opt in only when debugging by creating:
+#   /data/adb/modules/touchgrass_turnip_a619/enable_boot_diagnostics
+[ -f "$MODDIR/enable_boot_diagnostics" ] || exit 0
 
 # Capture the first stable userspace window while preserving the failure state
 # if SurfaceFlinger crashes or the UI becomes unstable.
@@ -382,7 +383,7 @@ rm -rf /dev/touchgrass-turnip-a619
 EOF
 
 cat > "$OUT_DIR/module/README.txt" <<'EOF'
-touchGrass Turnip A619 Mesa 26.2.2 v0.28 camera NV21 fix
+touchGrass Turnip A619 Mesa 26.2.2 v0.29 efficiency
 
 This persistent arm64 test adds native Adreno TP10 support for the QTI private TP10 UBWC import path (0x7fa30c09) exposed by the v0.17 SurfaceFlinger crash. The validated gralloc import remains DRM NV15 + QCOM_COMPRESSED, while Turnip now uses native FMT6_TP10 sampling with Qualcomm 48x4 Y and 24x4 UV UBWC metadata geometry instead of treating the storage as P010. It retains the validated NV12 Venus UBWC path (0x7fa30c06), bounded GMEM handling for exact-size linear Android AHBs and all YV12 fixes. The synthetic Vulkan/AHB suite
 proved all of the following on the A52 / Adreno 619:
@@ -403,8 +404,16 @@ At post-fs-data the module:
 
 Only arm64 is replaced. arm32 Vulkan remains stock Qualcomm.
 
-Automatic diagnostics:
+Mount diagnostics (current boot only; the file is replaced, not appended):
   /data/adb/modules/touchgrass_turnip_a619/turnip-mount.log
+
+Heavy boot diagnostics are disabled by default to avoid unnecessary wakeups,
+hashing and log scans. Enable them only for the next boots with:
+  adb shell su -c "touch /data/adb/modules/touchgrass_turnip_a619/enable_boot_diagnostics"
+Disable them again with:
+  adb shell su -c "rm -f /data/adb/modules/touchgrass_turnip_a619/enable_boot_diagnostics"
+
+When enabled, the report is:
   /data/adb/modules/touchgrass_turnip_a619/turnip-boot-diagnostic.txt
 
 Action diagnostics:
@@ -428,11 +437,12 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.28-vk1.4-camera-nv21-fix'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.29-vk1.4-efficiency'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
 unzip -l "$ZIP" | grep -Fq 'service.sh'
+unzip -p "$ZIP" service.sh | grep -Fq '[ -f "$MODDIR/enable_boot_diagnostics" ] || exit 0'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-vk-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-ahb-probe'
 unzip -l "$ZIP" | grep -Fq 'tools/turnip-yv12-sample-probe'

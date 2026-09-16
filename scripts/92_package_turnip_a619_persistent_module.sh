@@ -30,10 +30,10 @@ sha256sum "$OUT_DIR/module/payload/vulkan.adreno.so" > "$OUT_DIR/module/driver.s
 cat > "$OUT_DIR/module/module.prop" <<'EOF'
 id=touchgrass_turnip_a619
 name=touchGrass Turnip A619 Mesa 26.2.2 Persistent
-version=0.30-vk1.4-nap-efficiency
-versionCode=42
+version=0.31-vk1.4-nap-idle40
+versionCode=43
 author=touchGrass project
-description=A52 Turnip Vulkan 1.4 v0.30 NAP efficiency build. Retains v0.29 cleanup and enables the KGSL NAP power state by clearing force_no_nap at boot; no GPU clocks, governor, power levels or idle timer are changed.
+description=A52 Turnip Vulkan 1.4 v0.31 NAP+idle40 efficiency build. Retains v0.30 NAP enablement and sets KGSL idle_timer from 80 ms to 40 ms after trace A/B showed the same immediate NAP entry, earlier SLUMBER escalation and no added GPU faults or sleep/wake churn.
 EOF
 
 cat > "$OUT_DIR/module/customize.sh" <<'EOF'
@@ -282,7 +282,8 @@ echo "Turnip bind mount active"
 # v0.30 efficiency policy: enable KGSL NAP. The stock device exposes
 # force_no_nap=1, which disables this intermediate idle state. Manual A/B
 # testing on-device was stable with force_no_nap=0. Do not alter clocks,
-# pwrlevels, governor or idle_timer here.
+# pwrlevels or governor here. v0.31 also applies the separately validated
+# 40 ms idle_timer policy below.
 NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap
 if [ -w "$NAP_NODE" ]; then
     if echo 0 > "$NAP_NODE" 2>/dev/null &&
@@ -293,6 +294,21 @@ if [ -w "$NAP_NODE" ]; then
     fi
 else
     echo "WARNING: KGSL force_no_nap node unavailable"
+fi
+
+# v0.31 efficiency policy: shorten NAP -> SLUMBER escalation from 80 ms to
+# 40 ms. On-device ftrace A/B showed ACTIVE -> NAP remains ~0.6 ms while
+# NAP -> SLUMBER moves from ~80 ms to ~40 ms, with no added churn/faults.
+IDLE_NODE=/sys/class/kgsl/kgsl-3d0/idle_timer
+if [ -w "$IDLE_NODE" ]; then
+    if echo 40 > "$IDLE_NODE" 2>/dev/null &&
+       [ "$(cat "$IDLE_NODE" 2>/dev/null)" = "40" ]; then
+        echo "KGSL idle timer set: idle_timer=40"
+    else
+        echo "WARNING: unable to set KGSL idle_timer=40"
+    fi
+else
+    echo "WARNING: KGSL idle_timer node unavailable"
 fi
 EOF
 
@@ -318,6 +334,7 @@ sleep 18
   echo "=== PROPERTIES ==="
   echo "renderengine_backend=$(getprop debug.renderengine.backend)"
   echo "force_no_nap=$(cat /sys/class/kgsl/kgsl-3d0/force_no_nap 2>/dev/null)"
+  echo "idle_timer=$(cat /sys/class/kgsl/kgsl-3d0/idle_timer 2>/dev/null)"
   echo "vulkan_hw=$(getprop ro.hardware.vulkan)"
   echo
   echo "=== HAL MOUNT / LABEL ==="
@@ -415,7 +432,8 @@ proved all of the following on the A52 / Adreno 619:
 
 At post-fs-data the module:
 - enables KGSL NAP by setting /sys/class/kgsl/kgsl-3d0/force_no_nap to 0
-- does not modify GPU frequencies, governor, pwrlevels, or idle_timer
+- sets KGSL idle_timer to 40 ms (validated runtime A/B from stock 80 ms)
+- does not modify GPU frequencies, governor, or pwrlevels
   1. copies Turnip to /dev tmpfs
   2. applies u:object_r:same_process_hal_file:s0
   3. verifies the label
@@ -456,12 +474,15 @@ ZIP="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.
 test -s "$ZIP"
 unzip -tq "$ZIP"
 unzip -p "$ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.30-vk1.4-nap-efficiency'
+unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.31-vk1.4-nap-idle40'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'echo 0 > "$NAP_NODE"'
 unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'KGSL NAP enabled: force_no_nap=0'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'IDLE_NODE=/sys/class/kgsl/kgsl-3d0/idle_timer'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'echo 40 > "$IDLE_NODE"'
+unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'KGSL idle timer set: idle_timer=40'
 ! unzip -p "$ZIP" post-fs-data.sh | grep -Fq 'u:object_r:vendor_file:s0'
 unzip -l "$ZIP" | grep -Fq 'service.sh'
 unzip -p "$ZIP" service.sh | grep -Fq '[ -f "$MODDIR/enable_boot_diagnostics" ] || exit 0'

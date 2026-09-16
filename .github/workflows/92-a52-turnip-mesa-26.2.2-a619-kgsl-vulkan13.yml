@@ -1,9 +1,9 @@
-name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.31 NAP + Idle40 Efficiency
+name: 92 - A52 Turnip Mesa 26.2.2 A619 KGSL Vulkan 1.4 v0.32 Sync Merge Fix
 
 on:
   push:
     branches:
-      - agent/a52-turnip-vulkan14-idletimer-v031
+      - agent/a52-turnip-vulkan14-syncmerge-v032
     paths:
       - .github/workflows/92-a52-turnip-mesa-26.2.2-a619-kgsl-vulkan13.yml
       - scripts/92_*
@@ -333,7 +333,7 @@ jobs:
 
           unzip -tq "$PERSIST_ZIP"
           unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'id=touchgrass_turnip_a619'
-          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.31-vk1.4-nap-idle40'
+          unzip -p "$PERSIST_ZIP" module.prop | grep -Fxq 'version=0.32-vk1.4-syncmerge-fix'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'mount -o bind "$STAGE" "$TARGET"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'chcon u:object_r:same_process_hal_file:s0 "$STAGE"'
           unzip -p "$PERSIST_ZIP" post-fs-data.sh | grep -Fq 'NAP_NODE=/sys/class/kgsl/kgsl-3d0/force_no_nap'

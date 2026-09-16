@@ -2034,6 +2034,161 @@ PY
 grep -Fq 'pdevice->dev_id.chip_id == 0x06010900' "$SRC/src/freedreno/vulkan/tu_device.cc"
 grep -Fq '((pdevice->info->chip >= 7 ||' "$SRC/src/freedreno/vulkan/tu_device.cc"
 
+echo "==> Remove legacy-KGSL dead probes and bring-up logging"
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+
+# The A52 legacy KGSL does not implement GPUMEM_BIND_RANGES. Mesa's virtual-BO
+# capability test issues that unsupported ioctl once per Vulkan device, which
+# only produces an -EINVAL result plus kernel log noise. The end state is
+# always has_sparse=false. Keep that exact end state without the doomed ioctl.
+kgsl = src / "src/freedreno/vulkan/tu_knl_kgsl.cc"
+text = kgsl.read_text()
+name = "kgsl_is_virtual_bo_supported("
+name_pos = text.find(name)
+if name_pos < 0:
+    raise SystemExit("legacy KGSL virtual-BO probe function not found")
+start = text.rfind("static bool", 0, name_pos)
+brace = text.find("{", name_pos)
+if start < 0 or brace < 0:
+    raise SystemExit("legacy KGSL virtual-BO probe bounds not found")
+
+depth = 0
+end = None
+for i in range(brace, len(text)):
+    c = text[i]
+    if c == "{":
+        depth += 1
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            end = i
+            break
+if end is None:
+    raise SystemExit("legacy KGSL virtual-BO probe closing brace not found")
+
+old_func = text[start:end + 1]
+if "IOCTL_KGSL_GPUMEM_BIND_RANGES" not in old_func:
+    raise SystemExit("legacy KGSL virtual-BO probe no longer uses GPUMEM_BIND_RANGES")
+
+signature = text[start:brace]
+new_func = signature + """{
+   /* touchGrass A52 legacy KGSL: GPUMEM_BIND_RANGES is not implemented.
+    * Mesa's runtime probe always fails and only creates an unnecessary ioctl
+    * plus a kernel log entry. Preserve the resulting capability state without
+    * issuing the unsupported ioctl.
+    */
+   return false;
+}"""
+text = text[:start] + new_func + text[end + 1:]
+kgsl.write_text(text)
+
+patched = kgsl.read_text()
+probe_start = patched.find(name)
+probe_fn_start = patched.rfind("static bool", 0, probe_start)
+probe_brace = patched.find("{", probe_start)
+probe_end = patched.find("}", probe_brace)
+probe_body = patched[probe_fn_start:probe_end + 1]
+if "IOCTL_KGSL_GPUMEM_BIND_RANGES" in probe_body:
+    raise SystemExit("legacy KGSL GPUMEM_BIND_RANGES call survived")
+if "return false;" not in probe_body:
+    raise SystemExit("legacy KGSL virtual-BO probe does not return false")
+print("source_audit=legacy KGSL virtual-BO probe skipped:PASS")
+
+# Remove successful bring-up traces from normal Android buffer import paths.
+# Keep warnings/errors that indicate an actual import failure.
+p = src / "src/util/u_gralloc/u_gralloc_internal.c"
+text = p.read_text()
+success_logs = [
+    '         mesa_logi("touchGrass: normalized mapped QCOM YV12 android_ycbcr pointers");\n',
+    '         mesa_logi("touchGrass: normalized mapped QCOM explicit NV21 android_ycbcr pointers");\n',
+    '         mesa_logi("touchGrass: normalized mapped QCOM flexible YUV420 android_ycbcr pointers");\n',
+]
+removed = 0
+for line in success_logs:
+    count = text.count(line)
+    if count:
+        text = text.replace(line, "")
+        removed += count
+if removed < 3:
+    raise SystemExit(f"expected mapped-YUV success logs, removed only {removed}")
+p.write_text(text)
+
+p = src / "src/vulkan/runtime/vk_android.c"
+text = p.read_text()
+line = '      mesa_logi("touchGrass: resolved flexible Android YUV420 CrCb as NV21");\n'
+if text.count(line) != 1:
+    raise SystemExit("NV21 resolution success-log anchor mismatch")
+text = text.replace(line, "", 1)
+
+trace_start = text.find("   const bool tg_qti_private =")
+if trace_start < 0:
+    raise SystemExit("QTI stderr trace start not found")
+trace_end_marker = "      fflush(stderr);\n   }\n\n"
+trace_end = text.find(trace_end_marker, trace_start)
+if trace_end < 0:
+    raise SystemExit("QTI stderr trace end not found")
+trace_end += len(trace_end_marker)
+text = text[:trace_start] + text[trace_end:]
+p.write_text(text)
+
+p = src / "src/util/u_gralloc/u_gralloc_qcom.c"
+text = p.read_text()
+
+success_block = """   if (is_tp10_ubwc)
+      mesa_logi("touchGrass: imported QTI TP10 UBWC 0x7fa30c09 as NV15 via legacy PlaneLayoutInfo");
+   else
+      mesa_logi("touchGrass: imported QTI NV12 UBWC 0x7fa30c06 via legacy PlaneLayoutInfo");
+"""
+if text.count(success_block) != 1:
+    raise SystemExit("QTI import success-log block mismatch")
+text = text.replace(success_block, "", 1)
+
+helper_log = '      mesa_logi("touchGrass: QTI legacy PlaneLayoutInfo helper available");\n'
+if text.count(helper_log) != 1:
+    raise SystemExit("QTI helper success-log anchor mismatch")
+text = text.replace(helper_log, "", 1)
+
+# TP10's verbose bring-up diagnostics intentionally used ERROR severity even
+# on successful imports. They are useful for development but inappropriate
+# for a daily driver. Every remaining "if (is_tp10_ubwc)" in this helper only
+# guards a diagnostic mesa_loge block; the actual TP10 decisions use booleans
+# and ternaries outside these guards.
+diag_count = text.count("if (is_tp10_ubwc)")
+if diag_count < 8:
+    raise SystemExit(f"unexpected TP10 diagnostic guard count: {diag_count}")
+text = text.replace("if (is_tp10_ubwc)", "if (false && is_tp10_ubwc)")
+p.write_text(text)
+
+p = src / "src/freedreno/vulkan/tu_image.cc"
+text = p.read_text()
+needle = """      mesa_logi("touchGrass: validated native TP10 UBWC layout pitch=%" PRIu64
+                " uv_meta=%" PRIu64, pitch, expected_uv_meta);
+"""
+if text.count(needle) != 1:
+    raise SystemExit("TP10 validation success-log anchor mismatch")
+text = text.replace(needle, "", 1)
+p.write_text(text)
+
+# Final audit: successful paths should not contain touchGrass info traces or
+# direct stderr flushes. Error/warning strings are intentionally retained.
+for rel in (
+    "src/util/u_gralloc/u_gralloc_internal.c",
+    "src/util/u_gralloc/u_gralloc_qcom.c",
+    "src/vulkan/runtime/vk_android.c",
+    "src/freedreno/vulkan/tu_image.cc",
+):
+    data = (src / rel).read_text()
+    if 'mesa_logi("touchGrass:' in data:
+        raise SystemExit(f"success trace survived in {rel}")
+    if "fflush(stderr)" in data:
+        raise SystemExit(f"stderr flush survived in {rel}")
+print("source_audit=runtime bring-up success logging removed:PASS")
+PY
+
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 CROSS="$WORK/android-aarch64.ini"
 cat > "$CROSS" <<EOF
@@ -2195,6 +2350,8 @@ turnip_api_cap=Vulkan-1.4
 turnip_upstream_api=Vulkan-1.4
 a619_vulkan14_override=device-id-0x06010900-only
 kgsl_zero_timeout_poll=retired-timestamp-nonblocking
+kgsl_virtual_bo_probe=disabled-known-legacy-a52xq
+runtime_logging=errors-warnings-only-no-bringup-success-traces
 driver_filename=vulkan.adreno.so
 soname=vulkan.adreno.so
 architecture=aarch64

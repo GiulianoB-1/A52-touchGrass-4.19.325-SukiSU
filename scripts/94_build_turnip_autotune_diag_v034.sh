@@ -25,37 +25,39 @@ if text.count(anchor) != 1:
 inject = r'''echo "==> Enable v0.34 Turnip autotune diagnostics"
 python3 - "$SRC" <<'PYDIAG'
 from pathlib import Path
+import re
 import sys
 
 src = Path(sys.argv[1])
 p = src / "src/freedreno/vulkan/tu_autotune.cc"
 text = p.read_text()
 
-checks = [
-    ("#define TU_AUTOTUNE_DEBUG_LOG_BASE 0", "#define TU_AUTOTUNE_DEBUG_LOG_BASE 1"),
-    ("#define TU_AUTOTUNE_DEBUG_LOG_BANDWIDTH 0", "#define TU_AUTOTUNE_DEBUG_LOG_BANDWIDTH 1"),
-    ("#define TU_AUTOTUNE_DEBUG_LOG_PROFILED 0", "#define TU_AUTOTUNE_DEBUG_LOG_PROFILED 1"),
-]
+macros = (
+    "TU_AUTOTUNE_DEBUG_LOG_BASE",
+    "TU_AUTOTUNE_DEBUG_LOG_BANDWIDTH",
+    "TU_AUTOTUNE_DEBUG_LOG_PROFILED",
+)
 
-for old, new in checks:
-    count = text.count(old)
+for macro in macros:
+    pattern = rf"(?m)^(#define[ \\t]+{re.escape(macro)}[ \\t]+)0([ \\t]*)$"
+    text, count = re.subn(pattern, r"\\g<1>1\\g<2>", text, count=1)
     if count != 1:
-        raise SystemExit(f"autotune diagnostic anchor count for {old!r}: {count}")
-    text = text.replace(old, new, 1)
+        raise SystemExit(f"autotune diagnostic regex anchor count for {macro}: {count}")
 
 p.write_text(text)
 
 patched = p.read_text()
+for macro in macros:
+    if not re.search(rf"(?m)^#define[ \\t]+{re.escape(macro)}[ \\t]+1[ \\t]*$", patched):
+        raise SystemExit(f"v0.34 autotune diagnostic macro audit failed: {macro}")
+
 for needle in (
-    "#define TU_AUTOTUNE_DEBUG_LOG_BASE 1",
-    "#define TU_AUTOTUNE_DEBUG_LOG_BANDWIDTH 1",
-    "#define TU_AUTOTUNE_DEBUG_LOG_PROFILED 1",
     'mesa_logi("autotune: "',
     'mesa_logi("autotune-bw %016"',
     'mesa_logi("autotune-prof %016"',
 ):
     if needle not in patched:
-        raise SystemExit(f"v0.34 autotune diagnostic audit failed: {needle}")
+        raise SystemExit(f"v0.34 autotune diagnostic log audit failed: {needle}")
 
 print("source_audit=Turnip autotune base logging enabled:PASS")
 print("source_audit=Turnip autotune bandwidth logging enabled:PASS")

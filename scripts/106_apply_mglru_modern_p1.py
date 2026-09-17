@@ -35,6 +35,23 @@ subprocess.run([sys.executable, str(p3), str(root)], check=True)
 print("Applying MGLRU power diagnostics P1")
 subprocess.run([sys.executable, str(diag), str(root)], check=True)
 
+# P1 diagnostics can leave more than one debugfs include in the reconstructed
+# Samsung source. Recorder P2 only needs ktime.h to exist, so seed it here at
+# the first include block instead of making the recorder patcher depend on a
+# globally unique debugfs anchor.
+vmscan_c = root / "mm/vmscan.c"
+vmscan_text = vmscan_c.read_text()
+if "#include <linux/ktime.h>" not in vmscan_text:
+    include_anchor = "#include <linux/debugfs.h>\n"
+    include_pos = vmscan_text.find(include_anchor)
+    if include_pos < 0:
+        raise SystemExit("MGLRU recorder P2: debugfs include anchor missing")
+    include_pos += len(include_anchor)
+    vmscan_c.write_text(
+        vmscan_text[:include_pos] + "#include <linux/ktime.h>\n" + vmscan_text[include_pos:]
+    )
+    print("Seeded ktime include for MGLRU recorder P2")
+
 print("Applying MGLRU power recorder P2")
 subprocess.run([sys.executable, str(recorder), str(root)], check=True)
 

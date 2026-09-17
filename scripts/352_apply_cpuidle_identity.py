@@ -156,16 +156,19 @@ def patch_core(text: str) -> str:
                "core extern")
 
     # Capture the first use of each idle state index at the generic wrapper.
-    # This runs before coupled/non-coupled dispatch and therefore identifies
-    # the actual registered backend even if target_state->enter is not called
-    # directly by cpuidle_enter_state().
+    # Keep the function's existing declaration block before our executable
+    # instrumentation because this kernel treats declaration-after-statement
+    # as an error.
     anchor = "int cpuidle_enter(struct cpuidle_driver *drv, struct cpuidle_device *dev,\n\t\t  int index)\n{\n"
     if anchor not in text:
         # Some 5.10 drops use one less alignment space.
         anchor = "int cpuidle_enter(struct cpuidle_driver *drv, struct cpuidle_device *dev,\n\t\t int index)\n{\n"
     if text.count(anchor) != 1:
         raise SystemExit(f"Phase352 cpuidle_enter anchor count {text.count(anchor)}")
-    repl = anchor + (
+    decl_anchor = anchor + "\tint ret = 0;\n\n"
+    if text.count(decl_anchor) != 1:
+        raise SystemExit(f"Phase352 cpuidle_enter declaration anchor count {text.count(decl_anchor)}")
+    repl = decl_anchor + (
         "\tif (index >= 0 && index < 8)\n"
         "\t\ta52_p352_mark_first(4U + (u32)index, index, 0,\n"
         "\t\t\tdrv->states[index].flags, drv->name,\n"
@@ -175,7 +178,7 @@ def patch_core(text: str) -> str:
         "\t\tdrv ? drv->name : NULL,\n"
         "\t\t(index >= 0 && index < drv->state_count) ? (const void *)drv->states[index].enter : NULL);\n"
     )
-    text = text.replace(anchor, repl, 1)
+    text = text.replace(decl_anchor, repl, 1)
 
     # First direct backend callback and first return. These are intentionally
     # FIRST-only; Phase353 can bracket the identified backend on every entry.

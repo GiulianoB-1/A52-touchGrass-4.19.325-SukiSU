@@ -1,10 +1,36 @@
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_android.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* VK_ANDROID_native_buffer is a private Android platform extension and is
+ * intentionally absent from the public NDK Vulkan headers.  Define only the
+ * ABI surface needed by this diagnostic, matching Android/Mesa's extension.
+ */
+#ifndef VK_ANDROID_NATIVE_BUFFER_EXTENSION_NAME
+#define VK_ANDROID_NATIVE_BUFFER_EXTENSION_NAME "VK_ANDROID_native_buffer"
+#endif
+
+typedef VkFlags VkSwapchainImageUsageFlagsANDROID;
+#ifndef VK_SWAPCHAIN_IMAGE_USAGE_SHARED_BIT_ANDROID
+#define VK_SWAPCHAIN_IMAGE_USAGE_SHARED_BIT_ANDROID 0x00000001u
+#endif
+
+typedef VkResult (VKAPI_PTR *PFN_vkGetSwapchainGrallocUsageANDROID)(
+    VkDevice device,
+    VkFormat format,
+    VkImageUsageFlags imageUsage,
+    int *grallocUsage);
+
+typedef VkResult (VKAPI_PTR *PFN_vkGetSwapchainGrallocUsage2ANDROID)(
+    VkDevice device,
+    VkFormat format,
+    VkImageUsageFlags imageUsage,
+    VkSwapchainImageUsageFlagsANDROID swapchainImageUsage,
+    uint64_t *grallocConsumerUsage,
+    uint64_t *grallocProducerUsage);
 
 #ifndef GRALLOC_USAGE_PRIVATE_ALLOC_UBWC
 #define GRALLOC_USAGE_PRIVATE_ALLOC_UBWC (UINT64_C(1) << 28)

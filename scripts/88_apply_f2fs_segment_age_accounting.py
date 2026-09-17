@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
+import time
 
 if len(sys.argv) != 2:
     raise SystemExit("usage: 88_apply_f2fs_segment_age_accounting.py <kernel-dir>")
@@ -84,6 +86,38 @@ for forbidden in (
 ):
     if forbidden in final:
         raise SystemExit(f"Phase88 foundation unexpectedly contains later ATGC symbol: {forbidden}")
+
+# Phase101 may archive the complete prepared tree immediately after Phase88.
+# Newer Git can leave a detached auto-maintenance/repack process finishing a
+# temporary pack after the foreground fetch has returned.  Archiving while a
+# tmp_pack_* file is still changing makes GNU tar exit 1 and, more importantly,
+# risks caching a non-self-consistent .git object database.  Disable future
+# automatic maintenance for this generated workspace and wait for any existing
+# temporary pack writer to finish.  Do not delete or ignore temporary packs.
+git_dir = root / ".git"
+if git_dir.is_dir():
+    subprocess.run(["git", "-C", str(root), "config", "gc.auto", "0"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "config", "maintenance.auto", "false"],
+        check=True,
+    )
+
+    pack_dir = git_dir / "objects" / "pack"
+    deadline = time.monotonic() + 120
+    while True:
+        temporary_packs = sorted(pack_dir.glob("tmp_pack_*")) if pack_dir.is_dir() else []
+        if not temporary_packs:
+            break
+        if time.monotonic() >= deadline:
+            names = ", ".join(p.name for p in temporary_packs)
+            raise SystemExit(f"git temporary pack files did not quiesce before cache snapshot: {names}")
+        time.sleep(1)
+
+    subprocess.run(
+        ["git", "-C", str(root), "fsck", "--no-dangling"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
 
 report = root.parent.parent / "artifacts" / "phase88-f2fs-segment-age-accounting.txt"
 report.parent.mkdir(parents=True, exist_ok=True)

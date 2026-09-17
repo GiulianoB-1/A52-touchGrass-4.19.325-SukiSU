@@ -1,0 +1,74 @@
+name: Phase351B - TouchGrass freeze audit
+run-name: Phase351B - TouchGrass freeze audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/a52-phase346-dma-raw-v1]
+    paths:
+      - .github/workflows/351b-a52-touchgrass-freeze-audit-fast.yml
+      - scripts/351_touchgrass_freeze_audit.py
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase351b-freeze-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit TouchGrass vs GKI fast
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare bounded auditor
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/351_touchgrass_freeze_audit.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/351_touchgrass_freeze_audit.py')
+          s=p.read_text()
+          old='ratio = difflib.SequenceMatcher(None, nt[:400000], ng[:400000], autojunk=False).ratio() if ta and ga else 0.0'
+          new='ratio = difflib.SequenceMatcher(None, nt.split()[:20000], ng.split()[:20000]).ratio() if ta and ga else 0.0'
+          if s.count(old) != 1:
+              raise SystemExit('Phase351B similarity anchor mismatch')
+          p.write_text(s.replace(old,new,1))
+          PY
+          rm -rf audit-src phase351-freeze-audit
+          mkdir -p audit-src/gki audit-src/touchgrass phase351-freeze-audit
+      - name: Fetch exact sources
+        run: |
+          set -Eeuo pipefail
+          git -C audit-src/gki init
+          git -C audit-src/gki remote add origin https://android.googlesource.com/kernel/common
+          git -C audit-src/gki fetch --depth=1 origin "refs/tags/$GKI_COMMON_TAG"
+          git -C audit-src/gki checkout --detach FETCH_HEAD
+          test "$(git -C audit-src/gki rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          git -C audit-src/touchgrass init
+          git -C audit-src/touchgrass remote add origin "$TOUCHGRASS_REPO"
+          git -C audit-src/touchgrass fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C audit-src/touchgrass checkout --detach FETCH_HEAD
+          test "$(git -C audit-src/touchgrass rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+      - name: Run audit
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/351_touchgrass_freeze_audit.py --touchgrass audit-src/touchgrass --gki audit-src/gki --project "$GITHUB_WORKSPACE" --out phase351-freeze-audit | tee phase351-freeze-audit/run.log
+          test -s phase351-freeze-audit/SUMMARY.md
+          cat phase351-freeze-audit/SUMMARY.md
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE351B-TOUCHGRASS-FREEZE-AUDIT-${{ github.run_number }}
+          path: phase351-freeze-audit/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30

@@ -167,11 +167,14 @@ post = fuse_i.read_text()
 post_start = post.index(marker)
 post_end = post.find("\n};", post_start)
 post_region = post[post_start:post_end]
-if post_region.count("FUSE_I_ATTR_FORCE_SYNC") != 1:
-    raise SystemExit("fs/fuse/fuse_i.h: attribute-sync state postcondition failed")
-if post_region.count("FUSE_I_BAD") != 1:
-    raise SystemExit("fs/fuse/fuse_i.h: bad-inode state postcondition failed")
-if post_region.index("FUSE_I_ATTR_FORCE_SYNC") > post_region.index("FUSE_I_BAD"):
+post_entries = [line.strip() for line in post_region.splitlines()]
+attr_entry = "FUSE_I_ATTR_FORCE_SYNC,"
+bad_entry = "FUSE_I_BAD,"
+if post_entries.count(attr_entry) != 1:
+    raise SystemExit("fs/fuse/fuse_i.h: attribute-sync enum-entry postcondition failed")
+if post_entries.count(bad_entry) != 1:
+    raise SystemExit("fs/fuse/fuse_i.h: bad-inode enum-entry postcondition failed")
+if post_entries.index(attr_entry) > post_entries.index(bad_entry):
     raise SystemExit("fs/fuse/fuse_i.h: inode-state ordering postcondition failed")
 if "set_bit(FUSE_I_BAD" not in post or "test_bit(FUSE_I_BAD" not in post:
     raise SystemExit("fs/fuse/fuse_i.h: stable bad-inode helpers are incomplete")

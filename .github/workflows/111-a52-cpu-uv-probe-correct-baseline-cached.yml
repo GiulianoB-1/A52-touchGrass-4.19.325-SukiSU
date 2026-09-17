@@ -1,0 +1,223 @@
+name: 111 - A52 CPU UV Probe Correct Baseline Cached
+
+on:
+  push:
+    branches:
+      - agent/a52-cpu-uv-probe-base35249413635
+    paths:
+      - .github/workflows/111-a52-cpu-uv-probe-correct-baseline-cached.yml
+      - scripts/110_apply_cpu_uv_probe.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-cpu-uv-probe-correct-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Exact 35249413635 active-P3 baseline + CPU LUT probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-cpu-uv-probe-correct-${{ runner.os }}-v1
+          restore-keys: |
+            a52xq-cpu-uv-probe-${{ runner.os }}-
+            a52xq-base35196552336-fuse740-${{ runner.os }}-
+            a52xq-fuse-740-passthrough-btp2c-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact 35249413635 prepared-source cache
+        id: baseline_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35196552336-pre-fuse104-${{ runner.os }}-e72ccca-v3
+
+      - name: Require exact prepared baseline cache
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ steps.baseline_source.outputs.cache-hit }}" != "true" ]; then
+            echo 'ERROR: exact 35249413635 prepared-source cache was not restored'
+            exit 1
+          fi
+          test -d workspace/touchgrass-a52xq/.git
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Verify inherited active GPU P1 P2 P3 baseline
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          GMU="$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          PWR="$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'A52 A619 GPU UV P1: top OPP one ARC corner' "$GMU"
+          grep -Fq 'A52 A619 GPU UV P2: 650 MHz one ARC corner' "$GMU"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$GMU"
+          grep -Fq '#define A52_GPU_UV_P3_FREQ_HZ 565000000U' "$GMU"
+          sed -n '/static void a52_a619_uv_p3_adjust_565_opp/,/^}/p' "$GMU" | grep -Fq 'vlvl_tbl[target] = lowered;'
+          ! grep -Fq 'probe=1' "$GMU"
+          grep -Fq 'DEVICE_ATTR_RO(a52_gpu_uv_p3)' "$PWR"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply runtime-proven native FUSE 7.40 Phase104
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
+          python3 scripts/104_apply_fuse_740_upstream_passthrough.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/fuse740-native.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'FUSE_740_PASSTHROUGH_NEGOTIATED' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'FUSE_740_LEGACY_STACK_COMPAT' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'FUSE_740_PASSTHROUGH_SETUP' "$KERNEL/fs/fuse/passthrough.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Add read-only CPU voltage LUT probe
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/110_apply_cpu_uv_probe.py
+          python3 scripts/110_apply_cpu_uv_probe.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/cpu-uv-probe-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          SRC="$KERNEL/drivers/cpufreq/qcom-cpufreq-hw.c"
+          grep -Fq 'A52 CPU UV PROBE: read-only qcom-cpufreq-hw voltage LUT' "$SRC"
+          grep -Fq 'show_a52_cpu_uv_probe' "$SRC"
+          grep -Fq 'cpufreq_freq_attr_ro(a52_cpu_uv_probe);' "$SRC"
+          grep -Fq '&a52_cpu_uv_probe,' "$SRC"
+          grep -Fq 'volt_mv = raw & GENMASK(11, 0);' "$SRC"
+          grep -Fq 'vc = (raw & GENMASK(21, 16)) >> 16;' "$SRC"
+          git -C "$KERNEL" diff --check
+
+      - name: Build kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/cpu-uv-probe-correct-build.log
+          RC=${PIPESTATUS[0]}
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit built image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
+          grep -Fq 'A52 CPU UV PROBE: read-only qcom-cpufreq-hw voltage LUT' "$KERNEL/drivers/cpufreq/qcom-cpufreq-hw.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          sed -n '/static void a52_a619_uv_p3_adjust_565_opp/,/^}/p' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c" | grep -Fq 'vlvl_tbl[target] = lowered;'
+          grep -Fq 'FUSE_740_PASSTHROUGH_NEGOTIATED' "$KERNEL/fs/fuse/inode.c"
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package A52-CPU-UV-PROBE-P3ACTIVE.zip
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-cpu-uv-probe-p3active.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-cpu-uv-probe-p3active.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-cpu-uv-probe-p3active.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-cpu-uv-probe-p3active.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;', 1)
+          p.write_text(s)
+          PY
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-cpu-uv-probe-p3active.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + GPU-UV-P3-ACTIVE + CPU-UV-PROBE + FUSE-7.40-NATIVE/' scripts/.package-cpu-uv-probe-p3active.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-CPU-UV-PROBE-P3ACTIVE.zip/' scripts/.package-cpu-uv-probe-p3active.sh
+          chmod +x scripts/.package-cpu-uv-probe-p3active.sh
+          ./scripts/.package-cpu-uv-probe-p3active.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-cpu-uv-probe-p3active.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP=release/A52-CPU-UV-PROBE-P3ACTIVE.zip
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh > artifacts/packaged-anykernel.sh
+          grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";' artifacts/packaged-anykernel.sh
+          grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";' artifacts/packaged-anykernel.sh
+          grep -Fq 'install_vulkan_re_module;' artifacts/packaged-anykernel.sh
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-cpu-uv-probe-correct-${{ runner.os }}-v1
+
+      - name: Upload flashable
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-CPU-UV-PROBE-P3ACTIVE
+          path: release/A52-CPU-UV-PROBE-P3ACTIVE.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-CPU-UV-PROBE-P3ACTIVE-diag
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# CI entry point: exact baseline -> runtime-proven P1 -> Modern P2
 from pathlib import Path
 import subprocess
 import sys

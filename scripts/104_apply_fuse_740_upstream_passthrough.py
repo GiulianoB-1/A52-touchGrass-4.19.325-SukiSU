@@ -8,16 +8,19 @@ if len(sys.argv) != 2:
 root = Path(sys.argv[1]).resolve()
 changes = []
 
+
 def read(rel):
     p = root / rel
     if not p.is_file():
         raise SystemExit(f"missing {p}")
     return p.read_text()
 
+
 def write(rel, data):
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(data)
+
 
 def replace_once(rel, old, new, label):
     s = read(rel)
@@ -30,12 +33,17 @@ def replace_once(rel, old, new, label):
     write(rel, s.replace(old, new, 1))
     changes.append(label)
 
-# Phase 104: native upstream FUSE 7.40 passthrough.
-# Phase 103 already proved the 7.40 extended INIT handshake and normal I/O.
-# This phase advertises protocol bit 37 via flags2, consumes max_stack_depth,
-# and wires the already-ported P2/P3 backing_id/FOPEN_PASSTHROUGH path.
+
+# Phase 104: native upstream FUSE 7.40 passthrough on the old Samsung 4.19 base.
+# Phase103 already proved the 7.40 extended INIT handshake and normal I/O.
 #
-# Upstream passthrough is intentionally not combined with WRITEBACK_CACHE.
+# Compatibility note:
+# Modern Android userspace negotiates max_stack_depth=1 because its backing file
+# normally lives directly on the lower filesystem (stack depth 0).  This Samsung
+# 4.19 device can still expose the MediaProvider backing fd through legacy
+# sdcardfs (stack depth 1).  In that single, identified case, promote the
+# effective FUSE depth to 2, but only when FILESYSTEM_MAX_STACK_DEPTH permits it.
+# All other upstream stack-depth rejections remain intact.
 
 uapi = read("include/uapi/linux/fuse.h")
 inode = read("fs/fuse/inode.c")
@@ -52,284 +60,274 @@ for needle in required:
     if needle not in (uapi + inode):
         raise SystemExit(f"Phase104 missing Phase103 prerequisite: {needle}")
 
+# Upstream passthrough is not combined with writeback cache in this backport.
 replace_once(
     "fs/fuse/inode.c",
-    """		FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
-		FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT |
+    """\t\tFUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
+\t\tFUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT |
 """,
-    """		FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
-		FUSE_NO_OPEN_SUPPORT |
+    """\t\tFUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
+\t\tFUSE_NO_OPEN_SUPPORT |
 """,
     "drop_writeback_cache_offer_for_upstream_passthrough",
 )
 
+# Advertise bit 37 through flags2 bit 5.
 replace_once(
     "fs/fuse/inode.c",
-    """	arg->flags2 = 0;
+    """\targ->flags2 = 0;
 """,
-    """	arg->flags2 = (u32)(FUSE_PASSTHROUGH_UPSTREAM >> 32);
+    """\targ->flags2 = (u32)(FUSE_PASSTHROUGH_UPSTREAM >> 32);
 """,
     "advertise_upstream_passthrough_bit37",
 )
 
-old_block = """			if (arg->minor < 36 && (arg->flags & FUSE_PASSTHROUGH)) {
-				int max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
+# Keep the proven legacy <7.36 path separate from the real 7.40 path.
+old_init = """\t\t\tif (arg->minor < 36 && (arg->flags & FUSE_PASSTHROUGH)) {
+\t\t\t\tint max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
 
-				/*
-				 * Legacy 7.27 userspace has no max_stack_depth field.
-				 * Keep the proven P2 limit unless a real >=7.40 daemon
-				 * explicitly negotiates a valid modern depth.
-				 */
-				if (arg->minor >= 40 && arg->max_stack_depth > 0 &&
-				    arg->max_stack_depth <= FILESYSTEM_MAX_STACK_DEPTH)
-					max_stack_depth = arg->max_stack_depth;
+\t\t\t\t/*
+\t\t\t\t * Legacy 7.27 userspace has no max_stack_depth field.
+\t\t\t\t * Keep the proven P2 limit unless a real >=7.40 daemon
+\t\t\t\t * explicitly negotiates a valid modern depth.
+\t\t\t\t */
+\t\t\t\tif (arg->minor >= 40 && arg->max_stack_depth > 0 &&
+\t\t\t\t    arg->max_stack_depth <= FILESYSTEM_MAX_STACK_DEPTH)
+\t\t\t\t\tmax_stack_depth = arg->max_stack_depth;
 
-				fc->passthrough = 1;
-				fc->max_stack_depth = max_stack_depth;
-				fc->sb->s_stack_depth = max_stack_depth;
-			}
+\t\t\t\tfc->passthrough = 1;
+\t\t\t\tfc->max_stack_depth = max_stack_depth;
+\t\t\t\tfc->sb->s_stack_depth = max_stack_depth;
+\t\t\t}
 """
 
-new_block = """			if (arg->minor < 36 && (arg->flags & FUSE_PASSTHROUGH)) {
-				int max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
+new_init = """\t\t\tif (arg->minor < 36 && (arg->flags & FUSE_PASSTHROUGH)) {
+\t\t\t\tint max_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
 
-				fc->passthrough = 1;
-				fc->max_stack_depth = max_stack_depth;
-				fc->sb->s_stack_depth = max_stack_depth;
-			} else if (arg->minor >= 40 &&
-				   (arg->flags2 & (u32)(FUSE_PASSTHROUGH_UPSTREAM >> 32)) &&
-				   arg->max_stack_depth > 0 &&
-				   arg->max_stack_depth <= FILESYSTEM_MAX_STACK_DEPTH &&
-				   !(arg->flags & FUSE_WRITEBACK_CACHE)) {
-				fc->passthrough = 1;
-				fc->max_stack_depth = arg->max_stack_depth;
-				fc->sb->s_stack_depth = arg->max_stack_depth;
-				pr_info("FUSE_740_PASSTHROUGH_NEGOTIATED dev=%u:%u max_stack_depth=%u flags2=0x%08x\\n",
-					MAJOR(fc->dev), MINOR(fc->dev),
-					arg->max_stack_depth, arg->flags2);
-			}
+\t\t\t\tfc->passthrough = 1;
+\t\t\t\tfc->max_stack_depth = max_stack_depth;
+\t\t\t\tfc->sb->s_stack_depth = max_stack_depth;
+\t\t\t} else if (arg->minor >= 40 &&
+\t\t\t\t   (arg->flags2 & (u32)(FUSE_PASSTHROUGH_UPSTREAM >> 32)) &&
+\t\t\t\t   arg->max_stack_depth > 0 &&
+\t\t\t\t   arg->max_stack_depth <= FILESYSTEM_MAX_STACK_DEPTH &&
+\t\t\t\t   !(arg->flags & FUSE_WRITEBACK_CACHE)) {
+\t\t\t\tfc->passthrough = 1;
+\t\t\t\tfc->max_stack_depth = arg->max_stack_depth;
+\t\t\t\tfc->sb->s_stack_depth = arg->max_stack_depth;
+\t\t\t\tpr_info("FUSE_740_PASSTHROUGH_NEGOTIATED dev=%u:%u max_stack_depth=%u flags2=0x%08x\\n",
+\t\t\t\t\tMAJOR(fc->dev), MINOR(fc->dev),
+\t\t\t\t\targ->max_stack_depth, arg->flags2);
+\t\t\t}
 """
+replace_once("fs/fuse/inode.c", old_init, new_init,
+             "negotiate_upstream_passthrough")
 
-replace_once(
-    "fs/fuse/inode.c",
-    old_block,
-    new_block,
-    "negotiate_upstream_passthrough",
-)
-
-
-# Android's MediaProvider daemon is intentionally not granted CAP_SYS_ADMIN.
-# Android common carries an explicit relaxation for BACKING_OPEN/CLOSE because
-# /dev/fuse access and MediaProvider policy already gate this interface.
+# Needed for the narrowly scoped filesystem-name compatibility check below.
 replace_once(
     "fs/fuse/backing.c",
-    """	if (!fc->passthrough)
-		return -EPERM;
-
-	/*
-	 * Preserve the proven Android ioctl-126 behavior.  The new persistent
-	 * API follows upstream and requires privilege.
-	 */
-	if (!legacy_once && !capable(CAP_SYS_ADMIN))
-		return -EPERM;
+    """#include <linux/file.h>
+#include <linux/slab.h>
 """,
-    """	if (!fc->passthrough)
-		return -EPERM;
+    """#include <linux/file.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+""",
+    "backing_string_include",
+)
 
-	/*
-	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
-	 * Access to this ioctl is already restricted by Android's /dev/fuse
-	 * ownership/SELinux policy, matching Android common's passthrough patch.
-	 */
+# Android MediaProvider does not get CAP_SYS_ADMIN. Android common explicitly
+# relaxes this check because /dev/fuse access is already restricted by Android.
+replace_once(
+    "fs/fuse/backing.c",
+    """\tif (!fc->passthrough)
+\t\treturn -EPERM;
+
+\t/*
+\t * Preserve the proven Android ioctl-126 behavior.  The new persistent
+\t * API follows upstream and requires privilege.
+\t */
+\tif (!legacy_once && !capable(CAP_SYS_ADMIN))
+\t\treturn -EPERM;
+""",
+    """\tif (!fc->passthrough)
+\t\treturn -EPERM;
+
+\t/*
+\t * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+\t * /dev/fuse ownership and SELinux policy already gate this interface.
+\t */
 """,
     "android_relax_backing_open_cap_sys_admin",
 )
 
 replace_once(
     "fs/fuse/backing.c",
-    """	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
-		return -EPERM;
-	if (backing_id <= 0)
+    """\tif (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+\t\treturn -EPERM;
+\tif (backing_id <= 0)
 """,
-    """	if (!fc->passthrough)
-		return -EPERM;
-	if (backing_id <= 0)
+    """\tif (!fc->passthrough)
+\t\treturn -EPERM;
+\tif (backing_id <= 0)
 """,
     "android_relax_backing_close_cap_sys_admin",
 )
 
+# Preserve all normal validation, but adapt one old-Samsung storage-stack case.
+old_backing_checks = """\tif (!fc->passthrough)
+\t\treturn -EPERM;
 
-# Diagnostic probes for the native BACKING_OPEN ioctl path. These are kept
-# low-volume because they only fire when userspace attempts registration.
-replace_once(
-    "fs/fuse/dev.c",
-    """	case FUSE_DEV_IOC_BACKING_OPEN: {
-		struct fuse_backing_map map;
+\t/*
+\t * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+\t * /dev/fuse ownership and SELinux policy already gate this interface.
+\t */
 
-		err = -EFAULT;
-		if (!copy_from_user(&map, (void __user *)arg, sizeof(map))) {
-			fud = fuse_get_dev(file);
-			err = fud ? fuse_backing_open(fud->fc, &map) : -EINVAL;
-		}
-		break;
-	}
-""",
-    """	case FUSE_DEV_IOC_BACKING_OPEN: {
-		struct fuse_backing_map map;
+\tif (flags || padding)
+\t\treturn -EINVAL;
 
-		err = -EFAULT;
-		if (copy_from_user(&map, (void __user *)arg, sizeof(map))) {
-			pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN copy_from_user_failed err=%d\\n",
-					    err);
-			break;
-		}
+\tfile = fget(fd);
+\tif (!file)
+\t\treturn -EBADF;
 
-		fud = fuse_get_dev(file);
-		if (!fud) {
-			err = -EINVAL;
-			pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN no_fud err=%d\\n",
-					    err);
-			break;
-		}
+\tif (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
+\t\tret = -EBADF;
+\t\tgoto out_fput;
+\t}
 
-		err = fuse_backing_open(fud->fc, &map);
-		pr_info_ratelimited("FUSE_740_IOCTL_BACKING_OPEN fd=%d flags=0x%x padding=%llu ret=%d\\n",
-				    map.fd, map.flags,
-				    (unsigned long long)map.padding, err);
-		break;
-	}
-""",
-    "backing_open_ioctl_diagnostics",
-)
+\t/* Modern persistent registrations are limited to regular files. */
+\tif (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
+\t\tret = -EINVAL;
+\t\tgoto out_fput;
+\t}
 
-replace_once(
-    "fs/fuse/backing.c",
-    """	if (!fc->passthrough)
-		return -EPERM;
+\tbacking_sb = file_inode(file)->i_sb;
+\tif (fc->max_stack_depth <= 0 ||
+\t    backing_sb->s_stack_depth >= fc->max_stack_depth) {
+\t\tret = -ELOOP;
+\t\tgoto out_fput;
+\t}
+"""
 
-	/*
-	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
-	 * Access to this ioctl is already restricted by Android's /dev/fuse
-	 * ownership/SELinux policy, matching Android common's passthrough patch.
-	 */
+new_backing_checks = """\tif (!fc->passthrough) {
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=no_passthrough fd=%d err=%d\\n",
+\t\t\t\t    fd, -EPERM);
+\t\treturn -EPERM;
+\t}
 
-	if (flags || padding)
-		return -EINVAL;
+\t/*
+\t * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
+\t * /dev/fuse ownership and SELinux policy already gate this interface.
+\t */
 
-	file = fget(fd);
-	if (!file)
-		return -EBADF;
+\tif (flags || padding) {
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=map_flags fd=%d flags=0x%x padding=%llu err=%d\\n",
+\t\t\t\t    fd, flags, (unsigned long long)padding, -EINVAL);
+\t\treturn -EINVAL;
+\t}
 
-	if (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
-		ret = -EBADF;
-		goto out_fput;
-	}
+\tfile = fget(fd);
+\tif (!file) {
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=bad_fd fd=%d err=%d\\n",
+\t\t\t\t    fd, -EBADF);
+\t\treturn -EBADF;
+\t}
 
-	/* Modern persistent registrations are limited to regular files. */
-	if (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
-		ret = -EINVAL;
-		goto out_fput;
-	}
+\tif (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
+\t\tret = -EOPNOTSUPP;
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_ops fd=%d mode=0%o err=%d\\n",
+\t\t\t\t    fd, file_inode(file)->i_mode, ret);
+\t\tgoto out_fput;
+\t}
 
-	backing_sb = file_inode(file)->i_sb;
-	if (fc->max_stack_depth <= 0 ||
-	    backing_sb->s_stack_depth >= fc->max_stack_depth) {
-		ret = -ELOOP;
-		goto out_fput;
-	}
-""",
-    """	if (!fc->passthrough) {
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=no_passthrough fd=%d err=%d\\n",
-				    fd, -EPERM);
-		return -EPERM;
-	}
+\t/* Modern persistent registrations are limited to regular files. */
+\tif (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
+\t\tret = S_ISDIR(file_inode(file)->i_mode) ? -EISDIR : -EINVAL;
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_type fd=%d mode=0%o err=%d\\n",
+\t\t\t\t    fd, file_inode(file)->i_mode, ret);
+\t\tgoto out_fput;
+\t}
 
-	/*
-	 * Android MediaProvider is intentionally not granted CAP_SYS_ADMIN.
-	 * Access to this ioctl is already restricted by Android's /dev/fuse
-	 * ownership/SELinux policy, matching Android common's passthrough patch.
-	 */
+\tbacking_sb = file_inode(file)->i_sb;
+\tif (fc->max_stack_depth <= 0) {
+\t\tret = -ELOOP;
+\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=zero_limit fd=%d fs=%s backing_depth=%d limit=%d err=%d\\n",
+\t\t\t\t    fd,
+\t\t\t\t    backing_sb->s_type ? backing_sb->s_type->name : "?",
+\t\t\t\t    backing_sb->s_stack_depth, fc->max_stack_depth, ret);
+\t\tgoto out_fput;
+\t}
 
-	if (flags || padding) {
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=map_flags fd=%d flags=0x%x padding=%llu err=%d\\n",
-				    fd, flags, (unsigned long long)padding, -EINVAL);
-		return -EINVAL;
-	}
+\tif (backing_sb->s_stack_depth >= fc->max_stack_depth) {
+\t\tconst char *fsname = backing_sb->s_type ? backing_sb->s_type->name : NULL;
+\t\tbool samsung_sdcardfs_compat =
+\t\t\t!legacy_once && fsname && !strcmp(fsname, "sdcardfs") &&
+\t\t\tfc->max_stack_depth == 1 &&
+\t\t\tbacking_sb->s_stack_depth == 1 &&
+\t\t\tfc->max_stack_depth < FILESYSTEM_MAX_STACK_DEPTH;
 
-	file = fget(fd);
-	if (!file) {
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=bad_fd fd=%d err=%d\\n",
-				    fd, -EBADF);
-		return -EBADF;
-	}
+\t\tif (samsung_sdcardfs_compat) {
+\t\t\tfc->max_stack_depth = 2;
+\t\t\tfc->sb->s_stack_depth = 2;
+\t\t\tpr_info_ratelimited("FUSE_740_LEGACY_STACK_COMPAT fd=%d fs=%s backing_depth=%d promoted_limit=%d\\n",
+\t\t\t\t\t    fd, fsname, backing_sb->s_stack_depth,
+\t\t\t\t\t    fc->max_stack_depth);
+\t\t} else {
+\t\t\tret = -ELOOP;
+\t\t\tpr_info_ratelimited("FUSE_740_BACKING_REJECT reason=stack_depth fd=%d fs=%s backing_depth=%d limit=%d err=%d\\n",
+\t\t\t\t\t    fd, fsname ? fsname : "?",
+\t\t\t\t\t    backing_sb->s_stack_depth,
+\t\t\t\t\t    fc->max_stack_depth, ret);
+\t\t\tgoto out_fput;
+\t\t}
+\t}
+"""
+replace_once("fs/fuse/backing.c", old_backing_checks, new_backing_checks,
+             "android16_samsung_legacy_stack_compat")
 
-	if (!file->f_op || !file->f_op->read_iter || !file->f_op->write_iter) {
-		ret = -EOPNOTSUPP;
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_ops fd=%d mode=0%o err=%d\\n",
-				    fd, file_inode(file)->i_mode, ret);
-		goto out_fput;
-	}
-
-	/* Modern persistent registrations are limited to regular files. */
-	if (!legacy_once && !S_ISREG(file_inode(file)->i_mode)) {
-		ret = S_ISDIR(file_inode(file)->i_mode) ? -EISDIR : -EINVAL;
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=file_type fd=%d mode=0%o err=%d\\n",
-				    fd, file_inode(file)->i_mode, ret);
-		goto out_fput;
-	}
-
-	backing_sb = file_inode(file)->i_sb;
-	if (fc->max_stack_depth <= 0 ||
-	    backing_sb->s_stack_depth >= fc->max_stack_depth) {
-		ret = -ELOOP;
-		pr_info_ratelimited("FUSE_740_BACKING_REJECT reason=stack_depth fd=%d backing_depth=%d limit=%d err=%d\\n",
-				    fd, backing_sb->s_stack_depth,
-				    fc->max_stack_depth, ret);
-		goto out_fput;
-	}
-""",
-    "backing_open_rejection_diagnostics",
-)
-
+# Log successful persistent backing registrations.
 replace_once(
     "fs/fuse/backing.c",
-    """	ret = fuse_backing_id_alloc(fc, backing);
-	if (ret < 0) {
-		fuse_backing_put(backing);
-		return ret;
-	}
+    """\tret = fuse_backing_id_alloc(fc, backing);
+\tif (ret < 0) {
+\t\tfuse_backing_put(backing);
+\t\treturn ret;
+\t}
 
-	return ret;
+\treturn ret;
 """,
-    """	ret = fuse_backing_id_alloc(fc, backing);
-	if (ret < 0) {
-		fuse_backing_put(backing);
-		return ret;
-	}
+    """\tret = fuse_backing_id_alloc(fc, backing);
+\tif (ret < 0) {
+\t\tfuse_backing_put(backing);
+\t\treturn ret;
+\t}
 
-	if (!legacy_once)
-		pr_info_ratelimited("FUSE_740_BACKING_OPEN id=%d backing_depth=%d limit=%d\\n",
-				    ret, backing_sb->s_stack_depth, fc->max_stack_depth);
+\tif (!legacy_once)
+\t\tpr_info_ratelimited("FUSE_740_BACKING_OPEN id=%d fs=%s backing_depth=%d limit=%d\\n",
+\t\t\t\t    ret,
+\t\t\t\t    backing_sb->s_type ? backing_sb->s_type->name : "?",
+\t\t\t\t    backing_sb->s_stack_depth, fc->max_stack_depth);
 
-	return ret;
+\treturn ret;
 """,
     "backing_open_runtime_probe",
 )
 
+# Log successful OPEN replies consuming persistent backing_id.
 replace_once(
     "fs/fuse/passthrough.c",
-    """	ff->passthrough.backing = backing;
-	ff->passthrough.filp = backing->file;
-	ff->passthrough.cred = backing->cred;
-	return 0;
+    """\tff->passthrough.backing = backing;
+\tff->passthrough.filp = backing->file;
+\tff->passthrough.cred = backing->cred;
+\treturn 0;
 """,
-    """	ff->passthrough.backing = backing;
-	ff->passthrough.filp = backing->file;
-	ff->passthrough.cred = backing->cred;
-	if (persistent)
-		pr_info_ratelimited("FUSE_740_PASSTHROUGH_SETUP backing_id=%d\\n",
-				    backing_id);
-	return 0;
+    """\tff->passthrough.backing = backing;
+\tff->passthrough.filp = backing->file;
+\tff->passthrough.cred = backing->cred;
+\tif (persistent)
+\t\tpr_info_ratelimited("FUSE_740_PASSTHROUGH_SETUP backing_id=%d\\n",
+\t\t\t\t    backing_id);
+\treturn 0;
 """,
     "passthrough_setup_runtime_probe",
 )
@@ -350,13 +348,12 @@ checks = {
         "!(arg->flags & FUSE_WRITEBACK_CACHE)",
     ],
     "fs/fuse/backing.c": [
+        "FUSE_740_LEGACY_STACK_COMPAT",
         "FUSE_740_BACKING_REJECT",
         "FUSE_740_BACKING_OPEN",
-        "backing_sb->s_stack_depth >= fc->max_stack_depth",
-        "Android MediaProvider is intentionally not granted CAP_SYS_ADMIN",
-    ],
-    "fs/fuse/dev.c": [
-        "FUSE_740_IOCTL_BACKING_OPEN",
+        "strcmp(fsname, \"sdcardfs\")",
+        "fc->max_stack_depth = 2;",
+        "fc->sb->s_stack_depth = 2;",
     ],
     "fs/fuse/passthrough.c": [
         "FUSE_740_PASSTHROUGH_SETUP",
@@ -383,14 +380,12 @@ report.write_text(
     "phase=104-fuse-740-upstream-passthrough\n"
     "baseline=phase103-fuse-740-init-runtime-proven\n"
     "protocol=7.40\n"
-    "init_ext=enabled\n"
     "upstream_passthrough_bit37=advertised\n"
     "legacy_bit31_passthrough=not-advertised\n"
-    "writeback_cache_offer=disabled-for-upstream-passthrough-safety\n"
-    "backing_open_close=p2-persistent-registry\n"
-    "open_reply=fopen_passthrough-plus-backing_id\n"
-    "stack_depth=p3-daemon-negotiated\n"
-    "runtime_tags=FUSE_740_PASSTHROUGH_NEGOTIATED,FUSE_740_BACKING_OPEN,FUSE_740_PASSTHROUGH_SETUP\n"
+    "writeback_cache_offer=disabled\n"
+    "android_cap_sys_admin_relaxation=enabled\n"
+    "samsung_sdcardfs_stack_compat=depth1-to-depth2-only\n"
+    "runtime_tags=FUSE_740_PASSTHROUGH_NEGOTIATED,FUSE_740_LEGACY_STACK_COMPAT,FUSE_740_BACKING_OPEN,FUSE_740_PASSTHROUGH_SETUP\n"
     "changes=" + ",".join(changes) + "\n"
 )
 print(report.read_text(), end="")

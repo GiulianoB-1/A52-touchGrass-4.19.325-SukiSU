@@ -306,7 +306,7 @@ jobs:
       - name: Verify package
         run: |
           set -Eeuo pipefail
-          ZIP=release/A52-CPU-UV-P1-P3ACTIVE.zip
+          ZIP=release/touchGrass-A52xq-Linux-4.19.206-A52-CPU-UV-P1-P3ACTIVE.zip
           test -s "$ZIP"
           unzip -p "$ZIP" anykernel.sh > artifacts/packaged-anykernel.sh
           grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";' artifacts/packaged-anykernel.sh
@@ -326,7 +326,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52-CPU-UV-P1-P3ACTIVE
-          path: release/A52-CPU-UV-P1-P3ACTIVE.zip
+          path: release/touchGrass-A52xq-Linux-4.19.206-A52-CPU-UV-P1-P3ACTIVE.zip
           if-no-files-found: error
           retention-days: 14
 

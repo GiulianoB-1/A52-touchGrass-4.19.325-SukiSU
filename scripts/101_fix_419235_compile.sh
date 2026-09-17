@@ -198,6 +198,95 @@ dir_c = (kernel / "fs/fuse/dir.c").read_text()
 if "test_bit(FUSE_I_ATTR_FORCE_SYNC, &fi->state)" not in dir_c:
     raise SystemExit("fs/fuse/dir.c: Samsung FUSE_I_ATTR_FORCE_SYNC consumer is missing")
 
+
+# Linux stable changed ARM-LPAE table descriptors to pass the complete table
+# object through paddr_to_iopte() so high physical-address bits are formatted
+# correctly. Samsung independently extended arm_lpae_install_table() with a
+# ref_count stored in ignored IOPTE bits. A mechanical merge can therefore keep
+# Samsung's cfg + ref_count signature while taking stable's data-based body,
+# which creates a duplicate cfg declaration and an undeclared data variable.
+# This is the same conflict already reconciled in the proven Phase100 path:
+# keep stable address formatting and Samsung's table-refcount metadata.
+iommu = kernel / "drivers/iommu/io-pgtable-arm.c"
+iommu_text = iommu.read_text()
+vendor_sig = '''static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
+\t\t\t\t\t     arm_lpae_iopte *ptep,
+\t\t\t\t\t     arm_lpae_iopte curr,
+\t\t\t\t\t     struct io_pgtable_cfg *cfg,
+\t\t\t\t\t     int ref_count)
+'''
+integrated_sig = '''static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
+\t\t\t\t\t     arm_lpae_iopte *ptep,
+\t\t\t\t\t     arm_lpae_iopte curr,
+\t\t\t\t\t     struct arm_lpae_io_pgtable *data,
+\t\t\t\t\t     int ref_count)
+'''
+if iommu_text.count(vendor_sig) == 1:
+    iommu_text = iommu_text.replace(vendor_sig, integrated_sig, 1)
+elif iommu_text.count(integrated_sig) != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: install-table signature is unrecognized")
+
+install_start = iommu_text.index(integrated_sig)
+install_end = function_end(iommu_text, install_start)
+install_body = iommu_text[install_start:install_end]
+declaration = "\tstruct io_pgtable_cfg *cfg = &data->iop.cfg;\n"
+vars_anchor = "\tarm_lpae_iopte old, new;\n"
+if declaration not in install_body:
+    if install_body.count(vars_anchor) != 1:
+        raise SystemExit("drivers/iommu/io-pgtable-arm.c: install-table variable anchor is not unique")
+    install_body = install_body.replace(vars_anchor, vars_anchor + declaration, 1)
+elif install_body.count(declaration) != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: install-table cfg declaration is duplicated")
+
+old_addr = "\tnew = __pa(table) | ARM_LPAE_PTE_TYPE_TABLE;\n"
+fixed_addr = (
+    "\tnew = paddr_to_iopte(__pa(table), data) | "
+    "ARM_LPAE_PTE_TYPE_TABLE;\n"
+)
+if old_addr in install_body:
+    install_body = install_body.replace(old_addr, fixed_addr, 1)
+elif install_body.count(fixed_addr) != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: table address formatting is unrecognized")
+if install_body.count("iopte_tblcnt_set(&new, ref_count);") != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: Samsung table refcount update is missing")
+
+iommu_text = iommu_text[:install_start] + install_body + iommu_text[install_end:]
+
+vendor_calls = (
+    (
+        "arm_lpae_install_table(cptep, ptep, 0, cfg, 0)",
+        "arm_lpae_install_table(cptep, ptep, 0, data, 0)",
+    ),
+    (
+        "arm_lpae_install_table(tablep, ptep, blk_pte, cfg, child_cnt)",
+        "arm_lpae_install_table(tablep, ptep, blk_pte, data, child_cnt)",
+    ),
+)
+for old_call, new_call in vendor_calls:
+    old_count = iommu_text.count(old_call)
+    new_count = iommu_text.count(new_call)
+    if old_count == 1 and new_count == 0:
+        iommu_text = iommu_text.replace(old_call, new_call, 1)
+    elif old_count == 0 and new_count == 1:
+        pass
+    else:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: call shape is unrecognized: "
+            f"{old_call} (old={old_count}, new={new_count})"
+        )
+
+iommu.write_text(iommu_text)
+iommu_final = iommu.read_text()
+if iommu_final.count(integrated_sig) != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: integrated signature postcondition failed")
+if "arm_lpae_install_table(cptep, ptep, 0, cfg, 0)" in iommu_final:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: map call still passes cfg")
+if "arm_lpae_install_table(tablep, ptep, blk_pte, cfg, child_cnt)" in iommu_final:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: split call still passes cfg")
+if iommu_final.count("paddr_to_iopte(__pa(table), data)") != 1:
+    raise SystemExit("drivers/iommu/io-pgtable-arm.c: stable table-address encoding postcondition failed")
+rows.append("iommu_install_table=stable-paddr-plus-samsung-refcount\n")
+
 report.parent.mkdir(parents=True, exist_ok=True)
 report.write_text("".join(rows))
 PY

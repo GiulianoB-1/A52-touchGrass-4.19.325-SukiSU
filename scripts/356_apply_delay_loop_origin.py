@@ -22,17 +22,14 @@ RAW_BLOCK = r'''
  * Phase355 sampled the surviving CPU's interrupted execution context and
  * repeatedly found PID1/init at runtime PC __const_udelay+0x74. Exact Image
  * disassembly shows this is the counter read immediately after WFE in the
- * event-stream delay loop.  Phase356 samples the live registers needed to
- * distinguish two fundamentally different failures:
+ * event-stream delay loop. Phase356 samples the live registers needed to
+ * distinguish two failures:
+ *   (A) get_cycles()/CNTVCT advances but x21 is a huge delay target; identify
+ *       the caller from the PAC-signed LR saved at [sp+8].
+ *   (B) x0 does not advance while timer IRQs continue; the counter/read path
+ *       itself is broken.
  *
- *   (A) get_cycles()/CNTVCT is advancing but x21 is a huge delay target;
- *       then identify the caller from the PAC-signed return address saved at
- *       [sp+8] by __const_udelay's prologue.
- *
- *   (B) the sampled counter x0 does not advance while timer IRQs continue;
- *       then the virtual counter/read path itself is broken.
- *
- * Reuses the concluded Phase350/351/354/355 region:
+ * Reuses concluded diagnostic storage:
  *   0xB1BF0000..0xB1BF7FFF (32 KiB)
  *   copy A = +0x0000..+0x3fff
  *   copy B = +0x4000..+0x7fff
@@ -105,7 +102,7 @@ struct a52_r356_meta {
 	u32 slot_bytes;
 	u32 owner_cpu;
 	u32 reserved32;
-	u64 reserved[22];
+	u64 reserved[21];
 };
 
 extern char _text[];
@@ -298,7 +295,6 @@ def patch_rec(text: str) -> str:
         return text
     if "A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1" not in text:
         raise SystemExit("Phase356 requires Phase343 recorder lineage")
-
     text = one(text,
                "#include <linux/io.h>\n",
                "#include <linux/io.h>\n#include <linux/delay.h>\n#include <linux/uaccess.h>\n#include <asm/irq_regs.h>\n#include <asm/ptrace.h>\n",
@@ -346,7 +342,6 @@ def validate(br: str, ar: str, bt: str, at: str) -> None:
     ):
         if token not in joined:
             raise SystemExit("Phase356 required token missing: " + token)
-
     if at.count("evt->event_handler(evt);") != bt.count("evt->event_handler(evt);"):
         raise SystemExit("Phase356 changed protected timer callback count")
     if ar.count("a52_r356_start();") != 1:
@@ -358,21 +353,17 @@ def main() -> int:
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("--check-only", action="store_true")
     ns = ap.parse_args()
-
     files = [ns.root / REC, ns.root / TIMER]
     for p in files:
         if not p.is_file():
             raise SystemExit("Phase356 missing source: " + str(p))
-
     br, bt = (p.read_text() for p in files)
     ar = patch_rec(br)
     at = patch_timer(bt)
     validate(br, ar, bt, at)
-
     if ns.check_only:
         print("Phase356 delay-loop origin audit: PASS")
         return 0
-
     files[0].write_text(ar)
     files[1].write_text(at)
     print("Phase356 delay-loop origin probe applied")

@@ -194,9 +194,12 @@ def patch_core(text: str) -> str:
 def patch_idle(text: str) -> str:
     if MARK in text:
         return text
-    inc = "#include <linux/cpuidle.h>\n"
+    # kernel/sched/idle.c in this Android 5.10 tree gets cpuidle types through
+    # sched.h and does not include <linux/cpuidle.h> directly. Anchor the
+    # telemetry declaration after the Android scheduler hook include instead.
+    inc = "#include <trace/hooks/sched.h>\n"
     text = one(text, inc,
-               inc + 'extern void a52_p352_mark_first(u32 event, s32 index, s32 ret, u32 flags, const char *drv_name, const void *callback); /* ' + MARK + ' */\n',
+               inc + '\nextern void a52_p352_mark_first(u32 event, s32 index, s32 ret, u32 flags, const char *drv_name, const void *callback); /* ' + MARK + ' */\n',
                "idle extern")
 
     # If cpuidle is unavailable, record that before falling back.

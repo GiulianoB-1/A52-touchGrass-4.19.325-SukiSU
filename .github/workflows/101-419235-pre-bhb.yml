@@ -115,6 +115,23 @@ jobs:
           grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
           git -C "$KERNEL" diff --check
 
+      - name: Materialize rebuilt Phase88 prepared-tree cache
+        if: steps.phase88-tree-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .prepared-cache
+          rm -f .prepared-cache/phase88-source.tar.zst
+          tar -C workspace -I 'zstd -T0 -6' -cf .prepared-cache/phase88-source.tar.zst touchgrass-a52xq
+          test -s .prepared-cache/phase88-source.tar.zst
+          ls -lh .prepared-cache/phase88-source.tar.zst
+
+      - name: Save rebuilt Phase88 prepared-tree cache
+        if: steps.phase88-tree-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .prepared-cache/phase88-source.tar.zst
+          key: a52xq-phase88-prepared-4487542a-v1-${{ runner.os }}
+
       - name: Restore Phase88 prepared tree from cache
         if: steps.phase88-tree-cache.outputs.cache-hit == 'true'
         run: |

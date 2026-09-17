@@ -6,8 +6,8 @@ on:
       - agent/a52-eevdf-uclamp-efficiency-p1
     paths:
       - scripts/106_apply_mglru_modern_p1.py
-      - scripts/109_*
-      - scripts/110_*
+      - scripts/109*
+      - scripts/110*
       - .github/workflows/109-a52-eevdf-uclamp-efficiency-launch.yml
   workflow_dispatch:
 

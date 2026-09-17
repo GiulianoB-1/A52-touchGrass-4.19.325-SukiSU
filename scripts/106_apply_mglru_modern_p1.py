@@ -84,7 +84,7 @@ new_scan = r"""def mutate_scan(func):
     early = "if (get_nr_gens(lruvec, type) == MIN_NR_GENS)\n\t\treturn 0;"
     if func.count(early) != 1:
         raise SystemExit(f"scan_pages: expected one MIN_NR_GENS early return, found {func.count(early)}")
-    early_new = r'''if (get_nr_gens(lruvec, type) == MIN_NR_GENS) {
+    early_new = '''if (get_nr_gens(lruvec, type) == MIN_NR_GENS) {
 \t\tif (unlikely(READ_ONCE(mglru_record_level) >= 1)) {
 \t\t\tunsigned long a52_dur = 0;
 
@@ -105,7 +105,7 @@ new_scan = r"""def mutate_scan(func):
     final = "return isolated || !remaining ? scanned : 0;"
     if func.count(final) != 1:
         raise SystemExit(f"scan_pages: expected one v9 return contract, found {func.count(final)}")
-    final_new = r'''{
+    final_new = '''{
 \t\tint a52_ret = isolated || !remaining ? scanned : 0;
 
 \t\tif (unlikely(READ_ONCE(mglru_record_level) >= 1)) {

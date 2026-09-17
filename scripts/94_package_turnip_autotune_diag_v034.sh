@@ -22,7 +22,7 @@ text = p.read_text()
 # once in the base package's final ZIP audit. Both must move together so the
 # generated module and its self-audit agree.
 old_version = "version=0.32-vk1.4-syncmerge-fix"
-new_version = "version=0.34-vk1.4-autotune-diag"
+new_version = "version=0.34a-vk1.4-autotune-logcat"
 version_count = text.count(old_version)
 if version_count != 2:
     raise SystemExit(
@@ -30,10 +30,10 @@ if version_count != 2:
 text = text.replace(old_version, new_version)
 
 single_repls = [
-    ("versionCode=44", "versionCode=46"),
+    ("versionCode=44", "versionCode=47"),
     (
         "description=A52 Turnip Vulkan 1.4 v0.32 sync-merge fix. Retains v0.31 efficiency policy and fixes Mesa 26.2.2 KGSL mixed timestamp/sync-FD merge bugs that caused a release-build null dereference in Warframe.",
-        "description=A52 Turnip Vulkan 1.4 v0.34 diagnostic build from the confirmed v0.32 baseline. Functional rendering behavior is unchanged; Mesa autotune base/bandwidth/profiled logs are compiled in for GMEM-vs-SYSMEM analysis."
+        "description=A52 Turnip Vulkan 1.4 v0.34a diagnostic build from the confirmed v0.32 baseline. Functional rendering behavior is unchanged; Mesa autotune diagnostics are promoted to warning-level TGAT logcat markers for GMEM-vs-SYSMEM analysis."
     ),
 ]
 for old, new in single_repls:
@@ -49,8 +49,8 @@ chmod +x "$TMP"
 "$TMP" "$ROOT" "$BUILD_DIR" "$OUT_DIR"
 
 OLD="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-KGSL-Vulkan-1.4-PERSISTENT-KSU.zip"
-NEW="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34-AUTOTUNE-DIAG-KSU.zip"
+NEW="$OUT_DIR/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34a-AUTOTUNE-LOGCAT-DIAG-KSU.zip"
 [ -s "$OLD" ] || { echo "expected persistent module zip missing: $OLD" >&2; exit 3; }
 mv "$OLD" "$NEW"
 
-echo "v034_package=$NEW"
+echo "v034a_package=$NEW"

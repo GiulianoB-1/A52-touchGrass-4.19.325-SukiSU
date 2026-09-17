@@ -19,6 +19,10 @@ if [ "$TARGET_VERSION" != "4.19.235" ]; then
   exit 1
 fi
 
+# Repair only the two 4.19.235 vendor/upstream merge shapes discovered by the
+# first full compile: pm_show_wakelocks() and the FUSE private inode-state bit.
+bash "$SCRIPT_DIR/101_fix_419235_compile.sh"
+
 python3 - "$SOURCE" "$GENERATED" <<'PY'
 from pathlib import Path
 import sys

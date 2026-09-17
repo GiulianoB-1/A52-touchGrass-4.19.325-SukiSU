@@ -1,0 +1,218 @@
+name: 101 - Pre-BHB 4.19.235 Current Stack
+
+on:
+  push:
+    branches:
+      - phase91-325
+    paths:
+      - .github/workflows/101-419235-pre-bhb.yml
+      - scripts/101_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase101-419235-pre-bhb-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  LABEL: touchgrass-419235-pre-bhb-resukisu-v4.1.0-susfs-v1.4.2-phase101
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build Phase101 Linux 4.19.235 pre-BHB checkpoint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar zstd
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: a52xq-clang11-4.19.235-phase101-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang11-4.19.206-phase89-${{ runner.os }}-
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+
+      - name: Restore immutable Phase88 prepared-tree cache
+        id: phase88-tree-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .prepared-cache/phase88-source.tar.zst
+          key: a52xq-phase88-prepared-4487542a-v1-${{ runner.os }}
+
+      - name: Require proven Phase88 cache
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ steps.phase88-tree-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Phase88 prepared-tree cache is missing; Phase101 intentionally refuses to rebuild a different baseline"
+            exit 1
+          fi
+          test -s .prepared-cache/phase88-source.tar.zst
+
+      - name: Restore Phase88 prepared tree
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace artifacts
+          tar -I 'zstd -d -T0' -xf .prepared-cache/phase88-source.tar.zst -C workspace
+          test -d workspace/touchgrass-a52xq/.git
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = "4.19.206"
+
+      - name: Apply Phase89 F2FS rb-tree foundation
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/89_apply_f2fs_rbtree64_support.py
+          python3 scripts/89_apply_f2fs_rbtree64_support.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'f2fs_lookup_rb_tree_ext' "$KERNEL/fs/f2fs/extent_cache.c"
+          grep -Fq 'unsigned long long key;' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'update_segment_mtime(sbi, blkaddr);' "$KERNEL/fs/f2fs/segment.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Retain Phase89 crash diagnostics
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/89_apply_fuse_pagefault_diagnostics.py
+          python3 scripts/89_apply_fuse_pagefault_diagnostics.py workspace/touchgrass-a52xq
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52FUSE_BALANCE mmap' "$KERNEL/fs/fuse/passthrough.c"
+          grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
+          ! grep -Fq '#define NR_CURSEG_INMEM_TYPE' "$KERNEL/fs/f2fs/f2fs.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Merge Linux 4.19.235 pre-BHB checkpoint
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/101_merge_419235_full.py
+          python3 scripts/101_merge_419235_full.py
+          KERNEL=workspace/touchgrass-a52xq
+          test "$(make -s -C "$KERNEL" kernelversion)" = "4.19.235"
+          test -s artifacts/phase101-full235-state.txt
+          grep -Fxq 'test_applied_commits=1877' artifacts/phase101-full235-state.txt
+          grep -Fxq 'test_commit=6b481672f19259632a852d013cacd5655e8d7da8' artifacts/phase101-full235-state.txt
+          grep -Fxq 'spectre_bhb_backport=not-yet-present' artifacts/phase101-full235-state.txt
+          git -C "$KERNEL" diff --check
+
+      - name: Verify custom stack survived merge
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'CASS+EEVDF77 hybrid fair CPU placement path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'proc_create_single("eevdf_status"' "$KERNEL/kernel/sched/fair.c"
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'wait_on_bit_lock(&zram->table[index].flags' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'migrate_read_lock(zspage);' "$KERNEL/mm/zsmalloc.c"
+          grep -Fq 'f2fs_lookup_rb_tree_ext' "$KERNEL/fs/f2fs/extent_cache.c"
+          ! grep -Fq 'CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY' "$KERNEL/arch/arm64/configs/a52xq_defconfig" || true
+          git -C "$KERNEL" diff --check
+
+      - name: Build Phase101 4.19.235
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/*.sh
+          bash scripts/101_build_419235_full.sh 2>&1 | tee artifacts/phase101-full235-build.log
+
+      - name: Audit built kernel
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test "$(make -s -C "$KERNEL" kernelversion)" = "4.19.235"
+          test -s "artifacts/Image-${LABEL}"
+          test -s "artifacts/config-${LABEL}"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN_ENABLED=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fq 'A52PF_BADCTX' "$KERNEL/arch/arm64/mm/fault.c"
+          grep -aFq 'A52PF_BADCTX' "$KERNEL/out/vmlinux"
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package Phase101 flashable
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-phase101.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-phase101.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-phase101.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-phase101.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected package boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'patch_cmdline "rcu_nocbs" "rcu_nocbs=6-7";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+          chmod +x scripts/.package-phase101.sh
+          scripts/.package-phase101.sh \
+            4.19.235 \
+            "artifacts/Image-${LABEL}" \
+            packaging/AnyKernel3 \
+            release
+          rm -f scripts/.package-phase101.sh
+          ls -lh release
+
+      - name: Upload Phase101 flashable
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase101-419235-pre-bhb
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            release/*
+            artifacts/Image-${{ env.LABEL }}
+            artifacts/config-${{ env.LABEL }}
+            artifacts/phase101-full235-state.txt
+
+      - name: Upload Phase101 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase101-419235-pre-bhb-diag-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts/phase101-*
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/vmlinux

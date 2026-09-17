@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # CI entry point: exact baseline -> MGLRU P1/P2/P3 -> diag P1/P2 -> scheduler efficiency P1
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -36,21 +37,65 @@ print("Applying MGLRU power diagnostics P1")
 subprocess.run([sys.executable, str(diag), str(root)], check=True)
 
 # P1 diagnostics can leave more than one debugfs include in the reconstructed
-# Samsung source. Recorder P2 only needs ktime.h to exist, so seed it here at
-# the first include block instead of making the recorder patcher depend on a
-# globally unique debugfs anchor.
+# Samsung source. Recorder P2 only needs ktime.h to exist, so seed it at the
+# first include block instead of depending on a globally unique debugfs anchor.
+# Also normalize the two look-around statements consumed by recorder P2. The
+# old MGLRU source has changed whitespace/line wrapping across our reconstructed
+# checkpoints, but these regexes require the exact semantics and exactly one
+# matching statement, so this is formatting normalization only.
 vmscan_c = root / "mm/vmscan.c"
 vmscan_text = vmscan_c.read_text()
+changed = False
+
 if "#include <linux/ktime.h>" not in vmscan_text:
     include_anchor = "#include <linux/debugfs.h>\n"
     include_pos = vmscan_text.find(include_anchor)
     if include_pos < 0:
         raise SystemExit("MGLRU recorder P2: debugfs include anchor missing")
     include_pos += len(include_anchor)
-    vmscan_c.write_text(
-        vmscan_text[:include_pos] + "#include <linux/ktime.h>\n" + vmscan_text[include_pos:]
+    vmscan_text = (
+        vmscan_text[:include_pos]
+        + "#include <linux/ktime.h>\n"
+        + vmscan_text[include_pos:]
     )
+    changed = True
     print("Seeded ktime include for MGLRU recorder P2")
+
+look_loop_exact = "for (i = 0, addr = start; addr != end; i++, addr += PAGE_SIZE) {"
+if look_loop_exact not in vmscan_text:
+    loop_re = re.compile(
+        r"for\s*\(\s*i\s*=\s*0\s*,\s*addr\s*=\s*start\s*;\s*"
+        r"addr\s*!=\s*end\s*;\s*i\+\+\s*,\s*addr\s*\+=\s*PAGE_SIZE\s*\)\s*\{"
+    )
+    loop_hits = list(loop_re.finditer(vmscan_text))
+    if len(loop_hits) != 1:
+        raise SystemExit(
+            f"MGLRU recorder P2: expected one semantic look-around loop, found {len(loop_hits)}"
+        )
+    vmscan_text = loop_re.sub(look_loop_exact, vmscan_text, count=1)
+    changed = True
+    print("Normalized MGLRU look-around PTE loop formatting")
+
+look_clear_exact = (
+    "if (!ptep_clear_young_notify(pvmw->vma, addr, pte + i))\n"
+    "\t\t\tcontinue;"
+)
+if look_clear_exact not in vmscan_text:
+    clear_re = re.compile(
+        r"if\s*\(\s*!ptep_clear_young_notify\s*\(\s*pvmw->vma\s*,\s*addr\s*,\s*"
+        r"pte\s*\+\s*i\s*\)\s*\)\s*continue\s*;"
+    )
+    clear_hits = list(clear_re.finditer(vmscan_text))
+    if len(clear_hits) != 1:
+        raise SystemExit(
+            f"MGLRU recorder P2: expected one look-around young-clear statement, found {len(clear_hits)}"
+        )
+    vmscan_text = clear_re.sub(look_clear_exact, vmscan_text, count=1)
+    changed = True
+    print("Normalized MGLRU look-around young-clear formatting")
+
+if changed:
+    vmscan_c.write_text(vmscan_text)
 
 print("Applying MGLRU power recorder P2")
 subprocess.run([sys.executable, str(recorder), str(root)], check=True)

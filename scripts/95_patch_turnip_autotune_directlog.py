@@ -32,16 +32,18 @@ one(
     'diagnostic counters',
 )
 
-ctor = (
-    'tu_autotune::tu_autotune(struct tu_device *device, VkResult &result)\n'
-    '   : device(device), supported_mod_flags(get_supported_mod_flags(device)), active_config(get_env_config())\n'
-    '{\n'
+# Heartbeat inside the constructor body.  Anchor on the unique suballocator
+# initialization rather than the constructor signature so formatting changes
+# in Mesa cannot hide the diagnostic.
+ctor_body = (
+    '   tu_bo_suballocator_init(&suballoc, device, 128 * 1024, '
+    'TU_BO_ALLOC_INTERNAL_RESOURCE, "autotune_suballoc");\n'
 )
 one(
-    ctor,
-    ctor
-    + '   std::string tg_cfg = active_config.load().to_string();\n'
-      '   __android_log_print(ANDROID_LOG_WARN, "TGAT", "TGAT_INIT %s", tg_cfg.c_str());\n',
+    ctor_body,
+    '   std::string tg_cfg = active_config.load().to_string();\n'
+    '   __android_log_print(ANDROID_LOG_WARN, "TGAT", "TGAT_INIT %s", tg_cfg.c_str());\n'
+    + ctor_body,
     'constructor heartbeat',
 )
 

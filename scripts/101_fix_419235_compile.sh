@@ -98,6 +98,90 @@ with report.open("a") as fh:
     fh.write(f"dvb_dmxdev_caps={state}\n")
 PY
 
+python3 - "$KERNEL" "$REPORT" <<'PY'
+from pathlib import Path
+import sys
+
+kernel = Path(sys.argv[1])
+report = Path(sys.argv[2])
+path = kernel / "drivers/iommu/io-pgtable-arm.c"
+text = path.read_text()
+
+# v4.19.235 already carries paddr_to_iopte() as part of the ARM-LPAE 52-bit
+# physical-address support. Samsung's tree has its own IOPTE accessor block,
+# and the policy merge kept that block while our prior reconciliation correctly
+# retained stable's paddr_to_iopte(__pa(table), data) table-descriptor call.
+# With the helper definition missing, GCC accepts an implicit external symbol
+# (warnings are disabled for this vendor build) and vmlinux then fails to link.
+# Restore the exact v4.19.235 helper rather than falling back to raw __pa().
+sig = "static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,"
+typedef_anchor = "typedef u64 arm_lpae_iopte;\n"
+helper = '''static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,
+\t\t\t\t     struct arm_lpae_io_pgtable *data)
+{
+\tarm_lpae_iopte pte = paddr;
+
+\t/* Of the bits which overlap, either 51:48 or 15:12 are always RES0 */
+\treturn (pte | (pte >> (48 - 12))) & ARM_LPAE_PTE_ADDR_MASK;
+}
+'''
+
+def_count = text.count(sig)
+if def_count == 0:
+    if text.count(typedef_anchor) != 1:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: arm_lpae_iopte typedef anchor is not unique"
+        )
+    if text.count("#define ARM_LPAE_PTE_ADDR_MASK") != 1:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: stable ARM_LPAE_PTE_ADDR_MASK is missing or duplicated"
+        )
+    if text.count("paddr_to_iopte(__pa(table), data)") != 1:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: stable table-descriptor caller is missing or duplicated"
+        )
+    if "iopte_tblcnt_set(&new, ref_count);" not in text:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: Samsung table-refcount update is missing"
+        )
+    text = text.replace(typedef_anchor, typedef_anchor + "\n" + helper, 1)
+    path.write_text(text)
+    state = "restored-stable-419235-definition"
+elif def_count == 1:
+    state = "already-present"
+else:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: paddr_to_iopte definition is duplicated"
+    )
+
+post = path.read_text()
+if post.count(sig) != 1:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: paddr_to_iopte definition postcondition failed"
+    )
+if post.count("paddr_to_iopte(__pa(table), data)") != 1:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: stable table-descriptor encoding postcondition failed"
+    )
+if "new = __pa(table) | ARM_LPAE_PTE_TYPE_TABLE;" in post:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: raw table-descriptor __pa encoding returned"
+    )
+for required in (
+    "IOPTE_RESERVED_MASK",
+    "iopte_val(",
+    "iopte_tblcnt_set(&new, ref_count);",
+):
+    if required not in post:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: Samsung IOPTE metadata behavior lost: "
+            + required
+        )
+
+with report.open("a") as fh:
+    fh.write(f"iommu_paddr_helper={state}\n")
+PY
+
 git -C "$KERNEL" diff --check
 cat "$REPORT"
-echo "Phase101 Linux 4.19.235 DVB compile-shape repair complete"
+echo "Phase101 Linux 4.19.235 compile-shape repair complete"

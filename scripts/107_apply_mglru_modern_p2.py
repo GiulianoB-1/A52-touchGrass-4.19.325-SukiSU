@@ -57,12 +57,14 @@ for helper in (
 # ---------------------------------------------------------------------------
 
 if "#include <linux/mmu_notifier.h>" not in s:
-    s = replace_once(
-        s,
-        "#include <linux/debugfs.h>\n",
-        "#include <linux/debugfs.h>\n#include <linux/mmu_notifier.h>\n",
-        "MMU notifier include",
-    )
+    # Samsung's reconstructed 4.19 tree carries more than one debugfs include.
+    # Insert after the first one rather than requiring a globally unique anchor.
+    anchor = "#include <linux/debugfs.h>\n"
+    pos = s.find(anchor)
+    if pos < 0:
+        raise SystemExit("MMU notifier include: debugfs include anchor not found")
+    pos += len(anchor)
+    s = s[:pos] + "#include <linux/mmu_notifier.h>\n" + s[pos:]
 
 # 1) Main PTE aging walk: if an mm has notifiers, an old host PTE can still
 #    represent a young secondary mapping. Let the notifier-aware clear decide.

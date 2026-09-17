@@ -31,21 +31,21 @@ for marker in (
         raise SystemExit(f"Modern MGLRU P1 marker missing: {marker}")
 
 # P2 must already have converted look-around PTE aging to the notifier-aware
-# helper. P3 must preserve that behavior while fixing swap eligibility.
+# helper. P3 must preserve that behavior.
 if "ptep_clear_young_notify(pvmw->vma, addr, pte + i)" not in s:
     raise SystemExit("Modern MGLRU P2 notifier-aware look-around marker missing")
 
 # ---------------------------------------------------------------------------
 # Modern P3
-# Android/common reference:
-#   5e1d25ac2ab670561949d82de7b5027e5a9676d5
-# FROMGIT: BACKPORT: Multi-gen LRU: Fix can_swap in lru_gen_look_around()
-# Upstream/mm reference:
-#   fdf19e8c8f1cdcee4eccf4c98a875f44f39d8b9d
+# Upstream reference:
+#   c28ac3c7eb945fee6e20f47d576af68fdff1392a
+# mm/mglru: skip special VMAs in lru_gen_look_around()
 #
-# walk->can_swap is tied to the reclaim walk and is not guaranteed to describe
-# the lruvec/page that triggered this rmap look-around. Derive swap eligibility
-# from the triggering page instead, matching the page-based Android backport.
+# Special VMAs such as VM_PFNMAP can contain anonymous COW pages and are not a
+# useful target for MGLRU locality look-around. Newer kernels skip them before
+# scanning adjacent PTEs; doing so also avoids pte_special()/device-map warning
+# paths. This maps directly to our old page-based implementation and does not
+# require folio-era get_pfn_folio()/can_swap infrastructure.
 # ---------------------------------------------------------------------------
 
 look_start = s.find("void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)")
@@ -63,33 +63,23 @@ if "A52 MGLRU Modern P3:" in look:
 
 look = replace_once(
     look,
-    "\tstruct page *page = pvmw->page;\n",
-    "\tstruct page *page = pvmw->page;\n"
-    "\t/* A52 MGLRU Modern P3: Android/common 5e1d25ac can_swap from trigger page */\n"
-    "\tbool can_swap = !page_is_file_lru(page);\n",
-    "trigger-page can_swap declaration",
-)
-
-look = replace_once(
-    look,
-    "page = get_pfn_page(pfn, memcg, pgdat, !walk || walk->can_swap);",
-    "page = get_pfn_page(pfn, memcg, pgdat, can_swap);",
-    "look-around get_pfn_page can_swap",
+    "\tif (spin_is_contended(pvmw->ptl))\n\t\treturn;\n\n",
+    "\tif (spin_is_contended(pvmw->ptl))\n\t\treturn;\n\n"
+    "\t/* A52 MGLRU Modern P3: upstream c28ac3c7 skip special VMAs */\n"
+    "\tif (pvmw->vma->vm_flags & VM_SPECIAL)\n"
+    "\t\treturn;\n\n",
+    "special-VMA guard",
 )
 
 # Structural safety checks inside this function only.
 checks = [
     (
         "P3 marker missing",
-        "A52 MGLRU Modern P3: Android/common 5e1d25ac can_swap from trigger page" in look,
+        "A52 MGLRU Modern P3: upstream c28ac3c7 skip special VMAs" in look,
     ),
     (
-        "trigger-page can_swap declaration missing",
-        "bool can_swap = !page_is_file_lru(page);" in look,
-    ),
-    (
-        "fixed get_pfn_page call missing",
-        "page = get_pfn_page(pfn, memcg, pgdat, can_swap);" in look,
+        "special-VMA guard missing",
+        "if (pvmw->vma->vm_flags & VM_SPECIAL)" in look,
     ),
     (
         "P2 notifier-aware clear was lost",
@@ -104,8 +94,10 @@ for label, ok in checks:
     if not ok:
         raise SystemExit(label)
 
-if "!walk || walk->can_swap" in look:
-    raise SystemExit("stale walk->can_swap remains in lru_gen_look_around")
+# This old v9-era MGLRU does not have the later get_pfn_page(..., can_swap)
+# helper. Refuse to silently grow such an unrelated dependency in P3.
+if "get_pfn_page(" in look:
+    raise SystemExit("unexpected newer get_pfn_page helper in old look-around path")
 
 s = s[:look_start] + look + s[look_end:]
 vmscan.write_text(s)
@@ -115,11 +107,10 @@ report_dir.mkdir(parents=True, exist_ok=True)
 (report_dir / "mglru-phase108-modern-p3.txt").write_text(
     "phase=108\n"
     "baseline_mglru=phase107-modern-p2\n"
-    "lookaround_can_swap_fix=5e1d25ac2ab670561949d82de7b5027e5a9676d5\n"
-    "upstream_mm=fdf19e8c8f1cdcee4eccf4c98a875f44f39d8b9d\n"
-    "can_swap_source=trigger-page-lru-type\n"
+    "special_vma_fix=c28ac3c7eb945fee6e20f47d576af68fdff1392a\n"
+    "special_vma_policy=skip-lookaround\n"
     "p2_notifier_aging=preserved\n"
-    "target=rmap-lookaround-swap-eligibility-correctness\n"
+    "target=rmap-lookaround-special-vma-correctness\n"
 )
 
 print("Phase108 Modern MGLRU P3 applied")

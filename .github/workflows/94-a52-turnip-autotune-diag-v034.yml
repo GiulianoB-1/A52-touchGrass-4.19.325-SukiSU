@@ -1,4 +1,4 @@
-name: 94 - A52 Turnip Autotune Diagnostic v0.34
+name: 94 - A52 Turnip Autotune Diagnostic v0.34a
 
 on:
   push:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   build:
-    name: Build v0.34 autotune diagnostic Turnip
+    name: Build v0.34a autotune logcat diagnostic Turnip
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -98,7 +98,7 @@ jobs:
           ccache --set-config=compression_level=6
           ccache --zero-stats
 
-      - name: Build v0.34 diagnostic Turnip
+      - name: Build v0.34a diagnostic Turnip
         run: |
           set -o pipefail
           chmod +x scripts/94_build_turnip_autotune_diag_v034.sh
@@ -108,7 +108,7 @@ jobs:
             "$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2-v034" \
             2>&1 | tee artifacts/turnip-v034-build.log
 
-      - name: Package persistent v0.34 diagnostic module
+      - name: Package persistent v0.34a diagnostic module
         run: |
           set -Eeuo pipefail
           chmod +x scripts/94_package_turnip_autotune_diag_v034.sh
@@ -117,39 +117,39 @@ jobs:
             "$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2-v034" \
             "$GITHUB_WORKSPACE/release-turnip-autotune-v034"
 
-      - name: Audit v0.34 diagnostic build
+      - name: Audit v0.34a diagnostic build
         run: |
           set -Eeuo pipefail
           DRIVER="$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2-v034/dist/vulkan.adreno.so"
           INFO="$GITHUB_WORKSPACE/artifacts/turnip-mesa-26.2.2-v034/BUILD-INFO.txt"
-          ZIP="$GITHUB_WORKSPACE/release-turnip-autotune-v034/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34-AUTOTUNE-DIAG-KSU.zip"
+          ZIP="$GITHUB_WORKSPACE/release-turnip-autotune-v034/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34a-AUTOTUNE-LOGCAT-DIAG-KSU.zip"
 
           test -s "$DRIVER"
           test -s "$INFO"
           test -s "$ZIP"
           grep -Fxq 'mesa_version=26.2.2' "$INFO"
           grep -Fxq 'kgsl_sync_merge=fixed-mixed-ts-syncfd-and-cross-queue-ts' "$INFO"
-          grep -Fxq 'runtime_logging=autotune-diagnostic-base-bandwidth-profiled' "$INFO"
-          grep -Fxq 'autotune_diagnostics=base-bandwidth-profiled-compile-time-logs' "$INFO"
-          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.34-vk1.4-autotune-diag'
-          unzip -p "$ZIP" module.prop | grep -Fxq 'versionCode=46'
+          grep -Fxq 'runtime_logging=autotune-diagnostic-warning-markers' "$INFO"
+          grep -Fxq 'autotune_diagnostics=base-bandwidth-profiled-warning-logcat-markers' "$INFO"
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.34a-vk1.4-autotune-logcat'
+          unzip -p "$ZIP" module.prop | grep -Fxq 'versionCode=47'
           unzip -l "$ZIP" | grep -Fq 'payload/vulkan.adreno.so'
-          strings "$DRIVER" | grep -Fq 'autotune: '
-          strings "$DRIVER" | grep -Fq 'autotune-bw '
-          strings "$DRIVER" | grep -Fq 'autotune-prof '
+          strings "$DRIVER" | grep -Fq 'TGAT_BASE autotune: '
+          strings "$DRIVER" | grep -Fq 'TGAT_BW autotune-bw '
+          strings "$DRIVER" | grep -Fq 'TGAT_PROF autotune-prof '
           file "$DRIVER" | grep -Fq 'ARM aarch64'
-          echo 'v034_autotune_diagnostic_audit=PASS'
+          echo 'v034a_autotune_logcat_diagnostic_audit=PASS'
 
       - name: Compiler cache stats
         if: always()
         run: ccache --show-stats || true
 
-      - name: Upload v0.34 diagnostic artifact
+      - name: Upload v0.34a diagnostic artifact
         uses: actions/upload-artifact@v4
         with:
-          name: A52-Turnip-Autotune-DIAG-v0.34
+          name: A52-Turnip-Autotune-LOGCAT-DIAG-v0.34a
           path: |
-            release-turnip-autotune-v034/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34-AUTOTUNE-DIAG-KSU.zip
+            release-turnip-autotune-v034/touchGrass-Turnip-A619-Mesa-26.2.2-v0.34a-AUTOTUNE-LOGCAT-DIAG-KSU.zip
             artifacts/turnip-v034-build.log
             artifacts/turnip-mesa-26.2.2-v034/BUILD-INFO.txt
           if-no-files-found: error

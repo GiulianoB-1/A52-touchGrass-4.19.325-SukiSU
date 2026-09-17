@@ -18,15 +18,25 @@ import sys
 p = Path(sys.argv[1])
 text = p.read_text()
 
-repls = [
-    ("version=0.32-vk1.4-syncmerge-fix", "version=0.34-vk1.4-autotune-diag"),
+# The v0.32 version string exists twice intentionally: once in module.prop and
+# once in the base package's final ZIP audit. Both must move together so the
+# generated module and its self-audit agree.
+old_version = "version=0.32-vk1.4-syncmerge-fix"
+new_version = "version=0.34-vk1.4-autotune-diag"
+version_count = text.count(old_version)
+if version_count != 2:
+    raise SystemExit(
+        f"package version anchor count for {old_version!r}: {version_count}")
+text = text.replace(old_version, new_version)
+
+single_repls = [
     ("versionCode=44", "versionCode=46"),
     (
         "description=A52 Turnip Vulkan 1.4 v0.32 sync-merge fix. Retains v0.31 efficiency policy and fixes Mesa 26.2.2 KGSL mixed timestamp/sync-FD merge bugs that caused a release-build null dereference in Warframe.",
         "description=A52 Turnip Vulkan 1.4 v0.34 diagnostic build from the confirmed v0.32 baseline. Functional rendering behavior is unchanged; Mesa autotune base/bandwidth/profiled logs are compiled in for GMEM-vs-SYSMEM analysis."
     ),
 ]
-for old, new in repls:
+for old, new in single_repls:
     count = text.count(old)
     if count != 1:
         raise SystemExit(f"package metadata anchor count for {old!r}: {count}")

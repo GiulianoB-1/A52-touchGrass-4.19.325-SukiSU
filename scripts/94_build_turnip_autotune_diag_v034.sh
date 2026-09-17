@@ -20,9 +20,9 @@ text = p.read_text()
 
 anchor = 'TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"\n'
 if text.count(anchor) != 1:
-    raise SystemExit(f"v0.34 injection anchor count: {text.count(anchor)}")
+    raise SystemExit(f"v0.34a injection anchor count: {text.count(anchor)}")
 
-inject = r'''echo "==> Enable v0.34 Turnip autotune diagnostics"
+inject = r'''echo "==> Enable v0.34a Turnip autotune diagnostics"
 python3 - "$SRC" <<'PYDIAG'
 from pathlib import Path
 import re
@@ -44,31 +44,45 @@ for macro in macros:
     if count != 1:
         raise SystemExit(f"autotune diagnostic regex anchor count for {macro}: {count}")
 
+# Android production logging can discard Mesa INFO messages.  Keep Mesa's
+# existing diagnostic payloads intact, but promote them to WARNING and give
+# each family a unique marker that is trivial to capture from logcat.
+log_repls = (
+    ('mesa_logi("autotune: "', 'mesa_logw("TGAT_BASE autotune: "'),
+    ('mesa_logi("autotune-bw %016"', 'mesa_logw("TGAT_BW autotune-bw %016"'),
+    ('mesa_logi("autotune-prof %016"', 'mesa_logw("TGAT_PROF autotune-prof %016"'),
+)
+for old, new in log_repls:
+    count = text.count(old)
+    if count < 1:
+        raise SystemExit(f"autotune warning-log anchor missing for {old!r}")
+    text = text.replace(old, new)
+
 p.write_text(text)
 
 patched = p.read_text()
 for macro in macros:
     if not re.search(rf"(?m)^#define[ \\t]+{re.escape(macro)}[ \\t]+1[ \\t]*$", patched):
-        raise SystemExit(f"v0.34 autotune diagnostic macro audit failed: {macro}")
+        raise SystemExit(f"v0.34a autotune diagnostic macro audit failed: {macro}")
 
 for needle in (
-    'mesa_logi("autotune: "',
-    'mesa_logi("autotune-bw %016"',
-    'mesa_logi("autotune-prof %016"',
+    'mesa_logw("TGAT_BASE autotune: "',
+    'mesa_logw("TGAT_BW autotune-bw %016"',
+    'mesa_logw("TGAT_PROF autotune-prof %016"',
 ):
     if needle not in patched:
-        raise SystemExit(f"v0.34 autotune diagnostic log audit failed: {needle}")
+        raise SystemExit(f"v0.34a autotune warning log audit failed: {needle}")
 
-print("source_audit=Turnip autotune base logging enabled:PASS")
-print("source_audit=Turnip autotune bandwidth logging enabled:PASS")
-print("source_audit=Turnip autotune profiled logging enabled:PASS")
+print("source_audit=Turnip autotune base warning logging enabled:PASS")
+print("source_audit=Turnip autotune bandwidth warning logging enabled:PASS")
+print("source_audit=Turnip autotune profiled warning logging enabled:PASS")
 PYDIAG
 
 '''
 text = text.replace(anchor, inject + anchor, 1)
 
 old_meta = 'runtime_logging=errors-warnings-only-no-bringup-success-traces\n'
-new_meta = 'runtime_logging=autotune-diagnostic-base-bandwidth-profiled\n'
+new_meta = 'runtime_logging=autotune-diagnostic-warning-markers\n'
 if text.count(old_meta) != 1:
     raise SystemExit(f"runtime logging metadata anchor count: {text.count(old_meta)}")
 text = text.replace(old_meta, new_meta, 1)
@@ -78,7 +92,7 @@ if text.count(mode_anchor) != 1:
     raise SystemExit(f"BUILD-INFO diagnostic anchor count: {text.count(mode_anchor)}")
 text = text.replace(
     mode_anchor,
-    mode_anchor + 'autotune_diagnostics=base-bandwidth-profiled-compile-time-logs\n',
+    mode_anchor + 'autotune_diagnostics=base-bandwidth-profiled-warning-logcat-markers\n',
     1,
 )
 

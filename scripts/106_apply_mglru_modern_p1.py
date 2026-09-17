@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CI entry point: exact baseline -> MGLRU P1/P2/P3 -> MGLRU diag -> scheduler efficiency P1
+# CI entry point: exact baseline -> MGLRU P1/P2/P3 -> diag P1/P2 -> scheduler efficiency P1
 from pathlib import Path
 import subprocess
 import sys
@@ -13,12 +13,13 @@ p1 = here / "106_apply_mglru_modern_p1_core.py"
 p2 = here / "107_apply_mglru_modern_p2.py"
 p3 = here / "108_apply_mglru_modern_p3.py"
 diag = here / "111_apply_mglru_power_diag_p1.py"
+recorder = here / "112_apply_mglru_power_recorder_p2.py"
 eevdf = here / "109_apply_eevdf_efficiency_p1.py"
 eevdf_finalize = here / "109b_finalize_eevdf_efficiency_p1.py"
 uclamp = here / "110_apply_uclamp_efficiency_p1.py"
 uclamp_finalize = here / "110b_finalize_uclamp_efficiency_p1.py"
 
-for script in (p1, p2, p3, diag, eevdf, eevdf_finalize, uclamp, uclamp_finalize):
+for script in (p1, p2, p3, diag, recorder, eevdf, eevdf_finalize, uclamp, uclamp_finalize):
     if not script.is_file():
         raise SystemExit(f"missing chained script: {script}")
 
@@ -33,6 +34,9 @@ subprocess.run([sys.executable, str(p3), str(root)], check=True)
 
 print("Applying MGLRU power diagnostics P1")
 subprocess.run([sys.executable, str(diag), str(root)], check=True)
+
+print("Applying MGLRU power recorder P2")
+subprocess.run([sys.executable, str(recorder), str(root)], check=True)
 
 # Phase74 deliberately removed the stale EEVDF tick-deadline test because
 # update_curr() became responsible for deadline-expiry rescheduling. The later
@@ -88,7 +92,12 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "p3=c28ac3c7eb945fee6e20f47d576af68fdff1392a\n"
     "p3_target=rmap-lookaround-special-vma-correctness\n"
     "diag_p1=per-cpu-path-counters-only\n"
+    "diag_p2=runtime-gated-work-timing-flight-recorder\n"
+    "diag_p2_default_level=0\n"
     "diag_interface=/sys/kernel/mm/lru_gen/diag\n"
+    "recorder_control=/sys/kernel/mm/lru_gen/record\n"
+    "recorder_stats=/sys/kernel/mm/lru_gen/stats\n"
+    "recorder_trace=/sys/kernel/debug/lru_gen_trace\n"
 )
 (report_dir / "scheduler-efficiency-p1.txt").write_text(
     "experiment=scheduler-efficiency-p1\n"
@@ -103,5 +112,5 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "walt_schedutil=retained\n"
 )
 
-print("Modern MGLRU P1 + P2 + P3 + power diagnostics applied")
+print("Modern MGLRU P1 + P2 + P3 + power diagnostics P1/P2 applied")
 print("Scheduler efficiency P1 applied")

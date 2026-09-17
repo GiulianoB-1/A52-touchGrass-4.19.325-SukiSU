@@ -1,0 +1,188 @@
+name: 109 - A52 EEVDF + Uclamp Efficiency P1
+
+on:
+  push:
+    branches:
+      - agent/a52-eevdf-uclamp-efficiency-p1
+    paths:
+      - .github/workflows/109-a52-eevdf-uclamp-efficiency-p1-clang11.yml
+      - scripts/109_*
+      - scripts/110_*
+      - scripts/111_*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-eevdf-uclamp-efficiency-p1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build EEVDF + Uclamp Efficiency P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-eevdf-uclamp-eff-p1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-fuse-neg-probe-btp2c-${{ runner.os }}-
+            a52xq-u17-ccache-${{ runner.os }}-
+            a52xq-4.19.206-eevdf-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Reconstruct baseline 35199901520 and apply scheduler fixes
+        run: |
+          set -o pipefail
+          chmod +x scripts/111_rebuild_baseline_35199901520_with_sched_fixes.sh
+          ./scripts/111_rebuild_baseline_35199901520_with_sched_fixes.sh \
+            2>&1 | tee artifacts/workflow109-full.log
+
+      - name: Audit scheduler fixes in built tree
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fq 'A52 EEVDF post-6.6 protection correctness' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'protection_model=vprot' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'expired || !eevdf_protect_slice(curr)' "$KERNEL/kernel/sched/fair.c"
+          ! grep -Fq 'curr->vlag == curr->deadline' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'A52 uclamp/CASS efficiency: clamp-only wake placement' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-bounds-only task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          ! grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_ANDROID_BINDERFS=y' "$KERNEL/out/.config"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Modern P1: Android17 9eff4247' "$KERNEL/mm/vmscan.c"
+          git -C "$KERNEL" diff --check
+          cat artifacts/eevdf-uclamp-efficiency-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package EEVDF + Uclamp Efficiency P1 ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-eevdf-uclamp-eff-p1.sh
+
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-eevdf-uclamp-eff-p1.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-eevdf-uclamp-eff-p1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-eevdf-uclamp-eff-p1.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected AnyKernel boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          s = s.replace(
+              'kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0',
+              'kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + EEVDF Uclamp Efficiency P1',
+              1,
+          )
+          s = s.replace(
+              'touchGrass-A52xq-Linux-$TARGET_VERSION-ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip',
+              'touchGrass-A52xq-Linux-$TARGET_VERSION-ReSukiSU-v4.1.0-EEVDF-UCLAMP-EFF-P1-FLASHABLE.zip',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          chmod +x scripts/.package-eevdf-uclamp-eff-p1.sh
+          ./scripts/.package-eevdf-uclamp-eff-p1.sh \
+            4.19.206 \
+            "$IMAGE" \
+            packaging/AnyKernel3 \
+            release
+          rm -f scripts/.package-eevdf-uclamp-eff-p1.sh
+
+      - name: Verify flashable package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*EEVDF-UCLAMP-EFF-P1-FLASHABLE.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -tq "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'EEVDF Uclamp Efficiency P1'
+          sha256sum "$ZIP" | tee artifacts/eevdf-uclamp-efficiency-package.sha256
+          unzip -l "$ZIP" | tee artifacts/eevdf-uclamp-efficiency-package-list.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-eevdf-uclamp-eff-p1-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-4.19.206-EEVDF-UCLAMP-EFFICIENCY-P1
+          path: |
+            release/*EEVDF-UCLAMP-EFF-P1-FLASHABLE.zip
+            release/*EEVDF-UCLAMP-EFF-P1-FLASHABLE.zip.sha256
+            release/*EEVDF-UCLAMP-EFF-P1-FLASHABLE-VERIFICATION.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload scheduler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-eevdf-uclamp-efficiency-p1-diagnostics
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

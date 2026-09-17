@@ -90,8 +90,95 @@ new_bounds = '''def function_bounds(text, name):
 '''
 if old_bounds not in recorder_text:
     raise SystemExit("MGLRU recorder P2: function_bounds patcher anchor changed")
-recorder.write_text(recorder_text.replace(old_bounds, new_bounds, 1))
+recorder_text = recorder_text.replace(old_bounds, new_bounds, 1)
 print("Hardened MGLRU recorder function-definition parser")
+
+# The v9-era scan_pages() does not simply `return scanned`. It reports progress
+# as `isolated || !remaining ? scanned : 0`, while scanned/sorted/isolated still
+# describe real work done internally. Preserve that exact return contract and
+# record the work independently, including the zero-generation early exit.
+old_scan = '''def mutate_scan(func):
+    func = add_start_decl(func)
+    returns = list(re.finditer(r"(?m)^(\\s*)return\\s+scanned\\s*;", func))
+    if len(returns) != 1:
+        raise SystemExit(f"scan_pages: expected one return scanned, found {len(returns)}")
+    m = returns[0]
+    indent = m.group(1)
+    done = r'''if (unlikely(READ_ONCE(mglru_record_level) >= 1)) {
+\t\t\tunsigned long a52_dur = 0;
+
+\t\t\tthis_cpu_add(mglru_rec_scan_scanned, scanned);
+\t\t\tthis_cpu_add(mglru_rec_scan_sorted, sorted);
+\t\t\tthis_cpu_add(mglru_rec_scan_isolated, isolated);
+\t\t\tif (a52_rec_start_ns) {
+\t\t\t\ta52_dur = (unsigned long)ktime_get_ns() - a52_rec_start_ns;
+\t\t\t\tthis_cpu_add(mglru_rec_scan_time_ns, a52_dur);
+\t\t\t\tif (a52_dur >= MGLRU_REC_SLOW_NS)
+\t\t\t\t\tthis_cpu_inc(mglru_rec_scan_slow);
+\t\t\t}
+\t\t\tmglru_rec_event(MGLRU_REC_SCAN,
+\t\t\t\t\t(unsigned char)((type & 0xf) | ((tier & 0xf) << 4)),
+\t\t\t\t\tscanned, sorted, isolated, a52_dur);
+\t\t}
+\t\t'''
+    return func[:m.start()] + indent + done + "return scanned;" + func[m.end():]
+'''
+new_scan = '''def mutate_scan(func):
+    func = add_start_decl(func)
+
+    early = "if (get_nr_gens(lruvec, type) == MIN_NR_GENS)\\n\\t\\treturn 0;"
+    if func.count(early) != 1:
+        raise SystemExit(f"scan_pages: expected one MIN_NR_GENS early return, found {func.count(early)}")
+    early_new = r'''if (get_nr_gens(lruvec, type) == MIN_NR_GENS) {
+\t\tif (unlikely(READ_ONCE(mglru_record_level) >= 1)) {
+\t\t\tunsigned long a52_dur = 0;
+
+\t\t\tif (a52_rec_start_ns) {
+\t\t\t\ta52_dur = (unsigned long)ktime_get_ns() - a52_rec_start_ns;
+\t\t\t\tthis_cpu_add(mglru_rec_scan_time_ns, a52_dur);
+\t\t\t\tif (a52_dur >= MGLRU_REC_SLOW_NS)
+\t\t\t\t\tthis_cpu_inc(mglru_rec_scan_slow);
+\t\t\t}
+\t\t\tmglru_rec_event(MGLRU_REC_SCAN,
+\t\t\t\t\t(unsigned char)((type & 0xf) | ((tier & 0xf) << 4)),
+\t\t\t\t\t0, 0, 0, a52_dur);
+\t\t}
+\t\treturn 0;
+\t}'''
+    func = func.replace(early, early_new, 1)
+
+    final = "return isolated || !remaining ? scanned : 0;"
+    if func.count(final) != 1:
+        raise SystemExit(f"scan_pages: expected one v9 return contract, found {func.count(final)}")
+    final_new = r'''{
+\t\tint a52_ret = isolated || !remaining ? scanned : 0;
+
+\t\tif (unlikely(READ_ONCE(mglru_record_level) >= 1)) {
+\t\t\tunsigned long a52_dur = 0;
+
+\t\t\tthis_cpu_add(mglru_rec_scan_scanned, scanned);
+\t\t\tthis_cpu_add(mglru_rec_scan_sorted, sorted);
+\t\t\tthis_cpu_add(mglru_rec_scan_isolated, isolated);
+\t\t\tif (a52_rec_start_ns) {
+\t\t\t\ta52_dur = (unsigned long)ktime_get_ns() - a52_rec_start_ns;
+\t\t\t\tthis_cpu_add(mglru_rec_scan_time_ns, a52_dur);
+\t\t\t\tif (a52_dur >= MGLRU_REC_SLOW_NS)
+\t\t\t\t\tthis_cpu_inc(mglru_rec_scan_slow);
+\t\t\t}
+\t\t\tmglru_rec_event(MGLRU_REC_SCAN,
+\t\t\t\t\t(unsigned char)((type & 0xf) | ((tier & 0xf) << 4)),
+\t\t\t\t\tscanned, sorted, isolated, a52_dur);
+\t\t}
+\t\treturn a52_ret;
+\t}'''
+    return func.replace(final, final_new, 1)
+'''
+if old_scan not in recorder_text:
+    raise SystemExit("MGLRU recorder P2: mutate_scan patcher anchor changed")
+recorder_text = recorder_text.replace(old_scan, new_scan, 1)
+print("Adapted recorder to v9 MGLRU scan_pages return contract")
+
+recorder.write_text(recorder_text)
 
 # P1 diagnostics can leave more than one debugfs include in the reconstructed
 # Samsung source. Recorder P2 only needs ktime.h to exist, so seed it at the

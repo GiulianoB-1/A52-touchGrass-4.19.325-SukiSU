@@ -35,8 +35,8 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "p1=runtime-proven\n"
     "p2=runtime-proven\n"
     "p2_mmu_notifier_young_fix=1d4832becdc2cdb2cffe2a6050c9d9fd8ff1c58c\n"
-    "p3=5e1d25ac2ab670561949d82de7b5027e5a9676d5\n"
-    "p3_target=rmap-lookaround-can_swap-correctness\n"
+    "p3=c28ac3c7eb945fee6e20f47d576af68fdff1392a\n"
+    "p3_target=rmap-lookaround-special-vma-correctness\n"
 )
 
 print("Modern MGLRU P1 + P2 + P3 applied")

@@ -1,0 +1,33 @@
+name: 109 - A52 EEVDF + Uclamp Efficiency P1 Launcher
+
+on:
+  push:
+    branches:
+      - agent/a52-eevdf-uclamp-efficiency-p1
+    paths:
+      - scripts/106_apply_mglru_modern_p1.py
+      - scripts/109_*
+      - scripts/110_*
+      - .github/workflows/109-a52-eevdf-uclamp-efficiency-launch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-baseline-workflow:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch exact baseline workflow on this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          echo "Dispatching workflow 106 at ref $REF"
+          gh workflow run 106-a52-mglru-modern-p1-clang11.yml \
+            --repo "$REPO" \
+            --ref "$REF"
+          echo "Dispatched. Baseline provenance: run 35199901520 / commit 3de2b4cdb394a1c13c8fbfc68e8a081c8aa6a022"

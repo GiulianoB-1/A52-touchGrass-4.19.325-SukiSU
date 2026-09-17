@@ -38,9 +38,9 @@ test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
 grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
 grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' "$REC"
 grep -Fq 'Attempted to kill init! exitcode=0x%08x' "$EXIT"
-grep -Fq 'void do_exit(long code)' "$EXIT"
-grep -Fq 'void do_group_exit(int exit_code)' "$EXIT"
-grep -Fq 'void make_task_dead(int signr)' "$EXIT"
+grep -Fq 'void __noreturn do_exit(long code)' "$EXIT"
+grep -Fq 'do_group_exit(int exit_code)' "$EXIT"
+grep -Fq 'void __noreturn make_task_dead(int signr)' "$EXIT"
 
 cp phase346-gki-out/config/final.config /tmp/p357-base.config
 cp "$REC" /tmp/p357-rec-before

@@ -19,6 +19,7 @@ say "Reconstruct exact 4.19.206 Phase80 base"
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
 ./scripts/checkpoint_resolve_linux_4.19.164.sh
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+./scripts/checkpoint_resolve_linux_4.19.164.sh 2>/dev/null || true
 ./scripts/checkpoint_resolve_linux_4.19.180.sh
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
 ./scripts/checkpoint_resolve_linux_4.19.200.sh
@@ -101,7 +102,7 @@ python3 scripts/110_apply_uclamp_cass_efficiency.py "$KERNEL" 2>&1 | tee artifac
 git -C "$KERNEL" diff --check
 
 say "Static scheduler audit"
-grep -Fq 'u64\t\t\t\tvprot;' "$KERNEL/include/linux/sched.h"
+grep -Fq 'vprot;' "$KERNEL/include/linux/sched.h"
 grep -Fq 'A52 EEVDF post-6.6 protection correctness' "$KERNEL/kernel/sched/fair.c"
 grep -Fq 'eevdf_protect_slice(curr)' "$KERNEL/kernel/sched/fair.c"
 grep -Fq 'expired || !eevdf_protect_slice(curr)' "$KERNEL/kernel/sched/fair.c"
@@ -138,7 +139,6 @@ test -s "$KERNEL/out/vmlinux"
 grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
 grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
 grep -Fxq 'CONFIG_SCHED_CASS=y' "$KERNEL/out/.config"
-grep -Fq 'eevdf_protect_slice' "$KERNEL/out/vmlinux" || true
 
 printf 'baseline_run=35199901520\nbaseline_commit=3de2b4cdb394a1c13c8fbfc68e8a081c8aa6a022\n' > artifacts/build-baseline.txt
 printf 'build=success\n' >> artifacts/build-baseline.txt

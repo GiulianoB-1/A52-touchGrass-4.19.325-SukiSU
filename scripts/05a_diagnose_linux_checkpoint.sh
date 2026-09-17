@@ -6,7 +6,10 @@ FROM_VERSION=${1:?usage: $0 FROM_VERSION TARGET_VERSION}
 TARGET_VERSION=${2:?usage: $0 FROM_VERSION TARGET_VERSION}
 FROM_TAG="v$FROM_VERSION"
 TO_TAG="v$TARGET_VERSION"
-STABLE_DIR="$WORKSPACE/linux-stable-checkpoint-$TARGET_VERSION"
+# Keep one persistent Linux-stable object cache for the whole workflow run.
+# All checkpoint invocations reuse the same repository instead of downloading
+# a new shallow repository for every version range.
+STABLE_DIR="$WORKSPACE/linux-stable-checkpoint-cache"
 PATCH_FILE="$ARTIFACTS_DIR/linux-$FROM_VERSION-to-$TARGET_VERSION.patch"
 APPLY_LOG="$LOG_DIR/apply-$FROM_TAG-to-$TO_TAG.log"
 REPORT="$ARTIFACTS_DIR/checkpoint-$FROM_VERSION-to-$TARGET_VERSION.txt"
@@ -24,11 +27,22 @@ if find "$KERNEL_DIR" -type f -name '*.rej' -print -quit | grep -q .; then
 fi
 
 info "Fetching official Linux stable tags $FROM_TAG and $TO_TAG"
-rm -rf "$STABLE_DIR"
-git init -q "$STABLE_DIR"
-git -C "$STABLE_DIR" remote add origin "$LINUX_STABLE_REPO"
-git -C "$STABLE_DIR" fetch --quiet --depth=1000 origin "refs/tags/$TO_TAG:refs/tags/$TO_TAG"
-git -C "$STABLE_DIR" fetch --quiet --depth=1 origin "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"
+if [ ! -d "$STABLE_DIR/.git" ]; then
+  rm -rf "$STABLE_DIR"
+  git init -q "$STABLE_DIR"
+  git -C "$STABLE_DIR" remote add origin "$LINUX_STABLE_REPO"
+  git -C "$STABLE_DIR" config gc.auto 0
+  git -C "$STABLE_DIR" config maintenance.auto false
+fi
+
+# Fetch both endpoints in a single transaction and at a single depth.  The old
+# two-fetch sequence rewrote .git/shallow twice and can race on newer GitHub
+# runner Git versions with: "fatal: shallow file has changed since we read it".
+# Reusing STABLE_DIR also caches already-downloaded stable objects across all
+# checkpoint calls in this workflow.
+git -C "$STABLE_DIR" fetch --quiet --depth=1000 origin \
+  "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG" \
+  "refs/tags/$TO_TAG:refs/tags/$TO_TAG"
 
 from_sha=$(git -C "$STABLE_DIR" rev-parse "$FROM_TAG^{commit}")
 to_sha=$(git -C "$STABLE_DIR" rev-parse "$TO_TAG^{commit}")
@@ -171,6 +185,7 @@ fi
   printf 'apply_exit=%s\n' "$apply_rc"
   printf 'reject_count=%s\n' "$reject_count"
   printf 'reported_kernel_version=%s\n' "$reported_version"
+  printf 'stable_object_cache=%s\n' "$STABLE_DIR"
   if test "$reject_count" -eq 0 && test "$reported_version" = "$TARGET_VERSION"; then
     printf 'result=clean-checkpoint-apply-pending-overlap-audit\n'
   else
@@ -179,5 +194,6 @@ fi
   printf 'flashable=no\n'
 } | tee "$REPORT"
 
-rm -rf "$STABLE_DIR"
+# Do not delete STABLE_DIR. It is intentionally reused by the next checkpoint
+# and is captured by the existing prepared-source cache when that cache is saved.
 info "Checkpoint diagnostics complete: $FROM_VERSION -> $TARGET_VERSION"

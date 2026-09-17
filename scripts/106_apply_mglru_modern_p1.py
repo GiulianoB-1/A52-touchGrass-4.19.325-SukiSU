@@ -2,6 +2,7 @@
 # CI entry point: exact baseline -> runtime-proven P1 -> Modern P2
 # P2 rerun: baseline-safe MMU-notifier include insertion
 # CPU UV probe: read-only qcom-cpufreq-hw hardware voltage LUT exposure
+# Retrigger after fixing generated C whitespace/escaping in the CPU UV probe.
 from pathlib import Path
 import subprocess
 import sys

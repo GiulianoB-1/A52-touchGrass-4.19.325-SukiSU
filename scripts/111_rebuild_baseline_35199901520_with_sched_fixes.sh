@@ -19,7 +19,6 @@ say "Reconstruct exact 4.19.206 Phase80 base"
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
 ./scripts/checkpoint_resolve_linux_4.19.164.sh
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
-./scripts/checkpoint_resolve_linux_4.19.164.sh 2>/dev/null || true
 ./scripts/checkpoint_resolve_linux_4.19.180.sh
 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
 ./scripts/checkpoint_resolve_linux_4.19.200.sh

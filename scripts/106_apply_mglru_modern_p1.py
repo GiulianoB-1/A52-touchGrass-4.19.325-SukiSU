@@ -36,17 +36,68 @@ subprocess.run([sys.executable, str(p3), str(root)], check=True)
 print("Applying MGLRU power diagnostics P1")
 subprocess.run([sys.executable, str(diag), str(root)], check=True)
 
+# Recorder P2 originally used an overly broad function regex. Replace only that
+# helper in the checked-out patcher with the definition finder already proven by
+# diagnostic P1. This is a CI patcher fix only; it does not alter kernel policy.
+recorder_text = recorder.read_text()
+old_bounds = '''def function_bounds(text, name):
+    m = re.search(rf"(?m)^[ \\t]*(?:static[ \\t]+)?(?:inline[ \\t]+)?[^\\n;]*\\b{re.escape(name)}[ \\t]*\\([^;]*?\\)\\s*\\{{", text, re.S)
+    if not m:
+        raise SystemExit(f"{name}: definition not found")
+    brace = text.find("{", m.start(), m.end())
+    depth = 0
+    i = brace
+    while i < len(text):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return m.start(), brace, i + 1
+        i += 1
+    raise SystemExit(f"{name}: unbalanced braces")
+'''
+new_bounds = '''def function_bounds(text, name):
+    return_type = r"(?:bool|int|void|long|unsigned\\s+long|unsigned\\s+int|struct\\s+[A-Za-z_]\\w*\\s*\\*)"
+    pat = re.compile(
+        rf"(?m)^[ \\t]*(?:static[ \\t]+)?(?:inline[ \\t]+)?{return_type}[ \\t]+{re.escape(name)}[ \\t]*\\("
+    )
+    hits = []
+    for m in pat.finditer(text):
+        brace = text.find("{", m.end())
+        semi = text.find(";", m.end())
+        if brace < 0 or brace - m.start() > 2000:
+            continue
+        if semi >= 0 and semi < brace:
+            continue
+        hits.append((m.start(), brace))
+    if len(hits) != 1:
+        raise SystemExit(f"{name}: expected one function definition, found {len(hits)}")
+    start, brace = hits[0]
+    depth = 0
+    i = brace
+    while i < len(text):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return start, brace, i + 1
+        i += 1
+    raise SystemExit(f"{name}: unbalanced braces")
+'''
+if old_bounds not in recorder_text:
+    raise SystemExit("MGLRU recorder P2: function_bounds patcher anchor changed")
+recorder.write_text(recorder_text.replace(old_bounds, new_bounds, 1))
+print("Hardened MGLRU recorder function-definition parser")
+
 # P1 diagnostics can leave more than one debugfs include in the reconstructed
 # Samsung source. Recorder P2 only needs ktime.h to exist, so seed it at the
 # first include block instead of depending on a globally unique debugfs anchor.
-# Also normalize the two look-around statements consumed by recorder P2. The
-# old MGLRU source has changed whitespace/line wrapping across our reconstructed
-# checkpoints, but these regexes require the exact semantics and exactly one
-# matching statement, so this is formatting normalization only.
 vmscan_c = root / "mm/vmscan.c"
 vmscan_text = vmscan_c.read_text()
-changed = False
-
 if "#include <linux/ktime.h>" not in vmscan_text:
     include_anchor = "#include <linux/debugfs.h>\n"
     include_pos = vmscan_text.find(include_anchor)
@@ -58,44 +109,8 @@ if "#include <linux/ktime.h>" not in vmscan_text:
         + "#include <linux/ktime.h>\n"
         + vmscan_text[include_pos:]
     )
-    changed = True
-    print("Seeded ktime include for MGLRU recorder P2")
-
-look_loop_exact = "for (i = 0, addr = start; addr != end; i++, addr += PAGE_SIZE) {"
-if look_loop_exact not in vmscan_text:
-    loop_re = re.compile(
-        r"for\s*\(\s*i\s*=\s*0\s*,\s*addr\s*=\s*start\s*;\s*"
-        r"addr\s*!=\s*end\s*;\s*i\+\+\s*,\s*addr\s*\+=\s*PAGE_SIZE\s*\)\s*\{"
-    )
-    loop_hits = list(loop_re.finditer(vmscan_text))
-    if len(loop_hits) != 1:
-        raise SystemExit(
-            f"MGLRU recorder P2: expected one semantic look-around loop, found {len(loop_hits)}"
-        )
-    vmscan_text = loop_re.sub(look_loop_exact, vmscan_text, count=1)
-    changed = True
-    print("Normalized MGLRU look-around PTE loop formatting")
-
-look_clear_exact = (
-    "if (!ptep_clear_young_notify(pvmw->vma, addr, pte + i))\n"
-    "\t\t\tcontinue;"
-)
-if look_clear_exact not in vmscan_text:
-    clear_re = re.compile(
-        r"if\s*\(\s*!ptep_clear_young_notify\s*\(\s*pvmw->vma\s*,\s*addr\s*,\s*"
-        r"pte\s*\+\s*i\s*\)\s*\)\s*continue\s*;"
-    )
-    clear_hits = list(clear_re.finditer(vmscan_text))
-    if len(clear_hits) != 1:
-        raise SystemExit(
-            f"MGLRU recorder P2: expected one look-around young-clear statement, found {len(clear_hits)}"
-        )
-    vmscan_text = clear_re.sub(look_clear_exact, vmscan_text, count=1)
-    changed = True
-    print("Normalized MGLRU look-around young-clear formatting")
-
-if changed:
     vmscan_c.write_text(vmscan_text)
+    print("Seeded ktime include for MGLRU recorder P2")
 
 print("Applying MGLRU power recorder P2")
 subprocess.run([sys.executable, str(recorder), str(root)], check=True)

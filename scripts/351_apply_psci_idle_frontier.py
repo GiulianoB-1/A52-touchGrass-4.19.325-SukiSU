@@ -171,10 +171,17 @@ def patch_psci(text: str) -> str:
                "domain/cpu_pm entry")
 
     text = one(text,
-               "\tpm_runtime_put_sync_suspend(pd_dev);\n",
-               "\ta52_p351_mark(6U, (u32)idx, 0U);\n"
-               "\tp351_pmret = pm_runtime_put_sync_suspend(pd_dev);\n"
-               "\ta52_p351_mark(7U, (u32)idx, (u32)p351_pmret);\n",
+               "\tif (s2idle)\n"
+               "\t\tdev_pm_genpd_suspend(pd_dev);\n"
+               "\telse\n"
+               "\t\tpm_runtime_put_sync_suspend(pd_dev);\n",
+               "\tif (s2idle)\n"
+               "\t\tdev_pm_genpd_suspend(pd_dev);\n"
+               "\telse {\n"
+               "\t\ta52_p351_mark(6U, (u32)idx, 0U);\n"
+               "\t\tp351_pmret = pm_runtime_put_sync_suspend(pd_dev);\n"
+               "\t\ta52_p351_mark(7U, (u32)idx, (u32)p351_pmret);\n"
+               "\t}\n",
                "runtime PM put boundary")
 
     text = one(text,
@@ -185,20 +192,29 @@ def patch_psci(text: str) -> str:
                "PSCI suspend boundary")
 
     text = one(text,
-               "\tpm_runtime_get_sync(pd_dev);\n\n\tcpu_pm_exit();\n",
-               "\ta52_p351_mark(10U, state, 0U);\n"
-               "\tp351_pmret = pm_runtime_get_sync(pd_dev);\n"
-               "\ta52_p351_mark(11U, state, (u32)p351_pmret);\n\n"
+               "\telse\n\t\tpm_runtime_get_sync(pd_dev);\n\n"
+               "\ttrace_android_vh_cpuidle_psci_exit(dev, s2idle);\n",
+               "\telse {\n"
+               "\t\ta52_p351_mark(10U, state, 0U);\n"
+               "\t\tp351_pmret = pm_runtime_get_sync(pd_dev);\n"
+               "\t\ta52_p351_mark(11U, state, (u32)p351_pmret);\n"
+               "\t}\n\n"
+               "\ttrace_android_vh_cpuidle_psci_exit(dev, s2idle);\n",
+               "runtime PM get boundary")
+
+    text = one(text,
+               "\trcu_irq_exit_irqson();\n\n\tcpu_pm_exit();\n",
+               "\trcu_irq_exit_irqson();\n\n"
                "\ta52_p351_mark(12U, state, 0U);\n"
                "\tcpu_pm_exit();\n"
                "\ta52_p351_mark(13U, state, (u32)ret);\n",
-               "runtime PM get/cpu_pm exit boundaries")
+               "cpu_pm exit boundary")
 
     # Simple PSCI path: only trace the deepest simple state to avoid turning
     # every shallow idle/WFI into persistent writes.
     old_simple = (
         "static int psci_enter_idle_state(struct cpuidle_device *dev,\n"
-        "\t\t\t\t struct cpuidle_driver *drv, int idx)\n"
+        "\t\t\t\tstruct cpuidle_driver *drv, int idx)\n"
         "{\n"
         "\tu32 *state = __this_cpu_read(psci_cpuidle_data.psci_states);\n\n"
         "\treturn psci_enter_state(idx, state[idx]);\n"
@@ -206,7 +222,7 @@ def patch_psci(text: str) -> str:
     )
     new_simple = (
         "static int psci_enter_idle_state(struct cpuidle_device *dev,\n"
-        "\t\t\t\t struct cpuidle_driver *drv, int idx)\n"
+        "\t\t\t\tstruct cpuidle_driver *drv, int idx)\n"
         "{\n"
         "\tu32 *state = __this_cpu_read(psci_cpuidle_data.psci_states);\n"
         "\tint ret;\n\n"
@@ -290,6 +306,14 @@ def validate(before_rec: str, after_rec: str, before_psci: str, after_psci: str)
     for token in protected:
         if before_psci.count(token) != after_psci.count(token):
             raise SystemExit("Phase351 changed protected call count: " + token)
+
+    for token in (
+        "else {\n\t\ta52_p351_mark(6U",
+        "else {\n\t\ta52_p351_mark(10U",
+        "trace_android_vh_cpuidle_psci_exit(dev, s2idle);\n\n\trcu_irq_exit_irqson();\n\n\ta52_p351_mark(12U",
+    ):
+        if token not in after_psci:
+            raise SystemExit("Phase351 control-flow validation missing: " + token)
 
 
 def main() -> int:

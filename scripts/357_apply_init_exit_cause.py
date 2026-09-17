@@ -214,17 +214,14 @@ def patch_exit(text: str) -> str:
                "do_exit note")
 
     old = (
-        "\t\tif (unlikely(is_global_init(tsk)))\n"
         "\t\t\tpanic(\"Attempted to kill init! exitcode=0x%08x\\n\",\n"
         "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
     )
     new = (
-        "\t\tif (unlikely(is_global_init(tsk))) {\n"
         "\t\t\ta52_p357_persist_init_panic(code,\n"
         "\t\t\t\ttsk->signal->group_exit_code);\n"
         "\t\t\tpanic(\"Attempted to kill init! exitcode=0x%08x\\n\",\n"
         "\t\t\t\ttsk->signal->group_exit_code ?: (int)code);\n"
-        "\t\t}\n"
     )
     text = one(text, old, new, "global-init panic")
 

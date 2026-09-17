@@ -30,6 +30,40 @@ subprocess.run([sys.executable, str(p2), str(root)], check=True)
 print("Applying Modern MGLRU P3")
 subprocess.run([sys.executable, str(p3), str(root)], check=True)
 
+# Phase74 deliberately removed the stale EEVDF tick-deadline test because
+# update_curr() became responsible for deadline-expiry rescheduling. The later
+# Linux run-to-parity protection fix needs a tick hook again, but for protection
+# expiry rather than deadline expiry. Normalize the current Phase74 shape into
+# the historical anchor consumed by 109; 109 immediately replaces it with the
+# new protection-aware form. This keeps the patch deterministic on the exact
+# 35199901520 reconstruction without changing runtime behavior in-between.
+fair_c = root / "kernel/sched/fair.c"
+fc = fair_c.read_text()
+phase74_tick = """\tif (cfs_rq->nr_running > 1 &&
+\t    likely(!sched_eevdf_enabled))
+\t\tcheck_preempt_tick(cfs_rq, curr);
+"""
+legacy_tick_anchor = """\tif (cfs_rq->nr_running > 1) {
+\t\tif (unlikely(sched_eevdf_enabled)) {
+\t\t\tif ((s64)(curr->vruntime - curr->deadline) >= 0)
+\t\t\t\tresched_curr(rq_of(cfs_rq));
+\t\t} else {
+\t\t\tcheck_preempt_tick(cfs_rq, curr);
+\t\t}
+\t}
+"""
+phase74_count = fc.count(phase74_tick)
+legacy_count = fc.count(legacy_tick_anchor)
+if phase74_count == 1 and legacy_count == 0:
+    fair_c.write_text(fc.replace(phase74_tick, legacy_tick_anchor, 1))
+    print("Normalized Phase74 EEVDF tick anchor for protection-aware P1")
+elif phase74_count == 0 and legacy_count == 1:
+    print("EEVDF tick anchor already normalized")
+else:
+    raise SystemExit(
+        f"EEVDF tick anchor shape mismatch: phase74={phase74_count} legacy={legacy_count}"
+    )
+
 print("Applying EEVDF efficiency/correctness P1")
 subprocess.run([sys.executable, str(eevdf), str(root)], check=True)
 subprocess.run([sys.executable, str(eevdf_finalize), str(root)], check=True)

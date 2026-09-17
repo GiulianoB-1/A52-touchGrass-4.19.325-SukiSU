@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CI entry point: exact baseline -> MGLRU P1/P2/P3 -> scheduler efficiency P1
+# CI entry point: exact baseline -> MGLRU P1/P2/P3 -> MGLRU diag -> scheduler efficiency P1
 from pathlib import Path
 import subprocess
 import sys
@@ -12,12 +12,13 @@ here = Path(__file__).resolve().parent
 p1 = here / "106_apply_mglru_modern_p1_core.py"
 p2 = here / "107_apply_mglru_modern_p2.py"
 p3 = here / "108_apply_mglru_modern_p3.py"
+diag = here / "111_apply_mglru_power_diag_p1.py"
 eevdf = here / "109_apply_eevdf_efficiency_p1.py"
 eevdf_finalize = here / "109b_finalize_eevdf_efficiency_p1.py"
 uclamp = here / "110_apply_uclamp_efficiency_p1.py"
 uclamp_finalize = here / "110b_finalize_uclamp_efficiency_p1.py"
 
-for script in (p1, p2, p3, eevdf, eevdf_finalize, uclamp, uclamp_finalize):
+for script in (p1, p2, p3, diag, eevdf, eevdf_finalize, uclamp, uclamp_finalize):
     if not script.is_file():
         raise SystemExit(f"missing chained script: {script}")
 
@@ -29,6 +30,9 @@ subprocess.run([sys.executable, str(p2), str(root)], check=True)
 
 print("Applying Modern MGLRU P3")
 subprocess.run([sys.executable, str(p3), str(root)], check=True)
+
+print("Applying MGLRU power diagnostics P1")
+subprocess.run([sys.executable, str(diag), str(root)], check=True)
 
 # Phase74 deliberately removed the stale EEVDF tick-deadline test because
 # update_curr() became responsible for deadline-expiry rescheduling. The later
@@ -83,6 +87,8 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "p2_mmu_notifier_young_fix=1d4832becdc2cdb2cffe2a6050c9d9fd8ff1c58c\n"
     "p3=c28ac3c7eb945fee6e20f47d576af68fdff1392a\n"
     "p3_target=rmap-lookaround-special-vma-correctness\n"
+    "diag_p1=per-cpu-path-counters-only\n"
+    "diag_interface=/sys/kernel/mm/lru_gen/diag\n"
 )
 (report_dir / "scheduler-efficiency-p1.txt").write_text(
     "experiment=scheduler-efficiency-p1\n"
@@ -97,5 +103,5 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "walt_schedutil=retained\n"
 )
 
-print("Modern MGLRU P1 + P2 + P3 applied")
+print("Modern MGLRU P1 + P2 + P3 + power diagnostics applied")
 print("Scheduler efficiency P1 applied")

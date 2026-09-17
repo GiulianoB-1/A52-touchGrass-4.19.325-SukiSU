@@ -1,4 +1,4 @@
-name: 111 - A52 CPU UV Probe Correct Baseline Cached
+name: 111 - A52 CPU UV P1 + Active GPU P3 Cached
 
 on:
   push:
@@ -7,13 +7,14 @@ on:
     paths:
       - .github/workflows/111-a52-cpu-uv-probe-correct-baseline-cached.yml
       - scripts/110_apply_cpu_uv_probe.py
+      - scripts/111_apply_cpu_uv_p1.py
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-cpu-uv-probe-correct-${{ github.ref }}
+  group: a52-cpu-uv-p1-p3-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -25,7 +26,7 @@ env:
 
 jobs:
   build:
-    name: Exact 35249413635 active-P3 baseline + CPU LUT probe
+    name: Exact 35249413635 active-P3 baseline + CPU UV P1
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -50,8 +51,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-cpu-uv-probe-correct-${{ runner.os }}-v1
+          key: a52xq-cpu-uv-p1-p3-${{ runner.os }}-v1
           restore-keys: |
+            a52xq-cpu-uv-p1-p3-${{ runner.os }}-
+            a52xq-cpu-uv-probe-correct-${{ runner.os }}-
             a52xq-cpu-uv-probe-${{ runner.os }}-
             a52xq-base35196552336-fuse740-${{ runner.os }}-
             a52xq-fuse-740-passthrough-btp2c-${{ runner.os }}-
@@ -125,13 +128,31 @@ jobs:
           grep -Fq 'vc = (raw & GENMASK(21, 16)) >> 16;' "$SRC"
           git -C "$KERNEL" diff --check
 
+      - name: Apply CPU UV P1 2208 MHz 924 to 916 mV
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/111_apply_cpu_uv_p1.py
+          python3 scripts/111_apply_cpu_uv_p1.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/cpu-uv-p1-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          SRC="$KERNEL/drivers/cpufreq/qcom-cpufreq-hw.c"
+          grep -Fq 'A52 CPU UV P1: policy6 2208 MHz 924 -> 916 mV with MMIO readback' "$SRC"
+          grep -Fq '#define A52_CPU_UV_P1_FREQ_KHZ 2208000U' "$SRC"
+          grep -Fq '#define A52_CPU_UV_P1_STOCK_MV 924U' "$SRC"
+          grep -Fq '#define A52_CPU_UV_P1_TARGET_MV 916U' "$SRC"
+          grep -Fq 'writel_relaxed(raw_target, base_volt + i * lut_row_size);' "$SRC"
+          grep -Fq 'raw_readback = readl_relaxed(base_volt + i * lut_row_size);' "$SRC"
+          grep -Fq 'cpufreq_freq_attr_ro(a52_cpu_uv_p1);' "$SRC"
+          grep -Fq '&a52_cpu_uv_p1,' "$SRC"
+          git -C "$KERNEL" diff --check
+
       - name: Build kernel
         run: |
           set -o pipefail
           echo '=== CCACHE BEFORE ==='
           ccache --show-stats || true
           ./scripts/57_build_resukisu_susfs_manual_detection.sh \
-            2>&1 | tee artifacts/cpu-uv-probe-correct-build.log
+            2>&1 | tee artifacts/cpu-uv-p1-p3active-build.log
           RC=${PIPESTATUS[0]}
           echo '=== CCACHE AFTER ==='
           ccache --show-stats || true
@@ -147,9 +168,11 @@ jobs:
           grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_TCP_CONG_BBR3=y' "$KERNEL/out/.config"
           grep -Fq 'A52 CPU UV PROBE: read-only qcom-cpufreq-hw voltage LUT' "$KERNEL/drivers/cpufreq/qcom-cpufreq-hw.c"
+          grep -Fq 'A52 CPU UV P1: policy6 2208 MHz 924 -> 916 mV with MMIO readback' "$KERNEL/drivers/cpufreq/qcom-cpufreq-hw.c"
           grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
           sed -n '/static void a52_a619_uv_p3_adjust_565_opp/,/^}/p' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c" | grep -Fq 'vlvl_tbl[target] = lowered;'
           grep -Fq 'FUSE_740_PASSTHROUGH_NEGOTIATED' "$KERNEL/fs/fuse/inode.c"
+          nm -n "$KERNEL/out/vmlinux" | grep -E ' [Tt] show_a52_cpu_uv_(probe|p1)$' | tee artifacts/cpu-uv-symbols.txt
 
       - name: Check out pinned AnyKernel3
         uses: actions/checkout@v4
@@ -159,15 +182,15 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package A52-CPU-UV-PROBE-P3ACTIVE.zip
+      - name: Package A52-CPU-UV-P1-P3ACTIVE.zip
         run: |
           set -Eeuo pipefail
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-cpu-uv-probe-p3active.sh
-          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-cpu-uv-probe-p3active.sh
-          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-cpu-uv-probe-p3active.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-cpu-uv-p1-p3active.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-cpu-uv-p1-p3active.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-cpu-uv-p1-p3active.sh
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('scripts/.package-cpu-uv-probe-p3active.sh')
+          p = Path('scripts/.package-cpu-uv-p1-p3active.sh')
           s = p.read_text()
           anchor = 'dump_boot;\nwrite_boot;'
           if s.count(anchor) != 1:
@@ -179,17 +202,17 @@ jobs:
               'write_boot;', 1)
           p.write_text(s)
           PY
-          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-cpu-uv-probe-p3active.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + GPU-UV-P3-ACTIVE + CPU-UV-PROBE + FUSE-7.40-NATIVE/' scripts/.package-cpu-uv-probe-p3active.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-CPU-UV-PROBE-P3ACTIVE.zip/' scripts/.package-cpu-uv-probe-p3active.sh
-          chmod +x scripts/.package-cpu-uv-probe-p3active.sh
-          ./scripts/.package-cpu-uv-probe-p3active.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
-          rm -f scripts/.package-cpu-uv-probe-p3active.sh
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-cpu-uv-p1-p3active.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + GPU-UV-P3-ACTIVE + CPU-UV-P1-2208-916mV + CPU-UV-PROBE + FUSE-7.40-NATIVE/' scripts/.package-cpu-uv-p1-p3active.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-CPU-UV-P1-P3ACTIVE.zip/' scripts/.package-cpu-uv-p1-p3active.sh
+          chmod +x scripts/.package-cpu-uv-p1-p3active.sh
+          ./scripts/.package-cpu-uv-p1-p3active.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-cpu-uv-p1-p3active.sh
 
       - name: Verify package
         run: |
           set -Eeuo pipefail
-          ZIP=release/A52-CPU-UV-PROBE-P3ACTIVE.zip
+          ZIP=release/A52-CPU-UV-P1-P3ACTIVE.zip
           test -s "$ZIP"
           unzip -p "$ZIP" anykernel.sh > artifacts/packaged-anykernel.sh
           grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";' artifacts/packaged-anykernel.sh
@@ -203,13 +226,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-cpu-uv-probe-correct-${{ runner.os }}-v1
+          key: a52xq-cpu-uv-p1-p3-${{ runner.os }}-v1
 
       - name: Upload flashable
         uses: actions/upload-artifact@v4
         with:
-          name: A52-CPU-UV-PROBE-P3ACTIVE
-          path: release/A52-CPU-UV-PROBE-P3ACTIVE.zip
+          name: A52-CPU-UV-P1-P3ACTIVE
+          path: release/A52-CPU-UV-P1-P3ACTIVE.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -217,7 +240,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: A52-CPU-UV-PROBE-P3ACTIVE-diag
+          name: A52-CPU-UV-P1-P3ACTIVE-diag
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14

@@ -103,8 +103,8 @@ pmd_locked = replace_once(
 )
 pmd_locked = replace_once(
     pmd_locked,
-    "pmdp_test_and_clear_young(vma, addr, pmd + i)",
-    "pmdp_clear_young_notify(vma, addr, pmd + i)",
+    """\t\tif (!pmdp_test_and_clear_young(vma, addr, pmd + i))\n\t\t\tgoto next;\n""",
+    """\t\tif (!pmdp_clear_young_notify(vma, addr, pmd + i))\n\t\t\tgoto next;\n""",
     "notifier-aware leaf PMD clear",
 )
 s = s[:pmd_locked_start] + pmd_locked + s[pmd_locked_end:]

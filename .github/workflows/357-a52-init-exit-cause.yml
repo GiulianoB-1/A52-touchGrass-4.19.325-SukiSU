@@ -1,0 +1,217 @@
+name: Phase357 - init exit cause
+run-name: Phase357 - init exit cause
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase346-dma-raw-v1
+    paths:
+      - .github/workflows/357-a52-init-exit-cause.yml
+      - scripts/357_apply_init_exit_cause.py
+      - scripts/357_ci_build_gki.sh
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  JOBS: '4'
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase357-on346-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase357 init exit cause
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+
+          python3 -m py_compile \
+            scripts/345_apply_dma_us_frontier.py \
+            scripts/346_apply_dma_raw.py \
+            scripts/357_apply_init_exit_cause.py
+
+          bash -n \
+            scripts/345_ci_build_gki.sh \
+            scripts/346_ci_build_gki.sh \
+            scripts/357_ci_build_gki.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/357_ci_build_gki.sh').read_text()
+          for token in (
+              'stage "obtain Phase346 baseline"',
+              'stage "apply init-exit cause probe"',
+              'stage "scope audit"',
+              'stage "compile"',
+              'stage "package"',
+              'stage "complete"',
+          ):
+              if s.count(token) != 1:
+                  raise SystemExit('Phase357 structural audit failed: '+token)
+          print('Phase357 build-script structural audit: PASS')
+          PY
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j"$JOBS" --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase345 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Build Phase346 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Validate Phase346 baseline
+        run: |
+          set -Eeuo pipefail
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/compile/Image
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+          grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' gki/common/kernel/exit.c
+
+      - name: Save Phase346 baseline cache v2
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Build Phase357
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Upload
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE357-INIT-EXIT-CAUSE-${{ github.run_number }}
+          path: phase357-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE357-INIT-EXIT-CAUSE-${{ github.run_number }}-BOOT-IMG
+          path: phase357-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE357-INIT-EXIT-CAUSE-${{ github.run_number }}-FAILED
+          path: phase357-gki-failure/
+          if-no-files-found: warn
+          retention-days: 30

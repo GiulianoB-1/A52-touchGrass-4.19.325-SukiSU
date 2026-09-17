@@ -82,7 +82,7 @@ struct a52_r354_meta {
 	u32 version;
 	u32 cpu_count;
 	u32 slot_bytes;
-	u64 reserved[8];
+	u64 reserved[9];
 };
 
 static void *a52_r354_sideband;

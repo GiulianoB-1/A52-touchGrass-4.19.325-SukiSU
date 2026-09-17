@@ -19,6 +19,8 @@ if [ "$TARGET_VERSION" != "4.19.235" ]; then
   exit 1
 fi
 
+# Phase101 runs only after the prepared Phase88 tree has been validated and,
+# on a cache miss, quiesced so the complete Git object database is safe to archive.
 # Repair only the two 4.19.235 vendor/upstream merge shapes discovered by the
 # first full compile: pm_show_wakelocks() and the FUSE private inode-state bit.
 bash "$SCRIPT_DIR/101_fix_419235_compile.sh"

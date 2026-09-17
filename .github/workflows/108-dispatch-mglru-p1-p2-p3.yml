@@ -21,6 +21,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+          # Dispatch revision 2: P3 uses upstream c28ac3c7 special-VMA guard.
           curl --fail-with-body -L \
             -X POST \
             -H "Accept: application/vnd.github+json" \

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # CI entry point: exact baseline -> runtime-proven P1 -> Modern P2
+# P2 rerun: baseline-safe MMU-notifier include insertion
 from pathlib import Path
 import subprocess
 import sys

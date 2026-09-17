@@ -174,21 +174,25 @@ new = (
 )
 one(old, new, 'forced late decision')
 
-bw = (
-    '      bool select_sysmem = sysmem_bandwidth <= gmem_bandwidth;\n'
-    '      render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;\n\n'
+# Hook the stable bandwidth-algorithm call site rather than internal
+# implementation formatting.  This records the actual final mode returned by
+# the bandwidth algorithm while preserving behavior exactly.
+bw_call = (
+    '   if (config.is_enabled(algorithm::BANDWIDTH))\n'
+    '      return history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state);\n'
 )
 one(
-    bw,
-    bw
-    + '      const uint32_t tg_bw_seq = tg_diag_bw_count.fetch_add(1, std::memory_order_relaxed);\n'
-      '      if (tg_bw_seq < 256) {\n'
-      '         __android_log_print(ANDROID_LOG_WARN, "TGAT",\n'
-      '                             "TGAT_BW seq=%" PRIu32 " hash=%016" PRIx64 " draws=%" PRIu32 " mode=%s mean_samples=%" PRIu64 " sys_bw=%" PRIu64 " gmem_bw=%" PRIu64,\n'
-      '                             tg_bw_seq, history.hash, rp_state->drawcall_count, render_mode_str(mode), mean_samples,\n'
-      '                             sysmem_bandwidth, gmem_bandwidth);\n'
-      '      }\n\n',
-    'bandwidth decision',
+    bw_call,
+    '   if (config.is_enabled(algorithm::BANDWIDTH)) {\n'
+    '      render_mode tg_bw_mode = history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state);\n'
+    '      const uint32_t tg_bw_seq = tg_diag_bw_count.fetch_add(1, std::memory_order_relaxed);\n'
+    '      if (tg_bw_seq < 256)\n'
+    '         __android_log_print(ANDROID_LOG_WARN, "TGAT",\n'
+    '                             "TGAT_BW seq=%" PRIu32 " hash=%016" PRIx64 " draws=%" PRIu32 " mode=%s",\n'
+    '                             tg_bw_seq, history.hash, rp_state->drawcall_count, render_mode_str(tg_bw_mode));\n'
+    '      return tg_bw_mode;\n'
+    '   }\n',
+    'bandwidth caller',
 )
 
 p.write_text(text)

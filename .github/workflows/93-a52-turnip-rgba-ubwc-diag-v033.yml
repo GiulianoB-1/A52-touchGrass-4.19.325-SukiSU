@@ -55,7 +55,7 @@ jobs:
           mkdir -p "$OUT"
 
           "$TC/bin/aarch64-linux-android${ANDROID_API}-clang" \
-            -O2 -Wall -Wextra -Werror \
+            -O2 -Wall -Wextra -Werror -Wno-unused-parameter \
             scripts/93_turnip_rgba_ubwc_probe.c \
             -o "$OUT/turnip-rgba-ubwc-probe" \
             -lvulkan -landroid -ldl

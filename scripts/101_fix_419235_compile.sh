@@ -14,6 +14,7 @@ fi
 
 python3 - "$KERNEL" "$REPORT" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 kernel = Path(sys.argv[1])
@@ -96,86 +97,98 @@ if "return len;" not in post_fn:
 
 
 # Stable commit 1e1bb4933f1f added FUSE_I_BAD as a private inode-state bit.
-# Samsung independently uses FUSE_I_ATTR_FORCE_SYNC from fuse_dentry_delete().
-# The stable merge can keep FUSE_I_BAD while dropping Samsung's enum member.
-# Restore the Samsung bit and keep FUSE_I_BAD after it so the two states never
-# alias each other.
+# Samsung independently carries FUSE_I_ATTR_FORCE_SYNC and consumes it from
+# fuse_dentry_delete().  The policy merge can select either enum tail, so avoid
+# newline/last-entry-sensitive incremental insertion.  Instead validate that
+# the merged enum contains only the five known states, then rebuild that tiny
+# enum canonically with Samsung's bit before the stable bad-inode bit.
 fuse_i = kernel / "fs/fuse/fuse_i.h"
 text = fuse_i.read_text()
 marker = "/** FUSE inode state bits */\nenum {"
 if text.count(marker) != 1:
     raise SystemExit("fs/fuse/fuse_i.h: inode-state enum anchor is not unique")
 start = text.index(marker)
-end = text.find("\n};", start)
-if end < 0:
+close = text.find("\n};", start)
+if close < 0:
     raise SystemExit("fs/fuse/fuse_i.h: inode-state enum terminator missing")
+end = close + len("\n};")
 region = text[start:end]
 
-attr = "\tFUSE_I_ATTR_FORCE_SYNC,\n"
-bad = "\tFUSE_I_BAD,\n"
-size = "\tFUSE_I_SIZE_UNSTABLE,\n"
-
-if region.count(attr) > 1:
-    raise SystemExit("fs/fuse/fuse_i.h: Samsung attribute-sync bit is duplicated")
-if region.count(bad) > 1:
-    raise SystemExit("fs/fuse/fuse_i.h: bad-inode bit is duplicated")
-
-if attr not in region:
-    if bad in region:
-        region = region.replace(
-            bad,
-            "\t/** Samsung: force dentry invalidation / attribute sync. */\n"
-            + attr
-            + bad,
-            1,
-        )
-        rows.append("fuse_inode_state=restored-samsung-attr-sync-before-FUSE_I_BAD\n")
-    elif size in region:
-        region = region.replace(
-            size,
-            size
-            + "\t/** Samsung: force dentry invalidation / attribute sync. */\n"
-            + attr
-            + "\t/** Stable: private bad-inode state. */\n"
-            + bad,
-            1,
-        )
-        rows.append("fuse_inode_state=restored-samsung-attr-sync-and-FUSE_I_BAD\n")
-    else:
-        raise SystemExit("fs/fuse/fuse_i.h: cannot locate insertion point for inode-state bits")
-elif bad not in region:
-    region = region.replace(
-        attr,
-        attr + "\t/** Stable: private bad-inode state. */\n" + bad,
-        1,
+entries = re.findall(r"(?m)^\s*(FUSE_I_[A-Z0-9_]+)\s*,?\s*$", region)
+allowed = {
+    "FUSE_I_ADVISE_RDPLUS",
+    "FUSE_I_INIT_RDPLUS",
+    "FUSE_I_SIZE_UNSTABLE",
+    "FUSE_I_ATTR_FORCE_SYNC",
+    "FUSE_I_BAD",
+}
+unexpected = sorted(set(entries) - allowed)
+if unexpected:
+    raise SystemExit(
+        "fs/fuse/fuse_i.h: refusing to canonicalize unknown inode-state bits: "
+        + ", ".join(unexpected)
     )
-    rows.append("fuse_inode_state=added-distinct-FUSE_I_BAD-after-samsung-attr-sync\n")
-else:
-    # Both exist. Require Samsung's state to precede FUSE_I_BAD so their bit
-    # numbering is deterministic and cannot alias through a malformed merge.
-    if region.index(attr) > region.index(bad):
-        region = region.replace(attr, "", 1)
-        region = region.replace(bad, attr + bad, 1)
-        rows.append("fuse_inode_state=reordered-attr-sync-before-FUSE_I_BAD\n")
-    else:
-        rows.append("fuse_inode_state=both-bits-already-distinct\n")
 
-text = text[:start] + region + text[end:]
-fuse_i.write_text(text)
+for required in (
+    "FUSE_I_ADVISE_RDPLUS",
+    "FUSE_I_INIT_RDPLUS",
+    "FUSE_I_SIZE_UNSTABLE",
+):
+    count = entries.count(required)
+    if count != 1:
+        raise SystemExit(
+            f"fs/fuse/fuse_i.h: expected one {required} before canonicalization, found {count}"
+        )
+
+for optional in ("FUSE_I_ATTR_FORCE_SYNC", "FUSE_I_BAD"):
+    count = entries.count(optional)
+    if count > 1:
+        raise SystemExit(
+            f"fs/fuse/fuse_i.h: duplicate {optional} before canonicalization: {count}"
+        )
+
+canonical = '''/** FUSE inode state bits */
+enum {
+\t/** Advise readdirplus  */
+\tFUSE_I_ADVISE_RDPLUS,
+\t/** Initialized with readdirplus */
+\tFUSE_I_INIT_RDPLUS,
+\t/** An operation changing file size is in progress  */
+\tFUSE_I_SIZE_UNSTABLE,
+\t/** Samsung: force dentry invalidation / attribute sync. */
+\tFUSE_I_ATTR_FORCE_SYNC,
+\t/* Bad inode */
+\tFUSE_I_BAD,
+};'''
+
+if region != canonical:
+    text = text[:start] + canonical + text[end:]
+    fuse_i.write_text(text)
+    rows.append(
+        "fuse_inode_state=canonical-samsung-attr-sync-plus-stable-bad\n"
+    )
+else:
+    rows.append("fuse_inode_state=already-canonical\n")
 
 post = fuse_i.read_text()
 post_start = post.index(marker)
-post_end = post.find("\n};", post_start)
-post_region = post[post_start:post_end]
-post_entries = [line.strip() for line in post_region.splitlines()]
-attr_entry = "FUSE_I_ATTR_FORCE_SYNC,"
-bad_entry = "FUSE_I_BAD,"
-if post_entries.count(attr_entry) != 1:
-    raise SystemExit("fs/fuse/fuse_i.h: attribute-sync enum-entry postcondition failed")
-if post_entries.count(bad_entry) != 1:
-    raise SystemExit("fs/fuse/fuse_i.h: bad-inode enum-entry postcondition failed")
-if post_entries.index(attr_entry) > post_entries.index(bad_entry):
-    raise SystemExit("fs/fuse/fuse_i.h: inode-state ordering postcondition failed")
+post_close = post.find("\n};", post_start)
+if post_close < 0:
+    raise SystemExit("fs/fuse/fuse_i.h: post-repair enum terminator missing")
+post_region = post[post_start:post_close + len("\n};")]
+post_entries = re.findall(r"(?m)^\s*(FUSE_I_[A-Z0-9_]+)\s*,?\s*$", post_region)
+expected = [
+    "FUSE_I_ADVISE_RDPLUS",
+    "FUSE_I_INIT_RDPLUS",
+    "FUSE_I_SIZE_UNSTABLE",
+    "FUSE_I_ATTR_FORCE_SYNC",
+    "FUSE_I_BAD",
+]
+if post_entries != expected:
+    raise SystemExit(
+        "fs/fuse/fuse_i.h: canonical inode-state postcondition failed: "
+        + repr(post_entries)
+    )
 if "set_bit(FUSE_I_BAD" not in post or "test_bit(FUSE_I_BAD" not in post:
     raise SystemExit("fs/fuse/fuse_i.h: stable bad-inode helpers are incomplete")
 

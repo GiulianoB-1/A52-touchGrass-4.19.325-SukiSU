@@ -41,46 +41,46 @@ def patch(root: Path) -> None:
  */
 static ssize_t show_a52_cpu_uv_probe(struct cpufreq_policy *policy, char *buf)
 {
-\tstruct cpufreq_qcom *c = policy->driver_data;
-\tssize_t len = 0;
-\tunsigned int i;
+    struct cpufreq_qcom *c = policy->driver_data;
+    ssize_t len = 0;
+    unsigned int i;
 
-\tif (!c || !c->table || !c->reg_bases[REG_VOLT_LUT_TABLE])
-\t\treturn scnprintf(buf, PAGE_SIZE, "unavailable\n");
+    if (!c || !c->table || !c->reg_bases[REG_VOLT_LUT_TABLE])
+        return scnprintf(buf, PAGE_SIZE, "unavailable\n");
 
-\tlen += scnprintf(buf + len, PAGE_SIZE - len,
-\t\t"policy_cpu=%u entries=%u\n", policy->cpu, c->lut_max_entries);
+    len += scnprintf(buf + len, PAGE_SIZE - len,
+        "policy_cpu=%u entries=%u\n", policy->cpu, c->lut_max_entries);
 
-\tfor (i = 0; i < c->lut_max_entries; i++) {
-\t\tu32 raw, volt_mv, vc;
-\t\tunsigned int freq = c->table[i].frequency;
+    for (i = 0; i < c->lut_max_entries; i++) {
+        u32 raw, volt_mv, vc;
+        unsigned int freq = c->table[i].frequency;
 
-\t\tif (freq == CPUFREQ_ENTRY_INVALID || freq == CPUFREQ_TABLE_END)
-\t\t\tcontinue;
+        if (freq == CPUFREQ_ENTRY_INVALID || freq == CPUFREQ_TABLE_END)
+            continue;
 
-\t\traw = readl_relaxed(c->reg_bases[REG_VOLT_LUT_TABLE] +
-\t\t\t\ti * lut_row_size);
-\t\tvolt_mv = raw & GENMASK(11, 0);
-\t\tvc = (raw & GENMASK(21, 16)) >> 16;
+        raw = readl_relaxed(c->reg_bases[REG_VOLT_LUT_TABLE] +
+                i * lut_row_size);
+        volt_mv = raw & GENMASK(11, 0);
+        vc = (raw & GENMASK(21, 16)) >> 16;
 
-\t\tlen += scnprintf(buf + len, PAGE_SIZE - len,
-\t\t\t"idx=%u freq_khz=%u volt_mv=%u vc=%u raw=0x%08x\n",
-\t\t\ti, freq, volt_mv, vc, raw);
+        len += scnprintf(buf + len, PAGE_SIZE - len,
+            "idx=%u freq_khz=%u volt_mv=%u vc=%u raw=0x%08x\n",
+            i, freq, volt_mv, vc, raw);
 
-\t\tif (len >= PAGE_SIZE - 96)
-\t\t\tbreak;
-\t}
+        if (len >= PAGE_SIZE - 96)
+            break;
+    }
 
-\treturn len;
+    return len;
 }
 
 cpufreq_freq_attr_ro(a52_cpu_uv_probe);
 
 static struct freq_attr *qcom_cpufreq_hw_attr[] = {
-\t&cpufreq_freq_attr_scaling_available_freqs,
-\t&cpufreq_freq_attr_scaling_boost_freqs,
-\t&a52_cpu_uv_probe,
-\tNULL
+    &cpufreq_freq_attr_scaling_available_freqs,
+    &cpufreq_freq_attr_scaling_boost_freqs,
+    &a52_cpu_uv_probe,
+    NULL
 };
 '''
 

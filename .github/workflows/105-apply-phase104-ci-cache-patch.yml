@@ -1,0 +1,57 @@
+name: 105 - Apply Phase104 CI Cache Patch
+
+on:
+  push:
+    branches:
+      - agent/a52-fuse-740-passthrough-btp2c-v1
+    paths:
+      - .github/workflows/105-apply-phase104-ci-cache-patch.yml
+      - scripts/105_patch_phase104_ci_cache.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch:
+    name: Apply Phase104 cache + fetch hardening
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply CI patch
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/105_patch_phase104_ci_cache.py
+          python3 scripts/105_patch_phase104_ci_cache.py
+          git diff --check
+          git diff -- \
+            .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml \
+            scripts/05a_diagnose_linux_checkpoint.sh
+
+      - name: Commit patched Phase104 CI
+        run: |
+          set -Eeuo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/102-a52-fuse-negotiation-probe-btp2c-clang11.yml \
+            scripts/05a_diagnose_linux_checkpoint.sh
+          if git diff --cached --quiet; then
+            echo "No CI changes to commit"
+          else
+            git commit -m "phase104: cache Phase103 source and harden stable fetch"
+            git push origin HEAD:agent/a52-fuse-740-passthrough-btp2c-v1
+          fi
+
+      - name: Dispatch Phase104 build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run 102-a52-fuse-negotiation-probe-btp2c-clang11.yml \
+            --ref agent/a52-fuse-740-passthrough-btp2c-v1

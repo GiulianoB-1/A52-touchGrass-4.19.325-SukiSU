@@ -271,7 +271,7 @@ def patch_rec(text: str) -> str:
 
     text = one(text,
                "#include <linux/io.h>\n",
-               "#include <linux/io.h>\n#include <linux/irq_regs.h>\n#include <asm/ptrace.h>\n",
+               "#include <linux/io.h>\n#include <asm/irq_regs.h>\n#include <asm/ptrace.h>\n",
                "recorder irq-reg includes")
     anchor = "static void *a52_r343_sideband;\n"
     text = one(text, anchor, RAW_BLOCK + anchor, "sampler insertion")

@@ -62,6 +62,19 @@ jobs:
       - name: Run broad freeze audit
         run: |
           set -Eeuo pipefail
+          # Keep whole-file similarity diagnostic-only and bounded. Function-level
+          # extraction/diffs below remain exact; this avoids quadratic char-level
+          # SequenceMatcher work on multi-hundred-kilobyte kernel sources.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/351_touchgrass_freeze_audit.py')
+          s=p.read_text()
+          old='ratio = difflib.SequenceMatcher(None, nt[:400000], ng[:400000], autojunk=False).ratio() if ta and ga else 0.0'
+          new='ratio = difflib.SequenceMatcher(None, nt.split()[:20000], ng.split()[:20000]).ratio() if ta and ga else 0.0'
+          if s.count(old) != 1:
+              raise SystemExit('Phase351 similarity anchor mismatch')
+          p.write_text(s.replace(old,new,1))
+          PY
           python3 scripts/351_touchgrass_freeze_audit.py \
             --touchgrass audit-src/touchgrass \
             --gki audit-src/gki \

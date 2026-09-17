@@ -37,10 +37,10 @@ def function_end(source: str, start: int) -> int:
 
 
 # Linux 4.19.221+ stable commit cf94a8a3ff3d converted pm_show_wakelocks()
-# from manual PAGE_SIZE string arithmetic to sysfs_emit_at().  Samsung keeps
-# struct wakelock::ws as a pointer.  The generic three-way merge can therefore
+# from manual PAGE_SIZE string arithmetic to sysfs_emit_at(). Samsung keeps
+# struct wakelock::ws as a pointer. The generic three-way merge can therefore
 # take upstream's new `int len` declaration while retaining Samsung's old
-# str/end body, leaving str and end undeclared.  Canonicalize just this function
+# str/end body, leaving str and end undeclared. Canonicalize just this function
 # to the stable output logic while preserving the Samsung wakeup-source shape.
 wakelock = kernel / "kernel/power/wakelock.c"
 text = wakelock.read_text()
@@ -96,8 +96,10 @@ if "return len;" not in post_fn:
 
 
 # Stable commit 1e1bb4933f1f added FUSE_I_BAD as a private inode-state bit.
-# Samsung already has FUSE_I_ATTR_FORCE_SYNC in the same enum, occupying the
-# slot upstream used for FUSE_I_BAD.  Keep both private flags as distinct bits.
+# Samsung independently uses FUSE_I_ATTR_FORCE_SYNC from fuse_dentry_delete().
+# The stable merge can keep FUSE_I_BAD while dropping Samsung's enum member.
+# Restore the Samsung bit and keep FUSE_I_BAD after it so the two states never
+# alias each other.
 fuse_i = kernel / "fs/fuse/fuse_i.h"
 text = fuse_i.read_text()
 marker = "/** FUSE inode state bits */\nenum {"
@@ -111,21 +113,55 @@ region = text[start:end]
 
 attr = "\tFUSE_I_ATTR_FORCE_SYNC,\n"
 bad = "\tFUSE_I_BAD,\n"
-if attr not in region:
-    raise SystemExit("fs/fuse/fuse_i.h: Samsung FUSE_I_ATTR_FORCE_SYNC bit is missing")
-if region.count(attr) != 1:
+size = "\tFUSE_I_SIZE_UNSTABLE,\n"
+
+if region.count(attr) > 1:
     raise SystemExit("fs/fuse/fuse_i.h: Samsung attribute-sync bit is duplicated")
-if bad not in region:
+if region.count(bad) > 1:
+    raise SystemExit("fs/fuse/fuse_i.h: bad-inode bit is duplicated")
+
+if attr not in region:
+    if bad in region:
+        region = region.replace(
+            bad,
+            "\t/** Samsung: force dentry invalidation / attribute sync. */\n"
+            + attr
+            + bad,
+            1,
+        )
+        rows.append("fuse_inode_state=restored-samsung-attr-sync-before-FUSE_I_BAD\n")
+    elif size in region:
+        region = region.replace(
+            size,
+            size
+            + "\t/** Samsung: force dentry invalidation / attribute sync. */\n"
+            + attr
+            + "\t/** Stable: private bad-inode state. */\n"
+            + bad,
+            1,
+        )
+        rows.append("fuse_inode_state=restored-samsung-attr-sync-and-FUSE_I_BAD\n")
+    else:
+        raise SystemExit("fs/fuse/fuse_i.h: cannot locate insertion point for inode-state bits")
+elif bad not in region:
     region = region.replace(
         attr,
-        attr + "\t/** Bad inode, kept separate from Samsung attribute-sync state. */\n" + bad,
+        attr + "\t/** Stable: private bad-inode state. */\n" + bad,
         1,
     )
-    text = text[:start] + region + text[end:]
-    fuse_i.write_text(text)
     rows.append("fuse_inode_state=added-distinct-FUSE_I_BAD-after-samsung-attr-sync\n")
 else:
-    rows.append("fuse_inode_state=FUSE_I_BAD-already-present\n")
+    # Both exist. Require Samsung's state to precede FUSE_I_BAD so their bit
+    # numbering is deterministic and cannot alias through a malformed merge.
+    if region.index(attr) > region.index(bad):
+        region = region.replace(attr, "", 1)
+        region = region.replace(bad, attr + bad, 1)
+        rows.append("fuse_inode_state=reordered-attr-sync-before-FUSE_I_BAD\n")
+    else:
+        rows.append("fuse_inode_state=both-bits-already-distinct\n")
+
+text = text[:start] + region + text[end:]
+fuse_i.write_text(text)
 
 post = fuse_i.read_text()
 post_start = post.index(marker)
@@ -135,8 +171,16 @@ if post_region.count("FUSE_I_ATTR_FORCE_SYNC") != 1:
     raise SystemExit("fs/fuse/fuse_i.h: attribute-sync state postcondition failed")
 if post_region.count("FUSE_I_BAD") != 1:
     raise SystemExit("fs/fuse/fuse_i.h: bad-inode state postcondition failed")
+if post_region.index("FUSE_I_ATTR_FORCE_SYNC") > post_region.index("FUSE_I_BAD"):
+    raise SystemExit("fs/fuse/fuse_i.h: inode-state ordering postcondition failed")
 if "set_bit(FUSE_I_BAD" not in post or "test_bit(FUSE_I_BAD" not in post:
     raise SystemExit("fs/fuse/fuse_i.h: stable bad-inode helpers are incomplete")
+
+# The Samsung bit is not decorative: the vendor dentry delete path actively
+# consumes it. Refuse to build if that behavior was dropped by the stable merge.
+dir_c = (kernel / "fs/fuse/dir.c").read_text()
+if "test_bit(FUSE_I_ATTR_FORCE_SYNC, &fi->state)" not in dir_c:
+    raise SystemExit("fs/fuse/dir.c: Samsung FUSE_I_ATTR_FORCE_SYNC consumer is missing")
 
 report.parent.mkdir(parents=True, exist_ok=True)
 report.write_text("".join(rows))

@@ -60,6 +60,21 @@ def archive(repo: Path, ref: str, destination: Path) -> None:
         raise SystemExit(f"failed to archive {ref}")
 
 
+def run_phase99_fix_for_235(helper: Path) -> None:
+    """Run a proven Phase99 repair against .235 without weakening Phase99 guards."""
+    text = helper.read_text()
+    version_guard = "TARGET_VERSION=4.19.220"
+    if text.count(version_guard) != 1:
+        raise SystemExit(f"unexpected Phase99 version guard in {helper.name}")
+    generated = helper.with_name(f".phase101-{helper.name}")
+    generated.write_text(text.replace(version_guard, "TARGET_VERSION=4.19.235", 1))
+    generated.chmod(0o755)
+    try:
+        run("bash", str(generated))
+    finally:
+        generated.unlink(missing_ok=True)
+
+
 def repair_merge_shapes() -> None:
     # Preserve the same vendor/upstream compatibility repairs proven by Phase99.
     header = (KERNEL / "include/linux/timerqueue.h").read_text()
@@ -240,8 +255,8 @@ def main() -> None:
     if candidate_version != "4.19.235":
         raise SystemExit(f"merged tree reports {candidate_version}, expected 4.19.235")
 
-    run("bash", str(FIX_TEMPLATE))
-    run("bash", str(FIX_TEMPLATE_ROUND2))
+    run_phase99_fix_for_235(FIX_TEMPLATE)
+    run_phase99_fix_for_235(FIX_TEMPLATE_ROUND2)
     repair_merge_shapes()
     run("git", "-C", str(KERNEL), "diff", "--check")
 

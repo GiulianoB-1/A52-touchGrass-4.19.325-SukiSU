@@ -1,0 +1,144 @@
+name: 94 - A52 Turnip Swapchain Gralloc Usage Diagnostic v0.34
+
+on:
+  push:
+    branches:
+      - agent/a52-turnip-swapchain-usage-diag-v034
+    paths:
+      - .github/workflows/94-a52-turnip-swapchain-usage-diag-v034.yml
+      - scripts/94_turnip_swapchain_gralloc_usage_probe.c
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: 30.0.16248370
+  ANDROID_API: 36
+
+jobs:
+  build:
+    name: Build swapchain gralloc usage probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Locate Android SDK
+        run: |
+          set -Eeuo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort | tail -1)"
+          test -n "$SDKMANAGER"
+          test -x "$SDKMANAGER"
+          echo "SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+      - name: Install pinned Android NDK r30
+        run: |
+          set -Eeuo pipefail
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;$NDK_VERSION"
+          NDK_ROOT="$SDK_ROOT/ndk/$NDK_VERSION"
+          test -d "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Build diagnostic probe
+        run: |
+          set -Eeuo pipefail
+          OUT="$GITHUB_WORKSPACE/out-swapchain-usage-diag"
+          TC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          mkdir -p "$OUT"
+          "$TC/bin/aarch64-linux-android${ANDROID_API}-clang" \
+            -O2 -Wall -Wextra -Werror \
+            scripts/94_turnip_swapchain_gralloc_usage_probe.c \
+            -o "$OUT/turnip-swapchain-usage-probe" \
+            -lvulkan -ldl
+          "$TC/bin/llvm-strip" --strip-unneeded "$OUT/turnip-swapchain-usage-probe"
+          chmod 0755 "$OUT/turnip-swapchain-usage-probe"
+          file "$OUT/turnip-swapchain-usage-probe" | grep -Fq 'ARM aarch64'
+          readelf -d "$OUT/turnip-swapchain-usage-probe" | grep -Fq 'Shared library: [libvulkan.so]'
+          strings "$OUT/turnip-swapchain-usage-probe" | grep -Fq 'Swapchain Gralloc Usage DIAGNOSTIC v0.34'
+          strings "$OUT/turnip-swapchain-usage-probe" | grep -Fq 'vkGetSwapchainGrallocUsage2ANDROID'
+          strings "$OUT/turnip-swapchain-usage-probe" | grep -Fq 'ubwc_private_any=%s'
+          sha256sum "$OUT/turnip-swapchain-usage-probe" > "$OUT/turnip-swapchain-usage-probe.sha256"
+
+      - name: Package diagnostic-only KernelSU module
+        run: |
+          set -Eeuo pipefail
+          OUT="$GITHUB_WORKSPACE/out-swapchain-usage-diag"
+          REL="$GITHUB_WORKSPACE/release-swapchain-usage-diag"
+          MOD="$REL/module"
+          mkdir -p "$MOD/tools"
+          cp "$OUT/turnip-swapchain-usage-probe" "$MOD/tools/turnip-swapchain-usage-probe"
+          chmod 0755 "$MOD/tools/turnip-swapchain-usage-probe"
+
+          cat > "$MOD/module.prop" <<'EOF'
+          id=touchgrass_turnip_swapchain_usage_diag
+          name=touchGrass Turnip Swapchain Gralloc Usage Diagnostic
+          version=0.34-swapchain-usage-diag-only
+          versionCode=46
+          author=touchGrass project
+          description=Diagnostic-only Vulkan Android swapchain gralloc usage audit. Does not replace or modify the Vulkan driver.
+          EOF
+          sed -i 's/^          //' "$MOD/module.prop"
+
+          cat > "$MOD/customize.sh" <<'EOF'
+          SKIPUNZIP=0
+          ui_print "*********************************************"
+          ui_print " touchGrass Swapchain Usage Diagnostic v0.34"
+          ui_print " Diagnostic only - Vulkan HAL is untouched"
+          ui_print "*********************************************"
+          set_perm "$MODPATH/action.sh" 0 0 0755
+          set_perm "$MODPATH/tools/turnip-swapchain-usage-probe" 0 0 0755
+          EOF
+          sed -i 's/^          //' "$MOD/customize.sh"
+
+          cat > "$MOD/action.sh" <<'EOF'
+          #!/system/bin/sh
+          MODDIR=${0%/*}
+          PROBE="$MODDIR/tools/turnip-swapchain-usage-probe"
+          OUT=/data/local/tmp/tg_swapchain_usage_diag.txt
+          echo "========== touchGrass Swapchain Usage Diagnostic ==========" | tee "$OUT"
+          echo "date=$(date)" | tee -a "$OUT"
+          echo "vulkan_mount:" | tee -a "$OUT"
+          grep vulkan.adreno.so /proc/mounts 2>/dev/null | tee -a "$OUT" || true
+          echo | tee -a "$OUT"
+          "$PROBE" 2>&1 | tee -a "$OUT"
+          RC=${PIPESTATUS[0]}
+          echo | tee -a "$OUT"
+          echo "probe_exit=$RC" | tee -a "$OUT"
+          echo "saved=$OUT" | tee -a "$OUT"
+          exit "$RC"
+          EOF
+          sed -i 's/^          //' "$MOD/action.sh"
+          chmod 0755 "$MOD/action.sh"
+
+          ZIP="$REL/touchGrass-Turnip-SWAPCHAIN-USAGE-DIAG-v0.34-KSU.zip"
+          (cd "$MOD" && zip -9 -r "$ZIP" .)
+          test -s "$ZIP"
+
+      - name: Audit diagnostic package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$GITHUB_WORKSPACE/release-swapchain-usage-diag/touchGrass-Turnip-SWAPCHAIN-USAGE-DIAG-v0.34-KSU.zip"
+          test -s "$ZIP"
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.34-swapchain-usage-diag-only'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-swapchain-usage-probe'
+          ! unzip -l "$ZIP" | grep -Eq 'vulkan\.adreno\.so|payload/'
+          ! unzip -p "$ZIP" action.sh | grep -Eq 'mount .*vulkan|umount .*vulkan'
+          echo 'diagnostic_package_audit=PASS'
+
+      - name: Upload swapchain usage diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-Turnip-SWAPCHAIN-USAGE-DIAG-v0.34
+          path: |
+            release-swapchain-usage-diag/touchGrass-Turnip-SWAPCHAIN-USAGE-DIAG-v0.34-KSU.zip
+            out-swapchain-usage-diag/turnip-swapchain-usage-probe
+            out-swapchain-usage-diag/turnip-swapchain-usage-probe.sha256
+          if-no-files-found: error
+          retention-days: 14

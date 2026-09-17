@@ -1,0 +1,194 @@
+name: 93 - A52 Turnip RGBA UBWC Diagnostic v0.33
+
+on:
+  push:
+    branches:
+      - agent/a52-turnip-vulkan14-rgba-ubwc-diag-v033
+    paths:
+      - .github/workflows/93-a52-turnip-rgba-ubwc-diag-v033.yml
+      - scripts/93_turnip_rgba_ubwc_probe.c
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: 30.0.16248370
+  ANDROID_API: 36
+
+jobs:
+  build:
+    name: Build GPU-only RGBA UBWC probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Locate Android SDK
+        run: |
+          set -Eeuo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort | tail -1)"
+          test -n "$SDKMANAGER"
+          test -x "$SDKMANAGER"
+          echo "SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+      - name: Install pinned Android NDK r30
+        run: |
+          set -Eeuo pipefail
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;$NDK_VERSION"
+          NDK_ROOT="$SDK_ROOT/ndk/$NDK_VERSION"
+          test -d "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
+          "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API}-clang" --version
+
+      - name: Build diagnostic probe
+        run: |
+          set -Eeuo pipefail
+          OUT="$GITHUB_WORKSPACE/out-rgba-ubwc-diag"
+          TC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          mkdir -p "$OUT"
+
+          "$TC/bin/aarch64-linux-android${ANDROID_API}-clang" \
+            -O2 -Wall -Wextra -Werror \
+            scripts/93_turnip_rgba_ubwc_probe.c \
+            -o "$OUT/turnip-rgba-ubwc-probe" \
+            -lvulkan -landroid -ldl
+
+          "$TC/bin/llvm-strip" --strip-unneeded "$OUT/turnip-rgba-ubwc-probe"
+          chmod 0755 "$OUT/turnip-rgba-ubwc-probe"
+
+          file "$OUT/turnip-rgba-ubwc-probe"
+          file "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'ARM aarch64'
+          readelf -d "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'Shared library: [libvulkan.so]'
+          readelf -d "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'Shared library: [libandroid.so]'
+          strings "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'touchGrass RGBA UBWC DIAGNOSTIC v0.33'
+          strings "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'GET_UBWC_FLAG'
+          strings "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'rgba_gpu_1080x2400'
+          strings "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'DRM_FORMAT_MOD_QCOM_COMPRESSED'
+          strings "$OUT/turnip-rgba-ubwc-probe" | grep -Fq 'RGBA_UBWC_DIAG_STATUS=%s'
+          sha256sum "$OUT/turnip-rgba-ubwc-probe" | tee "$OUT/turnip-rgba-ubwc-probe.sha256"
+
+      - name: Package diagnostic-only KernelSU module
+        run: |
+          set -Eeuo pipefail
+          OUT="$GITHUB_WORKSPACE/out-rgba-ubwc-diag"
+          REL="$GITHUB_WORKSPACE/release-rgba-ubwc-diag"
+          MOD="$REL/module"
+          mkdir -p "$MOD/tools"
+
+          cp "$OUT/turnip-rgba-ubwc-probe" "$MOD/tools/turnip-rgba-ubwc-probe"
+          chmod 0755 "$MOD/tools/turnip-rgba-ubwc-probe"
+
+          cat > "$MOD/module.prop" <<'EOF'
+          id=touchgrass_turnip_rgba_ubwc_diag
+          name=touchGrass Turnip RGBA UBWC Diagnostic
+          version=0.33-rgba-ubwc-diag-only
+          versionCode=45
+          author=touchGrass project
+          description=Diagnostic-only A52 GPU RGBA AHardwareBuffer UBWC/import probe. Does not replace or modify the Vulkan driver.
+          EOF
+          sed -i 's/^          //' "$MOD/module.prop"
+
+          cat > "$MOD/customize.sh" <<'EOF'
+          SKIPUNZIP=0
+          ui_print "*********************************************"
+          ui_print " touchGrass RGBA UBWC Diagnostic v0.33"
+          ui_print " Diagnostic only - Vulkan HAL is untouched"
+          ui_print "*********************************************"
+          set_perm "$MODPATH/action.sh" 0 0 0755
+          set_perm "$MODPATH/tools/turnip-rgba-ubwc-probe" 0 0 0755
+          EOF
+          sed -i 's/^          //' "$MOD/customize.sh"
+
+          cat > "$MOD/action.sh" <<'EOF'
+          #!/system/bin/sh
+          MODDIR=${0%/*}
+          PROBE="$MODDIR/tools/turnip-rgba-ubwc-probe"
+          OUT=/data/local/tmp/tg_rgba_ubwc_diag.txt
+
+          echo "========== touchGrass RGBA UBWC DIAGNOSTIC ==========" | tee "$OUT"
+          echo "date=$(date)" | tee -a "$OUT"
+          echo "vulkan_mount:" | tee -a "$OUT"
+          grep vulkan.adreno.so /proc/mounts 2>/dev/null | tee -a "$OUT" || true
+          echo | tee -a "$OUT"
+
+          "$PROBE" 2>&1 | tee -a "$OUT"
+          RC=${PIPESTATUS[0]}
+
+          echo | tee -a "$OUT"
+          echo "probe_exit=$RC" | tee -a "$OUT"
+          echo "saved=$OUT" | tee -a "$OUT"
+          exit "$RC"
+          EOF
+          sed -i 's/^          //' "$MOD/action.sh"
+          chmod 0755 "$MOD/action.sh"
+
+          cat > "$MOD/README.txt" <<'EOF'
+          touchGrass Turnip RGBA UBWC Diagnostic v0.33
+
+          This module is diagnostic only. It does not mount or modify vulkan.adreno.so.
+
+          Run with:
+            su -c /data/adb/modules/touchgrass_turnip_rgba_ubwc_diag/action.sh
+
+          Output:
+            /data/local/tmp/tg_rgba_ubwc_diag.txt
+
+          The primary cases are GPU-only RGBA8 framebuffer+sampled AHardwareBuffers:
+            256x256
+            940x1670
+            1080x2400
+
+          Key fields:
+            gralloc.GET_UBWC_FLAG.ret
+            gralloc.GET_UBWC_FLAG.value
+            gralloc.authoritative_ubwc
+            mesa26_qcom_expected_modifier
+            vk.actual_drm_modifier (when queryable)
+          EOF
+          sed -i 's/^          //' "$MOD/README.txt"
+
+          ZIP="$REL/touchGrass-Turnip-RGBA-UBWC-DIAG-v0.33-KSU.zip"
+          (
+            cd "$MOD"
+            zip -9 -r "$ZIP" .
+          )
+          test -s "$ZIP"
+          unzip -l "$ZIP"
+          echo "DIAG_ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Audit diagnostic package
+        run: |
+          set -Eeuo pipefail
+          OUT="$GITHUB_WORKSPACE/out-rgba-ubwc-diag"
+          ZIP="$GITHUB_WORKSPACE/release-rgba-ubwc-diag/touchGrass-Turnip-RGBA-UBWC-DIAG-v0.33-KSU.zip"
+
+          test -s "$OUT/turnip-rgba-ubwc-probe"
+          test -s "$ZIP"
+          unzip -p "$ZIP" module.prop | grep -Fxq 'version=0.33-rgba-ubwc-diag-only'
+          unzip -p "$ZIP" module.prop | grep -Fq 'Diagnostic-only'
+          unzip -l "$ZIP" | grep -Fq 'tools/turnip-rgba-ubwc-probe'
+          unzip -p "$ZIP" action.sh | grep -Fq 'tg_rgba_ubwc_diag.txt'
+
+          # This package must not contain or touch a Vulkan HAL payload.
+          ! unzip -l "$ZIP" | grep -Eq 'vulkan\.adreno\.so|payload/'
+          ! unzip -p "$ZIP" action.sh | grep -Eq 'mount .*vulkan|umount .*vulkan'
+
+          echo 'diagnostic_package_audit=PASS'
+
+      - name: Upload RGBA UBWC diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-Turnip-RGBA-UBWC-DIAG-v0.33
+          path: |
+            release-rgba-ubwc-diag/touchGrass-Turnip-RGBA-UBWC-DIAG-v0.33-KSU.zip
+            out-rgba-ubwc-diag/turnip-rgba-ubwc-probe
+            out-rgba-ubwc-diag/turnip-rgba-ubwc-probe.sha256
+          if-no-files-found: error
+          retention-days: 14

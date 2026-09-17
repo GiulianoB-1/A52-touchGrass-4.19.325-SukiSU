@@ -107,12 +107,40 @@ report = Path(sys.argv[2])
 path = kernel / "drivers/iommu/io-pgtable-arm.c"
 text = path.read_text()
 
-# v4.19.235 already carries paddr_to_iopte() as part of the ARM-LPAE 52-bit
-# physical-address support. Samsung's tree has its own IOPTE accessor block,
-# and the policy merge kept that block while our prior reconciliation correctly
-# retained stable's paddr_to_iopte(__pa(table), data) table-descriptor call.
-# With the helper definition missing, GCC accepts an implicit external symbol
-# (warnings are disabled for this vendor build) and vmlinux then fails to link.
+# v4.19.235 carries ARM_LPAE_PTE_ADDR_MASK plus paddr_to_iopte() as part of
+# ARM-LPAE 52-bit physical-address support. Samsung's tree independently
+# modified the same PTE area for its table-refcount metadata, so the policy
+# merge can retain Samsung's block while dropping both stable pieces. Phase100
+# encountered the same shape and proved that restoring the exact stable mask
+# before restoring paddr_to_iopte() is the correct reconciliation.
+paddr_mask = "#define ARM_LPAE_PTE_ADDR_MASK\t\tGENMASK_ULL(47,12)"
+mask_name = "#define ARM_LPAE_PTE_ADDR_MASK"
+if paddr_mask not in text:
+    if mask_name in text:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: unexpected ARM_LPAE_PTE_ADDR_MASK spelling/value"
+        )
+    pte_page_anchor = "#define ARM_LPAE_PTE_TYPE_PAGE\t\t3\n"
+    if text.count(pte_page_anchor) != 1:
+        raise SystemExit(
+            "drivers/iommu/io-pgtable-arm.c: PTE type-page anchor is not unique"
+        )
+    text = text.replace(
+        pte_page_anchor,
+        pte_page_anchor + "\n" + paddr_mask + "\n",
+        1,
+    )
+    mask_state = "restored-stable-419235-mask"
+elif text.count(paddr_mask) == 1:
+    mask_state = "already-present"
+else:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: ARM_LPAE_PTE_ADDR_MASK is duplicated"
+    )
+
+# The merge retained stable's corrected table-descriptor call but dropped the
+# helper definition. GCC accepts that as an implicit external symbol because
+# warnings are disabled for this vendor build, then vmlinux fails at final link.
 # Restore the exact v4.19.235 helper rather than falling back to raw __pa().
 sig = "static arm_lpae_iopte paddr_to_iopte(phys_addr_t paddr,"
 typedef_anchor = "typedef u64 arm_lpae_iopte;\n"
@@ -132,10 +160,6 @@ if def_count == 0:
         raise SystemExit(
             "drivers/iommu/io-pgtable-arm.c: arm_lpae_iopte typedef anchor is not unique"
         )
-    if text.count("#define ARM_LPAE_PTE_ADDR_MASK") != 1:
-        raise SystemExit(
-            "drivers/iommu/io-pgtable-arm.c: stable ARM_LPAE_PTE_ADDR_MASK is missing or duplicated"
-        )
     if text.count("paddr_to_iopte(__pa(table), data)") != 1:
         raise SystemExit(
             "drivers/iommu/io-pgtable-arm.c: stable table-descriptor caller is missing or duplicated"
@@ -146,15 +170,20 @@ if def_count == 0:
         )
     text = text.replace(typedef_anchor, typedef_anchor + "\n" + helper, 1)
     path.write_text(text)
-    state = "restored-stable-419235-definition"
+    helper_state = "restored-stable-419235-definition"
 elif def_count == 1:
-    state = "already-present"
+    path.write_text(text)
+    helper_state = "already-present"
 else:
     raise SystemExit(
         "drivers/iommu/io-pgtable-arm.c: paddr_to_iopte definition is duplicated"
     )
 
 post = path.read_text()
+if post.count(paddr_mask) != 1:
+    raise SystemExit(
+        "drivers/iommu/io-pgtable-arm.c: ARM_LPAE_PTE_ADDR_MASK postcondition failed"
+    )
 if post.count(sig) != 1:
     raise SystemExit(
         "drivers/iommu/io-pgtable-arm.c: paddr_to_iopte definition postcondition failed"
@@ -179,7 +208,8 @@ for required in (
         )
 
 with report.open("a") as fh:
-    fh.write(f"iommu_paddr_helper={state}\n")
+    fh.write(f"iommu_pte_addr_mask={mask_state}\n")
+    fh.write(f"iommu_paddr_helper={helper_state}\n")
 PY
 
 git -C "$KERNEL" diff --check

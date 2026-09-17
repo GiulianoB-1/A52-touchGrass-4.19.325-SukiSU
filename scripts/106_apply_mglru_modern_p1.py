@@ -15,8 +15,9 @@ p3 = here / "108_apply_mglru_modern_p3.py"
 eevdf = here / "109_apply_eevdf_efficiency_p1.py"
 eevdf_finalize = here / "109b_finalize_eevdf_efficiency_p1.py"
 uclamp = here / "110_apply_uclamp_efficiency_p1.py"
+uclamp_finalize = here / "110b_finalize_uclamp_efficiency_p1.py"
 
-for script in (p1, p2, p3, eevdf, eevdf_finalize, uclamp):
+for script in (p1, p2, p3, eevdf, eevdf_finalize, uclamp, uclamp_finalize):
     if not script.is_file():
         raise SystemExit(f"missing chained script: {script}")
 
@@ -35,6 +36,7 @@ subprocess.run([sys.executable, str(eevdf_finalize), str(root)], check=True)
 
 print("Applying Android17 uclamp efficiency P1")
 subprocess.run([sys.executable, str(uclamp), str(root)], check=True)
+subprocess.run([sys.executable, str(uclamp_finalize), str(root)], check=True)
 
 report_dir = root.parent.parent / "artifacts"
 report_dir.mkdir(parents=True, exist_ok=True)

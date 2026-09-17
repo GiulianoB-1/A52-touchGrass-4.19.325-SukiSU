@@ -40,7 +40,7 @@ macros = (
 
 for macro in macros:
     pattern = rf"(?m)^(#define[ \\t]+{re.escape(macro)}[ \\t]+)0([ \\t]*)$"
-    text, count = re.subn(pattern, r"\\g<1>1\\g<2>", text, count=1)
+    text, count = re.subn(pattern, r"\g<1>1\g<2>", text, count=1)
     if count != 1:
         raise SystemExit(f"autotune diagnostic regex anchor count for {macro}: {count}")
 

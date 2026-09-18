@@ -218,6 +218,45 @@ import sys
 
 kernel = Path(sys.argv[1])
 report = Path(sys.argv[2])
+
+# The 4.19.236 BHB/vector backport also adds the clearbhb assembler macro.
+# Samsung's vendor tree already carries the same macro, and the merge can retain
+# both byte-identical copies. Phase100 encountered this exact collision at
+# 4.19.250; preserve one canonical definition and change no mitigation logic.
+assembler = kernel / "arch/arm64/include/asm/assembler.h"
+asm_text = assembler.read_text()
+clearbhb_block = (
+    "/*\n"
+    " * Clear Branch History instruction\n"
+    " */\n"
+    "\t.macro clearbhb\n"
+    "\thint\t#22\n"
+    "\t.endm\n"
+)
+clearbhb_count = asm_text.count(clearbhb_block)
+if clearbhb_count == 2:
+    adjacent = clearbhb_block + "\n" + clearbhb_block
+    if asm_text.count(adjacent) != 1:
+        raise SystemExit(
+            "arch/arm64/include/asm/assembler.h: duplicate clearbhb blocks are not the proven Phase100 shape"
+        )
+    asm_text = asm_text.replace(adjacent, clearbhb_block, 1)
+    assembler.write_text(asm_text)
+    clearbhb_state = "deduped-phase100-proven-shape"
+elif clearbhb_count == 1:
+    clearbhb_state = "already-single"
+else:
+    raise SystemExit(
+        "arch/arm64/include/asm/assembler.h: "
+        f"clearbhb block count is {clearbhb_count}, expected 1 or 2"
+    )
+
+asm_post = assembler.read_text()
+if asm_post.count("\t.macro clearbhb\n") != 1:
+    raise SystemExit(
+        "arch/arm64/include/asm/assembler.h: clearbhb postcondition failed"
+    )
+
 path = kernel / "arch/arm64/include/asm/sections.h"
 text = path.read_text()
 
@@ -262,6 +301,7 @@ if post.count("extern char __entry_tramp_text_start[], __entry_tramp_text_end[];
     )
 
 with report.open("a") as fh:
+    fh.write(f"arm64_clearbhb={clearbhb_state}\n")
     fh.write(f"arm64_entry_tramp_text_size={state}\n")
 PY
 

@@ -114,37 +114,60 @@ static bool a52_p361_ufs_target(struct device *dev)
     start, _ = function_bounds(text, fn, "platform_drv_probe")
     text = text[:start] + helper + text[start:]
 
-    text = insert_after(
-        text, fn,
-        "ret = of_clk_set_defaults(_dev->of_node, false);",
-        "\tif (a52_p361_ufs_target(_dev)) {\n"
-        + retained("PLAT clkdef ret=%d drv=%s",
-                   'ret, drv ? drv->driver.name : "<none>"', "\t\t")
-        + "\t}\n",
-        "clock defaults",
-    )
+    fn_start, fn_end = function_bounds(text, fn, "platform_drv_probe variant")
+    body = text[fn_start:fn_end]
 
-    text = insert_after(
-        text, fn,
-        "ret = dev_pm_domain_attach(_dev, true);",
-        "\tif (a52_p361_ufs_target(_dev)) {\n"
-        + retained("PLAT pmdom ret=%d drv=%s",
-                   'ret, drv ? drv->driver.name : "<none>"', "\t\t")
-        + "\t}\n",
-        "PM domain attach",
-    )
-
-    # Android common 5.10 uses this call in the platform wrapper after the
-    # clock-default and PM-domain gates.
-    text = insert_after(
-        text, fn,
-        "ret = drv->probe(dev);",
-        "\t\tif (a52_p361_ufs_target(_dev)) {\n"
-        + retained("PLAT drvprobe ret=%d drv=%s",
-                   'ret, drv ? drv->driver.name : "<none>"', "\t\t\t")
-        + "\t\t}\n",
-        "driver probe return",
-    )
+    if "ret = of_clk_set_defaults(_dev->of_node, false);" in body:
+        text = insert_after(
+            text, fn,
+            "ret = of_clk_set_defaults(_dev->of_node, false);",
+            "\tif (a52_p361_ufs_target(_dev)) {\n"
+            + retained("PLAT clkdef ret=%d drv=%s",
+                       'ret, drv ? drv->driver.name : "<none>"', "\t\t")
+            + "\t}\n",
+            "clock defaults",
+        )
+        text = insert_after(
+            text, fn,
+            "ret = dev_pm_domain_attach(_dev, true);",
+            "\tif (a52_p361_ufs_target(_dev)) {\n"
+            + retained("PLAT pmdom ret=%d drv=%s",
+                       'ret, drv ? drv->driver.name : "<none>"', "\t\t")
+            + "\t}\n",
+            "PM domain attach",
+        )
+        text = insert_after(
+            text, fn,
+            "ret = drv->probe(dev);",
+            "\t\tif (a52_p361_ufs_target(_dev)) {\n"
+            + retained("PLAT drvprobe ret=%d drv=%s",
+                       'ret, drv ? drv->driver.name : "<none>"', "\t\t\t")
+            + "\t\t}\n",
+            "driver probe return",
+        )
+    elif "return drv->probe(dev);" in body:
+        text = insert_after(
+            text, fn,
+            "struct platform_device *dev = to_platform_device(_dev);",
+            "\tint ret;\n",
+            "direct wrapper ret declaration",
+        )
+        start, end = line_span(
+            text, fn, "return drv->probe(dev);", "direct driver probe return"
+        )
+        replacement = (
+            "\tret = drv->probe(dev);\n"
+            "\tif (a52_p361_ufs_target(_dev)) {\n"
+            + retained("PLAT direct ret=%d drv=%s",
+                       'ret, drv ? drv->driver.name : "<none>"', "\t\t")
+            + "\t}\n"
+            "\treturn ret;\n"
+        )
+        text = text[:start] + replacement + text[end:]
+    else:
+        raise SystemExit(
+            "Phase361 platform_drv_probe: unsupported pinned source shape"
+        )
 
     return text
 
@@ -152,9 +175,6 @@ static bool a52_p361_ufs_target(struct device *dev)
 def validate(platform: str, core: str, qcom: str) -> None:
     required = (
         MARK,
-        "P361 c=1 PLAT clkdef",
-        "P361 c=1 PLAT pmdom",
-        "P361 c=1 PLAT drvprobe",
         "A52GDSC P360 c=1 HBA stage=",
         "A52GDSC P360 c=1 QCOM stage=devm_phy_get",
     )
@@ -162,6 +182,16 @@ def validate(platform: str, core: str, qcom: str) -> None:
     for token in required:
         if token not in joined:
             raise SystemExit("Phase361 required token missing: " + token)
+    gated = all(token in platform for token in (
+        "P361 c=1 PLAT clkdef",
+        "P361 c=1 PLAT pmdom",
+        "P361 c=1 PLAT drvprobe",
+    ))
+    direct = "P361 c=1 PLAT direct" in platform
+    if gated == direct:
+        raise SystemExit(
+            "Phase361 expected exactly one platform wrapper variant"
+        )
     if "A52_PREPROBE copy=1 P360 " in joined:
         raise SystemExit("Phase361 failed to retain-prefix Phase360 copy1")
 

@@ -187,7 +187,7 @@ jobs:
           python3 -m py_compile scripts/101_merge_419235_full.py
           python3 scripts/101_merge_419235_full.py
           KERNEL=workspace/touchgrass-a52xq
-          test "$(make -s -C "$KERNEL" kernelversion)" = "4.19.236"
+          test "$(make -s -C "$KERNEL" kernelversion)" = "4.19.235"
           bash scripts/101_fix_419235_compile.sh
           test -s artifacts/phase101-full235-state.txt
           grep -Fxq 'test_commit=6b481672f19259632a852d013cacd5655e8d7da8' artifacts/phase101-full235-state.txt

@@ -212,6 +212,59 @@ with report.open("a") as fh:
     fh.write(f"iommu_paddr_helper={helper_state}\n")
 PY
 
+python3 - "$KERNEL" "$REPORT" <<'PY'
+from pathlib import Path
+import sys
+
+kernel = Path(sys.argv[1])
+report = Path(sys.argv[2])
+path = kernel / "arch/arm64/include/asm/sections.h"
+text = path.read_text()
+
+# The 4.19.236 BHB/vector backport adds entry_tramp_text_size() upstream.
+# Samsung already carries the same helper in its vendor tree, so the merge can
+# leave two byte-identical definitions. Phase100 hit and proved this exact
+# reconciliation at 4.19.250: keep one canonical helper and reject any other
+# shape rather than changing trampoline semantics.
+entry_tramp_block = (
+    "static inline size_t entry_tramp_text_size(void)\n"
+    "{\n"
+    "\treturn __entry_tramp_text_end - __entry_tramp_text_start;\n"
+    "}\n"
+)
+count = text.count(entry_tramp_block)
+if count == 2:
+    first = text.find(entry_tramp_block)
+    second = text.find(entry_tramp_block, first + len(entry_tramp_block))
+    if first < 0 or second < 0:
+        raise SystemExit(
+            "arch/arm64/include/asm/sections.h: duplicate helper positions are invalid"
+        )
+    text = text[:second] + text[second + len(entry_tramp_block):]
+    path.write_text(text)
+    state = "deduped-phase100-proven-shape"
+elif count == 1:
+    state = "already-single"
+else:
+    raise SystemExit(
+        "arch/arm64/include/asm/sections.h: "
+        f"entry_tramp_text_size helper count is {count}, expected 1 or 2"
+    )
+
+post = path.read_text()
+if post.count(entry_tramp_block) != 1:
+    raise SystemExit(
+        "arch/arm64/include/asm/sections.h: entry_tramp_text_size postcondition failed"
+    )
+if post.count("extern char __entry_tramp_text_start[], __entry_tramp_text_end[];") != 1:
+    raise SystemExit(
+        "arch/arm64/include/asm/sections.h: trampoline section symbols changed unexpectedly"
+    )
+
+with report.open("a") as fh:
+    fh.write(f"arm64_entry_tramp_text_size={state}\n")
+PY
+
 git -C "$KERNEL" diff --check
 cat "$REPORT"
 echo "Phase102 Linux 4.19.236 compile-shape repair complete"

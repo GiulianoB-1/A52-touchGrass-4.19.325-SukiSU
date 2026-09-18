@@ -1,0 +1,260 @@
+name: Phase361 - UFS platform gate
+run-name: Phase361 - UFS platform gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase346-dma-raw-v1
+    paths:
+      - .github/workflows/361-a52-ufs-platform-gate.yml
+      - scripts/360_apply_ufs_defer_pinpoint.py
+      - scripts/361_apply_ufs_platform_gate.py
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase361-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase361 UFS platform gate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/357_apply_init_exit_cause.py \
+            scripts/358_apply_pid1_syscall_trace.py \
+            scripts/359_apply_pid1_writev_payload.py \
+            scripts/360_apply_ufs_defer_pinpoint.py \
+            scripts/361_apply_ufs_platform_gate.py
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Require validated Phase346 cache
+        run: |
+          set -Eeuo pipefail
+          if [ '${{ steps.phase346-v2.outputs.cache-hit }}' != 'true' ] && \
+             [ '${{ steps.phase346-v1.outputs.cache-hit }}' != 'true' ]; then
+            echo 'Phase346 cache missing; run Phase357 first.' >&2
+            exit 1
+          fi
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+
+      - name: Rebuild exact Phase357 baseline
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Reapply Phase358 and Phase359 source lineage
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Audit inherited UFS compatibility fixes
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase361-inherited-ufs-audit.txt
+
+      - name: Apply Phase360, Phase361 and compile
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase361-gki-out"
+
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT"
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT" --check-only
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT"
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT" --check-only
+
+          CORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          QCOM="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          PLATFORM="$ROOT/drivers/base/platform.c"
+          grep -Fq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$CORE"
+          grep -Fq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$QCOM"
+          grep -Fq 'P360 HBA stage=variant_hba_init' "$CORE"
+          grep -Fq 'P360 VREG name=%s ret=%ld' "$CORE"
+          grep -Fq 'P360 CLK name=%s ret=%ld' "$CORE"
+          grep -Fq 'P360 QCOM stage=devm_phy_get' "$QCOM"
+          grep -Fq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$PLATFORM"
+          grep -Fq 'P361 c=1 PLAT clkdef' "$PLATFORM"
+          grep -Fq 'P361 c=1 PLAT pmdom' "$PLATFORM"
+          grep -Fq 'P361 c=1 PLAT drvprobe' "$PLATFORM"
+          grep -Fq 'A52GDSC P360 c=1 HBA stage=' "$CORE"
+          grep -Fq 'A52GDSC P360 c=1 QCOM stage=devm_phy_get' "$QCOM"
+          git -C "$ROOT" diff --check
+
+          cp phase357-gki-out/config/final.config "$BUILD/.config"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          cmp -s phase357-gki-out/config/final.config "$BUILD/.config"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          grep -aFq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$IMAGE"
+          grep -aFq 'P360 QCOM stage=devm_phy_get' "$IMAGE"
+          grep -aFq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$IMAGE"
+          grep -aFq 'P361 c=1 PLAT pmdom' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{package,compile,config,source,audit}
+          cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$CORE" "$QCOM" "$PLATFORM" "$OUT/source/"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/"
+          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py "$OUT/audit/"
+          cp phase361-inherited-ufs-audit.txt "$OUT/audit/"
+
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source phase357-gki-out/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
+
+          cat > "$OUT/PHASE361-SCHEMA.txt" <<'SCHEMA'
+          Phase361 UFS platform-gate + retained UFS pinpoint
+          ====================================
+          Runtime lineage: Phase357 + Phase358 + Phase359 + Phase360.
+
+          Purpose
+          -------
+          Phase359 proved first-stage init aborts because required UFS partitions
+          never appear. Driver-core tracing shows 1d84000.ufshc / ufshcd-qcom
+          repeatedly returns -EPROBE_DEFER.
+
+          Phase360 records exactly which dependency returns the defer.
+
+          Generic UFS stages:
+          init_hba_vreg, setup_hba_vreg, init_clocks, setup_clocks,
+          init_device_vreg, setup_device_vreg, variant_hba_init.
+
+          Per-resource detail:
+          VREG name=<rail> ret=<errno>
+          CLK name=<clock> ret=<errno>
+          VOPS stage=init/setup_regulators
+
+          Qualcomm detail:
+          QCOM stage=devm_phy_get ret=<errno> supplier=<DT node>
+          compat=<compatible> pdev=<device> driver=<driver/unbound>
+          defer=<deferred-probe state>
+
+          Phase361 adds retained platform-bus markers for 1d84000.ufshc:
+          PLAT clkdef, PLAT pmdom, and PLAT drvprobe.
+          All P360 UFS markers are re-prefixed through the existing A52GDSC
+          post-capacity retention class so late deferred retries survive.
+          The first stage returning -517 identifies the dependency to fix.
+          SCHEMA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          r=Path('phase361-gki-out')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          audit={}
+          for line in (r/'audit/phase361-inherited-ufs-audit.txt').read_text().splitlines():
+              if '=' in line:
+                  k,v=line.split('=',1); audit[k]=v
+          ident={
+              'phase':'361',
+              'name':'UFS-PLATFORM-GATE-V1',
+              'base_phase':'357',
+              'source_lineage':['357','358','359','360','361'],
+              'hardware_validated':False,
+              'boot_img_size':(r/'package/boot.img').stat().st_size,
+              'boot_img_sha256':sha(r/'package/boot.img'),
+              'image_sha256':sha(r/'compile/Image'),
+              'inherited_ufs_compatibility':audit,
+              'git_sha':os.getenv('GITHUB_SHA'),
+          }
+          (r/'BUILD-IDENTITY.json').write_text(json.dumps(ident,indent=2,sort_keys=True)+'\n')
+          PY
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase361
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE361-UFS-PLATFORM-GATE-${{ github.run_number }}
+          path: phase361-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE361-UFS-PLATFORM-GATE-${{ github.run_number }}-BOOT-IMG
+          path: phase361-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

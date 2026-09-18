@@ -18,7 +18,7 @@ env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
 
 concurrency:
-  group: a52-phase360-\${{ github.ref }}
+  group: a52-phase360-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -54,7 +54,7 @@ jobs:
             workspace/gki-phase199-out
             phase345-gki-out
             phase346-gki-out
-          key: a52xq-phase346-baseline-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-445fe739
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
 
       - name: Restore Phase346 baseline cache v1
         if: steps.phase346-v2.outputs.cache-hit != 'true'
@@ -66,13 +66,13 @@ jobs:
             workspace/gki-phase199-out
             phase345-gki-out
             phase346-gki-out
-          key: a52xq-phase346-baseline-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-445fe739
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
 
       - name: Require validated Phase346 cache
         run: |
           set -Eeuo pipefail
-          if [ '\${{ steps.phase346-v2.outputs.cache-hit }}' != 'true' ] && \
-             [ '\${{ steps.phase346-v1.outputs.cache-hit }}' != 'true' ]; then
+          if [ '${{ steps.phase346-v2.outputs.cache-hit }}' != 'true' ] && \
+             [ '${{ steps.phase346-v1.outputs.cache-hit }}' != 'true' ]; then
             echo 'Phase346 cache missing; run Phase357 first.' >&2
             exit 1
           fi
@@ -227,7 +227,7 @@ jobs:
       - name: Upload Phase360
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE360-UFS-DEFER-PINPOINT-\${{ github.run_number }}
+          name: A52XQ-PHASE360-UFS-DEFER-PINPOINT-${{ github.run_number }}
           path: phase360-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -236,7 +236,7 @@ jobs:
       - name: Upload boot.img
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE360-UFS-DEFER-PINPOINT-\${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE360-UFS-DEFER-PINPOINT-${{ github.run_number }}-BOOT-IMG
           path: phase360-gki-out/package/boot.img
           if-no-files-found: error
           compression-level: 0

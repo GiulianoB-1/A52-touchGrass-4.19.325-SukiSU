@@ -227,6 +227,7 @@ def validate(text: str) -> None:
         "A52_R366_RING_SLOTS         56U",
         "A52_R366_LATCH_REPLICAS     8U",
         "A52_R366_COMMIT             0x366c0de5U",
+        "#include <linux/futex.h>",
         "get_task_comm(comm, current->group_leader);",
         "a52_r366_sys_enter(regs, scno);",
         "a52_r366_sys_return(regs, scno, a52_r366_sequence_token);",
@@ -245,6 +246,14 @@ def patch(text: str) -> str:
         return text
     if "A52_PHASE365_APEXD_WRITEV_FUTEX_V1" not in text:
         raise SystemExit("Phase366 requires Phase365 syscall lineage")
+
+    if "#include <linux/futex.h>\n" not in text:
+        text = one(
+            text,
+            "#include <linux/uio.h>\n",
+            "#include <linux/uio.h>\n#include <linux/futex.h>\n",
+            "futex constants include",
+        )
 
     text = one(
         text,

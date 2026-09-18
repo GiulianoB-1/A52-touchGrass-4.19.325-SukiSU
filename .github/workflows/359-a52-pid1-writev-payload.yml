@@ -1,0 +1,222 @@
+name: Phase359 - PID1 writev payload
+run-name: Phase359 - PID1 writev payload
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase346-dma-raw-v1
+    paths:
+      - .github/workflows/359-a52-pid1-writev-payload.yml
+      - scripts/359_apply_pid1_writev_payload.py
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase359-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase359 PID1 writev payload
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/357_apply_init_exit_cause.py \
+            scripts/358_apply_pid1_syscall_trace.py \
+            scripts/359_apply_pid1_writev_payload.py
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Require validated Phase346 cache
+        run: |
+          set -Eeuo pipefail
+          if [ '${{ steps.phase346-v2.outputs.cache-hit }}' != 'true' ] && \
+             [ '${{ steps.phase346-v1.outputs.cache-hit }}' != 'true' ]; then
+            echo 'Phase346 cache missing; run Phase357 first.' >&2
+            exit 1
+          fi
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' \
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+
+      - name: Rebuild exact Phase357 baseline
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Apply Phase358 source lineage
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          grep -Fq 'A52_PHASE358_PID1_SYSCALL_TRACE_V1' \
+            "$ROOT/arch/arm64/kernel/syscall.c"
+
+      - name: Apply Phase359 and compile
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase359-gki-out"
+
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+          SYS="$ROOT/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE359_PID1_WRITEV_PAYLOAD_V1' "$SYS"
+          grep -Fq 'a52_r359_maybe_persist(scno);' "$SYS"
+          grep -Fq 'a52_r359_writev_enter(regs, scno);' "$SYS"
+          grep -Fq 'a52_r359_writev_return(regs, a52_r359_sequence_token);' "$SYS"
+          grep -Fq 'late_initcall(a52_r359_init);' "$SYS"
+          ! grep -Fq 'late_initcall(a52_r358_init);' "$SYS"
+
+          cp phase357-gki-out/config/final.config "$BUILD/.config"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          cmp -s phase357-gki-out/config/final.config "$BUILD/.config"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          grep -aFq 'A52_PHASE359_PID1_WRITEV_PAYLOAD_V1' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{package,compile,config,source,audit}
+          cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$SYS" "$OUT/source/"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/"
+          cp scripts/359_apply_pid1_writev_payload.py "$OUT/audit/"
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source phase357-gki-out/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
+
+          cat > "$OUT/PHASE359-SCHEMA.txt" <<'SCHEMA'
+          Phase359 PID1 writev payload recorder
+          ======================================
+          Base source lineage: Phase357 + Phase358 syscall hooks.
+          Runtime owner: Phase359 only.
+
+          Sideband: physical 0xB1BF0000..0xB1BF7FFF
+          Raw collector window: 0xF0000..0xF7FFF
+          Two mirrored 16 KiB copies.
+
+          Normal operation:
+          - only PID1 writev(2) is observed
+          - last four writev payloads are retained in ordinary RAM
+          - up to 912 payload bytes are copied from at most eight iovecs
+          - no persistent cache flush is performed for ordinary writev calls
+
+          PID1 exit/exit_group:
+          - last four writev records are persisted
+          - each logical record is replicated four times in each mirror
+          - whole 32 KiB sideband is cache-cleaned once
+
+          Record size: 1024 bytes
+          magic: 0x3935335654495257 (WRITV359)
+          commit: 0x359c0de5
+          version: 1
+
+          Purpose:
+          Preserve Android init's exact first-stage fatal/error log text after
+          Phase358 identified a 10 s first-stage-mount wait followed by Bionic
+          abort() and exit_group(127).
+          SCHEMA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          r = Path('phase359-gki-out')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          ident = {
+              'phase':'359',
+              'name':'PID1-WRITEV-PAYLOAD-V1',
+              'base_phase':'357',
+              'source_lineage':['357','358','359'],
+              'hardware_validated':False,
+              'sideband_phys':'0xB1BF0000',
+              'sideband_bytes':0x8000,
+              'record_bytes':1024,
+              'writev_history':4,
+              'replicas_per_record_per_copy':4,
+              'payload_bytes':912,
+              'boot_img_size':(r/'package/boot.img').stat().st_size,
+              'boot_img_sha256':sha(r/'package/boot.img'),
+              'image_sha256':sha(r/'compile/Image'),
+              'git_sha':os.getenv('GITHUB_SHA'),
+          }
+          (r/'BUILD-IDENTITY.json').write_text(json.dumps(ident,indent=2,sort_keys=True)+'\n')
+          PY
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase359
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE359-PID1-WRITEV-PAYLOAD-${{ github.run_number }}
+          path: phase359-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE359-PID1-WRITEV-PAYLOAD-${{ github.run_number }}-BOOT-IMG
+          path: phase359-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

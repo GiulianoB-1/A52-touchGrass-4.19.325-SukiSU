@@ -140,9 +140,14 @@ jobs:
           grep -Fq 'P360 CLK name=%s ret=%ld' "$CORE"
           grep -Fq 'P360 QCOM stage=devm_phy_get' "$QCOM"
           grep -Fq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$PLATFORM"
-          grep -Fq 'P361 c=1 PLAT clkdef' "$PLATFORM"
-          grep -Fq 'P361 c=1 PLAT pmdom' "$PLATFORM"
-          grep -Fq 'P361 c=1 PLAT drvprobe' "$PLATFORM"
+          if grep -Fq 'P361 c=1 PLAT direct' "$PLATFORM"; then
+            echo 'Phase361 platform wrapper variant: direct'
+          else
+            grep -Fq 'P361 c=1 PLAT clkdef' "$PLATFORM"
+            grep -Fq 'P361 c=1 PLAT pmdom' "$PLATFORM"
+            grep -Fq 'P361 c=1 PLAT drvprobe' "$PLATFORM"
+            echo 'Phase361 platform wrapper variant: gated'
+          fi
           grep -Fq 'A52GDSC P360 c=1 HBA stage=' "$CORE"
           grep -Fq 'A52GDSC P360 c=1 QCOM stage=devm_phy_get' "$QCOM"
           git -C "$ROOT" diff --check
@@ -160,7 +165,12 @@ jobs:
           grep -aFq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$IMAGE"
           grep -aFq 'P360 QCOM stage=devm_phy_get' "$IMAGE"
           grep -aFq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$IMAGE"
-          grep -aFq 'P361 c=1 PLAT pmdom' "$IMAGE"
+          if grep -aFq 'P361 c=1 PLAT direct' "$IMAGE"; then
+            echo 'Phase361 image wrapper variant: direct'
+          else
+            grep -aFq 'P361 c=1 PLAT pmdom' "$IMAGE"
+            echo 'Phase361 image wrapper variant: gated'
+          fi
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}

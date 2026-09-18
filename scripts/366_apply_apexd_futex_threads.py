@@ -59,7 +59,7 @@ struct a52_r366_record {
 	u32 commit;
 	u32 version;
 	char comm[TASK_COMM_LEN];
-	u8 reserved[136];
+	u8 reserved[120];
 };
 
 static const char a52_r366_marker[] __used =

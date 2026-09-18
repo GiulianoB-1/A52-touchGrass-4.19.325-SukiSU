@@ -148,7 +148,7 @@ jobs:
 
           IMAGE="$BUILD/arch/arm64/boot/Image"
           test -s "$IMAGE"
-          grep -aFq 'P360 QCOM stage=devm_phy_get' "$IMAGE"
+          grep -aFq 'P360 c=1 QCOM stage=devm_phy_get' "$IMAGE"
           grep -aFq 'P361 c=1 PREPROBE stage=bus_probe_end' "$IMAGE"
           grep -aFq 'P361 c=1 PREPROBE stage=pm_activate' "$IMAGE"
 

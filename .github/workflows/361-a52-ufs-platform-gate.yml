@@ -1,5 +1,5 @@
-name: Phase361 - UFS platform gate
-run-name: Phase361 - UFS platform gate
+name: Phase361 - retained UFS trace
+run-name: Phase361 - retained UFS trace
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Phase361 UFS platform gate
+    name: Build Phase361 retained UFS trace
     runs-on: ubuntu-22.04
     timeout-minutes: 300
 
@@ -132,22 +132,17 @@ jobs:
 
           CORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
           QCOM="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
-          PLATFORM="$ROOT/drivers/base/platform.c"
+          DD="$ROOT/drivers/base/dd.c"
           grep -Fq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$CORE"
           grep -Fq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$QCOM"
           grep -Fq 'P360 HBA stage=variant_hba_init' "$CORE"
           grep -Fq 'P360 VREG name=%s ret=%ld' "$CORE"
           grep -Fq 'P360 CLK name=%s ret=%ld' "$CORE"
           grep -Fq 'P360 QCOM stage=devm_phy_get' "$QCOM"
-          grep -Fq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$PLATFORM"
-          if grep -Fq 'P361 c=1 PLAT direct' "$PLATFORM"; then
-            echo 'Phase361 platform wrapper variant: direct'
-          else
-            grep -Fq 'P361 c=1 PLAT clkdef' "$PLATFORM"
-            grep -Fq 'P361 c=1 PLAT pmdom' "$PLATFORM"
-            grep -Fq 'P361 c=1 PLAT drvprobe' "$PLATFORM"
-            echo 'Phase361 platform wrapper variant: gated'
-          fi
+          grep -Fq 'A52_PHASE361_UFS_RETAINED_TRACE_V1' "$DD"
+          grep -Fq 'P361 c=1 PREPROBE stage=bus_probe_end' "$DD"
+          grep -Fq 'P361 c=1 PREPROBE stage=pm_activate' "$DD"
+          grep -Fq 'A52_UFS_PINCTRL_DEFER_BYPASS' "$DD"
           grep -Fq 'A52GDSC P360 c=1 HBA stage=' "$CORE"
           grep -Fq 'A52GDSC P360 c=1 QCOM stage=devm_phy_get' "$QCOM"
           git -C "$ROOT" diff --check
@@ -164,19 +159,15 @@ jobs:
           test -s "$IMAGE"
           grep -aFq 'A52_PHASE360_UFS_DEFER_PINPOINT_V1' "$IMAGE"
           grep -aFq 'P360 QCOM stage=devm_phy_get' "$IMAGE"
-          grep -aFq 'A52_PHASE361_UFS_PLATFORM_GATE_V1' "$IMAGE"
-          if grep -aFq 'P361 c=1 PLAT direct' "$IMAGE"; then
-            echo 'Phase361 image wrapper variant: direct'
-          else
-            grep -aFq 'P361 c=1 PLAT pmdom' "$IMAGE"
-            echo 'Phase361 image wrapper variant: gated'
-          fi
+          grep -aFq 'A52_PHASE361_UFS_RETAINED_TRACE_V1' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=bus_probe_end' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=pm_activate' "$IMAGE"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}
           cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
           cp "$BUILD/.config" "$OUT/config/final.config"
-          cp "$CORE" "$QCOM" "$PLATFORM" "$OUT/source/"
+          cp "$CORE" "$QCOM" "$DD" "$OUT/source/"
           cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/"
           cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py "$OUT/audit/"
           cp phase361-inherited-ufs-audit.txt "$OUT/audit/"
@@ -190,7 +181,7 @@ jobs:
           test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
 
           cat > "$OUT/PHASE361-SCHEMA.txt" <<'SCHEMA'
-          Phase361 UFS platform-gate + retained UFS pinpoint
+          Phase361 retained UFS pinpoint
           ====================================
           Runtime lineage: Phase357 + Phase358 + Phase359 + Phase360.
 
@@ -216,11 +207,12 @@ jobs:
           compat=<compatible> pdev=<device> driver=<driver/unbound>
           defer=<deferred-probe state>
 
-          Phase361 adds retained platform-bus markers for 1d84000.ufshc:
-          PLAT clkdef, PLAT pmdom, and PLAT drvprobe.
-          All P360 UFS markers are re-prefixed through the existing A52GDSC
-          post-capacity retention class so late deferred retries survive.
-          The first stage returning -517 identifies the dependency to fix.
+          Phase361 reuses the already validated inherited driver-core UFS trace in
+          drivers/base/dd.c. Existing PREPROBE markers for pinctrl, DMA,
+          PM activation, bus_probe and driver_probe are re-prefixed through the
+          existing A52GDSC post-capacity retention class. All P360 UFS markers
+          are retained the same way. The first retained stage returning -517
+          identifies the dependency to fix.
           SCHEMA
 
           python3 - <<'PY'
@@ -235,7 +227,7 @@ jobs:
                   k,v=line.split('=',1); audit[k]=v
           ident={
               'phase':'361',
-              'name':'UFS-PLATFORM-GATE-V1',
+              'name':'UFS-RETAINED-TRACE-V1',
               'base_phase':'357',
               'source_lineage':['357','358','359','360','361'],
               'hardware_validated':False,
@@ -254,7 +246,7 @@ jobs:
       - name: Upload Phase361
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE361-UFS-PLATFORM-GATE-${{ github.run_number }}
+          name: A52XQ-PHASE361-UFS-RETAINED-TRACE-${{ github.run_number }}
           path: phase361-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -263,7 +255,7 @@ jobs:
       - name: Upload boot.img
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE361-UFS-PLATFORM-GATE-${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE361-UFS-RETAINED-TRACE-${{ github.run_number }}-BOOT-IMG
           path: phase361-gki-out/package/boot.img
           if-no-files-found: error
           compression-level: 0

@@ -1,0 +1,166 @@
+name: Phase358 - PID1 syscall trace
+run-name: Phase358 - PID1 syscall trace
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase346-dma-raw-v1
+    paths:
+      - .github/workflows/358-a52-pid1-syscall-trace.yml
+      - scripts/358_apply_pid1_syscall_trace.py
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase358-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase358 PID1 syscall trace
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile scripts/358_apply_pid1_syscall_trace.py
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Require validated Phase346 cache
+        run: |
+          set -Eeuo pipefail
+          if [ '${{ steps.phase346-v2.outputs.cache-hit }}' != 'true' ] && \
+             [ '${{ steps.phase346-v1.outputs.cache-hit }}' != 'true' ]; then
+            echo 'Phase346 cache missing; Phase357 run must seed it first.' >&2
+            exit 1
+          fi
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+
+      - name: Rebuild exact Phase357 baseline
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Apply Phase358 and compile
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase358-gki-out"
+
+          test -s phase357-gki-out/package/boot.img
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' "$ROOT/kernel/exit.c"
+
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+
+          grep -Fq 'A52_PHASE358_PID1_SYSCALL_TRACE_V1' "$ROOT/arch/arm64/kernel/syscall.c"
+          grep -Fq 'a52_r358_sequence_token = a52_r358_sys_enter(regs, scno);' "$ROOT/arch/arm64/kernel/syscall.c"
+          grep -Fq 'a52_r358_sys_return(regs, scno, a52_r358_sequence_token);' "$ROOT/arch/arm64/kernel/syscall.c"
+          grep -Fq 'static void __used a52_r357_start(void)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          ! grep -Fq $'\ta52_r357_start();' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          cp phase357-gki-out/config/final.config "$BUILD/.config"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          cmp -s phase357-gki-out/config/final.config "$BUILD/.config"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          grep -aFq 'A52_PHASE358_PID1_SYSCALL_TRACE_V1' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{package,compile,config,source,audit}
+          cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/"
+          cp scripts/358_apply_pid1_syscall_trace.py "$OUT/audit/"
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source phase357-gki-out/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
+
+          cat > "$OUT/PHASE358-SCHEMA.txt" <<'EOF'
+          Phase358 PID1 syscall flight recorder
+          Base: Phase357.
+          Sideband: physical 0xB1BF0000..0xB1BF7FFF, raw 0xF0000..0xF7FFF.
+          Normal PID1 syscalls update only a 32-entry RAM ring.
+          On PID1 exit/exit_group entry, slots 0..31 hold chronological history.
+          Slots 32..63 in each 16 KiB mirror replicate the final exit snapshot.
+          Record size: 256 bytes. Commit: 0x358c0de5. Version: 1.
+          Captures syscall number, x0..x8, PC, LR/x30, FP/x29, SP, PSTATE,
+          signed return values, CPU/PID/TGID, and mm code/data/stack bounds.
+          Phase357's sideband mapper is dormant so panic cannot overwrite Phase358.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase358
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE358-PID1-SYSCALL-TRACE-${{ github.run_number }}
+          path: phase358-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE358-PID1-SYSCALL-TRACE-${{ github.run_number }}-BOOT-IMG
+          path: phase358-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

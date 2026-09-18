@@ -86,10 +86,7 @@ def main() -> int:
     if "A52_UFS_PINCTRL_DEFER_BYPASS" not in dd:
         raise SystemExit("Phase361 requires inherited UFS pinctrl bridge")
 
-    marker = (
-        '\nstatic const char a52_phase361_retained_trace_marker[] __used = '
-        f'"{MARK}";\n'
-    )
+    marker = f"/* {MARK} */\n"
     anchor = "A52_UFS_PINCTRL_DEFER_BYPASS"
     pos = dd.find(anchor)
     line_start = dd.rfind("\n", 0, pos) + 1

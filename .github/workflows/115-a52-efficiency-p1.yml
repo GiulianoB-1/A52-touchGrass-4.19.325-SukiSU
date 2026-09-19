@@ -1,4 +1,4 @@
-name: 115 - A52 Efficiency P1 MGLRU+CASS+UCLAMP+WALT
+name: 115 - A52 Efficiency P1 + MGLRU/Scheduler Recorders
 
 on:
   push:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    name: Build 352494 clean + MGLRU P4 + CASS P3 + UCLAMP/WALT P2
+    name: Build 352494 clean + Efficiency P1 + Runtime Recorders
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -49,9 +49,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-effp1-${{ runner.os }}-v1
+          key: a52xq-effp1-recorder-${{ runner.os }}-v2
           restore-keys: |
-            a52xq-effp1-${{ runner.os }}-
+            a52xq-effp1-recorder-${{ runner.os }}-
             a52xq-fuse-740-passthrough-btp2c-${{ runner.os }}-
             a52xq-fuse-neg-probe-btp2c-${{ runner.os }}-
             a52xq-fuse-modern-p3-btp2c-${{ runner.os }}-
@@ -69,7 +69,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-base352494-clean-nobt-pre-fuse104-${{ runner.os }}-v2
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v3
 
       - name: Restore Linux stable object cache
         if: steps.base351_source.outputs.cache-hit != 'true'
@@ -184,7 +184,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-base352494-clean-nobt-pre-fuse104-${{ runner.os }}-v2
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v3
 
       - name: Save Linux stable object cache
         if: steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
@@ -201,14 +201,40 @@ jobs:
             2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
           KERNEL=workspace/touchgrass-a52xq
           grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU power diagnostics P1' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c"
+          grep -Fq '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c"
+          grep -Fq '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'debugfs_create_file("lru_gen_trace"' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c"
           grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
           grep -Fq 'if (likely(!uclamp_is_used()))' "$KERNEL/kernel/sched/sched.h"
           grep -Fq 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
           grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
           grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c"
+          grep -Fq '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'debugfs_create_file("lru_gen_trace"' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 scheduler efficiency recorder' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'debugfs_create_dir("a52_sched_diag", NULL)' "$KERNEL/kernel/sched/core.c"
           grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
           grep -Fq 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
           ! grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply CASS UCLAMP WALT schedutil recorder
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
+          python3 scripts/116_apply_a52_scheduler_recorder.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a52-scheduler-recorder-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 scheduler efficiency recorder' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'int a52_sched_diag_level;' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'debugfs_create_dir("a52_sched_diag", NULL)' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'a52_sched_diag_cass(best->cpu' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'a52_sched_diag_sugov_stale(j, delta_ns);' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'a52_sched_diag_sugov_freq(policy->cpu, util, max' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
           git -C "$KERNEL" diff --check
 
       - name: Apply runtime-proven native FUSE 7.40 Phase104
@@ -317,7 +343,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-effp1-${{ runner.os }}-v1
+          key: a52xq-effp1-recorder-${{ runner.os }}-v2
 
       - name: Record diagnostics
         if: always()

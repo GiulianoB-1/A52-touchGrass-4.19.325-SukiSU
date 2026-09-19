@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    name: Build baseline 35461116688 + F2FS stable325 P1
+    name: Build booted F2FS P1 + gc_merge P2
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -155,7 +155,7 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package F2FS P1 flashable ZIP
+      - name: Package F2FS gc_merge P2 flashable ZIP
         run: |
           set -Eeuo pipefail
           mkdir -p release
@@ -211,7 +211,7 @@ jobs:
           fi
           ccache --show-stats > artifacts/ccache.txt 2>&1 || true
 
-      - name: Upload F2FS P1 flashable ZIP
+      - name: Upload F2FS gc_merge P2 flashable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-BASE35461116688-F2FS-STABLE325-P1-GCMERGE-P2-${{ github.run_number }}
@@ -235,3 +235,5 @@ jobs:
 # trigger: executable-build-scripts
 
 # trigger: gc-merge-p2
+
+# trigger: gc-merge-opt-in-safety

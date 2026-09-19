@@ -231,6 +231,9 @@ jobs:
           if [ -d workspace/touchgrass-a52xq/.git ]; then
             git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-status.txt || true
             git -C workspace/touchgrass-a52xq diff --check > artifacts/diff-check.txt 2>&1 || true
+            mkdir -p artifacts/partial-source/fs artifacts/partial-source/include/trace/events
+            cp -a workspace/touchgrass-a52xq/fs/f2fs artifacts/partial-source/fs/ || true
+            cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/partial-source/include/trace/events/ || true
           fi
           ccache --show-stats > artifacts/ccache.txt 2>&1 || true
 
@@ -266,3 +269,5 @@ jobs:
 # trigger: atgc-p3-initial
 
 # trigger: preserve-atgc-rejects
+
+# trigger: capture-partial-atgc-source

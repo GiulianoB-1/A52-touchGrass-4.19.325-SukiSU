@@ -8,6 +8,13 @@ SYS = Path("arch/arm64/kernel/syscall.c")
 FORK = Path("kernel/fork.c")
 MARK = "A52_PHASE370_CLEARTID_FORENSICS_V1"
 
+def one(text: str, old: str, new: str, label: str) -> str:
+    n = text.count(old)
+    if n != 1:
+        raise SystemExit(f"Phase370 {label}: expected 1 match, found {n}")
+    return text.replace(old, new, 1)
+
+
 BLOCK = r'''
 /* A52_PHASE370_CLEARTID_FORENSICS_V1
  *

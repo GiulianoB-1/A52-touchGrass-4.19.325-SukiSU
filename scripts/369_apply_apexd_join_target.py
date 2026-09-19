@@ -132,7 +132,7 @@ struct a52_r369_record {
 	s64 ret;
 	u64 nvcsw;
 	u64 nivcsw;
-	u64 kstack[A52_R369_STACK_ENTRIES];
+	unsigned long kstack[A52_R369_STACK_ENTRIES];
 	u32 role;
 	u32 main_tgid;
 	u32 candidate_tid;

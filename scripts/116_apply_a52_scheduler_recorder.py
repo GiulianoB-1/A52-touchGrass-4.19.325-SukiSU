@@ -300,7 +300,7 @@ void a52_sched_diag_sugov_stale(unsigned int cpu, s64 age_ns)
 	preempt_enable();
 
 	a52_sched_rec_event(A52_REC_SUGOV_STALE, 0x80, cpu,
-			    (u32)div_s64(age_ns, NSEC_PER_USEC), 0, 0);
+			    (u32)(age_ns / NSEC_PER_USEC), 0, 0);
 }
 
 void a52_sched_diag_sugov_freq(unsigned int cpu, unsigned long util,
@@ -529,7 +529,7 @@ static int __init a52_sched_diag_init(void)
 	struct dentry *dir;
 
 	dir = debugfs_create_dir("a52_sched_diag", NULL);
-	if (!dir)
+	if (IS_ERR_OR_NULL(dir))
 		return 0;
 
 	debugfs_create_file("record", 0644, dir, NULL,

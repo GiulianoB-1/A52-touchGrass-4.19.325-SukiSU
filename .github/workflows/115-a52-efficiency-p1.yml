@@ -203,30 +203,46 @@ jobs:
         if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
+          must_grep() {
+            local needle="$1" file="$2" label="$3"
+            if grep -Fq "$needle" "$file"; then
+              echo "AUDIT PASS: $label"
+            else
+              echo "::error::AUDIT MISSING: $label"
+              echo "needle=$needle"
+              echo "file=$file"
+              return 1
+            fi
+          }
           python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
           python3 scripts/115_apply_a52_efficiency_p1.py workspace/touchgrass-a52xq \
             2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
           KERNEL=workspace/touchgrass-a52xq
-          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 MGLRU power diagnostics P1' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c"
-          grep -Fq '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c"
-          grep -Fq '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'if (unlikely(READ_ONCE(mglru_record_level) >= 1))' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
-          grep -Fq 'if (likely(!uclamp_is_used()))' "$KERNEL/kernel/sched/sched.h"
-          grep -Fq 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
-          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
-          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c"
-          grep -Fq '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
-          grep -Fq 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
-          ! grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          must_grep 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c" 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts'
+          must_grep 'A52 MGLRU power diagnostics P1' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power diagnostics P1'
+          must_grep 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power recorder P2'
+          must_grep '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c" '__ATTR(record, 0644, mglru_record_show, mglru_record_store)'
+          must_grep '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)' "$KERNEL/mm/vmscan.c" '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)'
+          must_grep 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c" 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)'
+          must_grep 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c" 'static int mglru_record_level;'
+          must_grep 'if (unlikely(READ_ONCE(mglru_record_level) >= 1))' "$KERNEL/mm/vmscan.c" 'if (unlikely(READ_ONCE(mglru_record_level) >= 1))'
+          must_grep 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c" 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active'
+          must_grep 'if (likely(!uclamp_is_used()))' "$KERNEL/kernel/sched/sched.h" 'if (likely(!uclamp_is_used()))'
+          must_grep 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c" 'A52 WALT schedutil P2: expire stale sibling demand by wall time.'
+          must_grep 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c" 'A52 A619 GPU UV P3: 565 MHz one ARC corner'
+          must_grep 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c" 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts'
+          must_grep 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power recorder P2'
+          must_grep '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c" '__ATTR(record, 0644, mglru_record_show, mglru_record_store)'
+          must_grep 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c" 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)'
+          must_grep 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c" 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active'
+          must_grep 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c" 'A52 WALT schedutil P2: expire stale sibling demand by wall time.'
+          if grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"; then
+            echo "::error::AUDIT UNEXPECTED: custom BT P2C marker present"
+            exit 1
+          fi
+          echo "AUDIT PASS: custom BT P2C absent"
           git -C "$KERNEL" diff --check
+          echo "AUDIT PASS: git diff --check"
 
       - name: Apply CASS UCLAMP WALT schedutil recorder
         if: steps.prebuild_source.outputs.cache-hit != 'true'

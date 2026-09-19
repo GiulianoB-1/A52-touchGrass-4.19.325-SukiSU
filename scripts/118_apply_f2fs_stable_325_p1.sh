@@ -7,6 +7,9 @@ PATCHDIR="${3:-artifacts/f2fs-stable325-patches}"
 
 test -d "$KERNEL/.git" || { echo "missing kernel git tree: $KERNEL" >&2; exit 1; }
 mkdir -p "$(dirname "$REPORT")" "$PATCHDIR"
+KERNEL="$(cd "$KERNEL" && pwd)"
+REPORT="$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")"
+PATCHDIR="$(cd "$PATCHDIR" && pwd)"
 
 # Official linux-4.19.y F2FS commits after v4.19.206 through v4.19.325,
 # oldest first.  We apply only patches that match this Samsung-derived tree
@@ -76,14 +79,14 @@ for sha in "${COMMITS[@]}"; do
   subject="$(sed -n 's/^Subject: \[PATCH[^]]*\] //p; s/^Subject: //p' "$patch" | head -1)"
   [ -n "$subject" ] || subject="(subject unavailable)"
 
-  if git -C "$KERNEL" apply --reverse --check "$OLDPWD/$patch" >/dev/null 2>&1; then
+  if git -C "$KERNEL" apply --reverse --check "$patch" >/dev/null 2>&1; then
     echo "ALREADY       $sha | $subject" | tee -a "$REPORT"
     already=$((already + 1))
     continue
   fi
 
-  if git -C "$KERNEL" apply --check "$OLDPWD/$patch" >/dev/null 2>&1; then
-    git -C "$KERNEL" apply "$OLDPWD/$patch"
+  if git -C "$KERNEL" apply --check "$patch" >/dev/null 2>&1; then
+    git -C "$KERNEL" apply "$patch"
     echo "APPLIED       $sha | $subject" | tee -a "$REPORT"
     applied=$((applied + 1))
     continue

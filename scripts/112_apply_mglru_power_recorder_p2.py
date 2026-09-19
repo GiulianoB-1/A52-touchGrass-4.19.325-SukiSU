@@ -149,6 +149,27 @@ static void mglru_rec_event(unsigned char type, unsigned char flags,
 '''
 s = replace_once(s, decl_anchor, recorder_decl, "recorder declarations")
 
+# P1's original path counters were unconditional. Once P2 provides the runtime
+# level, gate those increments too so level 0 is a true low-overhead state.
+for a52_counter in (
+    "try_inc_max_seq",
+    "walk_pte_range",
+    "walk_pmd_range",
+    "look_around",
+    "scan_pages",
+    "evict_pages",
+):
+    a52_old = f"this_cpu_inc(mglru_diag_{a52_counter}); /* A52 MGLRU diag */"
+    a52_new = (
+        "if (unlikely(READ_ONCE(mglru_record_level) >= 1))\n"
+        f"\t\tthis_cpu_inc(mglru_diag_{a52_counter}); /* A52 MGLRU diag */"
+    )
+    if s.count(a52_old) != 1:
+        raise SystemExit(
+            f"MGLRU diag gate {a52_counter}: expected one counter, found {s.count(a52_old)}"
+        )
+    s = s.replace(a52_old, a52_new, 1)
+
 def replace_func(text, name, mutate):
     start, brace, end = function_bounds(text, name)
     func = text[start:end]

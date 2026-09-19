@@ -66,7 +66,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py') }}
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Restore exact 35196552336 prepared source cache
         if: steps.prebuild_source.outputs.cache-hit != 'true'
@@ -217,6 +217,9 @@ jobs:
           python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
           python3 scripts/115_apply_a52_efficiency_p1.py workspace/touchgrass-a52xq \
             2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
+          python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+          python3 scripts/117_migrate_mglru_trace_to_proc.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
           KERNEL=workspace/touchgrass-a52xq
           must_grep 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c" 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts'
           must_grep 'A52 MGLRU power diagnostics P1' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power diagnostics P1'
@@ -281,7 +284,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py') }}
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Build integrated kernel
         run: |

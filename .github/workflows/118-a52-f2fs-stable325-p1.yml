@@ -211,3 +211,5 @@ jobs:
           retention-days: 14
 
 # trigger: f2fs-stable325-p1
+
+# trigger: runner-safe-patch-paths

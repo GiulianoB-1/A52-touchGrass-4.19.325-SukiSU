@@ -87,7 +87,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts release
-          chmod +x scripts/118_apply_f2fs_stable_325_p1.sh
+          chmod +x scripts/*.sh scripts/*.py
 
       - name: Apply compatible F2FS stable fixes through 4.19.325
         run: |
@@ -213,3 +213,5 @@ jobs:
 # trigger: f2fs-stable325-p1
 
 # trigger: runner-safe-patch-paths
+
+# trigger: executable-build-scripts

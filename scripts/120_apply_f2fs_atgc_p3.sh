@@ -45,12 +45,24 @@ for i in "${!COMMITS[@]}"; do
   set -e
   cat "$OLDPWD/$OUT/$sha.apply.log"
 
+  rejdir="$OLDPWD/$OUT/rejects-$sha"
+  mkdir -p "$rejdir"
+  while IFS= read -r rej; do
+    rel="${rej#./}"
+    mkdir -p "$rejdir/$(dirname "$rel")"
+    cp "$rej" "$rejdir/$rel"
+  done < <(find fs/f2fs include/trace/events -name '*.rej' -type f -print 2>/dev/null || true)
+
   if [ "$rc" -ne 0 ]; then
     echo "PARTIAL rc=$rc" | tee -a "$OLDPWD/$OUT/report.txt"
     failed=1
   else
     echo "APPLIED" | tee -a "$OLDPWD/$OUT/report.txt"
   fi
+
+  # Preserve per-commit rejects above, then clear them so a later patch
+  # cannot overwrite evidence from an earlier ATGC commit.
+  find fs/f2fs include/trace/events -name '*.rej' -type f -delete 2>/dev/null || true
 done
 
 echo "=== resulting ATGC-related diffstat ===" | tee -a "$OLDPWD/$OUT/report.txt"

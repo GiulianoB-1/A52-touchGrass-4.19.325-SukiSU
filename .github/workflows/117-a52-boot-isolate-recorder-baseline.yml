@@ -62,7 +62,7 @@ jobs:
           ccache --zero-stats
 
       - name: Restore exact 35196552336 prepared source cache
-                id: base351_source
+        id: base351_source
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
@@ -147,7 +147,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Audit inherited EEVDF UCLAMP and 35196552336 state
-                run: |
+        run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
           test -d "$KERNEL/.git"
@@ -197,7 +197,7 @@ jobs:
           key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
 
       - name: Apply runtime-proven native FUSE 7.40 Phase104
-                run: |
+        run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
           python3 scripts/104_apply_fuse_740_upstream_passthrough.py workspace/touchgrass-a52xq \

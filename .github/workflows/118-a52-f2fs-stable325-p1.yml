@@ -1,0 +1,211 @@
+name: 118 - A52 F2FS stable 4.19.325 P1
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/118-a52-f2fs-stable325-p1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-f2fs-stable325-p1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build baseline 35461116688 + F2FS stable325 P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-f2fs325-p1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-effp1-recorder-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact 35461116688 pre-build kernel source
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Require exact successful baseline cache
+        run: |
+          set -Eeuo pipefail
+          echo "cache-hit=${{ steps.prebuild_source.outputs.cache-hit }}"
+          if [ "${{ steps.prebuild_source.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Exact pre-build source cache from baseline 35461116688 was not restored."
+            exit 1
+          fi
+          test -d workspace/touchgrass-a52xq/.git
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' workspace/touchgrass-a52xq/mm/vmscan.c
+          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/118_apply_f2fs_stable_325_p1.sh
+
+      - name: Apply compatible F2FS stable fixes through 4.19.325
+        run: |
+          set -Eeuo pipefail
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-stable325-p1.txt \
+            artifacts/f2fs-stable325-patches
+          cat artifacts/f2fs-stable325-p1.txt
+          git -C workspace/touchgrass-a52xq diff --stat | tee artifacts/f2fs-stable325-diffstat.txt
+          git -C workspace/touchgrass-a52xq diff -- fs/f2fs include/linux/f2fs_fs.h \
+            > artifacts/f2fs-stable325-p1.diff || true
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/f2fs-stable325-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit integrated image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_F2FS_FS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
+          grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package F2FS P1 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-f2fs325-p1.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-f2fs325-p1.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-f2fs325-p1.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-f2fs325-p1.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;', 1)
+          p.write_text(s)
+          PY
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-f2fs325-p1.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35461116688 + F2FS-STABLE325-P1 + MGLRU-P4 + CASS-P3 + UCLAMP-EFF-P2 + WALT-SUGOV-P2 + GPU-UV-P1-P2-P3 + FUSE-7.40-NATIVE/' scripts/.package-f2fs325-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35461116688-F2FS-STABLE325-P1.zip/' scripts/.package-f2fs325-p1.sh
+          chmod +x scripts/.package-f2fs325-p1.sh
+          ./scripts/.package-f2fs325-p1.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-f2fs325-p1.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-f2fs325-p1-${{ runner.os }}-${{ github.sha }}
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache.txt 2>&1 || true
+
+      - name: Upload F2FS P1 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35461116688-F2FS-STABLE325-P1-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35461116688-F2FS-STABLE325-P1-DIAG-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

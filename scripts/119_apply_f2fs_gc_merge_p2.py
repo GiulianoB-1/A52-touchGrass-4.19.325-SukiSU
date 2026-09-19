@@ -26,7 +26,7 @@ if marker not in s:
         s,
         "#define F2FS_MOUNT_NORECOVERY\t\t0x04000000\n",
         "#define F2FS_MOUNT_NORECOVERY\t\t0x04000000\n"
-        "#define F2FS_MOUNT_GC_MERGE\t\t0x08000000 /* A52 F2FS P2: gc_merge */\n",
+        "#define F2FS_MOUNT_GC_MERGE\t\t0x20000000 /* A52 F2FS P2: gc_merge */\n",
         "f2fs.h mount flag",
     )
 write(p, s)

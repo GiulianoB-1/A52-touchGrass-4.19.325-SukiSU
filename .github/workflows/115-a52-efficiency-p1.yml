@@ -49,12 +49,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-effp1-recorder-${{ runner.os }}-v3
+          key: a52xq-effp1-recorder-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-effp1-recorder-${{ runner.os }}-
-            a52xq-fuse-740-passthrough-btp2c-${{ runner.os }}-
-            a52xq-fuse-neg-probe-btp2c-${{ runner.os }}-
-            a52xq-fuse-modern-p3-btp2c-${{ runner.os }}-
 
       - name: Configure compiler cache
         run: |
@@ -64,7 +61,15 @@ jobs:
           ccache --set-config=compression_level=6
           ccache --zero-stats
 
+      - name: Restore fully patched recorder pre-build source cache
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/106_apply_mglru_modern_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/104_apply_fuse_740_upstream_passthrough.py') }}
+
       - name: Restore exact 35196552336 prepared source cache
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
         id: base351_source
         uses: actions/cache/restore@v4
         with:
@@ -72,7 +77,7 @@ jobs:
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Restore Linux stable object cache
-        if: steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         id: stable_cache
         uses: actions/cache/restore@v4
         with:
@@ -86,7 +91,7 @@ jobs:
           chmod +x scripts/*.sh scripts/*.py
 
       - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
-        if: steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -150,6 +155,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Audit inherited EEVDF UCLAMP and 35196552336 state
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -180,20 +186,21 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save exact 35196552336 prepared source cache
-        if: steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Save Linux stable object cache
-        if: steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
+        if: steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/linux-stable-checkpoint-cache
           key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
 
       - name: Apply A52 MGLRU CASS UCLAMP WALT efficiency P1
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
@@ -216,14 +223,13 @@ jobs:
           grep -Fq 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c"
           grep -Fq '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c"
           grep -Fq 'debugfs_create_file("lru_gen_trace"' "$KERNEL/mm/vmscan.c"
-          grep -Fq 'A52 scheduler efficiency recorder' "$KERNEL/kernel/sched/core.c"
-          grep -Fq 'debugfs_create_dir("a52_sched_diag", NULL)' "$KERNEL/kernel/sched/core.c"
           grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
           grep -Fq 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
           ! grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
           git -C "$KERNEL" diff --check
 
       - name: Apply CASS UCLAMP WALT schedutil recorder
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
@@ -239,6 +245,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply runtime-proven native FUSE 7.40 Phase104
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
@@ -251,6 +258,13 @@ jobs:
           grep -Fq 'FUSE_740_BACKING_OPEN' "$KERNEL/fs/fuse/backing.c"
           grep -Fq 'FUSE_740_PASSTHROUGH_SETUP' "$KERNEL/fs/fuse/passthrough.c"
           git -C "$KERNEL" diff --check
+
+      - name: Save fully patched recorder pre-build source cache
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/106_apply_mglru_modern_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/104_apply_fuse_740_upstream_passthrough.py') }}
 
       - name: Build integrated kernel
         run: |
@@ -340,11 +354,11 @@ jobs:
           sha256sum "$ZIP" | tee artifacts/package-sha256.txt
 
       - name: Save compiler cache
-        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-effp1-recorder-${{ runner.os }}-v3
+          key: a52xq-effp1-recorder-${{ runner.os }}-${{ github.sha }}
 
       - name: Record diagnostics
         if: always()

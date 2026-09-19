@@ -158,19 +158,19 @@ if marker not in s:
 	}
 """
     new = """	if (has_not_enough_free_secs(sbi, 0, 0)) {
-		/*
-		 * A52 F2FS P2: gc_merge.
-		 * Submit the cached DATA bio before sleeping for foreground GC.
-		 * This folds in the deadlock prevention from upstream
-		 * 8b4468ec023d, adapted to this older tree which has no separate
-		 * merged-IPU bio cache/helper.
-		 */
-		f2fs_submit_merged_write(sbi, DATA);
-
 		if (test_opt(sbi, GC_MERGE) && sbi->gc_thread &&
 					sbi->gc_thread->f2fs_gc_task) {
 			DEFINE_WAIT(wait);
 
+			/*
+			 * A52 F2FS P2: gc_merge.
+			 * Submit the cached DATA bio before sleeping for foreground
+			 * GC. This folds in upstream 8b4468ec023d, adapted to this
+			 * older tree which has no separate merged-IPU bio cache.
+			 * Keep this inside GC_MERGE so nogc_merge retains the exact
+			 * boot-validated P1 foreground-GC behavior.
+			 */
+			f2fs_submit_merged_write(sbi, DATA);
 			prepare_to_wait(&sbi->gc_thread->fggc_wq, &wait,
 					TASK_UNINTERRUPTIBLE);
 			wake_up(&sbi->gc_thread->gc_wait_queue_head);

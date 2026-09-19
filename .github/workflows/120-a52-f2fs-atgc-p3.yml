@@ -114,6 +114,13 @@ jobs:
           grep -Fq 'f2fs_submit_merged_write(sbi, DATA)' workspace/touchgrass-a52xq/fs/f2fs/segment.c
           grep -Fq '"gc_merge"' workspace/touchgrass-a52xq/fs/f2fs/super.c
 
+      - name: Snapshot validated P2 F2FS source
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/pre-atgc-source/fs artifacts/pre-atgc-source/include/trace/events
+          cp -a workspace/touchgrass-a52xq/fs/f2fs artifacts/pre-atgc-source/fs/
+          cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/pre-atgc-source/include/trace/events/
+
       - name: Apply F2FS ATGC P3
         run: |
           set -Eeuo pipefail
@@ -273,3 +280,5 @@ jobs:
 # trigger: capture-partial-atgc-source
 
 # trigger: strict-atgc-dependency-order
+
+# trigger: snapshot-pristine-p2-before-atgc

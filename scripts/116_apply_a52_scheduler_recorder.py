@@ -110,7 +110,7 @@ if "#include <linux/seq_file.h>" not in cc:
     cc = replace_once(
         cc,
         "#include <linux/nospec.h>\n",
-        "#include <linux/nospec.h>\n#include <linux/seq_file.h>\n#include <linux/ktime.h>\n",
+        "#include <linux/nospec.h>\n#include <linux/seq_file.h>\n#include <linux/ktime.h>\n#include <linux/kobject.h>\n#include <linux/sysfs.h>\n#include <linux/proc_fs.h>\n",
         "recorder core includes",
     )
 
@@ -331,25 +331,6 @@ void a52_sched_diag_sugov_freq(unsigned int cpu, unsigned long util,
 			    old_freq, new_freq);
 }
 
-static int a52_sched_diag_record_get(void *data, u64 *val)
-{
-	*val = READ_ONCE(a52_sched_diag_level);
-	return 0;
-}
-
-static int a52_sched_diag_record_set(void *data, u64 val)
-{
-	if (val > 2)
-		return -EINVAL;
-
-	WRITE_ONCE(a52_sched_diag_level, (int)val);
-	return 0;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(a52_sched_diag_record_fops,
-			a52_sched_diag_record_get,
-			a52_sched_diag_record_set, "%llu\n");
-
 static void a52_sched_diag_reset_all(void)
 {
 	int cpu;
@@ -359,26 +340,50 @@ static void a52_sched_diag_reset_all(void)
 		       sizeof(struct a52_sched_rec_cpu));
 }
 
-static int a52_sched_diag_reset_get(void *data, u64 *val)
+static ssize_t a52_sched_diag_record_show(struct kobject *kobj,
+					  struct kobj_attribute *attr,
+					  char *buf)
 {
-	*val = 0;
-	return 0;
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+			 READ_ONCE(a52_sched_diag_level));
 }
 
-static int a52_sched_diag_reset_set(void *data, u64 val)
+static ssize_t a52_sched_diag_record_store(struct kobject *kobj,
+					   struct kobj_attribute *attr,
+					   const char *buf, size_t len)
 {
-	if (val != 1)
+	int level;
+
+	if (kstrtoint(buf, 0, &level))
+		return -EINVAL;
+	if (level < 0 || level > 2)
+		return -EINVAL;
+
+	WRITE_ONCE(a52_sched_diag_level, level);
+	return len;
+}
+
+static ssize_t a52_sched_diag_reset_show(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+
+static ssize_t a52_sched_diag_reset_store(struct kobject *kobj,
+					  struct kobj_attribute *attr,
+					  const char *buf, size_t len)
+{
+	if (!sysfs_streq(buf, "1") && !sysfs_streq(buf, "reset"))
 		return -EINVAL;
 
 	a52_sched_diag_reset_all();
-	return 0;
+	return len;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(a52_sched_diag_reset_fops,
-			a52_sched_diag_reset_get,
-			a52_sched_diag_reset_set, "%llu\n");
-
-static int a52_sched_diag_stats_show(struct seq_file *m, void *v)
+static ssize_t a52_sched_diag_stats_show(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 char *buf)
 {
 	u64 cass_calls = 0, cass_sync = 0, cass_uclamp = 0;
 	u64 cass_candidates = 0, cass_idle = 0;
@@ -389,6 +394,7 @@ static int a52_sched_diag_stats_show(struct seq_file *m, void *v)
 	u64 sugov_stale = 0, sugov_freq = 0;
 	u64 sugov_up = 0, sugov_down = 0, sugov_same = 0;
 	u64 selected[NR_CPUS] = { 0 };
+	ssize_t len = 0;
 	int cpu, dst;
 
 	for_each_possible_cpu(cpu) {
@@ -421,43 +427,52 @@ static int a52_sched_diag_stats_show(struct seq_file *m, void *v)
 		sugov_same += rec->sugov_freq_same;
 	}
 
-	seq_printf(m,
-		   "level=%d\n"
-		   "cass_calls=%llu\ncass_sync=%llu\ncass_uclamp=%llu\n"
-		   "cass_candidates=%llu\ncass_idle_candidates=%llu\n"
-		   "cass_under_ucmin=%llu\ncass_under_task=%llu\n"
-		   "cass_migrate=%llu\ncass_same=%llu\n"
-		   "uclamp_calls=%llu\nuclamp_inactive_bypass=%llu\n"
-		   "uclamp_changed=%llu\nuclamp_min_raise=%llu\n"
-		   "uclamp_max_cap=%llu\n"
-		   "sugov_stale_drops=%llu\nsugov_freq_calls=%llu\n"
-		   "sugov_freq_up=%llu\nsugov_freq_down=%llu\n"
-		   "sugov_freq_same=%llu\n",
-		   READ_ONCE(a52_sched_diag_level),
-		   cass_calls, cass_sync, cass_uclamp,
-		   cass_candidates, cass_idle, cass_under_ucmin,
-		   cass_under_task, cass_migrate, cass_same,
-		   uclamp_calls, uclamp_inactive, uclamp_changed,
-		   uclamp_min_raise, uclamp_max_cap,
-		   sugov_stale, sugov_freq, sugov_up, sugov_down, sugov_same);
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			 "level=%d\n"
+			 "cass_calls=%llu\ncass_sync=%llu\ncass_uclamp=%llu\n"
+			 "cass_candidates=%llu\ncass_idle_candidates=%llu\n"
+			 "cass_under_ucmin=%llu\ncass_under_task=%llu\n"
+			 "cass_migrate=%llu\ncass_same=%llu\n"
+			 "uclamp_calls=%llu\nuclamp_inactive_bypass=%llu\n"
+			 "uclamp_changed=%llu\nuclamp_min_raise=%llu\n"
+			 "uclamp_max_cap=%llu\n"
+			 "sugov_stale_drops=%llu\nsugov_freq_calls=%llu\n"
+			 "sugov_freq_up=%llu\nsugov_freq_down=%llu\n"
+			 "sugov_freq_same=%llu\n",
+			 READ_ONCE(a52_sched_diag_level),
+			 cass_calls, cass_sync, cass_uclamp,
+			 cass_candidates, cass_idle, cass_under_ucmin,
+			 cass_under_task, cass_migrate, cass_same,
+			 uclamp_calls, uclamp_inactive, uclamp_changed,
+			 uclamp_min_raise, uclamp_max_cap,
+			 sugov_stale, sugov_freq, sugov_up, sugov_down, sugov_same);
 
-	for (dst = 0; dst < nr_cpu_ids; dst++)
-		seq_printf(m, "cass_selected_cpu%d=%llu\n", dst, selected[dst]);
+	for (dst = 0; dst < nr_cpu_ids && len < PAGE_SIZE; dst++)
+		len += scnprintf(buf + len, PAGE_SIZE - len,
+				 "cass_selected_cpu%d=%llu\n",
+				 dst, selected[dst]);
 
-	return 0;
+	return len;
 }
 
-static int a52_sched_diag_stats_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, a52_sched_diag_stats_show, inode->i_private);
-}
+static struct kobj_attribute a52_sched_diag_record_attr =
+	__ATTR(record, 0644, a52_sched_diag_record_show,
+	       a52_sched_diag_record_store);
+static struct kobj_attribute a52_sched_diag_reset_attr =
+	__ATTR(reset, 0644, a52_sched_diag_reset_show,
+	       a52_sched_diag_reset_store);
+static struct kobj_attribute a52_sched_diag_stats_attr =
+	__ATTR(stats, 0444, a52_sched_diag_stats_show, NULL);
 
-static const struct file_operations a52_sched_diag_stats_fops = {
-	.owner = THIS_MODULE,
-	.open = a52_sched_diag_stats_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
+static struct attribute *a52_sched_diag_attrs[] = {
+	&a52_sched_diag_record_attr.attr,
+	&a52_sched_diag_reset_attr.attr,
+	&a52_sched_diag_stats_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group a52_sched_diag_attr_group = {
+	.attrs = a52_sched_diag_attrs,
 };
 
 static int a52_sched_diag_events_show(struct seq_file *m, void *v)
@@ -513,7 +528,7 @@ static int a52_sched_diag_events_show(struct seq_file *m, void *v)
 
 static int a52_sched_diag_events_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, a52_sched_diag_events_show, inode->i_private);
+	return single_open(file, a52_sched_diag_events_show, NULL);
 }
 
 static const struct file_operations a52_sched_diag_events_fops = {
@@ -526,20 +541,21 @@ static const struct file_operations a52_sched_diag_events_fops = {
 
 static int __init a52_sched_diag_init(void)
 {
-	struct dentry *dir;
+	struct kobject *kobj;
+	int ret;
 
-	dir = debugfs_create_dir("a52_sched_diag", NULL);
-	if (IS_ERR_OR_NULL(dir))
-		return 0;
+	kobj = kobject_create_and_add("a52_sched_diag", kernel_kobj);
+	if (!kobj)
+		return -ENOMEM;
 
-	debugfs_create_file("record", 0644, dir, NULL,
-			    &a52_sched_diag_record_fops);
-	debugfs_create_file("reset", 0644, dir, NULL,
-			    &a52_sched_diag_reset_fops);
-	debugfs_create_file("stats", 0444, dir, NULL,
-			    &a52_sched_diag_stats_fops);
-	debugfs_create_file("events", 0444, dir, NULL,
-			    &a52_sched_diag_events_fops);
+	ret = sysfs_create_group(kobj, &a52_sched_diag_attr_group);
+	if (ret) {
+		kobject_put(kobj);
+		return ret;
+	}
+
+	proc_create("a52_sched_diag_events", 0444, NULL,
+		    &a52_sched_diag_events_fops);
 
 	return 0;
 }
@@ -669,10 +685,10 @@ checks = {
     ],
     core: [
         "A52 scheduler efficiency recorder",
-        'debugfs_create_dir("a52_sched_diag", NULL)',
-        'debugfs_create_file("record"',
-        'debugfs_create_file("stats"',
-        'debugfs_create_file("events"',
+        'kobject_create_and_add("a52_sched_diag", kernel_kobj)',
+        '__ATTR(record, 0644, a52_sched_diag_record_show',
+        '__ATTR(stats, 0444, a52_sched_diag_stats_show, NULL)',
+        'proc_create("a52_sched_diag_events", 0444, NULL',
         "cass_under_ucmin=",
         "uclamp_inactive_bypass=",
         "sugov_stale_drops=",
@@ -697,11 +713,11 @@ report_dir.mkdir(parents=True, exist_ok=True)
 (report_dir / "a52-scheduler-recorder.txt").write_text(
     "default_level=0\n"
     "levels=0-off,1-aggregates,2-aggregates-plus-events\n"
-    "root=/sys/kernel/debug/a52_sched_diag\n"
-    "record=/sys/kernel/debug/a52_sched_diag/record\n"
-    "reset=/sys/kernel/debug/a52_sched_diag/reset\n"
-    "stats=/sys/kernel/debug/a52_sched_diag/stats\n"
-    "events=/sys/kernel/debug/a52_sched_diag/events\n"
+    "root=/sys/kernel/a52_sched_diag\n"
+    "record=/sys/kernel/a52_sched_diag/record\n"
+    "reset=/sys/kernel/a52_sched_diag/reset\n"
+    "stats=/sys/kernel/a52_sched_diag/stats\n"
+    "events=/proc/a52_sched_diag_events\n"
     "cass=placement,sync,uclamp,candidates,idle,underfit,migration,selected-cpu\n"
     "uclamp=inactive-bypass,changed,min-raise,max-cap\n"
     "walt_schedutil=stale-sibling-drops,freq-up-down-same\n"
@@ -710,6 +726,6 @@ report_dir.mkdir(parents=True, exist_ok=True)
 
 print("A52 scheduler efficiency recorder applied")
 print("default_level=0")
-print("record=/sys/kernel/debug/a52_sched_diag/record")
-print("stats=/sys/kernel/debug/a52_sched_diag/stats")
-print("events=/sys/kernel/debug/a52_sched_diag/events")
+print("record=/sys/kernel/a52_sched_diag/record")
+print("stats=/sys/kernel/a52_sched_diag/stats")
+print("events=/proc/a52_sched_diag_events")

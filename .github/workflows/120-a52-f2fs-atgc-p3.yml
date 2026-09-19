@@ -271,3 +271,5 @@ jobs:
 # trigger: preserve-atgc-rejects
 
 # trigger: capture-partial-atgc-source
+
+# trigger: strict-atgc-dependency-order

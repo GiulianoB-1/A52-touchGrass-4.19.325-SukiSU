@@ -237,3 +237,5 @@ jobs:
 # trigger: gc-merge-p2
 
 # trigger: gc-merge-opt-in-safety
+
+# trigger: canonical-gc-merge-bit

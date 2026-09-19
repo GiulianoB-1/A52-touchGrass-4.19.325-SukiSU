@@ -53,9 +53,17 @@ if "#include <linux/ktime.h>" not in s:
     s = replace_once(
         s,
         "#include <linux/debugfs.h>\n",
-        "#include <linux/debugfs.h>\n#include <linux/ktime.h>\n",
+        "#include <linux/debugfs.h>\n#include <linux/ktime.h>\n#include <linux/proc_fs.h>\n",
         "ktime include",
     )
+
+if "#include <linux/proc_fs.h>" not in s:
+    include_anchor = "#include <linux/debugfs.h>\n"
+    include_pos = s.find(include_anchor)
+    if include_pos < 0:
+        raise SystemExit("MGLRU recorder P2: debugfs include anchor missing for procfs")
+    include_pos += len(include_anchor)
+    s = s[:include_pos] + "#include <linux/proc_fs.h>\n" + s[include_pos:]
 
 decl_anchor = "DEFINE_PER_CPU(unsigned long, mglru_diag_evict_pages);\n\n"
 recorder_decl = r'''DEFINE_PER_CPU(unsigned long, mglru_diag_evict_pages);
@@ -497,7 +505,7 @@ static int mglru_rec_trace_show(struct seq_file *m, void *v)
 
 static int mglru_rec_trace_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mglru_rec_trace_show, inode->i_private);
+	return single_open(file, mglru_rec_trace_show, NULL);
 }
 
 static const struct file_operations mglru_rec_trace_fops = {
@@ -515,7 +523,8 @@ dbg_anchor = 'debugfs_create_file("lru_gen_full", 0444, NULL, NULL, &lru_gen_ro_
 s = replace_once(
     s,
     dbg_anchor,
-    dbg_anchor + '\n\tdebugfs_create_file("lru_gen_trace", 0444, NULL, NULL, &mglru_rec_trace_fops);',
+    dbg_anchor + '\n\tdebugfs_create_file("lru_gen_trace", 0444, NULL, NULL, &mglru_rec_trace_fops);' +
+    '\n\tproc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);',
     "recorder debugfs file",
 )
 
@@ -524,6 +533,7 @@ for required in (
     "__ATTR(record, 0644, mglru_record_show, mglru_record_store)",
     "__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)",
     'debugfs_create_file("lru_gen_trace"',
+    'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)',
     "this_cpu_add(mglru_rec_scan_scanned, scanned)",
     "this_cpu_add(mglru_rec_evict_reclaimed, reclaimed)",
     "a52_rec_young++",
@@ -542,6 +552,7 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "sysfs_record=/sys/kernel/mm/lru_gen/record\n"
     "sysfs_stats=/sys/kernel/mm/lru_gen/stats\n"
     "debugfs_trace=/sys/kernel/debug/lru_gen_trace\n"
+    "proc_trace=/proc/lru_gen_trace\n"
     "ring_entries_per_cpu=256\n"
     "ordinary_event_sampling=1-in-16\n"
     "slow_event_threshold_ns=500000\n"
@@ -554,4 +565,4 @@ print("MGLRU power recorder P2 applied")
 print("default_record_level=0")
 print("record=/sys/kernel/mm/lru_gen/record")
 print("stats=/sys/kernel/mm/lru_gen/stats")
-print("trace=/sys/kernel/debug/lru_gen_trace")
+print("trace=/proc/lru_gen_trace")

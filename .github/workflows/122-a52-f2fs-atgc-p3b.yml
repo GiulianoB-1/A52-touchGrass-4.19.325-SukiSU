@@ -292,3 +292,5 @@ jobs:
 # trigger: p3b-atgc-strict-on-booted-p3a
 
 # trigger: samsung-atgc-adapter-build
+
+# trigger: samsung-rbtree-api-fix

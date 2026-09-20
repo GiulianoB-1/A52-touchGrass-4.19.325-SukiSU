@@ -387,17 +387,27 @@ rep('segment.c',
 \t\t\tupdate_segment_mtime(sbi, old_blkaddr, 0);
 \t\tupdate_sit_entry(sbi, old_blkaddr, -1);''')
 
-rep('segment.c',
-'''\tf2fs_do_replace_block(sbi, &sum, old_addr, new_addr,
-\t\t\t\trecover_curseg, recover_newaddr);''',
-'''\tf2fs_do_replace_block(sbi, &sum, old_addr, new_addr,
-\t\t\t\trecover_curseg, recover_newaddr, false);''')
+p = root/'segment.c'
+seg = p.read_text()
+seg, n = re.subn(
+    r'f2fs_do_replace_block\(sbi, &sum, old_addr, new_addr,\s*recover_curseg, recover_newaddr\);',
+    'f2fs_do_replace_block(sbi, &sum, old_addr, new_addr,\n'
+    '\t\t\t\trecover_curseg, recover_newaddr, false);',
+    seg, count=1)
+if n != 1:
+    raise RuntimeError(f'unexpected f2fs_replace_block wrapper call count: {n}')
+p.write_text(seg)
 
-rep('gc.c',
-'''\t\tf2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,
-\t\t\t\t\t\t\t\ttrue, true);''',
-'''\t\tf2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,
-\t\t\t\t\t\t\t\ttrue, true, true);''')
+p = root/'gc.c'
+gc = p.read_text()
+gc, n = re.subn(
+    r'f2fs_do_replace_block\(fio\.sbi, &sum, newaddr, fio\.old_blkaddr,\s*true, true\);',
+    'f2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,\n'
+    '\t\t\t\t\t\t\t\ttrue, true, true);',
+    gc, count=1)
+if n != 1:
+    raise RuntimeError(f'unexpected GC recover replace-block call count: {n}')
+p.write_text(gc)
 
 # ATGC uses a 64-bit timestamp key in the same generic rb_entry layout used
 # by the newer F2FS extent-cache helpers. Backport that generalized rb-tree

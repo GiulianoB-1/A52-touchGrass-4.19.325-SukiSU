@@ -298,3 +298,5 @@ jobs:
 # trigger: full-generalized-rbtree-backport
 
 # trigger: atgc-mtime-and-rbtree-prereqs
+
+# trigger: allocator-adaptation-order-fix

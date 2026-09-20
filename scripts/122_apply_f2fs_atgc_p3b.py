@@ -244,9 +244,124 @@ out:
 ''')
 rep('gc.c','f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, CURSEG_COLD_DATA, NULL, false);',
     'f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, type, NULL, false);')
-# Samsung's rb-tree consistency helper predates upstream's third bool argument.
-rep('gc.c','f2fs_check_rb_tree_consistence(sbi,\n\t\t\t\t\t\t&sbi->am.root, true)',
-    'f2fs_check_rb_tree_consistence(sbi,\n\t\t\t\t\t\t&sbi->am.root)')
+# ATGC uses a 64-bit timestamp key in the same generic rb_entry layout used
+# by the newer F2FS extent-cache helpers. Backport that generalized rb-tree
+# infrastructure instead of weakening ATGC's consistency checks.
+rep('f2fs.h',
+'''struct rb_entry {
+\tstruct rb_node rb_node;\t\t/* rb node located in rb-tree */
+\tunsigned int ofs;\t\t/* start offset of the entry */
+\tunsigned int len;\t\t/* length of the entry */
+};''',
+'''struct rb_entry {
+\tstruct rb_node rb_node;\t\t/* rb node located in rb-tree */
+\tunion {
+\t\tstruct {
+\t\t\tunsigned int ofs;\t/* start offset of the entry */
+\t\t\tunsigned int len;\t/* length of the entry */
+\t\t};
+\t\tunsigned long long key;\t\t/* 64-bits key */
+\t};
+};''')
+
+rep('f2fs.h',
+'''struct rb_entry *f2fs_lookup_rb_tree(struct rb_root_cached *root,
+\t\t\t\tstruct rb_entry *cached_re, unsigned int ofs);
+struct rb_node **f2fs_lookup_rb_tree_for_insert''',
+'''struct rb_entry *f2fs_lookup_rb_tree(struct rb_root_cached *root,
+\t\t\t\tstruct rb_entry *cached_re, unsigned int ofs);
+struct rb_node **f2fs_lookup_rb_tree_ext(struct f2fs_sb_info *sbi,
+\t\t\t\tstruct rb_root_cached *root,
+\t\t\t\tstruct rb_node **parent,
+\t\t\t\tunsigned long long key, bool *leftmost);
+struct rb_node **f2fs_lookup_rb_tree_for_insert''')
+
+rep('f2fs.h',
+'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
+\t\t\t\tstruct rb_root_cached *root);''',
+'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
+\t\t\t\tstruct rb_root_cached *root, bool check_key);''')
+
+rep('extent_cache.c',
+'''struct rb_node **f2fs_lookup_rb_tree_for_insert(struct f2fs_sb_info *sbi,''',
+'''struct rb_node **f2fs_lookup_rb_tree_ext(struct f2fs_sb_info *sbi,
+\t\t\t\t\tstruct rb_root_cached *root,
+\t\t\t\t\tstruct rb_node **parent,
+\t\t\t\t\tunsigned long long key, bool *leftmost)
+{
+\tstruct rb_node **p = &root->rb_root.rb_node;
+\tstruct rb_entry *re;
+
+\twhile (*p) {
+\t\t*parent = *p;
+\t\tre = rb_entry(*parent, struct rb_entry, rb_node);
+
+\t\tif (key < re->key) {
+\t\t\tp = &(*p)->rb_left;
+\t\t} else {
+\t\t\tp = &(*p)->rb_right;
+\t\t\t*leftmost = false;
+\t\t}
+\t}
+
+\treturn p;
+}
+
+struct rb_node **f2fs_lookup_rb_tree_for_insert(struct f2fs_sb_info *sbi,''')
+
+between('extent_cache.c',
+'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
+''',
+'''static struct kmem_cache *extent_tree_slab;''',
+'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
+\t\t\t\tstruct rb_root_cached *root, bool check_key)
+{
+#ifdef CONFIG_F2FS_CHECK_FS
+\tstruct rb_node *cur = rb_first_cached(root), *next;
+\tstruct rb_entry *cur_re, *next_re;
+
+\tif (!cur)
+\t\treturn true;
+
+\twhile (cur) {
+\t\tnext = rb_next(cur);
+\t\tif (!next)
+\t\t\treturn true;
+
+\t\tcur_re = rb_entry(cur, struct rb_entry, rb_node);
+\t\tnext_re = rb_entry(next, struct rb_entry, rb_node);
+
+\t\tif (check_key) {
+\t\t\tif (cur_re->key > next_re->key) {
+\t\t\t\tf2fs_info(sbi, "inconsistent rbtree, cur(%llu) next(%llu)",
+\t\t\t\t\tcur_re->key, next_re->key);
+\t\t\t\treturn false;
+\t\t\t}
+\t\t\tgoto next;
+\t\t}
+
+\t\tif (cur_re->ofs + cur_re->len > next_re->ofs) {
+\t\t\tf2fs_info(sbi, "inconsistent rbtree, cur(%u, %u) next(%u, %u)",
+\t\t\t\t  cur_re->ofs, cur_re->len,
+\t\t\t\t  next_re->ofs, next_re->len);
+\t\t\treturn false;
+\t\t}
+next:
+\t\tcur = next;
+\t}
+#endif
+\treturn true;
+}
+
+''')
+
+# Existing extent-cache call sites use offset/length ordering, not key ordering.
+p = root/'extent_cache.c'
+ec = p.read_text()
+ec = ec.replace('f2fs_check_rb_tree_consistence(sbi, &et->root)',
+                'f2fs_check_rb_tree_consistence(sbi, &et->root, false)')
+p.write_text(ec)
+
 needle='\tif (__is_large_section(sbi))\n\t\tf2fs_ra_meta_pages(sbi, GET_SUM_BLOCK(sbi, segno),'
 rep('gc.c',needle,'\tsanity_check_seg_type(sbi, get_seg_entry(sbi, segno)->type);\n\n'+needle)
 
@@ -373,12 +488,13 @@ for p in kernel.rglob('*.rej'): p.unlink()
 for p in kernel.rglob('*.orig'): p.unlink()
 
 checks={
- 'f2fs.h':['F2FS_MOUNT_ATGC','NR_CURSEG_INMEM_TYPE\t(2)','CURSEG_ALL_DATA_ATGC','GC_IDLE_AT','bool f2fs_segment_has_free_slot','void f2fs_init_inmem_curseg'],
+ 'f2fs.h':['F2FS_MOUNT_ATGC','NR_CURSEG_INMEM_TYPE\t(2)','CURSEG_ALL_DATA_ATGC','GC_IDLE_AT','bool f2fs_segment_has_free_slot','void f2fs_init_inmem_curseg','unsigned long long key','f2fs_lookup_rb_tree_ext'],
  'segment.h':['AT_SSR','GC_AT','dirty_min_mtime','unsigned long long age_threshold'],
  'gc.c':['static struct kmem_cache *victim_entry_slab','p->alloc_mode == AT_SSR','init_atgc_management'],
  'segment.c':['CURSEG_ALL_DATA_ATGC','get_atssr_segment','bool from_gc = (type == CURSEG_ALL_DATA_ATGC)','get_ssr_segment(sbi, type, SSR, 0)'],
  'super.c':['Opt_atgc','"atgc"','LFS not compatible with ATGC','f2fs_init_inmem_curseg(sbi);'],
  'sysfs.c':['ATGC_INFO','atgc_candidate_ratio','atgc_candidate_count','atgc_age_weight','atgc_age_threshold'],
+ 'extent_cache.c':['f2fs_lookup_rb_tree_ext','bool check_key','cur_re->key > next_re->key'],
 }
 for f,needles in checks.items():
     data=rd(f)

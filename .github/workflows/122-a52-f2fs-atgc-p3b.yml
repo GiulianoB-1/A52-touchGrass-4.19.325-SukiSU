@@ -136,13 +136,16 @@ jobs:
           cp -a workspace/touchgrass-a52xq/fs/f2fs artifacts/pre-atgc-p3b/fs/
           cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/pre-atgc-p3b/include/trace/events/
 
-      - name: Stage F2FS ATGC P3B
+      - name: Apply F2FS ATGC P3B
         run: |
           set -Eeuo pipefail
-          ./scripts/122_stage_f2fs_atgc_p3b.sh \
+          python3 scripts/122_apply_f2fs_atgc_p3b.py \
             workspace/touchgrass-a52xq \
             artifacts/f2fs-atgc-p3b
           git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-atgc-p3b/report.txt
+          grep -Fq 'manual Samsung ATGC adaptation=PASS' artifacts/f2fs-atgc-p3b/report.txt
+          grep -Fq 'ATGC default=off' artifacts/f2fs-atgc-p3b/report.txt
 
       - name: Build integrated kernel
         run: |
@@ -287,3 +290,5 @@ jobs:
 # trigger: split-p3a-inmem-curseg-only
 
 # trigger: p3b-atgc-strict-on-booted-p3a
+
+# trigger: samsung-atgc-adapter-build

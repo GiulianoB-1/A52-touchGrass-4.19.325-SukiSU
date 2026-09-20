@@ -244,6 +244,9 @@ out:
 ''')
 rep('gc.c','f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, CURSEG_COLD_DATA, NULL, false);',
     'f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, type, NULL, false);')
+# Samsung's rb-tree consistency helper predates upstream's third bool argument.
+rep('gc.c','f2fs_check_rb_tree_consistence(sbi,\n\t\t\t\t\t\t&sbi->am.root, true)',
+    'f2fs_check_rb_tree_consistence(sbi,\n\t\t\t\t\t\t&sbi->am.root)')
 needle='\tif (__is_large_section(sbi))\n\t\tf2fs_ra_meta_pages(sbi, GET_SUM_BLOCK(sbi, segno),'
 rep('gc.c',needle,'\tsanity_check_seg_type(sbi, get_seg_entry(sbi, segno)->type);\n\n'+needle)
 

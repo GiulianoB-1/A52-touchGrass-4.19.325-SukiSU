@@ -42,7 +42,7 @@ def sub1(f,pat,repl,flags=0,label="regex"):
 # ---- f2fs.h ---------------------------------------------------------------
 s=rd("f2fs.h")
 if "F2FS_MOUNT_AGE_EXTENT_CACHE" not in s:
-    m=re.search(r"(^#define\s+F2FS_MOUNT_GC_MERGE\s+0x[0-9A-Fa-f]+\s*$)",s,re.M)
+    m=re.search(r"(^#define\s+F2FS_MOUNT_GC_MERGE\b.*$)",s,re.M)
     if not m:
         raise RuntimeError("f2fs.h: GC_MERGE mount-bit anchor missing")
     s=s[:m.end()]+"\n#define F2FS_MOUNT_AGE_EXTENT_CACHE\t0x80000000"+s[m.end():]

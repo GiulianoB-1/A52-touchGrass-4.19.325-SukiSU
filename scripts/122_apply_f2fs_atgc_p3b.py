@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import subprocess, sys
+import subprocess, sys, re
 
 kernel = Path(sys.argv[1] if len(sys.argv) > 1 else 'workspace/touchgrass-a52xq').resolve()
 out = Path(sys.argv[2] if len(sys.argv) > 2 else 'artifacts/f2fs-atgc-p3b').resolve()
@@ -361,6 +361,16 @@ ec = p.read_text()
 ec = ec.replace('f2fs_check_rb_tree_consistence(sbi, &et->root)',
                 'f2fs_check_rb_tree_consistence(sbi, &et->root, false)')
 p.write_text(ec)
+
+# Samsung's discard-command rb-tree shares the extent-style offset/length
+# ordering and therefore uses check_key=false. There are exactly two checks.
+p = root/'segment.c'
+seg = p.read_text()
+seg, n = re.subn(r'f2fs_check_rb_tree_consistence\(sbi,\s*&dcc->root\)',
+                 'f2fs_check_rb_tree_consistence(sbi, &dcc->root, false)', seg)
+if n != 2:
+    raise RuntimeError(f'unexpected discard rb-tree checker call count: {n}')
+p.write_text(seg)
 
 needle='\tif (__is_large_section(sbi))\n\t\tf2fs_ra_meta_pages(sbi, GET_SUM_BLOCK(sbi, segno),'
 rep('gc.c',needle,'\tsanity_check_seg_type(sbi, get_seg_entry(sbi, segno)->type);\n\n'+needle)

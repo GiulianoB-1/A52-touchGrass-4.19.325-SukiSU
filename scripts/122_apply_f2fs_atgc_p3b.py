@@ -355,16 +355,6 @@ rep('segment.c',
 \t/*
 \t * SIT information should be updated before segment allocation,''')
 
-# Ensure old_mtime storage is declared in the allocator.
-rep('segment.c',
-'''\tstruct sit_info *sit_i = SIT_I(sbi);
-\tstruct curseg_info *curseg = CURSEG_I(sbi, type);
-\tstruct seg_entry *se = NULL;''',
-'''\tstruct sit_info *sit_i = SIT_I(sbi);
-\tstruct curseg_info *curseg = CURSEG_I(sbi, type);
-\tstruct seg_entry *se = NULL;
-\tunsigned long long old_mtime;''')
-
 # Preserve mtime correctly through block replacement/recovery too.
 rep('f2fs.h',
 '''\t\t\tbool recover_curseg, bool recover_newaddr);''',
@@ -610,7 +600,7 @@ rep('segment.c',r'''static bool __has_curseg_space(struct f2fs_sb_info *sbi, int
 }
 ''')
 rep('segment.c','\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\n\t/*\n\t * We need to wait for node_write',
-    '\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\tstruct seg_entry *se = NULL;\n\n\t/*\n\t * We need to wait for node_write')
+    '\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\tstruct seg_entry *se = NULL;\n\tunsigned long long old_mtime;\n\n\t/*\n\t * We need to wait for node_write')
 rep('segment.c','\tmutex_lock(&curseg->curseg_mutex);\n\tdown_write(&sit_i->sentry_lock);\n\n\t*new_blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);\n',
     '\tmutex_lock(&curseg->curseg_mutex);\n\tdown_write(&sit_i->sentry_lock);\n\n\tif (from_gc) {\n\t\tf2fs_bug_on(sbi, GET_SEGNO(sbi, old_blkaddr) == NULL_SEGNO);\n\t\tse = get_seg_entry(sbi, GET_SEGNO(sbi, old_blkaddr));\n\t\tsanity_check_seg_type(sbi, se->type);\n\t\tf2fs_bug_on(sbi, IS_NODESEG(se->type));\n\t}\n\n\t*new_blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);\n\tf2fs_bug_on(sbi, curseg->next_blkoff >= sbi->blocks_per_seg);\n')
 rep('segment.c','\tif (!__has_curseg_space(sbi, type))\n\t\tsit_i->s_ops->allocate_segment(sbi, type, false);\n',

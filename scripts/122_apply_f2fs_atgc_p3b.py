@@ -244,6 +244,171 @@ out:
 ''')
 rep('gc.c','f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, CURSEG_COLD_DATA, NULL, false);',
     'f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,\n\t\t\t\t\t&sum, type, NULL, false);')
+# ATGC prerequisites from 6f3a01ae9b72 + c5d02785c59d:
+# keep a segment's average update time and preserve source age across GC moves.
+rep('segment.c',
+'''static void update_sit_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int del)
+{''',
+'''static inline unsigned long long get_segment_mtime(struct f2fs_sb_info *sbi,
+\t\t\t\t\t\t\tblock_t blkaddr)
+{
+\tunsigned int segno = GET_SEGNO(sbi, blkaddr);
+
+\tif (segno == NULL_SEGNO)
+\t\treturn 0;
+\treturn get_seg_entry(sbi, segno)->mtime;
+}
+
+static void update_segment_mtime(struct f2fs_sb_info *sbi, block_t blkaddr,
+\t\t\t\t\t\tunsigned long long old_mtime)
+{
+\tstruct seg_entry *se;
+\tunsigned int segno = GET_SEGNO(sbi, blkaddr);
+\tunsigned long long ctime = get_mtime(sbi, false);
+\tunsigned long long mtime = old_mtime ? old_mtime : ctime;
+
+\tif (segno == NULL_SEGNO)
+\t\treturn;
+
+\tse = get_seg_entry(sbi, segno);
+\tif (!se->mtime)
+\t\tse->mtime = mtime;
+\telse
+\t\tse->mtime = div_u64(se->mtime * se->valid_blocks + mtime,
+\t\t\t\t\t\tse->valid_blocks + 1);
+
+\tif (ctime > SIT_I(sbi)->max_mtime)
+\t\tSIT_I(sbi)->max_mtime = ctime;
+}
+
+static void update_sit_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int del)
+{''')
+
+rep('segment.c',
+'''\tse->valid_blocks = new_vblocks;
+\tse->mtime = get_mtime(sbi, false);
+\tif (se->mtime > SIT_I(sbi)->max_mtime)
+\t\tSIT_I(sbi)->max_mtime = se->mtime;
+''',
+'''\tse->valid_blocks = new_vblocks;
+''')
+
+rep('segment.c',
+'''\tdown_write(&sit_i->sentry_lock);
+
+\tupdate_sit_entry(sbi, addr, -1);
+''',
+'''\tdown_write(&sit_i->sentry_lock);
+
+\tupdate_segment_mtime(sbi, addr, 0);
+\tupdate_sit_entry(sbi, addr, -1);
+''')
+
+# Keep Samsung's add_list ABI and add an explicit from_gc bit.
+rep('f2fs.h',
+'''\t\t\tstruct f2fs_summary *sum, int type,
+\t\t\tstruct f2fs_io_info *fio, bool add_list);''',
+'''\t\t\tstruct f2fs_summary *sum, int type,
+\t\t\tstruct f2fs_io_info *fio, bool add_list, bool from_gc);''')
+
+rep('segment.c',
+'''\t\tstruct f2fs_summary *sum, int type,
+\t\tstruct f2fs_io_info *fio, bool add_list)
+{''',
+'''\t\tstruct f2fs_summary *sum, int type,
+\t\tstruct f2fs_io_info *fio, bool add_list, bool from_gc)
+{''')
+
+rep('data.c',
+'''\t\t\t\t\t&sum, seg_type, NULL, false);''',
+'''\t\t\t\t\t&sum, seg_type, NULL, false, false);''')
+
+rep('gc.c',
+'''f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,
+\t\t\t\t\t&sum, type, NULL, false);''',
+'''f2fs_allocate_data_block(fio.sbi, NULL, fio.old_blkaddr, &newaddr,
+\t\t\t\t\t&sum, type, NULL, false, true);''')
+
+rep('segment.c',
+'''\tf2fs_allocate_data_block(fio->sbi, fio->page, fio->old_blkaddr,
+\t\t\t&fio->new_blkaddr, sum, type, fio, true);''',
+'''\tf2fs_allocate_data_block(fio->sbi, fio->page, fio->old_blkaddr,
+\t\t\t&fio->new_blkaddr, sum, type, fio, true,
+\t\t\tis_cold_data(fio->page));''')
+
+rep('segment.c',
+'''\tstat_inc_block_count(sbi, curseg);
+\tsbi->sec_stat.alloc_blk_count[curseg->alloc_type]++;
+\t/*
+\t * SIT information should be updated before segment allocation,''',
+'''\tstat_inc_block_count(sbi, curseg);
+\tsbi->sec_stat.alloc_blk_count[curseg->alloc_type]++;
+
+\tif (from_gc) {
+\t\told_mtime = get_segment_mtime(sbi, old_blkaddr);
+\t} else {
+\t\tupdate_segment_mtime(sbi, old_blkaddr, 0);
+\t\told_mtime = 0;
+\t}
+\tupdate_segment_mtime(sbi, *new_blkaddr, old_mtime);
+
+\t/*
+\t * SIT information should be updated before segment allocation,''')
+
+# Ensure old_mtime storage is declared in the allocator.
+rep('segment.c',
+'''\tstruct sit_info *sit_i = SIT_I(sbi);
+\tstruct curseg_info *curseg = CURSEG_I(sbi, type);
+\tstruct seg_entry *se = NULL;''',
+'''\tstruct sit_info *sit_i = SIT_I(sbi);
+\tstruct curseg_info *curseg = CURSEG_I(sbi, type);
+\tstruct seg_entry *se = NULL;
+\tunsigned long long old_mtime;''')
+
+# Preserve mtime correctly through block replacement/recovery too.
+rep('f2fs.h',
+'''\t\t\tbool recover_curseg, bool recover_newaddr);''',
+'''\t\t\tbool recover_curseg, bool recover_newaddr,
+\t\t\tbool from_gc);''')
+
+rep('segment.c',
+'''\t\t\t\tbool recover_curseg, bool recover_newaddr)
+{''',
+'''\t\t\t\tbool recover_curseg, bool recover_newaddr,
+\t\t\t\tbool from_gc)
+{''')
+
+rep('segment.c',
+'''\tif (!recover_curseg || recover_newaddr)
+\t\tupdate_sit_entry(sbi, new_blkaddr, 1);''',
+'''\tif (!recover_curseg || recover_newaddr) {
+\t\tif (!from_gc)
+\t\t\tupdate_segment_mtime(sbi, new_blkaddr, 0);
+\t\tupdate_sit_entry(sbi, new_blkaddr, 1);
+\t}''')
+
+rep('segment.c',
+'''\t\tinvalidate_mapping_pages(META_MAPPING(sbi),
+\t\t\t\t\told_blkaddr, old_blkaddr);
+\t\tupdate_sit_entry(sbi, old_blkaddr, -1);''',
+'''\t\tinvalidate_mapping_pages(META_MAPPING(sbi),
+\t\t\t\t\told_blkaddr, old_blkaddr);
+\t\tif (!from_gc)
+\t\t\tupdate_segment_mtime(sbi, old_blkaddr, 0);
+\t\tupdate_sit_entry(sbi, old_blkaddr, -1);''')
+
+rep('segment.c',
+'''\tf2fs_do_replace_block(sbi, &sum, old_addr, new_addr,
+\t\t\t\trecover_curseg, recover_newaddr);''',
+'''\tf2fs_do_replace_block(sbi, &sum, old_addr, new_addr,
+\t\t\t\trecover_curseg, recover_newaddr, false);''')
+
+rep('gc.c',
+'''\t\tf2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,
+\t\t\t\t\t\t\t\ttrue, true);''',
+'''\t\tf2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,
+\t\t\t\t\t\t\t\ttrue, true, true);''')
+
 # ATGC uses a 64-bit timestamp key in the same generic rb_entry layout used
 # by the newer F2FS extent-cache helpers. Backport that generalized rb-tree
 # infrastructure instead of weakening ATGC's consistency checks.
@@ -276,11 +441,16 @@ struct rb_node **f2fs_lookup_rb_tree_ext(struct f2fs_sb_info *sbi,
 \t\t\t\tunsigned long long key, bool *leftmost);
 struct rb_node **f2fs_lookup_rb_tree_for_insert''')
 
-rep('f2fs.h',
-'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
-\t\t\t\tstruct rb_root_cached *root);''',
-'''bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,
-\t\t\t\tstruct rb_root_cached *root, bool check_key);''')
+p = root/'f2fs.h'
+hh = p.read_text()
+hh, n = re.subn(
+    r'bool f2fs_check_rb_tree_consistence\(struct f2fs_sb_info \*sbi,\s*struct rb_root_cached \*root\);',
+    'bool f2fs_check_rb_tree_consistence(struct f2fs_sb_info *sbi,\n'
+    '\t\t\t\tstruct rb_root_cached *root, bool check_key);',
+    hh, count=1)
+if n != 1 and 'bool check_key' not in hh:
+    raise RuntimeError(f'failed to generalize rb-tree checker declaration: {n}')
+p.write_text(hh)
 
 rep('extent_cache.c',
 '''struct rb_node **f2fs_lookup_rb_tree_for_insert(struct f2fs_sb_info *sbi,''',
@@ -440,7 +610,7 @@ rep('segment.c',r'''static bool __has_curseg_space(struct f2fs_sb_info *sbi, int
 }
 ''')
 rep('segment.c','\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\n\t/*\n\t * We need to wait for node_write',
-    '\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\tbool from_gc = (type == CURSEG_ALL_DATA_ATGC);\n\tstruct seg_entry *se = NULL;\n\n\t/*\n\t * We need to wait for node_write')
+    '\tstruct sit_info *sit_i = SIT_I(sbi);\n\tstruct curseg_info *curseg = CURSEG_I(sbi, type);\n\tstruct seg_entry *se = NULL;\n\n\t/*\n\t * We need to wait for node_write')
 rep('segment.c','\tmutex_lock(&curseg->curseg_mutex);\n\tdown_write(&sit_i->sentry_lock);\n\n\t*new_blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);\n',
     '\tmutex_lock(&curseg->curseg_mutex);\n\tdown_write(&sit_i->sentry_lock);\n\n\tif (from_gc) {\n\t\tf2fs_bug_on(sbi, GET_SEGNO(sbi, old_blkaddr) == NULL_SEGNO);\n\t\tse = get_seg_entry(sbi, GET_SEGNO(sbi, old_blkaddr));\n\t\tsanity_check_seg_type(sbi, se->type);\n\t\tf2fs_bug_on(sbi, IS_NODESEG(se->type));\n\t}\n\n\t*new_blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);\n\tf2fs_bug_on(sbi, curseg->next_blkoff >= sbi->blocks_per_seg);\n')
 rep('segment.c','\tif (!__has_curseg_space(sbi, type))\n\t\tsit_i->s_ops->allocate_segment(sbi, type, false);\n',
@@ -501,7 +671,7 @@ checks={
  'f2fs.h':['F2FS_MOUNT_ATGC','NR_CURSEG_INMEM_TYPE\t(2)','CURSEG_ALL_DATA_ATGC','GC_IDLE_AT','bool f2fs_segment_has_free_slot','void f2fs_init_inmem_curseg','unsigned long long key','f2fs_lookup_rb_tree_ext'],
  'segment.h':['AT_SSR','GC_AT','dirty_min_mtime','unsigned long long age_threshold'],
  'gc.c':['static struct kmem_cache *victim_entry_slab','p->alloc_mode == AT_SSR','init_atgc_management'],
- 'segment.c':['CURSEG_ALL_DATA_ATGC','get_atssr_segment','bool from_gc = (type == CURSEG_ALL_DATA_ATGC)','get_ssr_segment(sbi, type, SSR, 0)'],
+ 'segment.c':['CURSEG_ALL_DATA_ATGC','get_atssr_segment','get_segment_mtime','update_segment_mtime','bool add_list, bool from_gc','get_ssr_segment(sbi, type, SSR, 0)'],
  'super.c':['Opt_atgc','"atgc"','LFS not compatible with ATGC','f2fs_init_inmem_curseg(sbi);'],
  'sysfs.c':['ATGC_INFO','atgc_candidate_ratio','atgc_candidate_count','atgc_age_weight','atgc_age_threshold'],
  'extent_cache.c':['f2fs_lookup_rb_tree_ext','bool check_key','cur_re->key > next_re->key'],

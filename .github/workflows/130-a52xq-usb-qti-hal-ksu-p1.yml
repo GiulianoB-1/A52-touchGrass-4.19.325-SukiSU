@@ -1,0 +1,195 @@
+name: 130 - A52xq USB QTI HAL KSU P1
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/130-a52xq-usb-qti-hal-ksu-p1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Verify QTI USB HAL and package KernelSU module
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Install inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl file binutils zip
+
+      - name: Fetch VNDK30-generation QTI USB HAL
+        run: |
+          set -euxo pipefail
+          mkdir -p work
+          URL='https://raw.githubusercontent.com/melles1991/oneplus_kebab_dump/aosp_kebab-user-12-SQ3A.220705.003.A1-1657533913-release-keys/vendor/bin/hw/android.hardware.usb%401.3-service-qti'
+          curl -fL --retry 4 --retry-delay 2 "$URL" -o work/android.hardware.usb@1.3-service-qti
+          chmod 0755 work/android.hardware.usb@1.3-service-qti
+          sha256sum work/android.hardware.usb@1.3-service-qti | tee work/SHA256SUMS.txt
+          file work/android.hardware.usb@1.3-service-qti
+
+      - name: Verify ELF architecture and dependencies
+        run: |
+          set -euxo pipefail
+          BIN=work/android.hardware.usb@1.3-service-qti
+
+          readelf -h "$BIN" | tee work/elf-header.txt
+          readelf -d "$BIN" | tee work/elf-dynamic.txt
+
+          readelf -h "$BIN" | grep -q 'Class:[[:space:]]*ELF64'
+          readelf -h "$BIN" | grep -q 'Machine:[[:space:]]*AArch64'
+
+          readelf -d "$BIN" | awk '/NEEDED/{gsub(/\\[|\\]/, "", $5); print $5}' | sort -u | tee work/needed.txt
+
+          cat > work/allowed-needed.txt <<'EOF'
+          android.hardware.usb@1.0.so
+          android.hardware.usb@1.1.so
+          android.hardware.usb@1.2.so
+          android.hardware.usb@1.3.so
+          libbase.so
+          libc++.so
+          libc.so
+          libcutils.so
+          libdl.so
+          libhardware.so
+          libhidlbase.so
+          liblog.so
+          libm.so
+          libutils.so
+          EOF
+          sort -u -o work/allowed-needed.txt work/allowed-needed.txt
+
+          echo '=== NEEDED ==='
+          cat work/needed.txt
+
+          echo '=== Unexpected dependencies ==='
+          comm -23 work/needed.txt work/allowed-needed.txt | tee work/unexpected-needed.txt
+          test ! -s work/unexpected-needed.txt
+
+      - name: Build KernelSU systemless module
+        run: |
+          set -euxo pipefail
+          MOD=work/module
+          mkdir -p "$MOD/system/vendor/bin/hw"
+
+          # Deliberately keep the existing Coral service name/path so the
+          # phone's current init RC + VINTF declaration remain unchanged.
+          cp work/android.hardware.usb@1.3-service-qti \
+             "$MOD/system/vendor/bin/hw/android.hardware.usb@1.3-service.coral"
+
+          cat > "$MOD/module.prop" <<'EOF'
+          id=a52xq-usb-qti-hal-p1
+          name=A52xq USB QTI HAL P1
+          version=P1
+          versionCode=1
+          author=OpenAI + GiulianoB-1
+          description=A/B test: systemlessly replaces the existing Coral USB 1.3 HAL executable with the Qualcomm QTI USB 1.3 HAL while preserving the stock init/VINTF configuration. SM-A526B/a52xq test only.
+          EOF
+
+          cat > "$MOD/customize.sh" <<'EOF'
+          #!/system/bin/sh
+
+          ui_print "========================================"
+          ui_print " A52xq USB QTI HAL P1"
+          ui_print "========================================"
+
+          DEVICE="$(getprop ro.product.vendor.device)"
+          PLATFORM="$(getprop ro.board.platform)"
+          VNDK="$(getprop ro.vndk.version)"
+          VENDOR_SDK="$(getprop ro.vendor.build.version.sdk)"
+
+          ui_print "device=$DEVICE platform=$PLATFORM vndk=$VNDK vendor_sdk=$VENDOR_SDK"
+
+          if [ "$DEVICE" != "a52xq" ]; then
+            abort "This P1 module is only for Samsung a52xq."
+          fi
+
+          if [ "$PLATFORM" != "lito" ]; then
+            abort "Unexpected platform: $PLATFORM (expected lito)."
+          fi
+
+          if [ "$VNDK" != "30" ] || [ "$VENDOR_SDK" != "30" ]; then
+            abort "Unexpected vendor ABI: VNDK=$VNDK SDK=$VENDOR_SDK (expected 30/30)."
+          fi
+
+          STOCK=/vendor/bin/hw/android.hardware.usb@1.3-service.coral
+          if [ ! -x "$STOCK" ]; then
+            abort "Stock Coral USB HAL not found at $STOCK"
+          fi
+
+          ui_print "Replacing only the USB HAL executable."
+          ui_print "Stock init RC and VINTF manifest are left untouched."
+          ui_print "Reboot after installation."
+
+          set_perm "$MODPATH/system/vendor/bin/hw/android.hardware.usb@1.3-service.coral" \
+                   0 2000 0755 u:object_r:hal_usb_default_exec:s0
+          EOF
+          chmod 0755 "$MOD/customize.sh"
+
+          cat > "$MOD/README.txt" <<'EOF'
+          A52xq USB QTI HAL P1
+
+          Purpose:
+          A/B test for the reconnect bug where first PC connection works, but
+          subsequent reconnect becomes charging-only until Android is rebooted.
+
+          Change:
+          Only /vendor/bin/hw/android.hardware.usb@1.3-service.coral is overlaid.
+          The replacement executable is Qualcomm's android.hardware.usb@1.3-service-qti.
+          Existing Coral init RC and VINTF files remain unchanged.
+
+          Target:
+          Samsung Galaxy A52 5G SM-A526B / a52xq
+          lito
+          vendor SDK 30
+          VNDK 30
+
+          Test:
+          1. Reboot.
+          2. Confirm USB data works on first PC connection.
+          3. Disconnect and reconnect 10-20 times.
+          4. Confirm MTP/ADB remain available.
+          5. Test USB tethering.
+          6. If anything regresses, disable/remove this module and reboot.
+
+          Note:
+          KernelSU system-file overlays require a compatible metamodule such as
+          meta-overlayfs on current KernelSU releases.
+          EOF
+
+          (
+            cd "$MOD"
+            zip -r9 ../A52XQ-USB-QTI-HAL-P1-KSU.zip .
+          )
+
+          unzip -l work/A52XQ-USB-QTI-HAL-P1-KSU.zip
+          sha256sum work/A52XQ-USB-QTI-HAL-P1-KSU.zip | tee work/module-SHA256SUMS.txt
+
+      - name: Upload KernelSU module
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-USB-QTI-HAL-P1-KSU
+          path: work/A52XQ-USB-QTI-HAL-P1-KSU.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload verification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-USB-QTI-HAL-P1-DIAG
+          path: |
+            work/SHA256SUMS.txt
+            work/module-SHA256SUMS.txt
+            work/elf-header.txt
+            work/elf-dynamic.txt
+            work/needed.txt
+            work/unexpected-needed.txt
+          if-no-files-found: error

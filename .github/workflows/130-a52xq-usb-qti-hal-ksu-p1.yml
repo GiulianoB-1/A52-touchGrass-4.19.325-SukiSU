@@ -47,7 +47,7 @@ jobs:
           readelf -h "$BIN" | grep -q 'Class:[[:space:]]*ELF64'
           readelf -h "$BIN" | grep -q 'Machine:[[:space:]]*AArch64'
 
-          readelf -d "$BIN" | awk '/NEEDED/{gsub(/\\[|\\]/, "", $5); print $5}' | sort -u | tee work/needed.txt
+          readelf -d "$BIN" | awk '/NEEDED/{print substr($5,2,length($5)-2)}' | sort -u | tee work/needed.txt
 
           cat > work/allowed-needed.txt <<'EOF'
           android.hardware.usb@1.0.so

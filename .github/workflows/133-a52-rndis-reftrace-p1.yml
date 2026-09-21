@@ -1,0 +1,243 @@
+name: 133 - A52 RNDIS REFTRACE P1
+
+on:
+  push:
+    branches:
+      - agent/a52-rndis-reftrace-p1
+    paths:
+      - .github/workflows/133-a52-rndis-reftrace-p1.yml
+      - scripts/133_apply_rndis_reftrace_p1.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-rndis-reftrace-p1-\${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: \${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build exact 35633887441 baseline + RNDIS REFTRACE P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-rndis-reftrace-p1-\${{ runner.os }}-\${{ hashFiles('scripts/133_apply_rndis_reftrace_p1.py') }}
+          restore-keys: |
+            a52xq-f2fs325-p1-\${{ runner.os }}-
+            a52xq-effp1-recorder-\${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact 35633887441 pre-RNDIS source cache
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-prerndis-\${{ runner.os }}-v1
+
+      - name: Require exact cached baseline
+        run: |
+          set -Eeuo pipefail
+          echo "cache-hit=\${{ steps.baseline.outputs.cache-hit }}"
+          if [ "\${{ steps.baseline.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Exact 35633887441 pre-RNDIS source cache was not restored."
+            exit 1
+          fi
+          test -d workspace/touchgrass-a52xq/.git
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Audit untouched RNDIS baseline
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
+          c = p.read_text().count('ipa_pm_is_used()')
+          print(f'baseline ipa_pm_is_used() count={c}')
+          if c != 5:
+              raise SystemExit(f'expected untouched baseline with 5 ipa_pm_is_used() calls, got {c}')
+          PY
+          ! grep -Fq 'A52 RNDIS PM P1' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          ! grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/include/linux/netdevice.h"
+          ! grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/net/core/dev.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply RNDIS REFTRACE P1
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/133_apply_rndis_reftrace_p1.py
+          python3 scripts/133_apply_rndis_reftrace_p1.py \
+            workspace/touchgrass-a52xq \
+            artifacts/rndis-reftrace-p1
+
+          KERNEL=workspace/touchgrass-a52xq
+          cat artifacts/rndis-reftrace-p1/report.txt
+          grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF HOLD' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF PUT' "$KERNEL/net/core/dev.c"
+          grep -Fq 'EXPORT_SYMBOL(dev_hold);' "$KERNEL/net/core/dev.c"
+          grep -Fq 'EXPORT_SYMBOL(dev_put);' "$KERNEL/net/core/dev.c"
+          ! grep -Fq 'static inline void dev_hold' "$KERNEL/include/linux/netdevice.h"
+          ! grep -Fq 'static inline void dev_put' "$KERNEL/include/linux/netdevice.h"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- include/linux/netdevice.h net/core/dev.c \
+            > artifacts/rndis-reftrace-p1.diff
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/rndis-reftrace-build.log
+          RC=\${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit integrated image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_F2FS_FS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
+          grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52 RNDIS REFTRACE P1' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF HOLD dev=%s ref=%d->%d caller=%pS' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF PUT dev=%s ref=%d->%d caller=%pS' "$KERNEL/net/core/dev.c"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
+          c = p.read_text().count('ipa_pm_is_used()')
+          if c != 5:
+              raise SystemExit(f'RNDIS IPA baseline changed unexpectedly: ipa_pm_is_used count={c}')
+          print('RNDIS IPA behavior remains baseline: 5 ipa_pm_is_used() calls')
+          PY
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: \${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package RNDIS REFTRACE P1 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-rndis-reftrace-p1.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-rndis-reftrace-p1.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-rndis-reftrace-p1.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-rndis-reftrace-p1.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(anchor,
+              'dump_boot;\\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\\n'
+              'write_boot;', 1)
+          p.write_text(s)
+          PY
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-rndis-reftrace-p1.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35633887441 + RNDIS-REFTRACE-P1/' scripts/.package-rndis-reftrace-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35633887441-RNDIS-REFTRACE-P1.zip/' scripts/.package-rndis-reftrace-p1.sh
+          chmod +x scripts/.package-rndis-reftrace-p1.sh
+          ./scripts/.package-rndis-reftrace-p1.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-rndis-reftrace-p1.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'RNDIS-REFTRACE-P1'
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-rndis-reftrace-p1-\${{ runner.os }}-\${{ hashFiles('scripts/133_apply_rndis_reftrace_p1.py') }}
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache.txt 2>&1 || true
+
+      - name: Upload RNDIS REFTRACE P1 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35633887441-RNDIS-REFTRACE-P1-\${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35633887441-RNDIS-REFTRACE-P1-DIAG-\${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -3,9 +3,9 @@ name: 132 - A52 RNDIS Netdev Reftrace P1
 on:
   push:
     branches:
-      - agent/a52-rndis-netdev-reftrace-p1
+      - agent/a52-rndis-ipa-pm-p1
     paths:
-      - .github/workflows/132-a52-rndis-netdev-reftrace-p1.yml
+      - .github/workflows/132-a52-rndis-ipa-pm-p1.yml
       - scripts/117_migrate_mglru_trace_to_proc.py
       - scripts/129_apply_bpf_bootfix_p1.py
       - scripts/133_apply_rndis_netdev_reftrace_p1.py

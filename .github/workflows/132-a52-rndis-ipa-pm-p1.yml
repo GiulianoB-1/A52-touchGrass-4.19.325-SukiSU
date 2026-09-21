@@ -1,21 +1,21 @@
-name: 132 - A52 RNDIS IPA PM P1
+name: 132 - A52 RNDIS Netdev Reftrace P1
 
 on:
   push:
     branches:
-      - agent/a52-rndis-ipa-pm-p1
+      - agent/a52-rndis-netdev-reftrace-p1
     paths:
-      - .github/workflows/132-a52-rndis-ipa-pm-p1.yml
+      - .github/workflows/132-a52-rndis-netdev-reftrace-p1.yml
       - scripts/117_migrate_mglru_trace_to_proc.py
       - scripts/129_apply_bpf_bootfix_p1.py
-      - scripts/132_apply_rndis_ipa_pm_p1.py
+      - scripts/133_apply_rndis_netdev_reftrace_p1.py
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-rndis-ipa-pm-p1-${{ github.ref }}
+  group: a52-rndis-reftrace-p1-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   build:
-    name: Build exact 35633887441 baseline + RNDIS IPA PM P1
+    name: Build exact 35633887441 baseline + RNDIS netdev reftrace P1
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -510,41 +510,38 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-prerndis-${{ runner.os }}-v1
 
-      - name: Apply RNDIS IPA PM P1
+      - name: Apply RNDIS netdev reftrace P1
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile scripts/132_apply_rndis_ipa_pm_p1.py
-          python3 scripts/132_apply_rndis_ipa_pm_p1.py \
+          python3 -m py_compile scripts/133_apply_rndis_netdev_reftrace_p1.py
+          python3 scripts/133_apply_rndis_netdev_reftrace_p1.py \
             workspace/touchgrass-a52xq \
-            artifacts/rndis-ipa-pm-p1
+            artifacts/rndis-netdev-reftrace-p1
 
           KERNEL=workspace/touchgrass-a52xq
-          cat artifacts/rndis-ipa-pm-p1/report.txt
+          cat artifacts/rndis-netdev-reftrace-p1/report.txt
           git -C "$KERNEL" diff --check
 
-          grep -Fq 'A52 RNDIS PM P1: IPA v18 direct PM path.' \
-            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'result = rndis_ipa_register_pm_client(rndis_ipa_ctx);' \
-            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'retval = rndis_ipa_deregister_pm_client(rndis_ipa_ctx);' \
-            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'return ipa_pm_activate(rndis_ipa_ctx->pm_hdl);' \
-            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'ipa_pm_deferred_deactivate(rndis_ipa_ctx->pm_hdl);' \
-            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq '/* A52 RNDIS netdev reftrace P1 */' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'void a52_rndis_reftrace(struct net_device *dev, int delta,' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'a52_rndis_reftrace(dev, -1,' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'a52_rndis_reftrace(dev, 1,' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52_RNDIS_REF HOLD' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF PUT' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF STUCK' "$KERNEL/net/core/dev.c"
 
           python3 - <<'PY'
           from pathlib import Path
           p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
           count = p.read_text().count('ipa_pm_is_used()')
-          if count:
-              raise SystemExit(f'ipa_pm_is_used() references remain: {count}')
-          print('RNDIS ipa_pm_is_used() references: 0')
+          if count != 5:
+              raise SystemExit(f'baseline RNDIS PM policy changed unexpectedly: ipa_pm_is_used() count={count}, expected 5')
+          print('AUDIT PASS: original RNDIS IPA PM policy preserved (5 ipa_pm_is_used() calls)')
           PY
 
           git -C "$KERNEL" diff -- \
-            drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c \
-            > artifacts/rndis-ipa-pm-p1.diff
+            include/linux/netdevice.h net/core/dev.c \
+            > artifacts/rndis-netdev-reftrace-p1.diff
 
       - name: Build integrated kernel
         run: |
@@ -574,18 +571,19 @@ jobs:
           grep -Fxq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
-          grep -Fq 'A52 RNDIS PM P1: IPA v18 direct PM path.' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'return ipa_pm_activate(rndis_ipa_ctx->pm_hdl);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'ipa_pm_deferred_deactivate(rndis_ipa_ctx->pm_hdl);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq '/* A52 RNDIS netdev reftrace P1 */' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'a52_rndis_reftrace(dev, -1,' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'a52_rndis_reftrace(dev, 1,' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52_RNDIS_REF HOLD' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF PUT' "$KERNEL/net/core/dev.c"
+          grep -Fq 'A52_RNDIS_REF STUCK' "$KERNEL/net/core/dev.c"
           python3 - <<'PY'
           from pathlib import Path
           p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
-          bad = [
-              (n, line) for n, line in enumerate(p.read_text().splitlines(), 1)
-              if 'ipa_pm_is_used()' in line and not line.lstrip().startswith('*')
-          ]
-          if bad:
-              raise SystemExit(f'executable ipa_pm_is_used() calls remain: {bad}')
+          count = p.read_text().count('ipa_pm_is_used()')
+          if count != 5:
+              raise SystemExit(f'RNDIS behavior drifted from known-good baseline: ipa_pm_is_used() count={count}')
+          print('AUDIT PASS: RNDIS behavior unchanged; reftrace only')
           PY
           ! grep -RFn 'REG_LIVE_DONE' "$KERNEL/include/linux/bpf_verifier.h" "$KERNEL/kernel/bpf/verifier.c"
           ! grep -Fq 'struct idpair' "$KERNEL/kernel/bpf/verifier.c"
@@ -671,7 +669,7 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package RNDIS IPA PM P1 flashable ZIP
+      - name: Package RNDIS netdev reftrace P1 flashable ZIP
         run: |
           set -Eeuo pipefail
           mkdir -p release
@@ -693,8 +691,8 @@ jobs:
           p.write_text(s)
           PY
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-f2fs325-p1.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35461116688 + F2FS-STABLE325-P1-GCMERGE-P2-INMEM-P3A-ATGC-P3B-P3C-P4-BLOCKAGE-P5A-P5B-GCCP-P6-CORRECTNESS-P7-BPF-BOOTFIX-P1 + MGLRU-P4 + CASS-P3 + UCLAMP-EFF-P2 + WALT-SUGOV-P2 + GPU-UV-P1-P2-P3 + FUSE-7.40-NATIVE + RNDIS-IPA-PM-P1/' scripts/.package-f2fs325-p1.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35633887441-RNDIS-IPA-PM-P1.zip/' scripts/.package-f2fs325-p1.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35633887441 + F2FS-STABLE325-P1-GCMERGE-P2-INMEM-P3A-ATGC-P3B-P3C-P4-BLOCKAGE-P5A-P5B-GCCP-P6-CORRECTNESS-P7-BPF-BOOTFIX-P1 + MGLRU-P4 + CASS-P3 + UCLAMP-EFF-P2 + WALT-SUGOV-P2 + GPU-UV-P1-P2-P3 + FUSE-7.40-NATIVE + RNDIS-NETDEV-REFTRACE-P1/' scripts/.package-f2fs325-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35633887441-RNDIS-NETDEV-REFTRACE-P1.zip/' scripts/.package-f2fs325-p1.sh
           chmod +x scripts/.package-f2fs325-p1.sh
           ./scripts/.package-f2fs325-p1.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-f2fs325-p1.sh
@@ -727,10 +725,10 @@ jobs:
           fi
           ccache --show-stats > artifacts/ccache.txt 2>&1 || true
 
-      - name: Upload RNDIS IPA PM P1 flashable ZIP
+      - name: Upload RNDIS netdev reftrace P1 flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-BASE35633887441-RNDIS-IPA-PM-P1-${{ github.run_number }}
+          name: A52XQ-BASE35633887441-RNDIS-NETDEV-REFTRACE-P1-${{ github.run_number }}
           path: release/
           if-no-files-found: error
           retention-days: 14
@@ -739,7 +737,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-BASE35633887441-RNDIS-IPA-PM-P1-DIAG-${{ github.run_number }}
+          name: A52XQ-BASE35633887441-RNDIS-NETDEV-REFTRACE-P1-DIAG-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14
@@ -788,7 +786,7 @@ jobs:
 
 # trigger: bpf-boot-reliability-p1
 
-# trigger: rndis-ipa-pm-p1
+# trigger: rndis-netdev-reftrace-p1
 
 # trigger: reconstruct-evicted-baseline-cache
 
@@ -801,3 +799,5 @@ jobs:
 # trigger: rndis-audit-comment-fix
 
 # trigger: cache-safe-final-audit
+
+# trigger: rndis-netdev-reftrace-p1

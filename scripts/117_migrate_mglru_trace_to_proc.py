@@ -22,9 +22,7 @@ for needle in required:
         raise SystemExit(f"inherited MGLRU recorder marker missing: {needle}")
 
 marker = "/* A52 MGLRU recorder procfs export */"
-if marker in s:
-    print("MGLRU procfs export already applied")
-    raise SystemExit(0)
+already_marked = marker in s
 
 if "#include <linux/proc_fs.h>" not in s:
     anchors = (
@@ -66,6 +64,16 @@ if proc not in s:
         dbg + "\n\t/* A52 MGLRU recorder procfs export */\n\t" + proc,
         1,
     )
+elif marker not in s:
+    # Repair a partially migrated tree: procfs registration is already present
+    # but an earlier interrupted phase did not leave the audit marker.
+    if s.count(proc) != 1:
+        raise SystemExit(f"expected exactly one existing procfs trace registration, found {s.count(proc)}")
+    s = s.replace(
+        proc,
+        marker + "\n\t" + proc,
+        1,
+    )
 
 for needle in (
     marker,
@@ -88,5 +96,8 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "proc_trace=/proc/lru_gen_trace\n"
 )
 
-print("MGLRU inherited recorder procfs export applied")
+if already_marked:
+    print("MGLRU procfs export already complete; audited idempotently")
+else:
+    print("MGLRU inherited recorder procfs export applied/repaired")
 print("trace=/proc/lru_gen_trace")

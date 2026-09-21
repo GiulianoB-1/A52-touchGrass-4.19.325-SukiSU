@@ -27,7 +27,7 @@ repls = [
 \t}
 \tRNDIS_IPA_DEBUG("RM resource was created\\n");
 ''',
-'''\t/* A52 RNDIS PM P1: IPA v18 has no ipa_pm_is_used() dispatcher.
+'''\t/* A52 RNDIS PM P1: IPA v18 direct PM path.
 \t * Newer Qualcomm RNDIS drivers use the PM framework directly.
 \t */
 \tresult = rndis_ipa_register_pm_client(rndis_ipa_ctx);
@@ -102,20 +102,11 @@ for idx, (old, new) in enumerate(repls, 1):
     s = s.replace(old, new, 1)
 
 after_count = s.count("ipa_pm_is_used()")
-if after_count != 1:
-    # One occurrence is intentionally present only in the explanatory comment above.
-    raise SystemExit(f"unexpected ipa_pm_is_used() text count after patch: {after_count}")
-
-# Ensure there are no executable calls left; comment-only occurrence is allowed.
-code_lines = [
-    line for line in s.splitlines()
-    if "ipa_pm_is_used()" in line and not line.lstrip().startswith("*")
-]
-if code_lines:
-    raise SystemExit("executable ipa_pm_is_used() references remain: " + repr(code_lines))
+if after_count != 0:
+    raise SystemExit(f"unexpected ipa_pm_is_used() references after patch: {after_count}")
 
 required = [
-    "A52 RNDIS PM P1: IPA v18 has no ipa_pm_is_used() dispatcher.",
+    "A52 RNDIS PM P1: IPA v18 direct PM path.",
     "result = rndis_ipa_register_pm_client(rndis_ipa_ctx);",
     "rndis_ipa_deregister_pm_client(rndis_ipa_ctx);",
     "return ipa_pm_activate(rndis_ipa_ctx->pm_hdl);",

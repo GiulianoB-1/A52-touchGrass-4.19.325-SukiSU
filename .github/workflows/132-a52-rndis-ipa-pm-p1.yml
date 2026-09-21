@@ -202,6 +202,27 @@ jobs:
           path: workspace/linux-stable-checkpoint-cache
           key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
 
+      - name: Restore inherited MGLRU diagnostics and recorder
+        if: steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 -m py_compile scripts/111_apply_mglru_power_diag_p1.py
+          python3 scripts/111_apply_mglru_power_diag_p1.py "$KERNEL" \
+            2>&1 | tee artifacts/mglru-power-diag-p1-apply.txt
+
+          python3 -m py_compile scripts/112_apply_mglru_power_recorder_p2.py
+          python3 scripts/112_apply_mglru_power_recorder_p2.py "$KERNEL" \
+            2>&1 | tee artifacts/mglru-power-recorder-p2-apply.txt
+
+          grep -Fq '/* A52 MGLRU power diagnostics P1 */' "$KERNEL/mm/vmscan.c"
+          grep -Fq '/* A52 MGLRU power recorder P2 */' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static const struct file_operations mglru_rec_trace_fops' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'debugfs_create_file("lru_gen_trace", 0444, NULL, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"
+          git -C "$KERNEL" diff --check
+
       - name: Apply A52 MGLRU CASS UCLAMP WALT efficiency P1
         if: steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
@@ -717,3 +738,5 @@ jobs:
 # trigger: rndis-ipa-pm-p1
 
 # trigger: reconstruct-evicted-baseline-cache
+
+# trigger: restore-mglru-recorder-prereqs

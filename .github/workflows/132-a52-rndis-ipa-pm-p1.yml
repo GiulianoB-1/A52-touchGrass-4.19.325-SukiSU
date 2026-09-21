@@ -6,6 +6,7 @@ on:
       - agent/a52-rndis-ipa-pm-p1
     paths:
       - .github/workflows/132-a52-rndis-ipa-pm-p1.yml
+      - scripts/117_migrate_mglru_trace_to_proc.py
       - scripts/129_apply_bpf_bootfix_p1.py
       - scripts/132_apply_rndis_ipa_pm_p1.py
   workflow_dispatch:
@@ -71,8 +72,16 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-prerndis-${{ runner.os }}-v1
 
-      - name: Restore baseline pre-build source cache
+      - name: Restore exact 35633887441 post-P7 source cache
         if: steps.prerndis_source.outputs.cache-hit != 'true'
+        id: postp7_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-postp7-${{ runner.os }}-v1
+
+      - name: Restore baseline pre-build source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         id: prebuild_source
         uses: actions/cache/restore@v4
         with:
@@ -80,7 +89,7 @@ jobs:
           key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Restore exact 35196552336 prepared source cache
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         id: base351_source
         uses: actions/cache/restore@v4
         with:
@@ -88,7 +97,7 @@ jobs:
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Restore Linux stable object cache
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         id: stable_cache
         uses: actions/cache/restore@v4
         with:
@@ -102,7 +111,7 @@ jobs:
           chmod +x scripts/*.sh scripts/*.py
 
       - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -166,7 +175,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Audit inherited EEVDF UCLAMP and 35196552336 state
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -197,21 +206,21 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save exact 35196552336 prepared source cache
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Save Linux stable object cache
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/linux-stable-checkpoint-cache
           key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
 
       - name: Restore inherited MGLRU diagnostics and recorder
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -240,7 +249,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply A52 MGLRU CASS UCLAMP WALT efficiency P1
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           must_grep() {
@@ -288,7 +297,7 @@ jobs:
           echo "AUDIT PASS: git diff --check"
 
       - name: Apply CASS UCLAMP WALT schedutil recorder
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
@@ -305,7 +314,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply runtime-proven native FUSE 7.40 Phase104
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
@@ -320,14 +329,14 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save reconstructed baseline pre-build source cache
-        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Apply compatible F2FS stable fixes through 4.19.325
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           ./scripts/118_apply_f2fs_stable_325_p1.sh \
@@ -340,7 +349,7 @@ jobs:
             > artifacts/f2fs-stable325-p1.diff || true
 
       - name: Apply F2FS gc_merge P2
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/119_apply_f2fs_gc_merge_p2.py workspace/touchgrass-a52xq
@@ -354,7 +363,7 @@ jobs:
           grep -Fq '"gc_merge"' workspace/touchgrass-a52xq/fs/f2fs/super.c
 
       - name: Apply F2FS inmem curseg P3A
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py \
@@ -370,7 +379,7 @@ jobs:
           ! grep -Rqs 'CURSEG_ALL_DATA_ATGC\|F2FS_MOUNT_ATGC\|GC_IDLE_AT' workspace/touchgrass-a52xq/fs/f2fs
 
       - name: Snapshot booted P3A F2FS source
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
@@ -378,7 +387,7 @@ jobs:
           cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/pre-atgc-p3b/include/trace/events/
 
       - name: Apply F2FS ATGC P3B
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/122_apply_f2fs_atgc_p3b.py \
@@ -390,7 +399,7 @@ jobs:
           grep -Fq 'ATGC default=off' artifacts/f2fs-atgc-p3b/report.txt
 
       - name: Enable ATGC at initial mount P3C
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/123_enable_f2fs_atgc_p3c.py \
@@ -401,7 +410,7 @@ jobs:
           grep -Fq 'ATGC default=on at initial mount only' artifacts/f2fs-atgc-p3c/report.txt
 
       - name: Apply newer ATGC refinements P4
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/124_apply_f2fs_atgc_p4.py \
@@ -414,7 +423,7 @@ jobs:
           grep -Fq 'skip_empty_gc_sections=dccd324fa9bd' artifacts/f2fs-atgc-p4/report.txt
 
       - name: Apply block-age extent cache P5A
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/125_apply_f2fs_block_age_p5a.py \
@@ -427,7 +436,7 @@ jobs:
           grep -Fq 'activation=OFF by default' artifacts/f2fs-block-age-p5a/report.txt
 
       - name: Enable block-age extent cache P5B
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/126_enable_f2fs_block_age_p5b.py \
@@ -439,7 +448,7 @@ jobs:
           grep -Fq 'observability=enabled,tree_count,node_count,allocated_data_blocks' artifacts/f2fs-block-age-p5b/report.txt
 
       - name: Apply GC/segment/checkpoint modernization P6
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/127_apply_f2fs_gc_cp_p6.py \
@@ -452,7 +461,7 @@ jobs:
           grep -Fq 'lfs_map_blocks_balance_fix=1005a3ca28e9' artifacts/f2fs-gc-cp-p6/report.txt
 
       - name: Apply recent correctness/data-integrity P7
-        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/128_apply_f2fs_correctness_p7.py \
@@ -463,6 +472,13 @@ jobs:
           grep -Fq 'nat_flag_lock_fix=238e14eb7226 adapted' artifacts/f2fs-correctness-p7/report.txt
           grep -Fq 'node_mark_fix=019f9dda7f66+c3e238bd1f56 adapted-to-pages' artifacts/f2fs-correctness-p7/report.txt
           grep -Fq 'write_end_io_uaf_fix=ce2739e482bc+2d9c4a4ed4ee adapted-to-pages' artifacts/f2fs-correctness-p7/report.txt
+
+      - name: Save exact 35633887441 post-P7 source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-postp7-${{ runner.os }}-v1
 
       - name: Apply BPF boot reliability P1
         if: steps.prerndis_source.outputs.cache-hit != 'true'
@@ -777,3 +793,5 @@ jobs:
 # trigger: restore-mglru-recorder-prereqs
 
 # trigger: exact-prerndis-cache-v1
+
+# trigger: stage-cache-postp7-v1

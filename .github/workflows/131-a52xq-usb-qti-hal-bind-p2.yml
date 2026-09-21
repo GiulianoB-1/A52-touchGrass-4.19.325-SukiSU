@@ -1,0 +1,233 @@
+name: 131 - A52xq USB QTI HAL Bind P2
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/131-a52xq-usb-qti-hal-bind-p2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package direct-bind QTI USB HAL KernelSU module
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl file binutils zip
+
+      - name: Fetch and verify QTI USB HAL
+        run: |
+          set -euxo pipefail
+          mkdir -p work/module/qti
+          URL='https://raw.githubusercontent.com/melles1991/oneplus_kebab_dump/aosp_kebab-user-12-SQ3A.220705.003.A1-1657533913-release-keys/vendor/bin/hw/android.hardware.usb%401.3-service-qti'
+          BIN=work/module/qti/android.hardware.usb@1.3-service-qti
+          curl -fL --retry 4 --retry-delay 2 "$URL" -o "$BIN"
+          chmod 0755 "$BIN"
+          sha256sum "$BIN" | tee work/HAL-SHA256.txt
+          file "$BIN"
+          readelf -h "$BIN" | grep -q 'Class:[[:space:]]*ELF64'
+          readelf -h "$BIN" | grep -q 'Machine:[[:space:]]*AArch64'
+          readelf -d "$BIN" | awk '/NEEDED/{print substr($5,2,length($5)-2)}' | sort -u | tee work/NEEDED.txt
+
+          cat > work/allowed.txt <<'EOF'
+          android.hardware.usb@1.0.so
+          android.hardware.usb@1.1.so
+          android.hardware.usb@1.2.so
+          android.hardware.usb@1.3.so
+          libbase.so
+          libc++.so
+          libc.so
+          libcutils.so
+          libdl.so
+          libhardware.so
+          libhidlbase.so
+          liblog.so
+          libm.so
+          libutils.so
+          EOF
+          sort -u -o work/allowed.txt work/allowed.txt
+          comm -23 work/NEEDED.txt work/allowed.txt | tee work/UNEXPECTED.txt
+          test ! -s work/UNEXPECTED.txt
+
+      - name: Build P2 module
+        run: |
+          set -euxo pipefail
+          MOD=work/module
+
+          cat > "$MOD/module.prop" <<'EOF'
+          id=a52xq-usb-qti-hal-p2
+          name=A52xq USB QTI HAL P2 Direct Bind
+          version=P2
+          versionCode=2
+          author=OpenAI + GiulianoB-1
+          description=Direct-bind A/B test for A52xq USB reconnect bug. Does not require KernelSU system overlay/meta-overlayfs. Bind-mounts QTI USB 1.3 HAL over the stock Coral HAL during post-fs-data and restarts the HAL once.
+          EOF
+
+          cat > "$MOD/customize.sh" <<'EOF'
+          #!/system/bin/sh
+          ui_print "========================================"
+          ui_print " A52xq USB QTI HAL P2 - Direct Bind"
+          ui_print "========================================"
+
+          DEVICE="$(getprop ro.product.vendor.device)"
+          PLATFORM="$(getprop ro.board.platform)"
+          VNDK="$(getprop ro.vndk.version)"
+          VENDOR_SDK="$(getprop ro.vendor.build.version.sdk)"
+
+          ui_print "device=$DEVICE platform=$PLATFORM vndk=$VNDK vendor_sdk=$VENDOR_SDK"
+
+          [ "$DEVICE" = "a52xq" ] || abort "Wrong device: $DEVICE"
+          [ "$PLATFORM" = "lito" ] || abort "Wrong platform: $PLATFORM"
+          [ "$VNDK" = "30" ] || abort "Wrong VNDK: $VNDK"
+          [ "$VENDOR_SDK" = "30" ] || abort "Wrong vendor SDK: $VENDOR_SDK"
+          [ -x /vendor/bin/hw/android.hardware.usb@1.3-service.coral ] || abort "Stock Coral USB HAL missing"
+
+          set_perm "$MODPATH/qti/android.hardware.usb@1.3-service-qti" 0 2000 0755
+          ui_print "P2 uses a direct bind mount at boot."
+          ui_print "No meta-overlayfs is required."
+          ui_print "Reboot after installation."
+          EOF
+          chmod 0755 "$MOD/customize.sh"
+
+          cat > "$MOD/post-fs-data.sh" <<'EOF'
+          #!/system/bin/sh
+          MODDIR=${0%/*}
+          LOG=/data/adb/a52xq_usb_qti_p2.log
+          SRC="$MODDIR/qti/android.hardware.usb@1.3-service-qti"
+          TARGET=/vendor/bin/hw/android.hardware.usb@1.3-service.coral
+          TMPDIR=/dev/a52xq_usb_qti_p2
+          TMP="$TMPDIR/android.hardware.usb@1.3-service.coral"
+
+          exec >>"$LOG" 2>&1
+          echo
+          echo "========== P2 BOOT $(date) =========="
+          echo "device=$(getprop ro.product.vendor.device)"
+          echo "platform=$(getprop ro.board.platform)"
+          echo "vndk=$(getprop ro.vndk.version)"
+          echo "vendor_sdk=$(getprop ro.vendor.build.version.sdk)"
+
+          if [ "$(getprop ro.product.vendor.device)" != "a52xq" ] ||
+             [ "$(getprop ro.board.platform)" != "lito" ] ||
+             [ "$(getprop ro.vndk.version)" != "30" ]; then
+              echo "P2: compatibility check failed; refusing bind"
+              exit 0
+          fi
+
+          mkdir -p "$TMPDIR"
+          cp -f "$SRC" "$TMP" || {
+              echo "P2: copy to tmpfs failed"
+              exit 0
+          }
+          chown 0:2000 "$TMP"
+          chmod 0755 "$TMP"
+
+          STOCK_CTX="$(ls -Z "$TARGET" 2>/dev/null | awk '{print $1}')"
+          echo "stock_ctx=$STOCK_CTX"
+          if [ -n "$STOCK_CTX" ]; then
+              chcon "$STOCK_CTX" "$TMP" 2>/dev/null || true
+          fi
+          echo "tmp_ctx=$(ls -Z "$TMP" 2>/dev/null)"
+
+          echo "stock_before=$(sha256sum "$TARGET" 2>/dev/null)"
+          echo "candidate=$(sha256sum "$TMP" 2>/dev/null)"
+
+          mount --bind "$TMP" "$TARGET" || {
+              echo "P2: bind mount FAILED"
+              exit 0
+          }
+
+          echo "live_after_bind=$(sha256sum "$TARGET" 2>/dev/null)"
+          echo "mount:"
+          grep -F "$TARGET" /proc/mounts || true
+
+          STATE="$(getprop init.svc.vendor.usb-hal-1-3)"
+          OLDPID="$(getprop init.svc_debug_pid.vendor.usb-hal-1-3)"
+          echo "before_restart state=$STATE pid=$OLDPID"
+
+          if [ "$STATE" = "running" ]; then
+              stop vendor.usb-hal-1-3
+              sleep 1
+          fi
+
+          start vendor.usb-hal-1-3
+          sleep 2
+
+          echo "after_restart state=$(getprop init.svc.vendor.usb-hal-1-3)"
+          echo "after_restart pid=$(getprop init.svc_debug_pid.vendor.usb-hal-1-3)"
+          echo "final_hash=$(sha256sum "$TARGET" 2>/dev/null)"
+          echo "P2 post-fs-data complete"
+          EOF
+          chmod 0755 "$MOD/post-fs-data.sh"
+
+          cat > "$MOD/service.sh" <<'EOF'
+          #!/system/bin/sh
+          LOG=/data/adb/a52xq_usb_qti_p2.log
+          sleep 20
+          {
+            echo "========== P2 LATE CHECK $(date) =========="
+            echo "state=$(getprop init.svc.vendor.usb-hal-1-3)"
+            echo "pid=$(getprop init.svc_debug_pid.vendor.usb-hal-1-3)"
+            echo "hash=$(sha256sum /vendor/bin/hw/android.hardware.usb@1.3-service.coral 2>/dev/null)"
+            echo "mount:"
+            grep -F '/vendor/bin/hw/android.hardware.usb@1.3-service.coral' /proc/mounts || true
+            echo "qti logs:"
+            logcat -b all -d 2>/dev/null | grep -Ei 'QTI USB HAL Ready|usb@1.3-service-qti' | tail -20
+          } >>"$LOG" 2>&1
+          EOF
+          chmod 0755 "$MOD/service.sh"
+
+          cat > "$MOD/README.txt" <<'EOF'
+          A52xq USB QTI HAL P2 Direct Bind
+
+          This test does NOT rely on KernelSU's system/vendor overlay.
+          During post-fs-data it:
+          - copies the verified QTI USB HAL to /dev tmpfs
+          - copies the stock HAL SELinux context
+          - bind-mounts it over /vendor/bin/hw/android.hardware.usb@1.3-service.coral
+          - restarts vendor.usb-hal-1-3 once
+
+          Expected live HAL SHA256:
+          ca7f1eba56074338e2b717947ebdd1f20f70bda71c3d3c90de8880cc1de49150
+
+          Diagnostic log:
+          /data/adb/a52xq_usb_qti_p2.log
+
+          Rollback:
+          Disable/remove this module and reboot. The bind mount disappears.
+          EOF
+
+          (
+            cd "$MOD"
+            zip -r9 ../A52XQ-USB-QTI-HAL-P2-DIRECT-BIND-KSU.zip .
+          )
+          sha256sum work/A52XQ-USB-QTI-HAL-P2-DIRECT-BIND-KSU.zip | tee work/MODULE-SHA256.txt
+          unzip -l work/A52XQ-USB-QTI-HAL-P2-DIRECT-BIND-KSU.zip
+
+      - name: Upload P2 module
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-USB-QTI-HAL-P2-DIRECT-BIND-KSU
+          path: work/A52XQ-USB-QTI-HAL-P2-DIRECT-BIND-KSU.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload P2 diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-USB-QTI-HAL-P2-DIAG
+          path: |
+            work/HAL-SHA256.txt
+            work/MODULE-SHA256.txt
+            work/NEEDED.txt
+            work/UNEXPECTED.txt
+          if-no-files-found: error

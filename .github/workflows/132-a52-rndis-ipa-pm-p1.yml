@@ -522,7 +522,7 @@ jobs:
           cat artifacts/rndis-ipa-pm-p1/report.txt
           git -C "$KERNEL" diff --check
 
-          grep -Fq 'A52 RNDIS PM P1: IPA v18 has no ipa_pm_is_used() dispatcher.' \
+          grep -Fq 'A52 RNDIS PM P1: IPA v18 direct PM path.' \
             "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'result = rndis_ipa_register_pm_client(rndis_ipa_ctx);' \
             "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
@@ -536,13 +536,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
-          bad = [
-              (n, line) for n, line in enumerate(p.read_text().splitlines(), 1)
-              if 'ipa_pm_is_used()' in line and not line.lstrip().startswith('*')
-          ]
-          if bad:
-              raise SystemExit(f'executable ipa_pm_is_used() calls remain: {bad}')
-          print('RNDIS executable ipa_pm_is_used() calls: 0')
+          count = p.read_text().count('ipa_pm_is_used()')
+          if count:
+              raise SystemExit(f'ipa_pm_is_used() references remain: {count}')
+          print('RNDIS ipa_pm_is_used() references: 0')
           PY
 
           git -C "$KERNEL" diff -- \
@@ -577,7 +574,7 @@ jobs:
           grep -Fxq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
-          grep -Fq 'A52 RNDIS PM P1: IPA v18 has no ipa_pm_is_used() dispatcher.' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq 'A52 RNDIS PM P1: IPA v18 direct PM path.' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'return ipa_pm_activate(rndis_ipa_ctx->pm_hdl);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'ipa_pm_deferred_deactivate(rndis_ipa_ctx->pm_hdl);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           python3 - <<'PY'
@@ -795,3 +792,5 @@ jobs:
 # trigger: exact-prerndis-cache-v1
 
 # trigger: stage-cache-postp7-v1
+
+# trigger: rndis-audit-comment-fix

@@ -116,13 +116,19 @@ def remove_call_statements_containing(s, func, needle):
 # Keep all MGLRU policy/efficiency code.
 # -------------------------------------------------------------------------
 vm = read("mm/vmscan.c")
-if "/* A52 MGLRU power diagnostics P1 */" in vm:
-    start = vm.index("/* A52 MGLRU power diagnostics P1 */")
-    m = re.search(r"(?m)^[^\n;]*\btry_to_inc_max_seq[ \t]*\(", vm[start:])
-    if not m:
-        raise SystemExit("MGLRU cleanup: try_to_inc_max_seq anchor missing")
-    func_start = start + m.start()
-    vm = vm[:start] + vm[func_start:]
+mglru_diag_decl = r'''/* A52 MGLRU power diagnostics P1 */
+DEFINE_PER_CPU(unsigned long, mglru_diag_try_inc_max_seq);
+DEFINE_PER_CPU(unsigned long, mglru_diag_walk_pte_range);
+DEFINE_PER_CPU(unsigned long, mglru_diag_walk_pmd_range);
+DEFINE_PER_CPU(unsigned long, mglru_diag_look_around);
+DEFINE_PER_CPU(unsigned long, mglru_diag_scan_pages);
+DEFINE_PER_CPU(unsigned long, mglru_diag_evict_pages);
+
+'''
+if mglru_diag_decl in vm:
+    vm = vm.replace(mglru_diag_decl, "", 1)
+elif "/* A52 MGLRU power diagnostics P1 */" in vm:
+    raise SystemExit("MGLRU cleanup: diagnostic declaration block shape changed")
 
 # Remove P1+P2 sysfs implementation blocks that were inserted immediately
 # before the standard lru_gen_attrs table.

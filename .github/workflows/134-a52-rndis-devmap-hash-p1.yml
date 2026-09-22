@@ -1,0 +1,807 @@
+name: 134 - A52 RNDIS DEVMAP_HASH P1
+
+on:
+  push:
+    branches:
+      - agent/a52-rndis-ipa-pm-p1
+    paths:
+      - .github/workflows/134-a52-rndis-devmap-hash-p1.yml
+      - scripts/117_migrate_mglru_trace_to_proc.py
+      - scripts/129_apply_bpf_bootfix_p1.py
+      - scripts/134_apply_rndis_devmap_hash_p1.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-rndis-devmap-hash-p1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+
+jobs:
+  build:
+    name: Build exact 35633887441 baseline + RNDIS DEVMAP_HASH P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-f2fs325-p1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-effp1-recorder-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact 35633887441 pre-RNDIS source cache
+        id: prerndis_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-prerndis-${{ runner.os }}-v1
+
+      - name: Restore exact 35633887441 post-P7 source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        id: postp7_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-postp7-${{ runner.os }}-v1
+
+      - name: Restore baseline pre-build source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Restore exact 35196552336 prepared source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        id: base351_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
+
+      - name: Restore Linux stable object cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        id: stable_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/linux-stable-checkpoint-cache
+          key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release workspace
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          ./scripts/84_apply_android17_binder_alloc.sh
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_a619_gpu_modernization.py workspace/touchgrass-a52xq
+          python3 scripts/87_apply_a619_gpu_modernization_p2.py workspace/touchgrass-a52xq
+          python3 scripts/90_apply_a619_gpu_modernization_p3.py workspace/touchgrass-a52xq
+          python3 scripts/91_apply_a619_gpu_modernization_p4.py workspace/touchgrass-a52xq
+          python3 scripts/94_apply_a619_gpu_modernization_p5.py workspace/touchgrass-a52xq
+
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq
+
+
+          python3 scripts/98_apply_fuse_passthrough_modern_p1.py workspace/touchgrass-a52xq
+          python3 scripts/99_apply_fuse_passthrough_modern_p2.py workspace/touchgrass-a52xq
+          python3 scripts/101_apply_fuse_passthrough_modern_p3.py workspace/touchgrass-a52xq
+          python3 scripts/102_apply_fuse_negotiation_probe.py workspace/touchgrass-a52xq
+          python3 scripts/103_apply_fuse_740_init_compat.py workspace/touchgrass-a52xq
+
+          python3 scripts/104_apply_a619_gpu_undervolt_p1.py workspace/touchgrass-a52xq
+          python3 scripts/105_apply_a619_gpu_undervolt_p1_diag.py workspace/touchgrass-a52xq
+          python3 scripts/106_apply_mglru_modern_p1.py workspace/touchgrass-a52xq
+
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Audit inherited EEVDF UCLAMP and 35196552336 state
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'ENQUEUE_INITIAL' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'eevdf_status_init' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'sched_eevdf_enabled' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'CASS uclamp-aware task demand path is active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'sched_util_clamp_min_rt_default' "$KERNEL/kernel/sysctl.c"
+          grep -Fq 'uclamp_sync_util_min_rt_default();' "$KERNEL/kernel/sched/core.c"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'arg->flags2 = 0;' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'A52 MGLRU Modern P1: Android17 9eff4247' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU Modern P1: Android a7adb988 per-zone forward progress' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'ptep_clear_young_notify(pvmw->vma, addr, pte + i)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU Modern P3: upstream c28ac3c7 skip special VMAs' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'sysctl_sched_uclamp_util_min_rt_default = 0;' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'A52 uclamp efficiency P1' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'unsigned long p_util = uclamp_task(p);' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'A52 A619 GPU UV P1 diagnostics: persistent sysfs status' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'A52 A619 GPU UV P2: 650 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          ! grep -Fq 'A52 BT-P2A:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          ! grep -Fq 'A52 BT-P2B:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          ! grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Save exact 35196552336 prepared source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
+
+      - name: Save Linux stable object cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true' && steps.stable_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/linux-stable-checkpoint-cache
+          key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
+
+      - name: Restore inherited MGLRU diagnostics and recorder
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          if grep -Fq '/* A52 MGLRU power diagnostics P1 */' "$KERNEL/mm/vmscan.c"; then
+            echo "CACHE/STATE: MGLRU diagnostics P1 already present"
+          else
+            python3 -m py_compile scripts/111_apply_mglru_power_diag_p1.py
+            python3 scripts/111_apply_mglru_power_diag_p1.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-power-diag-p1-apply.txt
+          fi
+
+          if grep -Fq '/* A52 MGLRU power recorder P2 */' "$KERNEL/mm/vmscan.c"; then
+            echo "CACHE/STATE: MGLRU recorder P2 already present"
+          else
+            python3 -m py_compile scripts/112_apply_mglru_power_recorder_p2.py
+            python3 scripts/112_apply_mglru_power_recorder_p2.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-power-recorder-p2-apply.txt
+          fi
+
+          grep -Fq '/* A52 MGLRU power diagnostics P1 */' "$KERNEL/mm/vmscan.c"
+          grep -Fq '/* A52 MGLRU power recorder P2 */' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static const struct file_operations mglru_rec_trace_fops' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'debugfs_create_file("lru_gen_trace", 0444, NULL, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply A52 MGLRU CASS UCLAMP WALT efficiency P1
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          must_grep() {
+            local needle="$1" file="$2" label="$3"
+            if grep -Fq "$needle" "$file"; then
+              echo "AUDIT PASS: $label"
+            else
+              echo "::error::AUDIT MISSING: $label"
+              echo "needle=$needle"
+              echo "file=$file"
+              return 1
+            fi
+          }
+          python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
+          python3 scripts/115_apply_a52_efficiency_p1.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
+          python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+          python3 scripts/117_migrate_mglru_trace_to_proc.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          must_grep 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c" 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts'
+          must_grep 'A52 MGLRU power diagnostics P1' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power diagnostics P1'
+          must_grep 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power recorder P2'
+          must_grep '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c" '__ATTR(record, 0644, mglru_record_show, mglru_record_store)'
+          must_grep '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)' "$KERNEL/mm/vmscan.c" '__ATTR(stats, 0644, mglru_rec_stats_show, mglru_rec_stats_store)'
+          must_grep 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c" 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)'
+          must_grep 'static int mglru_record_level;' "$KERNEL/mm/vmscan.c" 'static int mglru_record_level;'
+          must_grep 'if (unlikely(READ_ONCE(mglru_record_level) >= 1))' "$KERNEL/mm/vmscan.c" 'if (unlikely(READ_ONCE(mglru_record_level) >= 1))'
+          must_grep 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c" 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active'
+          must_grep 'if (likely(!uclamp_is_used()))' "$KERNEL/kernel/sched/sched.h" 'if (likely(!uclamp_is_used()))'
+          must_grep 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c" 'A52 WALT schedutil P2: expire stale sibling demand by wall time.'
+          must_grep 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c" 'A52 A619 GPU UV P3: 565 MHz one ARC corner'
+          must_grep 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c" 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts'
+          must_grep 'A52 MGLRU power recorder P2' "$KERNEL/mm/vmscan.c" 'A52 MGLRU power recorder P2'
+          must_grep '__ATTR(record, 0644, mglru_record_show, mglru_record_store)' "$KERNEL/mm/vmscan.c" '__ATTR(record, 0644, mglru_record_show, mglru_record_store)'
+          must_grep 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)' "$KERNEL/mm/vmscan.c" 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops)'
+          must_grep 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c" 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active'
+          must_grep 'A52 WALT schedutil P2: expire stale sibling demand by wall time.' "$KERNEL/kernel/sched/cpufreq_schedutil.c" 'A52 WALT schedutil P2: expire stale sibling demand by wall time.'
+          if grep -Fq 'A52 BT-P2C:' "$KERNEL/drivers/tty/serial/msm_geni_serial.c"; then
+            echo "::error::AUDIT UNEXPECTED: custom BT P2C marker present"
+            exit 1
+          fi
+          echo "AUDIT PASS: custom BT P2C absent"
+          git -C "$KERNEL" diff --check
+          echo "AUDIT PASS: git diff --check"
+
+      - name: Apply CASS UCLAMP WALT schedutil recorder
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
+          python3 scripts/116_apply_a52_scheduler_recorder.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/a52-scheduler-recorder-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 scheduler efficiency recorder' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'int a52_sched_diag_level;' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'kobject_create_and_add("a52_sched_diag", kernel_kobj)' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'proc_create("a52_sched_diag_events", 0444, NULL' "$KERNEL/kernel/sched/core.c"
+          grep -Fq 'a52_sched_diag_cass(best->cpu' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'a52_sched_diag_sugov_stale(j, delta_ns);' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'a52_sched_diag_sugov_freq(policy->cpu, util, max' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply runtime-proven native FUSE 7.40 Phase104
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
+          python3 scripts/104_apply_fuse_740_upstream_passthrough.py workspace/touchgrass-a52xq \
+            2>&1 | tee artifacts/fuse-740-native-apply.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'arg->flags2 = (u32)(FUSE_PASSTHROUGH_UPSTREAM >> 32);' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'FUSE_740_PASSTHROUGH_NEGOTIATED' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'FUSE_740_LEGACY_STACK_COMPAT' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'FUSE_740_BACKING_OPEN' "$KERNEL/fs/fuse/backing.c"
+          grep -Fq 'FUSE_740_PASSTHROUGH_SETUP' "$KERNEL/fs/fuse/passthrough.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Save reconstructed baseline pre-build source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Apply compatible F2FS stable fixes through 4.19.325
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-stable325-p1.txt \
+            artifacts/f2fs-stable325-patches
+          cat artifacts/f2fs-stable325-p1.txt
+          git -C workspace/touchgrass-a52xq diff --stat | tee artifacts/f2fs-stable325-diffstat.txt
+          git -C workspace/touchgrass-a52xq diff -- fs/f2fs include/linux/f2fs_fs.h \
+            > artifacts/f2fs-stable325-p1.diff || true
+
+      - name: Apply F2FS gc_merge P2
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/119_apply_f2fs_gc_merge_p2.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+          git -C workspace/touchgrass-a52xq diff --stat | tee artifacts/f2fs-gcmerge-p2-diffstat.txt
+          git -C workspace/touchgrass-a52xq diff -- fs/f2fs > artifacts/f2fs-gcmerge-p2.diff
+          grep -Fq 'F2FS_MOUNT_GC_MERGE' workspace/touchgrass-a52xq/fs/f2fs/f2fs.h
+          grep -Fq 'waitqueue_active(fggc_wq)' workspace/touchgrass-a52xq/fs/f2fs/gc.c
+          grep -Fq 'prepare_to_wait(&sbi->gc_thread->fggc_wq' workspace/touchgrass-a52xq/fs/f2fs/segment.c
+          grep -Fq 'f2fs_submit_merged_write(sbi, DATA)' workspace/touchgrass-a52xq/fs/f2fs/segment.c
+          grep -Fq '"gc_merge"' workspace/touchgrass-a52xq/fs/f2fs/super.c
+
+      - name: Apply F2FS inmem curseg P3A
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-inmem-p3a
+          git -C workspace/touchgrass-a52xq diff --check
+          git -C workspace/touchgrass-a52xq diff --stat | tee artifacts/f2fs-inmem-p3a-diffstat.txt
+          grep -Fq 'NR_CURSEG_INMEM_TYPE' workspace/touchgrass-a52xq/fs/f2fs/f2fs.h
+          grep -Fq 'CURSEG_COLD_DATA_PINNED = NR_PERSISTENT_LOG' workspace/touchgrass-a52xq/fs/f2fs/f2fs.h
+          grep -Fq 'void f2fs_save_inmem_curseg' workspace/touchgrass-a52xq/fs/f2fs/segment.c
+          grep -Fq '__allocate_new_segment' workspace/touchgrass-a52xq/fs/f2fs/segment.c
+          grep -Fq 'active_logs != NR_CURSEG_PERSIST_TYPE' workspace/touchgrass-a52xq/fs/f2fs/super.c
+          ! grep -Rqs 'CURSEG_ALL_DATA_ATGC\|F2FS_MOUNT_ATGC\|GC_IDLE_AT' workspace/touchgrass-a52xq/fs/f2fs
+
+      - name: Snapshot booted P3A F2FS source
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
+          cp -a workspace/touchgrass-a52xq/fs/f2fs artifacts/pre-atgc-p3b/fs/
+          cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/pre-atgc-p3b/include/trace/events/
+
+      - name: Apply F2FS ATGC P3B
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/122_apply_f2fs_atgc_p3b.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-atgc-p3b
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-atgc-p3b/report.txt
+          grep -Fq 'manual Samsung ATGC adaptation=PASS' artifacts/f2fs-atgc-p3b/report.txt
+          grep -Fq 'ATGC default=off' artifacts/f2fs-atgc-p3b/report.txt
+
+      - name: Enable ATGC at initial mount P3C
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/123_enable_f2fs_atgc_p3c.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-atgc-p3c
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-atgc-p3c/report.txt
+          grep -Fq 'ATGC default=on at initial mount only' artifacts/f2fs-atgc-p3c/report.txt
+
+      - name: Apply newer ATGC refinements P4
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/124_apply_f2fs_atgc_p4.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-atgc-p4
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-atgc-p4/report.txt
+          grep -Fq 'dynamic_atgc_reenable=6efc3a05e613' artifacts/f2fs-atgc-p4/report.txt
+          grep -Fq 'atgc_enabled_sysfs=6f092b55e1ad' artifacts/f2fs-atgc-p4/report.txt
+          grep -Fq 'skip_empty_gc_sections=dccd324fa9bd' artifacts/f2fs-atgc-p4/report.txt
+
+      - name: Apply block-age extent cache P5A
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/125_apply_f2fs_block_age_p5a.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-block-age-p5a
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-block-age-p5a/report.txt
+          grep -Fq 'feature=71644dff4811' artifacts/f2fs-block-age-p5a/report.txt
+          grep -Fq 'fix_age_math=b03a41a495df' artifacts/f2fs-block-age-p5a/report.txt
+          grep -Fq 'activation=OFF by default' artifacts/f2fs-block-age-p5a/report.txt
+
+      - name: Enable block-age extent cache P5B
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/126_enable_f2fs_block_age_p5b.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-block-age-p5b
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-block-age-p5b/report.txt
+          grep -Fq 'age_extent_cache default=on at initial mount' artifacts/f2fs-block-age-p5b/report.txt
+          grep -Fq 'observability=enabled,tree_count,node_count,allocated_data_blocks' artifacts/f2fs-block-age-p5b/report.txt
+
+      - name: Apply GC/segment/checkpoint modernization P6
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/127_apply_f2fs_gc_cp_p6.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-gc-cp-p6
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-gc-cp-p6/report.txt
+          grep -Fq 'checkpoint_freeze_fix=d50dfc0c7df7 adapted' artifacts/f2fs-gc-cp-p6/report.txt
+          grep -Fq 'ioctl_gc_victim_fix=e9a844f6e487 adapted' artifacts/f2fs-gc-cp-p6/report.txt
+          grep -Fq 'lfs_map_blocks_balance_fix=1005a3ca28e9' artifacts/f2fs-gc-cp-p6/report.txt
+
+      - name: Apply recent correctness/data-integrity P7
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/128_apply_f2fs_correctness_p7.py \
+            workspace/touchgrass-a52xq \
+            artifacts/f2fs-correctness-p7
+          git -C workspace/touchgrass-a52xq diff --check
+          cat artifacts/f2fs-correctness-p7/report.txt
+          grep -Fq 'nat_flag_lock_fix=238e14eb7226 adapted' artifacts/f2fs-correctness-p7/report.txt
+          grep -Fq 'node_mark_fix=019f9dda7f66+c3e238bd1f56 adapted-to-pages' artifacts/f2fs-correctness-p7/report.txt
+          grep -Fq 'write_end_io_uaf_fix=ce2739e482bc+2d9c4a4ed4ee adapted-to-pages' artifacts/f2fs-correctness-p7/report.txt
+
+      - name: Save exact 35633887441 post-P7 source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true' && steps.postp7_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-postp7-${{ runner.os }}-v1
+
+      - name: Apply BPF boot reliability P1
+        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/129_apply_bpf_bootfix_p1.py
+          python3 scripts/129_apply_bpf_bootfix_p1.py \
+            workspace/touchgrass-a52xq \
+            artifacts/bpf-bootfix-p1
+          cat artifacts/bpf-bootfix-p1/report.txt
+          KERNEL=workspace/touchgrass-a52xq
+          git -C "$KERNEL" diff --check
+          ! grep -RFn 'REG_LIVE_DONE' "$KERNEL/include/linux/bpf_verifier.h" "$KERNEL/kernel/bpf/verifier.c"
+          ! grep -Fq 'struct idpair' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'struct bpf_id_pair *idmap' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'i < BPF_ID_MAP_SIZE' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'if (env->explore_alu_limits)' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ctx_access = true;' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$KERNEL/kernel/bpf/syscall.c"
+          git -C "$KERNEL" diff -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c \
+            > artifacts/bpf-bootfix-p1.diff
+
+      - name: Save exact 35633887441 pre-RNDIS source cache
+        if: steps.prerndis_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-prerndis-${{ runner.os }}-v1
+
+      - name: Apply RNDIS DEVMAP_HASH unregister fix P1
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/134_apply_rndis_devmap_hash_p1.py
+          python3 scripts/134_apply_rndis_devmap_hash_p1.py \
+            workspace/touchgrass-a52xq \
+            artifacts/rndis-devmap-hash-p1
+
+          KERNEL=workspace/touchgrass-a52xq
+          cat artifacts/rndis-devmap-hash-p1/report.txt
+          git -C "$KERNEL" diff --check
+
+          grep -Fq '/* A52 RNDIS DEVMAP_HASH unregister fix P1 */' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev(struct bpf_dtab *dtab,' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'if (dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH) {' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'A52_RNDIS_DEVMAP_HASH_RELEASE' "$KERNEL/kernel/bpf/devmap.c"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          pm = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
+          count = pm.read_text().count('ipa_pm_is_used()')
+          if count != 5:
+              raise SystemExit(f'baseline RNDIS PM policy changed unexpectedly: ipa_pm_is_used() count={count}, expected 5')
+
+          p = Path('workspace/touchgrass-a52xq/kernel/bpf/devmap.c')
+          s = p.read_text()
+          if s.count('dev_map_hash_remove_netdev(dtab, netdev);') != 1:
+              raise SystemExit('unexpected DEVMAP_HASH unregister cleanup call count')
+          print('AUDIT PASS: original RNDIS IPA PM policy preserved')
+          print('AUDIT PASS: DEVMAP_HASH unregister cleanup present exactly once')
+          PY
+
+          git -C "$KERNEL" diff -- kernel/bpf/devmap.c \
+            > artifacts/rndis-devmap-hash-p1.diff
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/f2fs-stable325-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit integrated image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          grep -Fxq 'CONFIG_F2FS_FS=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_FUSE_PASSTHROUGH=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
+          grep -Fq '/* A52 RNDIS DEVMAP_HASH unregister fix P1 */' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev(struct bpf_dtab *dtab,' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'if (dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH) {' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'A52_RNDIS_DEVMAP_HASH_RELEASE' "$KERNEL/kernel/bpf/devmap.c"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('workspace/touchgrass-a52xq/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c')
+          count = p.read_text().count('ipa_pm_is_used()')
+          if count != 5:
+              raise SystemExit(f'RNDIS behavior drifted from known-good baseline: ipa_pm_is_used() count={count}')
+          print('AUDIT PASS: RNDIS IPA PM policy unchanged; DEVMAP_HASH cleanup only')
+          PY
+          ! grep -RFn 'REG_LIVE_DONE' "$KERNEL/include/linux/bpf_verifier.h" "$KERNEL/kernel/bpf/verifier.c"
+          ! grep -Fq 'struct idpair' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ctx_access = true;' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$KERNEL/kernel/bpf/verifier.c"
+          grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$KERNEL/kernel/bpf/syscall.c"
+          if [ -f artifacts/f2fs-stable325-p1.txt ]; then
+            grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
+            grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
+          else
+            echo "AUDIT INFO: cached pre-RNDIS source; transient F2FS report is absent"
+            echo "AUDIT INFO: validating F2FS directly from source markers below"
+          fi
+          grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'fggc_wq' "$KERNEL/fs/f2fs/gc.h"
+          grep -Fq 'waitqueue_active(fggc_wq)' "$KERNEL/fs/f2fs/gc.c"
+          grep -Fq 'f2fs_submit_merged_write(sbi, DATA)' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'Opt_gc_merge' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'NR_CURSEG_INMEM_TYPE' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'NR_CURSEG_PERSIST_TYPE' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'CURSEG_COLD_DATA_PINNED = NR_PERSISTENT_LOG' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'void f2fs_save_inmem_curseg' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'void f2fs_restore_inmem_curseg' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq '__allocate_new_segment' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'active_logs != NR_CURSEG_PERSIST_TYPE' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'F2FS_MOUNT_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'CURSEG_ALL_DATA_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'GC_IDLE_AT' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'GC_AT' "$KERNEL/fs/f2fs/segment.h"
+          grep -Fq 'AT_SSR' "$KERNEL/fs/f2fs/segment.h"
+          grep -Fq 'atgc_age_threshold' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'Opt_atgc' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'P3C: enable ATGC only during the initial mount' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'set_opt(sbi, ATGC);' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'f2fs_reinit_atgc_curseg' "$KERNEL/fs/f2fs/checkpoint.c"
+          grep -Fq 'reenabled age threshold GC' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(atgc_enabled)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'ATTR_LIST(atgc_enabled)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'fio.sbi->gc_mode != GC_URGENT' "$KERNEL/fs/f2fs/gc.c"
+          grep -Fq '__is_valid_data_blkaddr(fio->old_blkaddr)' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'if (flush && curseg->inited)' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'if (!get_valid_blocks(sbi, segno, true))' "$KERNEL/fs/f2fs/gc.c"
+          ! grep -Rqs 'GC_URGENT_HIGH\|GC_URGENT_LOW\|GC_URGENT_MID\|FI_OPU_WRITE' "$KERNEL/fs/f2fs"
+          grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'struct age_extent_info' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'f2fs_lookup_age_extent_cache' "$KERNEL/fs/f2fs/extent_cache.c"
+          grep -Fq 'age_weighted_average' "$KERNEL/fs/f2fs/extent_cache.c"
+          grep -Fq 'atomic64_inc_return(&sbi->allocated_data_blocks)' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq '__get_age_segment_type' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'Opt_age_extent_cache' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'hot_data_age_threshold' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'warm_data_age_threshold' "$KERNEL/fs/f2fs/sysfs.c"
+          awk '/static void default_options/,/^}/' "$KERNEL/fs/f2fs/super.c" | grep -Fq 'set_opt(sbi, AGE_EXTENT_CACHE)'
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(age_extent_cache_enabled)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(age_extent_tree_count)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(age_extent_node_count)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(allocated_data_blocks)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'switch age_extent_cache option is not allowed' "$KERNEL/fs/f2fs/super.c"
+          grep -Fq 'P6/d50dfc0c7df7' "$KERNEL/fs/f2fs/checkpoint.c"
+          grep -Fq 'P6/e9a844f6e487' "$KERNEL/fs/f2fs/gc.c"
+          grep -Fq 'P6/d26fecb03e1f' "$KERNEL/fs/f2fs/segment.h"
+          grep -Fq 'P6/c836d3b8d94e' "$KERNEL/fs/f2fs/segment.c"
+          grep -Fq 'P6/1005a3ca28e9' "$KERNEL/fs/f2fs/data.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(ckpt_merge_active)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(ckpt_merge_issued)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(ckpt_merge_inflight)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(ckpt_merge_accumulated)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'F2FS_GENERAL_RO_ATTR(ckpt_merge_queue_pending)' "$KERNEL/fs/f2fs/sysfs.c"
+          grep -Fq 'P7/238e14eb7226' "$KERNEL/fs/f2fs/node.c"
+          grep -Fq 'P7/1773f63d108b' "$KERNEL/fs/f2fs/node.c"
+          grep -Fq 'P7/019f9dda7f66+c3e238bd1f56' "$KERNEL/fs/f2fs/node.c"
+          grep -Fq 'P7/2d9c4a4ed4ee' "$KERNEL/fs/f2fs/data.c"
+          grep -Fq 'P7/ce2739e482bc' "$KERNEL/fs/f2fs/data.c"
+          grep -Fq 'P7/05872a167c2c' "$KERNEL/fs/f2fs/f2fs.h"
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package RNDIS DEVMAP_HASH P1 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-f2fs325-p1.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-f2fs325-p1.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-f2fs325-p1.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-f2fs325-p1.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;', 1)
+          p.write_text(s)
+          PY
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-f2fs325-p1.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35633887441 + F2FS-STABLE325-P1-GCMERGE-P2-INMEM-P3A-ATGC-P3B-P3C-P4-BLOCKAGE-P5A-P5B-GCCP-P6-CORRECTNESS-P7-BPF-BOOTFIX-P1 + MGLRU-P4 + CASS-P3 + UCLAMP-EFF-P2 + WALT-SUGOV-P2 + GPU-UV-P1-P2-P3 + FUSE-7.40-NATIVE + RNDIS-DEVMAP-HASH-P1/' scripts/.package-f2fs325-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35633887441-RNDIS-DEVMAP-HASH-P1.zip/' scripts/.package-f2fs325-p1.sh
+          chmod +x scripts/.package-f2fs325-p1.sh
+          ./scripts/.package-f2fs325-p1.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-f2fs325-p1.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-f2fs325-p1-${{ runner.os }}-${{ github.sha }}
+
+      - name: Record diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --check > artifacts/diff-check.txt 2>&1 || true
+          fi
+          ccache --show-stats > artifacts/ccache.txt 2>&1 || true
+
+      - name: Upload RNDIS DEVMAP_HASH P1 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35633887441-RNDIS-DEVMAP-HASH-P1-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35633887441-RNDIS-DEVMAP-HASH-P1-DIAG-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+# trigger: f2fs-stable325-p1
+
+# trigger: runner-safe-patch-paths
+
+# trigger: executable-build-scripts
+
+# trigger: gc-merge-p2
+
+# trigger: gc-merge-opt-in-safety
+
+# trigger: canonical-gc-merge-bit
+
+# trigger: split-p3a-inmem-curseg-only
+
+# trigger: p3b-atgc-strict-on-booted-p3a
+
+# trigger: samsung-atgc-adapter-build
+
+# trigger: samsung-rbtree-api-fix
+
+# trigger: full-generalized-rbtree-backport
+
+# trigger: atgc-mtime-and-rbtree-prereqs
+
+# trigger: allocator-adaptation-order-fix
+
+# trigger: replace-block-regex-adaptation
+
+# trigger: p3c-atgc-initial-mount-enable
+
+# trigger: p4-newer-atgc-refinements
+
+# trigger: p5a-block-age-dormant
+
+# trigger: p5a-comment-safe-mount-bit-anchor
+
+# trigger: p5b-block-age-activation
+
+# trigger: p6-gc-cp-modernization
+
+# trigger: p7-correctness-integrity
+
+# trigger: bpf-boot-reliability-p1
+
+# trigger: rndis-devmap-hash-p1
+
+# trigger: reconstruct-evicted-baseline-cache
+
+# trigger: restore-mglru-recorder-prereqs
+
+# trigger: exact-prerndis-cache-v1
+
+# trigger: stage-cache-postp7-v1
+
+# trigger: rndis-audit-comment-fix
+
+# trigger: cache-safe-final-audit
+
+# trigger: rndis-devmap-hash-p1
+
+# trigger: upstream-devmap-hash-unregister-fix

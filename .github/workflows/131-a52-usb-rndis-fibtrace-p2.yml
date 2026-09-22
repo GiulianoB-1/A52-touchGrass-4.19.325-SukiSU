@@ -262,16 +262,6 @@ jobs:
           grep -Fq 'proc_create("a52_rndis_reftrace"' "$KERNEL/net/core/dev.c"
           grep -Fq 'a52_rndis_reftrace_freeze(dev, refcnt);' "$KERNEL/net/core/dev.c"
           grep -Fq 'a52_rndis_reftrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'A52 USB RNDIS FIB trace P2' "$KERNEL/include/linux/netdevice.h"
-          grep -Fq 'A52_RNDIS_FIBTRACE_SIZE' "$KERNEL/net/core/dev.c"
-          grep -Fq 'proc_create("a52_rndis_fibtrace"' "$KERNEL/net/core/dev.c"
-          grep -Fq "a52_rndis_fibtrace(dev, 'G'" "$KERNEL/net/core/dev.c"
-          grep -Fq "a52_rndis_fibtrace(nexthop_nh->nh_dev, '4'" "$KERNEL/net/ipv4/fib_semantics.c"
-          grep -Fq "a52_rndis_fibtrace(nexthop_nh->nh_dev, 'q'" "$KERNEL/net/ipv4/fib_semantics.c"
-          grep -Fq "a52_rndis_fibtrace(dev, 'A'" "$KERNEL/net/ipv6/route.c"
-          grep -Fq "a52_rndis_fibtrace(dev, '6'" "$KERNEL/net/ipv6/route.c"
-          grep -Fq "a52_rndis_fibtrace(f6i->fib6_nh.nh_dev, 'v'" "$KERNEL/net/ipv6/ip6_fib.c"
-          grep -Fq 'a52_rndis_fibtrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq "a52_rndis_reftrace_mark(rndis_ipa_ctx->net, 'U');" "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
 
           git -C "$KERNEL" diff -- \
@@ -352,6 +342,16 @@ jobs:
           grep -Fq 'A52_RNDIS_REFTRACE_SIZE' "$KERNEL/net/core/dev.c"
           grep -Fq 'proc_create("a52_rndis_reftrace"' "$KERNEL/net/core/dev.c"
           grep -Fq 'a52_rndis_reftrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq 'A52 USB RNDIS FIB trace P2' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52_RNDIS_FIBTRACE_SIZE' "$KERNEL/net/core/dev.c"
+          grep -Fq 'proc_create("a52_rndis_fibtrace"' "$KERNEL/net/core/dev.c"
+          grep -Fq "a52_rndis_fibtrace(dev, 'G'" "$KERNEL/net/core/dev.c"
+          grep -Fq "a52_rndis_fibtrace(nexthop_nh->nh_dev, '4'" "$KERNEL/net/ipv4/fib_semantics.c"
+          grep -Fq "a52_rndis_fibtrace(nexthop_nh->nh_dev, 'q'" "$KERNEL/net/ipv4/fib_semantics.c"
+          grep -Fq "a52_rndis_fibtrace(dev, 'A'" "$KERNEL/net/ipv6/route.c"
+          grep -Fq "a52_rndis_fibtrace(dev, '6'" "$KERNEL/net/ipv6/route.c"
+          grep -Fq "a52_rndis_fibtrace(f6i->fib6_nh.nh_dev, 'v'" "$KERNEL/net/ipv6/ip6_fib.c"
+          grep -Fq 'a52_rndis_fibtrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"

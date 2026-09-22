@@ -294,10 +294,6 @@ jobs:
           grep -Fq "a52_rndis_fibtrace(dev, '6'" "$KERNEL/net/ipv6/route.c"
           grep -Fq "a52_rndis_fibtrace(f6i->fib6_nh.nh_dev, 'v'" "$KERNEL/net/ipv6/ip6_fib.c"
           grep -Fq 'a52_rndis_fibtrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
-          grep -Fq 'A52 USB RNDIS fix P3' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
 
           git -C "$KERNEL" diff -- \
             include/linux/netdevice.h \
@@ -380,6 +376,10 @@ jobs:
           grep -Fq "a52_rndis_fibtrace(dev, '6'" "$KERNEL/net/ipv6/route.c"
           grep -Fq "a52_rndis_fibtrace(f6i->fib6_nh.nh_dev, 'v'" "$KERNEL/net/ipv6/ip6_fib.c"
           grep -Fq 'a52_rndis_fibtrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq 'A52 USB RNDIS fix P3' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"

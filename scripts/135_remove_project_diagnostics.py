@@ -130,6 +130,31 @@ if mglru_diag_decl in vm:
 elif "/* A52 MGLRU power diagnostics P1 */" in vm:
     raise SystemExit("MGLRU cleanup: diagnostic declaration block shape changed")
 
+# Remove the Phase 112 recorder storage/event implementation.  It was inserted
+# immediately after the P1 per-CPU declarations and before normal MGLRU code.
+rec_marker = "/* A52 MGLRU power recorder P2 */"
+if rec_marker in vm:
+    start = vm.index(rec_marker)
+    fn = vm.index("static void mglru_rec_event(", start)
+    brace = vm.index("{", fn)
+    depth = 0
+    end = None
+    for i in range(brace, len(vm)):
+        if vm[i] == "{":
+            depth += 1
+        elif vm[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise SystemExit("MGLRU cleanup: mglru_rec_event block is unbalanced")
+    while end < len(vm) and vm[end] in " \t":
+        end += 1
+    while end < len(vm) and vm[end] in "\r\n":
+        end += 1
+    vm = vm[:start] + vm[end:]
+
 # Remove P1+P2 sysfs implementation blocks that were inserted immediately
 # before the standard lru_gen_attrs table.
 for marker in (

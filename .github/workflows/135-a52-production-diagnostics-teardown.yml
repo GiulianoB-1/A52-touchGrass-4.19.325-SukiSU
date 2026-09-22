@@ -66,7 +66,15 @@ jobs:
           ccache --set-config=compression_level=6
           ccache --zero-stats
 
+      - name: Restore prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
       - name: Restore exact 35461116688 pre-build kernel source
+        if: steps.p134_source.outputs.cache-hit != 'true'
         id: prebuild_source
         uses: actions/cache/restore@v4
         with:
@@ -74,6 +82,7 @@ jobs:
           key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Require exact successful baseline cache
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           echo "cache-hit=${{ steps.prebuild_source.outputs.cache-hit }}"
@@ -87,6 +96,21 @@ jobs:
           grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
           grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
 
+      - name: Validate prepared P134 feature source cache
+        if: steps.p134_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "P134 source cache hit: skipping F2FS/BPF preparation phases"
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dev->bulkq = __alloc_percpu_gfp(sizeof(*dev->bulkq)' "$KERNEL/kernel/bpf/devmap.c"
+          ! grep -Fq 'a52_rndis_reftrace' "$KERNEL/net/core/dev.c"
+          ! grep -Fq 'a52_rndis_fibtrace' "$KERNEL/net/core/dev.c"
+
       - name: Prepare workspace
         run: |
           set -Eeuo pipefail
@@ -94,6 +118,7 @@ jobs:
           chmod +x scripts/*.sh scripts/*.py
 
       - name: Apply compatible F2FS stable fixes through 4.19.325
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           ./scripts/118_apply_f2fs_stable_325_p1.sh \
@@ -106,6 +131,7 @@ jobs:
             > artifacts/f2fs-stable325-p1.diff || true
 
       - name: Apply F2FS gc_merge P2
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/119_apply_f2fs_gc_merge_p2.py workspace/touchgrass-a52xq
@@ -119,6 +145,7 @@ jobs:
           grep -Fq '"gc_merge"' workspace/touchgrass-a52xq/fs/f2fs/super.c
 
       - name: Apply F2FS inmem curseg P3A
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py \
@@ -134,6 +161,7 @@ jobs:
           ! grep -Rqs 'CURSEG_ALL_DATA_ATGC\|F2FS_MOUNT_ATGC\|GC_IDLE_AT' workspace/touchgrass-a52xq/fs/f2fs
 
       - name: Snapshot booted P3A F2FS source
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
@@ -141,6 +169,7 @@ jobs:
           cp -a workspace/touchgrass-a52xq/include/trace/events/f2fs.h artifacts/pre-atgc-p3b/include/trace/events/
 
       - name: Apply F2FS ATGC P3B
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/122_apply_f2fs_atgc_p3b.py \
@@ -152,6 +181,7 @@ jobs:
           grep -Fq 'ATGC default=off' artifacts/f2fs-atgc-p3b/report.txt
 
       - name: Enable ATGC at initial mount P3C
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/123_enable_f2fs_atgc_p3c.py \
@@ -162,6 +192,7 @@ jobs:
           grep -Fq 'ATGC default=on at initial mount only' artifacts/f2fs-atgc-p3c/report.txt
 
       - name: Apply newer ATGC refinements P4
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/124_apply_f2fs_atgc_p4.py \
@@ -174,6 +205,7 @@ jobs:
           grep -Fq 'skip_empty_gc_sections=dccd324fa9bd' artifacts/f2fs-atgc-p4/report.txt
 
       - name: Apply block-age extent cache P5A
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/125_apply_f2fs_block_age_p5a.py \
@@ -186,6 +218,7 @@ jobs:
           grep -Fq 'activation=OFF by default' artifacts/f2fs-block-age-p5a/report.txt
 
       - name: Enable block-age extent cache P5B
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/126_enable_f2fs_block_age_p5b.py \
@@ -197,6 +230,7 @@ jobs:
           grep -Fq 'observability=enabled,tree_count,node_count,allocated_data_blocks' artifacts/f2fs-block-age-p5b/report.txt
 
       - name: Apply GC/segment/checkpoint modernization P6
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/127_apply_f2fs_gc_cp_p6.py \
@@ -209,6 +243,7 @@ jobs:
           grep -Fq 'lfs_map_blocks_balance_fix=1005a3ca28e9' artifacts/f2fs-gc-cp-p6/report.txt
 
       - name: Apply recent correctness/data-integrity P7
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 scripts/128_apply_f2fs_correctness_p7.py \
@@ -221,6 +256,7 @@ jobs:
           grep -Fq 'write_end_io_uaf_fix=ce2739e482bc+2d9c4a4ed4ee adapted-to-pages' artifacts/f2fs-correctness-p7/report.txt
 
       - name: Apply BPF boot reliability P1
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           python3 -m py_compile scripts/129_apply_bpf_bootfix_p1.py
@@ -243,6 +279,7 @@ jobs:
             > artifacts/bpf-bootfix-p1.diff
 
       - name: Apply clean BPF DEVMAP RNDIS production fix P134
+        if: steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -274,6 +311,13 @@ jobs:
 
           git -C "$KERNEL" diff -- kernel/bpf/devmap.c \
             > artifacts/bpf-devmap-rndis-clean-p134.diff
+
+      - name: Save prepared P134 feature source cache
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Remove all project diagnostics P135
         run: |
@@ -588,3 +632,5 @@ jobs:
 # production phase: no USB RNDIS reftrace/fibtrace instrumentation
 
 # P135: strip all project-added runtime diagnostics, retain production features
+
+# P135 caching: prepared P134 source cache skips repeated F2FS/BPF phase replay

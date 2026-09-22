@@ -322,9 +322,6 @@ jobs:
           grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'A52 BPF devmap lifecycle P4:' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'dev->bulkq = __alloc_percpu_gfp(sizeof(*dev->bulkq)' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'hlist_for_each_entry_safe(dev, next, head, index_hlist)' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'hlist_del_rcu(&dev->index_hlist);' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'call_rcu(&dev->rcu, __dev_map_entry_free);' "$KERNEL/kernel/bpf/devmap.c"
 
@@ -407,6 +404,9 @@ jobs:
           grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'dev_map_hash_remove_netdev(dtab, netdev);' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'A52 BPF devmap lifecycle P4:' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'dev->bulkq = __alloc_percpu_gfp(sizeof(*dev->bulkq)' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'hlist_for_each_entry_safe(dev, next, head, index_hlist)' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"

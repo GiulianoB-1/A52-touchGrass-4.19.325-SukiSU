@@ -238,10 +238,6 @@ jobs:
           grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$KERNEL/kernel/bpf/verifier.c"
           grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$KERNEL/kernel/bpf/syscall.c"
           grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$KERNEL/kernel/bpf/syscall.c"
-          grep -Fq 'A52 USB RNDIS reftrace P1' "$KERNEL/include/linux/netdevice.h"
-          grep -Fq 'A52_RNDIS_REFTRACE_SIZE' "$KERNEL/net/core/dev.c"
-          grep -Fq 'proc_create("a52_rndis_reftrace"' "$KERNEL/net/core/dev.c"
-          grep -Fq 'a52_rndis_reftrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           git -C "$KERNEL" diff -- include/linux/bpf_verifier.h kernel/bpf/verifier.c kernel/bpf/syscall.c \
             > artifacts/bpf-bootfix-p1.diff
 
@@ -308,6 +304,10 @@ jobs:
           grep -Fq 'ctx_access = BPF_CLASS(insn->code) == BPF_STX;' "$KERNEL/kernel/bpf/verifier.c"
           grep -Fq 'ptype = BPF_PROG_TYPE_SK_MSG;' "$KERNEL/kernel/bpf/syscall.c"
           grep -Fq 'ptype = BPF_PROG_TYPE_SK_SKB;' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'A52 USB RNDIS reftrace P1' "$KERNEL/include/linux/netdevice.h"
+          grep -Fq 'A52_RNDIS_REFTRACE_SIZE' "$KERNEL/net/core/dev.c"
+          grep -Fq 'proc_create("a52_rndis_reftrace"' "$KERNEL/net/core/dev.c"
+          grep -Fq 'a52_rndis_reftrace_reset(net);' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
           grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"

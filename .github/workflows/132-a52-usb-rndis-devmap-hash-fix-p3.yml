@@ -476,7 +476,7 @@ jobs:
           PY
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-f2fs325-p1.sh
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + BASE35461116688 + F2FS-STABLE325-P1-GCMERGE-P2-INMEM-P3A-ATGC-P3B-P3C-P4-BLOCKAGE-P5A-P5B-GCCP-P6-CORRECTNESS-P7-BPF-BOOTFIX-P1 + MGLRU-P4 + CASS-P3 + UCLAMP-EFF-P2 + WALT-SUGOV-P2 + GPU-UV-P1-P2-P3 + FUSE-7.40-NATIVE + USB-RNDIS-REFTRACE-P1 + USB-RNDIS-FIBTRACE-P2 + USB-RNDIS-DEVMAP-HASH-FIX-P3/' scripts/.package-f2fs325-p1.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/ReSukiSU-v4.1.0-BASE35461116688-F2FS-STABLE325-P1-GCMERGE-P2-INMEM-P3A-ATGC-P3B-P3C-P4-BLOCKAGE-P5A-P5B-GCCP-P6-CORRECTNESS-P7-BPF-BOOTFIX-P1-USB-RNDIS-REFTRACE-P1-USB-RNDIS-FIBTRACE-P2-USB-RNDIS-DEVMAP-HASH-FIX-P3.zip/' scripts/.package-f2fs325-p1.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-RNDIS-DEVMAP-HASH-FIX-P3.zip/' scripts/.package-f2fs325-p1.sh
           chmod +x scripts/.package-f2fs325-p1.sh
           ./scripts/.package-f2fs325-p1.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-f2fs325-p1.sh
@@ -575,3 +575,5 @@ jobs:
 # diagnostic refinement: P2 FIB object identity + dev_get_by_index parent caller
 
 # fix candidate: upstream ce197d83a9fc devmap_hash unregister cleanup
+
+# packaging fix: keep ZIP filename below filesystem NAME_MAX

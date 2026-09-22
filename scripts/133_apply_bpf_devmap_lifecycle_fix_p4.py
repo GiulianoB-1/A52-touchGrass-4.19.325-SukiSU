@@ -116,7 +116,7 @@ new_free = """	if (dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
 			struct hlist_head *head;
 			struct hlist_node *next;
 
-			head = dev_map_index_hash(dtab, i);
+			head = &dtab->dev_index_head[i];
 
 			hlist_for_each_entry_safe(dev, next, head, index_hlist) {
 				hlist_del_rcu(&dev->index_hlist);
@@ -160,7 +160,7 @@ report.write_text(
     "root_cause=Samsung hybrid devmap backport retains per-entry bulkq users/free but __dev_map_alloc_node never allocates bulkq\n"
     "repair_1=restore __alloc_percpu_gfp(sizeof(*dev->bulkq), sizeof(void *), gfp)\n"
     "repair_2=free bulkq on dev_get_by_index failure\n"
-    "repair_3=DEVMAP_HASH map-free bucket walk adapted from upstream 071cdecec57fb5d5df78e6a12114ad7bccea5b0e\n"
+    "repair_3=DEVMAP_HASH map-free bucket walk adapted from upstream 071cdecec57fb5d5df78e6a12114ad7bccea5b0e; direct bucket indexing avoids helper-order dependency\n"
     "unregister_fix=upstream ce197d83a9fc42795c248c90983bf05faf0f013b retained from P3\n"
     "changed_file=kernel/bpf/devmap.c\n"
 )

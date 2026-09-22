@@ -525,6 +525,16 @@ for rel, forbidden in {
     data = read(rel)
     for token in forbidden:
         if token in data:
+            if rel == "mm/vmscan.c":
+                lines = data.splitlines()
+                print(f"--- remaining {token} context in {rel} ---")
+                for idx, line in enumerate(lines):
+                    if token in line:
+                        lo = max(0, idx - 8)
+                        hi = min(len(lines), idx + 12)
+                        for n in range(lo, hi):
+                            print(f"{n + 1}: {lines[n]}")
+                        print("---")
             raise SystemExit(f"diagnostic token remains in {rel}: {token}")
 
 sf = read("fs/f2fs/sysfs.c")

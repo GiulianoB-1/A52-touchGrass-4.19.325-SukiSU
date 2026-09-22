@@ -252,6 +252,96 @@ evict_done = r'''if (unlikely(READ_ONCE(mglru_record_level) >= 1)) {
 		'''
 vm = vm.replace(evict_done, "")
 
+# Robust second pass: strip any recorder-only fragments left inside the three
+# MGLRU hot-path functions.  Phase 115 changed surrounding reclaim code after
+# the recorder was added, so exact reverse snippets are not sufficient.
+def strip_mglru_recorder_from_function(text, name):
+    pat = re.compile(
+        rf"(?m)^[ \t]*(?:static[ \t]+)?(?:inline[ \t]+)?[^\n;]*\b{re.escape(name)}[ \t]*\("
+    )
+    m = pat.search(text)
+    if not m:
+        raise SystemExit(f"MGLRU cleanup: function not found: {name}")
+    brace = text.find("{", m.end())
+    depth = 0
+    end = None
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise SystemExit(f"MGLRU cleanup: unbalanced function: {name}")
+
+    func = text[m.start():end]
+
+    # Recorder timing/work locals are never part of MGLRU policy.
+    func = re.sub(
+        r'\n[ \t]*unsigned long a52_rec_start_ns =.*?;',
+        "", func, flags=re.S)
+    func = re.sub(
+        r'\n[ \t]*unsigned long a52_rec_(?:ptes|young|promoted) = 0;',
+        "", func)
+
+    # Remove braced recorder blocks regardless of indentation or small source
+    # changes around them.
+    needle = "if (unlikely(READ_ONCE(mglru_record_level) >= 1))"
+    pos = 0
+    while True:
+        p = func.find(needle, pos)
+        if p < 0:
+            break
+        line_start = func.rfind("\n", 0, p) + 1
+        q = p + len(needle)
+        while q < len(func) and func[q] in " \t\r\n":
+            q += 1
+
+        if q < len(func) and func[q] == "{":
+            d = 0
+            close = None
+            for j in range(q, len(func)):
+                if func[j] == "{":
+                    d += 1
+                elif func[j] == "}":
+                    d -= 1
+                    if d == 0:
+                        close = j + 1
+                        break
+            if close is None:
+                raise SystemExit(f"MGLRU cleanup: unterminated recorder block in {name}")
+            while close < len(func) and func[close] in " \t":
+                close += 1
+            if close < len(func) and func[close] == "\n":
+                close += 1
+            func = func[:line_start] + func[close:]
+            pos = line_start
+            continue
+
+        # P1/P2 path counters use an unbraced if followed by one statement.
+        stmt_end = func.find(";", q)
+        if stmt_end < 0:
+            raise SystemExit(f"MGLRU cleanup: recorder statement end missing in {name}")
+        stmt_end += 1
+        while stmt_end < len(func) and func[stmt_end] in " \t":
+            stmt_end += 1
+        if stmt_end < len(func) and func[stmt_end] == "\n":
+            stmt_end += 1
+        func = func[:line_start] + func[stmt_end:]
+        pos = line_start
+
+    # No recorder symbol should remain in these functions.
+    for token in ("mglru_rec_", "mglru_diag_", "mglru_record_level", "a52_rec_"):
+        if token in func:
+            raise SystemExit(f"MGLRU cleanup: {token} remains in {name}")
+
+    return text[:m.start()] + func + text[end:]
+
+for _mglru_fn in ("lru_gen_look_around", "scan_pages", "evict_pages"):
+    vm = strip_mglru_recorder_from_function(vm, _mglru_fn)
+
 # Remove recorder-only headers once no recorder code remains.
 if not any(x in vm for x in ("mglru_rec_", "mglru_diag_", "lru_gen_trace", "mglru_record_level")):
     vm = vm.replace("#include <linux/proc_fs.h>\n", "")

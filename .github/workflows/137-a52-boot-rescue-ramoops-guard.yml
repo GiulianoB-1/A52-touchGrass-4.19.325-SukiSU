@@ -1,0 +1,265 @@
+name: 137 - A52 5s Boot Rescue + Ramoops Guard
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/137-a52-boot-rescue-ramoops-guard.yml
+      - scripts/137_apply_a52_boot_rescue.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-boot-rescue-p137-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P136_BASELINE_SHA: a83a9ab71c10f873355e16cfd5e8730db81ad986
+  P136_BASELINE_RUN: '35865070203'
+
+jobs:
+  build:
+    name: Build exact P136 baseline + 5s recovery rescue P137
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact successful P136 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P136_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p137-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-f2fs325-p1-${{ runner.os }}-
+            a52xq-effp1-recorder-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache used by P136
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Require exact P136 source-cache boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Exact P134 prepared source cache used by run 35865070203 was not restored."
+            exit 1
+          fi
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Replay P135 production diagnostics cleanup
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/135_remove_project_diagnostics.py \
+            workspace/touchgrass-a52xq \
+            artifacts/production-nodiag-p135
+          cat artifacts/production-nodiag-p135/report.txt
+
+      - name: Replay P136 A619 KGSL and power-management modernization
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq \
+            | tee artifacts/a619-kgsl-p6-pm-p136.txt
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm 45d7e571a332 + ca1cbeedfcd6' \
+            "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm eff8f6e07da7' \
+            "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm dde4355ea92d' \
+            "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+
+      - name: Fetch and apply P137 5-second boot rescue
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/137_apply_a52_boot_rescue.py" \
+            -o /tmp/137_apply_a52_boot_rescue.py
+          python3 -m py_compile /tmp/137_apply_a52_boot_rescue.py
+          python3 /tmp/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-rescue-p137.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          git -C "$KERNEL" diff --check
+
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'A52_BOOT_RESCUE_WINDOW_NS' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'KEY_VOLUMEUP' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'KEY_POWER' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'kmsg_dump(KMSG_DUMP_OOPS);' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'machine_restart("recovery");' "$KERNEL/drivers/input/input.c"
+
+          grep -Fq 'A52_RAMOOPS_BOOT_HOLD_NS' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq 'a52_ramoops_release_one' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq 'a52_ramoops_release_ftrace' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq 'do not zap console/pmsg at probe time' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq 'Never let pstore cleanup erase retained evidence' "$KERNEL/fs/pstore/ram.c"
+
+          grep -Fq '!strncmp(cmd, "recovery", 8)' "$KERNEL/drivers/power/reset/msm-poweroff.c"
+          grep -Fq 'PON_RESTART_REASON_RECOVERY' "$KERNEL/drivers/power/reset/msm-poweroff.c"
+          grep -Fq '__raw_writel(0x77665502, restart_reason);' "$KERNEL/drivers/power/reset/msm-poweroff.c"
+
+          git -C "$KERNEL" diff -- drivers/input/input.c fs/pstore/ram.c \
+            > artifacts/boot-rescue-p137.diff
+          git -C "$KERNEL" diff --stat | tee artifacts/boot-rescue-p137-diffstat.txt
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/boot-rescue-p137-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P137 image and config
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+
+          grep -Fxq 'CONFIG_INPUT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_PSTORE_PMSG=y' "$KERNEL/out/.config"
+
+          grep -aFq 'A52_BOOT_RESCUE: Power + Volume Up detected inside 5s window' "$IMAGE"
+          grep -aFq 'A52_BOOT_RESCUE: saving current printk ring to ramoops' "$IMAGE"
+          grep -aFq 'A52_BOOT_RESCUE: direct restart to recovery' "$IMAGE"
+          grep -aFq 'A52 BOOT RESCUE P137: released %s ramoops writer after 5s' "$IMAGE"
+          grep -aFq 'A52 BOOT RESCUE P137: released ftrace ramoops writer after 5s' "$IMAGE"
+
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm 45d7e571a332 + ca1cbeedfcd6' \
+            "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' \
+            "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          ! grep -RFn 'a52_rndis_reftrace\|a52_rndis_fibtrace' \
+            "$KERNEL/include/linux/netdevice.h" "$KERNEL/net/core/dev.c" \
+            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P137 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p137.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p137.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p137.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p137.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p137.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P136-BASE35865070203 + BOOT-RESCUE-P137/' scripts/.package-p137.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P137-5S-BOOT-RESCUE-RAMOOPS.zip/' scripts/.package-p137.sh
+          chmod +x scripts/.package-p137.sh
+          ./scripts/.package-p137.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p137.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p137-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P137 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P136-RUN35865070203-BOOT-RESCUE-P137-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/boot-rescue-p137.txt
+            artifacts/boot-rescue-p137.diff
+            artifacts/boot-rescue-p137-diffstat.txt
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14

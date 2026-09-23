@@ -418,6 +418,14 @@ jobs:
           grep -Fxq 'CONFIG_BPF_SYSCALL=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_BPF_JIT_ALWAYS_ON=y' "$KERNEL/out/.config"
+
+          # P136 KGSL + PM backport must be present in the compiled source.
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm 45d7e571a332 + ca1cbeedfcd6' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          grep -Fq 'IS_ERR_OR_NULL(devfreq)' "$KERNEL/drivers/gpu/msm/kgsl_pwrscale.c"
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm eff8f6e07da7' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'qcom,initial-min-pwrlevel' "$KERNEL/drivers/gpu/msm/adreno.c"
+          grep -Fq 'A619 KGSL P6 PM: Qualcomm dde4355ea92d' "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+          grep -Fq 'A6XX_UCHE_GBIF_GX_CONFIG, 0x70000' "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
           ! grep -RFn 'REG_LIVE_DONE' "$KERNEL/include/linux/bpf_verifier.h" "$KERNEL/kernel/bpf/verifier.c"
           ! grep -Fq 'struct idpair' "$KERNEL/kernel/bpf/verifier.c"
           grep -Fq 'ctx_access = true;' "$KERNEL/kernel/bpf/verifier.c"
@@ -437,8 +445,14 @@ jobs:
           ! grep -Fq 'a52_rndis_fibtrace' "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
           grep -Fq 'dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH' "$KERNEL/kernel/bpf/devmap.c"
           grep -Fq 'dev->bulkq = __alloc_percpu_gfp(sizeof(*dev->bulkq)' "$KERNEL/kernel/bpf/devmap.c"
-          grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
-          grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
+          # The F2FS patch report exists only when preparation runs in this job.
+          # On a prepared-source cache hit, validate the restored source below instead.
+          if [ -s artifacts/f2fs-stable325-p1.txt ]; then
+            grep -Fq 'applied=' artifacts/f2fs-stable325-p1.txt
+            grep -Fq 'processed=34' artifacts/f2fs-stable325-p1.txt
+          else
+            echo 'F2FS report absent because prepared source cache was restored; validating source state directly.'
+          fi
           grep -Fq 'F2FS_MOUNT_GC_MERGE' "$KERNEL/fs/f2fs/f2fs.h"
           grep -Fq 'fggc_wq' "$KERNEL/fs/f2fs/gc.h"
           grep -Fq 'waitqueue_active(fggc_wq)' "$KERNEL/fs/f2fs/gc.c"

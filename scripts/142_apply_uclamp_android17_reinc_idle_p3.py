@@ -52,7 +52,9 @@ def main() -> int:
     sh = sched_h.read_text()
     sg = sugov.read_text()
 
-    # Require the boot-tested modern-uclamp baseline.
+    # Require the boot-tested modern-uclamp semantics. Do not depend on
+    # project diagnostic/runtime markers here: P135 intentionally removes
+    # those markers while preserving the implementation.
     for needle in (
         "DEFINE_STATIC_KEY_FALSE(sched_uclamp_used);",
         "static inline bool uclamp_is_used(void)",
@@ -60,7 +62,9 @@ def main() -> int:
         "sysctl_sched_uclamp_util_min_rt_default = 0;",
         "static void __init init_uclamp_rq(struct rq *rq)",
         "rq->uclamp_flags = UCLAMP_FLAG_IDLE;",
-        "A52 uclamp efficiency P1",
+        "unsigned int uclamp_task(struct task_struct *p)",
+        "util = max(util, uclamp_eff_value(p, UCLAMP_MIN));",
+        "util = min(util, uclamp_eff_value(p, UCLAMP_MAX));",
     ):
         if needle not in text and needle not in sh:
             raise SystemExit(f"required modern-uclamp baseline missing: {needle}")

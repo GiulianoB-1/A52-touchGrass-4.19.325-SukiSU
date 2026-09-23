@@ -155,8 +155,8 @@ static int page_lru_tier(struct page *page)
 
     func = replace_once(
         func,
-        "	if (tier > tier_idx) {
-",
+        """	if (tier > tier_idx) {
+""",
         """	/*
 	 * Pages that saturated the fd-access reference counter deserve one more
 	 * generation even if the PID controller has not raised their tier yet.

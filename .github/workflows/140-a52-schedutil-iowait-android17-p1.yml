@@ -1,0 +1,323 @@
+name: 140 - A52 Android17 Schedutil IOWAIT P1
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/140-a52-schedutil-iowait-android17-p1.yml
+      - scripts/140_apply_schedutil_iowait_android17_p1.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-schedutil-iowait-p140-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P139_BASELINE_SHA: 382f65bafe3a4b48210eef0686f7e963098be8d1
+  P139_BASELINE_RUN: '35910838031'
+
+jobs:
+  build:
+    name: Build exact P139 baseline + Android17 schedutil IOWAIT P1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P139 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P139_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p140-schedutil-iowait-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-p139-mglru-p4-${{ runner.os }}-
+            a52xq-p138-a619-kgsl-p7-${{ runner.os }}-
+            a52xq-p137-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Require exact prepared source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Exact prepared source cache used by the boot-tested P139 chain was not restored."
+            exit 1
+          fi
+
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Replay P135 production diagnostics cleanup
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/135_remove_project_diagnostics.py \
+            workspace/touchgrass-a52xq \
+            artifacts/production-nodiag-p135
+
+          KERNEL=workspace/touchgrass-a52xq
+          git -C "$KERNEL" diff --check
+          ! grep -RFn 'a52_sched_diag' "$KERNEL/kernel/sched"
+          ! grep -RFn 'a52_rndis_reftrace\|a52_rndis_fibtrace' \
+            "$KERNEL/include/linux/netdevice.h" "$KERNEL/net/core/dev.c" \
+            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+
+      - name: Replay P136 A619 KGSL and power-management modernization
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq \
+            | tee artifacts/a619-kgsl-p6-pm-p136.txt
+
+      - name: Replay P137 boot rescue and ramoops guard
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-rescue-p137.txt
+
+      - name: Replay P138 A619 KGSL P7 CP init
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq \
+            | tee artifacts/a619-kgsl-p7-cp-init-p138.txt
+
+      - name: Replay boot-tested P139 Modern MGLRU P4
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq \
+            | tee artifacts/mglru-modern-p4-pagecache-p139.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' \
+            "$KERNEL/include/linux/mm_inline.h"
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' \
+            "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' \
+            "$KERNEL/mm/workingset.c"
+
+      - name: Apply Android17 schedutil IOWAIT P1
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/140_apply_schedutil_iowait_android17_p1.py" \
+            -o /tmp/140_apply_schedutil_iowait_android17_p1.py
+
+          python3 -m py_compile /tmp/140_apply_schedutil_iowait_android17_p1.py
+          python3 /tmp/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/schedutil-iowait-android17-p1-p140.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          git -C "$KERNEL" diff --check
+
+          grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
+          grep -Fq '#define IOWAIT_BOOST_MIN' "$SUGOV"
+          grep -Fq 'set_iowait_boost ? IOWAIT_BOOST_MIN : 0' "$SUGOV"
+          grep -Fq 'sg_cpu->iowait_boost = IOWAIT_BOOST_MIN;' "$SUGOV"
+          grep -Fq 'sg_cpu->iowait_boost < IOWAIT_BOOST_MIN' "$SUGOV"
+          grep -Fq 'boost = uclamp_rq_util_with(cpu_rq(sg_cpu->cpu), boost, NULL);' "$SUGOV"
+
+          ! grep -Fq 'sg_cpu->min' "$SUGOV"
+
+          # Keep the already boot-tested WALT/uclamp governor path.
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$SUGOV"
+          grep -Fq 'util = stune_util(sg_cpu->cpu, 0, &sg_cpu->walt_load);' "$SUGOV"
+          grep -Fq 'util = uclamp_rq_util_with(rq, util, NULL);' "$SUGOV"
+          grep -Fq 'sugov_walt_adjust' "$SUGOV"
+
+          git -C "$KERNEL" diff -- kernel/sched/cpufreq_schedutil.c \
+            > artifacts/schedutil-iowait-android17-p1-p140.diff
+          git -C "$KERNEL" diff --stat \
+            | tee artifacts/schedutil-iowait-android17-p1-p140-diffstat.txt
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/schedutil-iowait-android17-p1-p140-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P140 image and source
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_TUNE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LRU_GEN=y' "$KERNEL/out/.config"
+
+          # P140 Android17 I/O-wait behavior.
+          grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
+          grep -Fq '#define IOWAIT_BOOST_MIN' "$SUGOV"
+          grep -Fq 'set_iowait_boost ? IOWAIT_BOOST_MIN : 0' "$SUGOV"
+          grep -Fq 'boost = uclamp_rq_util_with(cpu_rq(sg_cpu->cpu), boost, NULL);' "$SUGOV"
+          ! grep -Fq 'sg_cpu->min' "$SUGOV"
+
+          # Preserve Android17 uclamp + Samsung WALT compatibility.
+          grep -Fq 'U17 uclamp + WALT schedutil compatibility path active' "$SUGOV"
+          grep -Fq 'uclamp_rq_util_with(rq, util, NULL)' "$SUGOV"
+          grep -Fq 'sugov_walt_adjust' "$SUGOV"
+
+          # P139 and prior memory stack remain.
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' \
+            "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 MGLRU Modern P3: upstream c28ac3c7 skip special VMAs' \
+            "$KERNEL/mm/vmscan.c"
+
+          # GPU and rescue stack remain.
+          grep -Fq 'A619 KGSL P7 CP INIT: Qualcomm f583f456d0a2' \
+            "$KERNEL/drivers/gpu/msm/adreno_a6xx.c"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'A52_RAMOOPS_BOOT_HOLD_NS' "$KERNEL/fs/pstore/ram.c"
+          grep -aFq 'A52_BOOT_RESCUE: Power + Volume Up detected inside 5s window' "$IMAGE"
+          grep -aFq 'A52_BOOT_RESCUE: direct restart to recovery' "$IMAGE"
+
+          # Production diagnostics remain absent; permanent USB fix remains.
+          ! grep -RFn 'a52_rndis_reftrace\|a52_rndis_fibtrace' \
+            "$KERNEL/include/linux/netdevice.h" "$KERNEL/net/core/dev.c" \
+            "$KERNEL/drivers/platform/msm/ipa/ipa_clients/rndis_ipa.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P140 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p140.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p140.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p140.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p140.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p140.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P139-BASE35910838031 + SUGOV-IOWAIT-P140/' scripts/.package-p140.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P140-SCHEDUTIL-IOWAIT-ANDROID17-P1.zip/' scripts/.package-p140.sh
+          chmod +x scripts/.package-p140.sh
+          ./scripts/.package-p140.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p140.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -l "$ZIP" | tee artifacts/package-list.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p140-schedutil-iowait-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P140 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35910838031-SUGOV-IOWAIT-P140-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/schedutil-iowait-android17-p1-p140.txt
+            artifacts/schedutil-iowait-android17-p1-p140.diff
+            artifacts/schedutil-iowait-android17-p1-p140-diffstat.txt
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+# P140 CPU logical phase: Android17 schedutil I/O-wait modernization P1
+# exact boot-tested baseline: actions run 35910838031 / 382f65bafe3a4b48210eef0686f7e963098be8d1
+# primary reference: Android17 Linux 6.18 schedutil
+# upstream origin: 9eca544b1491df90ea7102a7ed14acc3c562d97b

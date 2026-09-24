@@ -1,4 +1,4 @@
-name: 148 - A52 Qualcomm LPM Fix Pack P1
+name: 148 - A52 Qualcomm LPM + WALT Battery Fix Pack
 
 on:
   push:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   build:
-    name: Build exact P146 baseline + Qualcomm LPM fix pack
+    name: Build P146 + Qualcomm LPM/WALT/schedutil fix pack
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -54,9 +54,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-p148-qcom-lpm-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-p148-qcom-battery-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-p146-teo-active-${{ runner.os }}-
+            a52xq-p148-qcom-lpm-${{ runner.os }}-
             a52xq-p145-teo-baseline-${{ runner.os }}-
             a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
             a52xq-f2fs325-p1-${{ runner.os }}-
@@ -122,7 +123,7 @@ jobs:
           grep -Fq '.rating =	30,' "$KERNEL/drivers/cpuidle/lpm-levels.c"
           grep -Fq 'lpm_cpu->drv->name = "msm_idle";' "$KERNEL/drivers/cpuidle/lpm-levels.c"
 
-      - name: Apply P148 Qualcomm LPM modernization fix pack
+      - name: Apply P148 Qualcomm LPM + WALT/schedutil fix pack
         run: |
           set -Eeuo pipefail
 
@@ -136,6 +137,9 @@ jobs:
 
           KERNEL=workspace/touchgrass-a52xq
           LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          FAIR="$KERNEL/kernel/sched/fair.c"
+          WALT="$KERNEL/kernel/sched/walt.c"
 
           grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$LPM"
           grep -Fq 'raw_spin_lock(&cluster->sync_lock);' "$LPM"
@@ -154,13 +158,24 @@ jobs:
           grep -Fq 'lpm_cpu->drv->name = "msm_idle";' "$LPM"
           grep -Fq 'predicted = lpm_cpuidle_predict(dev, cpu,' "$LPM"
           grep -Fq 'pred_mode = cluster_predict(cluster, &pred_us);' "$LPM"
+          grep -Fq 'is_IPI_pending(cpumask_of(dev->cpu))' "$LPM"
+
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$SUGOV"
+          grep -Fq 'a52_sugov_irq_work_queue(&sg_policy->irq_work);' "$SUGOV"
+          grep -Fq 'irq_work_queue_on(work, cpu)' "$SUGOV"
+          grep -Fq 'sg_policy->cached_raw_freq = sg_policy->prev_cached_raw_freq;' "$SUGOV"
+          grep -Fq 'if (sg_policy->next_freq == next_freq)' "$SUGOV"
+
+          grep -Fq 'queued = stop_one_cpu_nowait(cpu_of(busiest)' "$FAIR"
+          grep -Fq 'clear_reserved(this_cpu);' "$FAIR"
+          grep -Fq 'clear_reserved(rq->push_cpu);' "$WALT"
 
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- \
             drivers/cpuidle/lpm-levels.c \
             drivers/cpuidle/lpm-levels-of.c \
             drivers/cpuidle/lpm-levels.h \
-            > artifacts/qcom-lpm-fixpack-p148.diff
+            > artifacts/qcom-lpm-walt-fixpack-p148.diff
 
       - name: Build integrated kernel
         run: |
@@ -199,6 +214,7 @@ jobs:
           grep -Fq 'lpm_cpu->drv->name = "msm_idle";' "$LPM"
           grep -Fq 'raw_spin_lock(&cluster->sync_lock);' "$LPM"
           grep -Fq 'sleep_us <= (s64)(TICK_NSEC / NSEC_PER_USEC)' "$LPM"
+          grep -Fq 'is_IPI_pending(cpumask_of(dev->cpu))' "$LPM"
           ! grep -Fq 'update_debug_pc_event(' "$LPM"
           ! grep -Fq 'KLPMDEBUG' "$LPM"
 
@@ -215,6 +231,12 @@ jobs:
           grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
           grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
           grep -Fq 'A52 SCHEDUTIL P2: Android17 79443a7e limits_changed synchronization' "$SUGOV"
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$SUGOV"
+          grep -Fq 'a52_sugov_irq_work_queue(&sg_policy->irq_work);' "$SUGOV"
+          grep -Fq 'irq_work_queue_on(work, cpu)' "$SUGOV"
+          grep -Fq 'sg_policy->cached_raw_freq = sg_policy->prev_cached_raw_freq;' "$SUGOV"
+          grep -Fq 'queued = stop_one_cpu_nowait(cpu_of(busiest)' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'clear_reserved(rq->push_cpu);' "$KERNEL/kernel/sched/walt.c"
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
           grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
 
@@ -254,8 +276,8 @@ jobs:
           PY
 
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p148.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P146-BASE35960921027 + QCOM-LPM-P148/' scripts/.package-p148.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P148-QCOM-LPM-FIXPACK-P1.zip/' scripts/.package-p148.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P146-BASE35960921027 + QCOM-LPM-WALT-P148/' scripts/.package-p148.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P148-QCOM-LPM-WALT-SCHEDUTIL-FIXPACK-P1.zip/' scripts/.package-p148.sh
           chmod +x scripts/.package-p148.sh
           ./scripts/.package-p148.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p148.sh
@@ -275,12 +297,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-p148-qcom-lpm-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-p148-qcom-battery-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload P148 flashable ZIP and audit
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-BASE35960921027-QCOM-LPM-P148-${{ github.run_number }}
+          name: A52XQ-BASE35960921027-QCOM-BATTERY-P148-${{ github.run_number }}
           path: |
             release/
             artifacts/qcom-lpm-fixpack-p148.txt
@@ -291,4 +313,5 @@ jobs:
 
 # Exact boot-tested base: P146 run 35960921027 / 24f87ad...
 # P147 is intentionally not replayed: it only changes dormant generic TEO.
-# P148 modifies the actually active Qualcomm qcom/msm_idle path.
+# P148 modifies the actually active Qualcomm qcom/msm_idle path and folds in compatible WALT/schedutil correctness fixes.
+# No frequency tables, rate-limit values, hispeed, RTG, PL, voltage, or boost policy tuning is changed.

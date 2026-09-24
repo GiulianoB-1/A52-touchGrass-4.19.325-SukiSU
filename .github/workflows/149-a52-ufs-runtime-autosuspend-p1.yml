@@ -144,8 +144,8 @@ jobs:
           grep -Fq 'if (ufshcd_is_rpm_autosuspend_allowed(hba))' "$UFS"
           grep -Fq 'ktime_t window_start_t;' "$UFSH"
           grep -Fq '#define UFSHCD_CAP_CRYPTO (1 << 7)' "$UFSH"
-          grep -Fq '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)' "$UFSH"
-          grep -Fq '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)' "$UFSH"
+          grep -Fq '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)' "$UFSH"
+          grep -Fq '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 8)' "$UFSH"
           grep -Fq 'hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;' "$QCOM"
 
           ! sed -n '/static int ufshcd_devfreq_get_dev_status(/,/^}/p' "$UFS" | grep -Fq 'jiffies_to_usecs('
@@ -195,10 +195,11 @@ jobs:
           grep -Fq 'hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;' "$QCOM"
           grep -Fq 'if (ufshcd_is_rpm_autosuspend_allowed(hba))' "$UFS"
 
-          # Capability bits must be unique.
+          # Preserve Samsung's existing vendor capability layout; P149 only
+          # consumes previously unused bit 8 for the new autosuspend flag.
           test "$(grep -Fc '#define UFSHCD_CAP_CRYPTO (1 << 7)' "$UFSH")" -eq 1
-          test "$(grep -Fc '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)' "$UFSH")" -eq 1
-          test "$(grep -Fc '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)' "$UFSH")" -eq 1
+          test "$(grep -Fc '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)' "$UFSH")" -eq 1
+          test "$(grep -Fc '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 8)' "$UFSH")" -eq 1
 
           # Existing UFS operating envelope retained.
           grep -Fq '.upthreshold = 70,' "$UFS"
@@ -296,7 +297,7 @@ jobs:
 # - runtime-active guard around UFS clock/gear scaling
 # - Qualcomm capability-gated request-based runtime autosuspend
 # - autosuspend delay 3000ms -> modern Qualcomm 2000ms
-# - unique UFS capability bits for crypto / power collapse / autosuspend
+# - preserve Samsung crypto/power-collapse layout; add autosuspend on free bit 8
 #
 # No UFS gear table, clock frequency table, Hibern8 delay, bus vote table,
 # CPU frequency, voltage, WALT, RTG, PL or scheduler tuning values changed.

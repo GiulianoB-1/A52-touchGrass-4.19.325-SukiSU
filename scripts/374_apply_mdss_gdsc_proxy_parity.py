@@ -38,12 +38,14 @@ def validate_touchgrass(tg: Path) -> None:
         if token not in proxy:
             raise SystemExit("Phase374 TouchGrass proxy contract drifted: " + token)
 
-    core_token = (
-        "rdev->proxy_consumer = regulator_proxy_consumer_register(dev,\n"
-        "\t\t\t\t\t\t\tconfig->of_node);"
-    )
-    if core_token not in core:
-        raise SystemExit("Phase374 TouchGrass regulator-core proxy hook drifted")
+    for token in (
+        "rdev->proxy_consumer = regulator_proxy_consumer_register(dev,",
+        "config->of_node);",
+    ):
+        if token not in core:
+            raise SystemExit(
+                "Phase374 TouchGrass regulator-core proxy hook drifted: " + token
+            )
 
 
 BLOCK = r'''

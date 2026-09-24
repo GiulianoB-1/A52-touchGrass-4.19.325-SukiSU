@@ -271,7 +271,7 @@ static u64 a52_r368_sys_enter(struct pt_regs *regs, int scno)
 	if (scno == __NR_exit || scno == __NR_exit_group)
 		event = A52_R368_EVT_EXIT_ENTRY;
 
-	a52_r368_fill(&r, regs, scno, event, sequence, LONG_MIN,
+	a52_r368_fill(&r, regs, scno, event, sequence, (s64)(1ULL << 63),
 		      (unsigned int)slot);
 	a52_r368_write_slot((unsigned int)slot, &r);
 	return sequence;

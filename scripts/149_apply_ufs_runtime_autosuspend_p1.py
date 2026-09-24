@@ -259,15 +259,10 @@ start_window:
     # entire Samsung function body.
     # ------------------------------------------------------------------
     target = function_block(c, "static int ufshcd_devfreq_target(struct device *dev,")
-    old_scale = """\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-
-\tstart = ktime_get();
+    old_scale = """\tstart = ktime_get();
 \tret = ufshcd_devfreq_scale(hba, scale_up);
-\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
 """
-    new_scale = f"""\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-
-\t/*
+    new_scale = f"""\t/*
 \t * {MARKER}
 \t * Qualcomm {DEVFREQ_RPM_SRC}: devfreq may race runtime suspend.
 \t * Pin the PM state without waking the host and retry later if it
@@ -283,10 +278,9 @@ start_window:
 \tstart = ktime_get();
 \tret = ufshcd_devfreq_scale(hba, scale_up);
 \tpm_runtime_put(hba->dev);
-\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
 """
     if old_scale not in target:
-        raise SystemExit("UFS devfreq runtime-active guard: scale-call anchor missing")
+        raise SystemExit("UFS devfreq runtime-active guard: scale-call core missing")
     target_new = target.replace(old_scale, new_scale, 1)
     c = replace_once(c, target, target_new, "UFS devfreq runtime-active guard")
 

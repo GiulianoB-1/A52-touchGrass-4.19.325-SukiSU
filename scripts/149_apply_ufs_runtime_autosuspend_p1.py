@@ -8,7 +8,6 @@ MARKER = "A52 UFS P149: precise devfreq + runtime-PM autosuspend"
 DEVFREQ_TIME_SRC = "ee48a99fffd427eaf676e8cd697606d5bcea61dc"
 DEVFREQ_RPM_SRC = "80d85e5d973d9ee3ae0cc44580f78c37d8e83c27"
 QCOM_AUTOSUSPEND_SRC = "5862ee751b63a2d4b75c751671108754165d5789"
-CAP_COLLISION_SRC = "f7eefc38b845a776489c2e8796b50a0c388b68ac"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -19,12 +18,17 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def function_block(text: str, signature: str) -> str:
-    start = text.find(signature)
-    if start < 0:
-        raise SystemExit(f"missing function: {signature}")
-    brace = text.find("{", start)
-    if brace < 0:
-        raise SystemExit(f"missing opening brace: {signature}")
+    search = 0
+    while True:
+        start = text.find(signature, search)
+        if start < 0:
+            raise SystemExit(f"missing function definition: {signature}")
+        brace = text.find("{", start)
+        semi = text.find(";", start)
+        if brace >= 0 and (semi < 0 or brace < semi):
+            break
+        search = start + len(signature)
+
     depth = 0
     for i in range(brace, len(text)):
         if text[i] == "{":
@@ -252,34 +256,124 @@ start_window:
     # Never perform a clock/gear devfreq transition while HBA runtime PM is
     # already suspended. Pin the runtime-PM status without forcing a resume.
     # ------------------------------------------------------------------
-    target = function_block(c, "static int ufshcd_devfreq_target(struct device *dev,")
-    if "pm_runtime_get_noresume(hba->dev);" not in target:
-        old = """\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+    old_target = """static int ufshcd_devfreq_target(struct device *dev,
+				unsigned long *freq, u32 flags)
+{
+	int ret = 0;
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	ktime_t start;
+	bool scale_up, sched_clk_scaling_suspend_work = false;
+	struct list_head *clk_list = &hba->clk_list_head;
+	struct ufs_clk_info *clki;
+	unsigned long irq_flags;
 
-\tstart = ktime_get();
-\tret = ufshcd_devfreq_scale(hba, scale_up);
-\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
+	if (!ufshcd_is_clkscaling_supported(hba))
+		return -EINVAL;
+
+	spin_lock_irqsave(hba->host->host_lock, irq_flags);
+	if (ufshcd_eh_in_progress(hba)) {
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		return 0;
+	}
+
+	if (!hba->clk_scaling.active_reqs)
+		sched_clk_scaling_suspend_work = true;
+
+	if (list_empty(clk_list)) {
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		goto out;
+	}
+
+	clki = list_first_entry(&hba->clk_list_head, struct ufs_clk_info, list);
+	scale_up = (*freq == clki->max_freq) ? true : false;
+	if (!ufshcd_is_devfreq_scaling_required(hba, scale_up)) {
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		ret = 0;
+		goto out; /* no state change required */
+	}
+	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+
+	start = ktime_get();
+	ret = ufshcd_devfreq_scale(hba, scale_up);
+	trace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
+		(scale_up ? "up" : "down"),
+		ktime_to_us(ktime_sub(ktime_get(), start)), ret);
+
+out:
+	if (sched_clk_scaling_suspend_work)
+		queue_work(hba->clk_scaling.workq,
+			   &hba->clk_scaling.suspend_work);
+
+	return ret;
+}
 """
-        new = f"""\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+    new_target = f"""static int ufshcd_devfreq_target(struct device *dev,
+				unsigned long *freq, u32 flags)
+{{
+	int ret = 0;
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	ktime_t start;
+	bool scale_up, sched_clk_scaling_suspend_work = false;
+	struct list_head *clk_list = &hba->clk_list_head;
+	struct ufs_clk_info *clki;
+	unsigned long irq_flags;
 
-\t/*
-\t * {MARKER}
-\t * Qualcomm {DEVFREQ_RPM_SRC}: a devfreq callback can race runtime
-\t * suspend. Do not wake the controller just to scale it; retry later.
-\t */
-\tpm_runtime_get_noresume(hba->dev);
-\tif (!pm_runtime_active(hba->dev)) {{
-\t\tpm_runtime_put_noidle(hba->dev);
-\t\tret = -EAGAIN;
-\t\tgoto out;
-\t}}
+	if (!ufshcd_is_clkscaling_supported(hba))
+		return -EINVAL;
 
-\tstart = ktime_get();
-\tret = ufshcd_devfreq_scale(hba, scale_up);
-\tpm_runtime_put(hba->dev);
-\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
+	spin_lock_irqsave(hba->host->host_lock, irq_flags);
+	if (ufshcd_eh_in_progress(hba)) {{
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		return 0;
+	}}
+
+	if (!hba->clk_scaling.active_reqs)
+		sched_clk_scaling_suspend_work = true;
+
+	if (list_empty(clk_list)) {{
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		goto out;
+	}}
+
+	clki = list_first_entry(&hba->clk_list_head, struct ufs_clk_info, list);
+	scale_up = (*freq == clki->max_freq) ? true : false;
+	if (!ufshcd_is_devfreq_scaling_required(hba, scale_up)) {{
+		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+		ret = 0;
+		goto out; /* no state change required */
+	}}
+	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+
+	/*
+	 * {MARKER}
+	 * Qualcomm {DEVFREQ_RPM_SRC}: devfreq may race runtime suspend.
+	 * Pin the PM state without waking the host and retry later if it
+	 * is already suspended.
+	 */
+	pm_runtime_get_noresume(hba->dev);
+	if (!pm_runtime_active(hba->dev)) {{
+		pm_runtime_put_noidle(hba->dev);
+		ret = -EAGAIN;
+		goto out;
+	}}
+
+	start = ktime_get();
+	ret = ufshcd_devfreq_scale(hba, scale_up);
+	pm_runtime_put(hba->dev);
+	trace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
+		(scale_up ? "up" : "down"),
+		ktime_to_us(ktime_sub(ktime_get(), start)), ret);
+
+out:
+	if (sched_clk_scaling_suspend_work)
+		queue_work(hba->clk_scaling.workq,
+			   &hba->clk_scaling.suspend_work);
+
+	return ret;
+}}
 """
-        c = replace_once(c, old, new, "UFS devfreq runtime-active guard")
+    c = replace_once(c, old_target, new_target,
+                     "UFS devfreq runtime-active guard")
 
     # ------------------------------------------------------------------
     # 3) Merge the planned autosuspend phase into P149.
@@ -300,27 +394,18 @@ start_window:
         "UFS autosuspend delay",
     )
 
-    old_caps = """#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)
-\t/*
-\t * This capability allows the host controller driver to use the
-\t * inline crypto engine, if it is present
-\t */
-#define UFSHCD_CAP_CRYPTO (1 << 7)
+    caps_anchor = """#define UFSHCD_CAP_CRYPTO (1 << 7)
+
 """
-    new_caps = f"""/*
-\t * {MARKER}
-\t * Keep Qualcomm power-collapse and crypto capability bits distinct.
-\t * Android fixed a similar capability collision in {CAP_COLLISION_SRC}.
-\t */
-#define UFSHCD_CAP_CRYPTO (1 << 7)
-#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)
-\t/*
-\t * Allow the host driver to opt SCSI devices into runtime autosuspend
-\t * instead of relying on userspace to change power/control.
-\t */
-#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)
+    caps_new = """#define UFSHCD_CAP_CRYPTO (1 << 7)
+	/*
+	 * Allow the Qualcomm host driver to opt SCSI devices into runtime
+	 * autosuspend. Bit 8 is unused in this Samsung 4.19 capability map.
+	 */
+#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 8)
+
 """
-    h = replace_once(h, old_caps, new_caps, "UFS capability bitmap collision")
+    h = replace_once(h, caps_anchor, caps_new, "UFS autosuspend capability bit")
 
     helper_anchor = """static inline bool ufshcd_is_hibern8_on_idle_allowed(struct ufs_hba *hba)
 {
@@ -397,19 +482,19 @@ start_window:
     for needle in (
         "ktime_t window_start_t;",
         "#define UFSHCD_CAP_CRYPTO (1 << 7)",
-        "#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)",
-        "#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)",
+        "#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)",
+        "#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 8)",
         "static inline bool ufshcd_is_rpm_autosuspend_allowed",
     ):
         if needle not in H:
             raise SystemExit(f"audit failed: ufshcd.h missing {needle}")
 
-    if H.count("(1 << 7)") != 1:
-        raise SystemExit("audit failed: UFS capability bit 7 still collides")
-    if H.count("(1 << 8)") != 1:
-        raise SystemExit("audit failed: UFS capability bit 8 not unique")
-    if H.count("(1 << 9)") != 1:
-        raise SystemExit("audit failed: UFS capability bit 9 not unique")
+    if H.count("#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 8)") != 1:
+        raise SystemExit("audit failed: UFS autosuspend bit 8 missing or duplicated")
+    if "#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)" not in H:
+        raise SystemExit("audit failed: Samsung power-collapse capability changed")
+    if "#define UFSHCD_CAP_CRYPTO (1 << 7)" not in H:
+        raise SystemExit("audit failed: Samsung crypto capability changed")
 
     for needle in (
         "hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;",
@@ -453,13 +538,12 @@ start_window:
     print("[audit] Qualcomm request-based UFS autosuspend enabled when LPM is enabled: PASS")
     print("[audit] autosuspend delay modernized 3000ms -> 2000ms: PASS")
     print("[audit] Samsung SCSI request-based RPM mechanism preserved: PASS")
-    print("[audit] UFS capability bit collision removed: PASS")
+    print("[audit] Samsung legacy capability layout preserved; autosuspend uses free bit 8: PASS")
     print("[audit] UFS gear/frequency tables unchanged: PASS")
     print("[audit] Hibern8 and clock-gating delays unchanged: PASS")
     print(f"[source] {DEVFREQ_TIME_SRC}: precise UFS devfreq load accounting")
     print(f"[source] {DEVFREQ_RPM_SRC}: scale clocks only while HBA runtime-active")
     print(f"[source] {QCOM_AUTOSUSPEND_SRC}: Qualcomm runtime autosuspend capability")
-    print(f"[source] {CAP_COLLISION_SRC}: capability-bit collision precedent")
     print("[done] A52 P149 combined UFS runtime-PM + autosuspend phase applied")
     return 0
 

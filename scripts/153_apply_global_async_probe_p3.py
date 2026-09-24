@@ -13,7 +13,7 @@ if not dd.is_file():
 
 s = dd.read_text()
 
-marker = "/* A52 P153: default all ordinary initial driver probing asynchronous */"
+marker = "A52 P153: default all ordinary initial driver probing asynchronous"
 if marker in s:
     print("A52 P153 global async-default policy already applied")
     raise SystemExit(0)

@@ -1,0 +1,278 @@
+name: 145 - A52 TEO Baseline P1
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/145-a52-cpuidle-teo-baseline-p1.yml
+      - scripts/145_apply_teo_baseline_p1.py
+      - backports/145_teo_4.19.c
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-teo-p145-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P143_BASELINE_SHA: 565670bf8817d359cbdf8de978db7287bf743ed5
+  P143_BASELINE_RUN: '35954783799'
+
+jobs:
+  build:
+    name: Build exact P143 baseline + dormant TEO governor
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P143 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P143_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p145-teo-baseline-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
+            a52xq-p142-uclamp-reinc-${{ runner.os }}-
+            a52xq-p141-schedutil-limits-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Require exact prepared source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" != "true" ]; then
+            echo "::error::Exact prepared source cache used by the boot-tested P143 chain was not restored."
+            exit 1
+          fi
+          test -d workspace/touchgrass-a52xq/.git
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Replay production chain P135 through P143
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq | tee artifacts/a619-kgsl-p6-pm-p136.txt
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq | tee artifacts/boot-rescue-p137.txt
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq | tee artifacts/a619-kgsl-p7-cp-init-p138.txt
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq | tee artifacts/mglru-modern-p4-pagecache-p139.txt
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq | tee artifacts/schedutil-iowait-p140.txt
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq | tee artifacts/schedutil-limits-p141.txt
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq | tee artifacts/uclamp-reinc-p142.txt
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq | tee artifacts/uclamp-rq-idle-p143.txt
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Verify P144 upstream power semantic already present
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/144_audit_uclamp_enqueue_order.py" \
+            -o /tmp/144_audit_uclamp_enqueue_order.py
+          python3 /tmp/144_audit_uclamp_enqueue_order.py workspace/touchgrass-a52xq \
+            | tee artifacts/uclamp-enqueue-order-p144.txt
+
+      - name: Apply TEO baseline P1
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/145_apply_teo_baseline_p1.py" \
+            -o /tmp/145_apply_teo_baseline_p1.py
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/backports/145_teo_4.19.c" \
+            -o /tmp/145_teo_4.19.c
+
+          python3 -m py_compile /tmp/145_apply_teo_baseline_p1.py
+          python3 /tmp/145_apply_teo_baseline_p1.py \
+            workspace/touchgrass-a52xq /tmp/145_teo_4.19.c \
+            | tee artifacts/cpuidle-teo-baseline-p145.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'config CPU_IDLE_GOV_TEO' "$KERNEL/drivers/cpuidle/Kconfig"
+          grep -Fq 'obj-$(CONFIG_CPU_IDLE_GOV_TEO) += teo.o' "$KERNEL/drivers/cpuidle/governors/Makefile"
+          grep -Fq 'CONFIG_CPU_IDLE_GOV_MENU=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'CONFIG_CPU_IDLE_GOV_TEO=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'A52 TEO P1: Linux 5.14-era TEO core adapted to Samsung 4.19.' "$KERNEL/drivers/cpuidle/governors/teo.c"
+          grep -Fq '.rating =	19,' "$KERNEL/drivers/cpuidle/governors/teo.c"
+          grep -Fq '.rating =	20,' "$KERNEL/drivers/cpuidle/governors/menu.c"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- \
+            drivers/cpuidle/Kconfig \
+            drivers/cpuidle/governors/Makefile \
+            drivers/cpuidle/governors/teo.c \
+            arch/arm64/configs/a52xq_defconfig \
+            > artifacts/cpuidle-teo-baseline-p145.diff
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/cpuidle-teo-baseline-p145-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P145 image and source
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
+          MENU="$KERNEL/drivers/cpuidle/governors/menu.c"
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+
+          grep -Fxq 'CONFIG_CPU_IDLE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_IDLE_GOV_MENU=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_IDLE_GOV_TEO=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_NO_HZ_IDLE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
+
+          grep -Fq 'A52 TEO P1: Linux 5.14-era TEO core adapted to Samsung 4.19.' "$TEO"
+          grep -Fq '.rating =	19,' "$TEO"
+          grep -Fq '.rating =	20,' "$MENU"
+          grep -Fq 'cpu_data->last_state = -1;' "$TEO"
+          grep -Fq 'cpuidle_get_last_residency(dev)' "$TEO"
+          grep -aFq 'teo' "$KERNEL/out/vmlinux"
+
+          # Production default intentionally stays menu in P145.
+          grep -Fq 'select CPU_IDLE_GOV_MENU if (NO_HZ || NO_HZ_IDLE)' "$KERNEL/drivers/cpuidle/Kconfig"
+          ! grep -Fq 'select CPU_IDLE_GOV_MENU if (NO_HZ || NO_HZ_IDLE) && !CPU_IDLE_GOV_TEO' "$KERNEL/drivers/cpuidle/Kconfig"
+
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
+          grep -Fq 'A52 SCHEDUTIL P2: Android17 79443a7e limits_changed synchronization' "$SUGOV"
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P145 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p145.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p145.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p145.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p145.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p145.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P143-BASE35954783799 + TEO-BASE-P145/' scripts/.package-p145.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P145-CPUIDLE-TEO-BASELINE-P1.zip/' scripts/.package-p145.sh
+          chmod +x scripts/.package-p145.sh
+          ./scripts/.package-p145.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p145.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p145-teo-baseline-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P145 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35954783799-TEO-P145-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/uclamp-enqueue-order-p144.txt
+            artifacts/cpuidle-teo-baseline-p145.txt
+            artifacts/cpuidle-teo-baseline-p145.diff
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+# P144: upstream 90ca9410 ordering is already present and regression-audited.
+# P145: mature TEO core compiled alongside menu; menu stays production default.
+# TEO baseline: 5.14-era core through c2ec772b87408259cb01209a22fb4e1ae7d346de,
+# adapted to the Samsung 4.19 microsecond cpuidle ABI.

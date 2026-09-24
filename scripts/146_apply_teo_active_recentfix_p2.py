@@ -40,6 +40,65 @@ def main() -> int:
     if ".rating =\t20," not in m and ".rating = 20," not in m:
         raise SystemExit("menu rating 20 anchor missing")
 
+    # Upstream 449914 also removes the obsolete documentation for the
+    # recent-intercepts heuristic. Keep the comments synchronized with code so
+    # source audits don't mistake dead prose for live logic.
+    t = replace_once(
+        t,
+        """ *
+ * In addition to the metrics described above, the governor counts recent
+ * intercepts (that is, intercepts that have occurred during the last
+ * %NR_RECENT invocations of it for the given CPU) for each bin.
+ *
+""",
+        """ *
+""",
+        "recent-intercepts overview documentation",
+    )
+
+    t = replace_once(
+        t,
+        """ *
+ *    - The sum of the numbers of recent intercepts for all of the idle states
+ *      shallower than the candidate one.
+ *
+ * 2. If the second sum is greater than the first one or the third sum is
+ *    greater than %NR_RECENT / 2, the CPU is likely to wake up early, so look
+ *    for an alternative idle state to select.
+""",
+        """ *
+ * 2. If the second sum is greater than the first one, the CPU is likely to
+ *    wake up early, so look for an alternative idle state to select.
+""",
+        "recent-intercepts decision documentation",
+    )
+
+    t = replace_once(
+        t,
+        """ *    - For each of them compute the sum of the "intercepts" metrics and the sum
+ *      of the numbers of recent intercepts over all of the idle states between
+ *      it and the candidate one (including the former and excluding the
+ *      latter).
+ *
+ *    - If each of these sums that needs to be taken into account (because the
+ *      check related to it has indicated that the CPU is likely to wake up
+ *      early) is greater than a half of the corresponding sum computed in step
+ *      1 (which means that the target residency of the state in question had
+ *      not exceeded the idle duration in over a half of the relevant cases),
+ *      select the given idle state instead of the candidate one.
+""",
+        """ *    - For each of them compute the sum of the "intercepts" metrics over all
+ *      of the idle states between it and the candidate one (including the
+ *      former and excluding the latter).
+ *
+ *    - If the sum is greater than a half of the corresponding sum computed in
+ *      step 1 (which means that the target residency of the state in question
+ *      had not exceeded the idle duration in over a half of the relevant
+ *      cases), select the given idle state instead of the candidate one.
+""",
+        "recent-intercepts traversal documentation",
+    )
+
     # Upstream 449914: remove the broken recent-intercepts mechanism.
     t = replace_once(
         t,

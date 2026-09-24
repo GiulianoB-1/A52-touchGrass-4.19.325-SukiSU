@@ -1,0 +1,302 @@
+name: 149 - A52 UFS Runtime PM + Autosuspend P1
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/149-a52-ufs-runtime-autosuspend-p1.yml
+      - scripts/149_apply_ufs_runtime_autosuspend_p1.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-ufs-runtime-autosuspend-p149-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P148_BASELINE_SHA: 5f7a4e5a3b904e831c107bdc67b3491af2710fb3
+  P148_BASELINE_RUN: '35970811877'
+
+jobs:
+  build:
+    name: Build exact P148 + UFS runtime PM/autosuspend
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P148 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P148_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-p148-qcom-battery-${{ runner.os }}-
+            a52xq-p146-teo-active-${{ runner.os }}-
+            a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Require exact prepared source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          test "${{ steps.p134_source.outputs.cache-hit }}" = "true"
+          test -d workspace/touchgrass-a52xq/.git
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Replay production chain through boot-tested P148
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
+
+          python3 scripts/145_apply_teo_baseline_p1.py \
+            workspace/touchgrass-a52xq backports/145_teo_4.19.c \
+            | tee artifacts/cpuidle-teo-baseline-p145.txt
+          python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq \
+            | tee artifacts/cpuidle-teo-active-p146.txt
+          python3 scripts/148_apply_qcom_lpm_fixpack_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/qcom-lpm-fixpack-p148.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq '.name =		"qcom",' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          grep -Fq '.rating =	30,' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P149 combined UFS runtime PM + autosuspend
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/149_apply_ufs_runtime_autosuspend_p1.py" \
+            -o /tmp/149_apply_ufs_runtime_autosuspend_p1.py
+
+          python3 -m py_compile /tmp/149_apply_ufs_runtime_autosuspend_p1.py
+          python3 /tmp/149_apply_ufs_runtime_autosuspend_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/ufs-runtime-autosuspend-p149.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          UFS="$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          UFSH="$KERNEL/drivers/scsi/ufs/ufshcd.h"
+          QCOM="$KERNEL/drivers/scsi/ufs/ufs-qcom.c"
+
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$UFS"
+          grep -Fq '#define UFSHCD_AUTO_SUSPEND_DELAY_MS 2000' "$UFS"
+          grep -Fq 'stat->total_time = ktime_to_us(ktime_sub(curr_t,' "$UFS"
+          grep -Fq 'scaling->window_start_t = curr_t;' "$UFS"
+          grep -Fq 'pm_runtime_get_noresume(hba->dev);' "$UFS"
+          grep -Fq 'if (!pm_runtime_active(hba->dev))' "$UFS"
+          grep -Fq 'if (ufshcd_is_rpm_autosuspend_allowed(hba))' "$UFS"
+          grep -Fq 'ktime_t window_start_t;' "$UFSH"
+          grep -Fq '#define UFSHCD_CAP_CRYPTO (1 << 7)' "$UFSH"
+          grep -Fq '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)' "$UFSH"
+          grep -Fq '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)' "$UFSH"
+          grep -Fq 'hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;' "$QCOM"
+
+          ! sed -n '/static int ufshcd_devfreq_get_dev_status(/,/^}/p' "$UFS" | grep -Fq 'jiffies_to_usecs('
+          ! sed -n '/static int ufshcd_devfreq_get_dev_status(/,/^}/p' "$UFS" | grep -Fq 'window_start_t = jiffies'
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            drivers/scsi/ufs/ufshcd.c \
+            drivers/scsi/ufs/ufshcd.h \
+            drivers/scsi/ufs/ufs-qcom.c \
+            > artifacts/ufs-runtime-autosuspend-p149.diff
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/ufs-runtime-autosuspend-p149-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P149 image and retained stack
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          UFS="$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          UFSH="$KERNEL/drivers/scsi/ufs/ufshcd.h"
+          QCOM="$KERNEL/drivers/scsi/ufs/ufs-qcom.c"
+          LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+
+          # New UFS behavior.
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$UFS"
+          grep -Fq '#define UFSHCD_AUTO_SUSPEND_DELAY_MS 2000' "$UFS"
+          grep -Fq 'ktime_t window_start_t;' "$UFSH"
+          grep -Fq 'pm_runtime_get_noresume(hba->dev);' "$UFS"
+          grep -Fq 'pm_runtime_put_noidle(hba->dev);' "$UFS"
+          grep -Fq 'hba->caps |= UFSHCD_CAP_RPM_AUTOSUSPEND;' "$QCOM"
+          grep -Fq 'if (ufshcd_is_rpm_autosuspend_allowed(hba))' "$UFS"
+
+          # Capability bits must be unique.
+          test "$(grep -Fc '#define UFSHCD_CAP_CRYPTO (1 << 7)' "$UFSH")" -eq 1
+          test "$(grep -Fc '#define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 8)' "$UFSH")" -eq 1
+          test "$(grep -Fc '#define UFSHCD_CAP_RPM_AUTOSUSPEND (1 << 9)' "$UFSH")" -eq 1
+
+          # Existing UFS operating envelope retained.
+          grep -Fq '.upthreshold = 70,' "$UFS"
+          grep -Fq '.downdifferential = 65,' "$UFS"
+          grep -Fq '.simple_scaling = 1,' "$UFS"
+          grep -Fq '#define UFSHCD_CLK_GATING_DELAY_MS_PWR_SAVE	30' "$UFS"
+          grep -Fq '#define UFSHCD_CLK_GATING_DELAY_MS_PERF		50' "$UFS"
+
+          # Exact P148 CPU/LPM/scheduler stack retained.
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$LPM"
+          grep -Fq '.name =		"qcom",' "$LPM"
+          grep -Fq '.rating =	30,' "$LPM"
+          grep -Fq 'lpm_cpu->drv->name = "msm_idle";' "$LPM"
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$SUGOV"
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P149 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p149.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p149.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p149.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p149.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p149.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P148-BASE35970811877 + UFS-RPM-P149/' scripts/.package-p149.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P149-UFS-RUNTIME-AUTOSUSPEND-P1.zip/' scripts/.package-p149.sh
+          chmod +x scripts/.package-p149.sh
+          ./scripts/.package-p149.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p149.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P149 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35970811877-UFS-RPM-P149-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/ufs-runtime-autosuspend-p149.txt
+            artifacts/ufs-runtime-autosuspend-p149.diff
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+# Exact boot-tested base:
+# P148 run 35970811877 / 5f7a4e5a3b904e831c107bdc67b3491af2710fb3
+#
+# P149 combines the originally planned P149 + P150:
+# - precise ktime-based UFS devfreq load accounting
+# - runtime-active guard around UFS clock/gear scaling
+# - Qualcomm capability-gated request-based runtime autosuspend
+# - autosuspend delay 3000ms -> modern Qualcomm 2000ms
+# - unique UFS capability bits for crypto / power collapse / autosuspend
+#
+# No UFS gear table, clock frequency table, Hibern8 delay, bus vote table,
+# CPU frequency, voltage, WALT, RTG, PL or scheduler tuning values changed.

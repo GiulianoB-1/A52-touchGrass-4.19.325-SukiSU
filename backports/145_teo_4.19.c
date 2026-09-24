@@ -263,7 +263,7 @@ static void teo_update(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	cpu_data->total += PULSE;
 }
 
-static bool teo_time_ok(u64 interval_ns)
+static bool teo_time_ok(s64 interval_ns)
 {
 	return !tick_nohz_tick_stopped() || interval_ns >= TICK_NSEC;
 }

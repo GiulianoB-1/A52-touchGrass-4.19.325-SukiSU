@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Phase369 workflow trigger v1
+# Phase369 rebuild trigger v2
 from __future__ import annotations
 
 import argparse

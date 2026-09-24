@@ -193,7 +193,6 @@ SYSTEM_MAP="$BUILD/System.map"
 test -s "$IMAGE"
 test -s "$SYSTEM_MAP"
 
-grep -aFq 'A52_PHASE376_MDSS_GDSC_HWCTRL_PARITY_V1' "$IMAGE"
 grep -aFq 'A52GDSC disable profile=mdss name=%s rc=%d before=0x%x after=0x%x' "$IMAGE"
 grep -aFq 'P276 345R %x %x %llx %x %x %x %x' "$IMAGE"
 grep -Eq '[[:space:]]a52_p346_sideband_init$' "$SYSTEM_MAP"

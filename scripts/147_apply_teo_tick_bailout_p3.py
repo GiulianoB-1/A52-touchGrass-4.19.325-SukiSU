@@ -102,32 +102,22 @@ def main() -> int:
         "single enabled state tick handling",
     )
 
-    old_end = """end:
-\t/*
-\t * Don't stop the tick if the selected state is a polling one or if the
-\t * expected idle duration is shorter than the tick period length.
-\t */
-\tif (((drv->states[idx].flags & CPUIDLE_FLAG_POLLING) ||
-\t    duration_ns < TICK_NSEC) && !tick_nohz_tick_stopped()) {
-\t\t*stop_tick = false;
+    # Rewrite the tail of teo_select() structurally instead of matching the
+    # full comment/whitespace body.  P146 changed nearby prose, but not the
+    # control-flow anchors.
+    sel_start = t.find("static int teo_select(")
+    if sel_start < 0:
+        raise SystemExit("teo_select() missing")
+    tail_start = t.find("\nend:\n", sel_start)
+    reflect = t.find("\n/**\n * teo_reflect", tail_start)
+    if tail_start < 0 or reflect < 0:
+        raise SystemExit("TEO end/out_tick structural anchors missing")
 
-\t\t/*
-\t\t * The tick is not going to be stopped, so if the target
-\t\t * residency of the state to be returned is not within the time
-\t\t * till the closest timer including the tick, try to correct
-\t\t * that.
-\t\t */
-\t\tif (idx > idx0 &&
-\t\t    teo_target_residency_ns(&drv->states[idx]) >
-\t\t    ktime_to_ns(delta_tick))
-\t\t\tidx = teo_find_shallower_state(drv, dev, idx,
-\t\t\t\t\t       ktime_to_ns(delta_tick));
-\t}
+    old_tail = t[tail_start + 1:reflect]
+    if "*stop_tick = false;" not in old_tail or "return idx;" not in old_tail:
+        raise SystemExit("unexpected teo_select tail semantics")
 
-\treturn idx;
-}
-"""
-    new_end = f"""end:
+    new_tail = f"""end:
 \t/*
 \t * {MARKER}
 \t *
@@ -156,7 +146,8 @@ out_tick:
 \treturn idx;
 }}
 """
-    t = replace_once(t, old_end, new_end, "TEO end/out_tick restructuring")
+    t = t[:tail_start + 1] + new_tail + t[reflect:]
+
 
     teo.write_text(t)
     final = teo.read_text()

@@ -596,10 +596,9 @@ static uint32_t a52_lpm_cluster_qos(const struct cpumask *mask)
 \t\tuint32_t value;
 
 \t\t/*
-\t\t * Use the core isolation predicate directly here.  The vendor
-\t\t * check_cpu_isolated() wrapper is local to a configuration-specific
-\t\t * section in some Samsung source drops and can become an unresolved
-\t\t * symbol when this helper is emitted later in the translation unit.
+\t\t * Use the core isolation predicate directly here.  Some Samsung
+\t\t * vendor wrappers are configuration-local and are not safe to call
+\t\t * from this helper when emitted later in the translation unit.
 \t\t */
 \t\tif (cpu_isolated(cpu))
 \t\t\tcontinue;

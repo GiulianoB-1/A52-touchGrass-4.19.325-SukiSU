@@ -178,6 +178,9 @@ jobs:
 
           grep -Fq 'static uint32_t a52_lpm_cluster_qos(' "$LPM"
           grep -Fq 'latency_us = a52_lpm_cluster_qos(&mask);' "$LPM"
+          grep -Fq 'cpumask_test_cpu(cpu, cpu_isolated_mask)' "$LPM"
+          ! sed -n '/static uint32_t a52_lpm_cluster_qos(/,/^}/p' "$LPM" | grep -Fq 'cpu_isolated('
+          ! sed -n '/static uint32_t a52_lpm_cluster_qos(/,/^}/p' "$LPM" | grep -Fq 'check_cpu_isolated('
           test "$(grep -Fc 'suspend_set_ops(&lpm_suspend_ops);' "$LPM")" -eq 1
           test "$(grep -Fc 's2idle_set_ops(&lpm_s2idle_ops);' "$LPM")" -eq 1
 
@@ -261,6 +264,9 @@ jobs:
           ! sed -n '/static void update_top_cache_domain(/,/^}/p' "$TOPO" | grep -Fq 'sd = cpu_rq(cpu)->sd;'
           grep -Fq 'static uint32_t a52_lpm_cluster_qos(' "$LPM"
           grep -Fq 'latency_us = a52_lpm_cluster_qos(&mask);' "$LPM"
+          grep -Fq 'cpumask_test_cpu(cpu, cpu_isolated_mask)' "$LPM"
+          ! sed -n '/static uint32_t a52_lpm_cluster_qos(/,/^}/p' "$LPM" | grep -Fq 'cpu_isolated('
+          ! sed -n '/static uint32_t a52_lpm_cluster_qos(/,/^}/p' "$LPM" | grep -Fq 'check_cpu_isolated('
           test "$(grep -Fc 'suspend_set_ops(&lpm_suspend_ops);' "$LPM")" -eq 1
           test "$(grep -Fc 's2idle_set_ops(&lpm_s2idle_ops);' "$LPM")" -eq 1
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"

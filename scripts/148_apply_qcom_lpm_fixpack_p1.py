@@ -595,7 +595,13 @@ static uint32_t a52_lpm_cluster_qos(const struct cpumask *mask)
 \tfor_each_cpu(cpu, mask) {{
 \t\tuint32_t value;
 
-\t\tif (check_cpu_isolated(cpu))
+\t\t/*
+\t\t * Use the core isolation predicate directly here.  The vendor
+\t\t * check_cpu_isolated() wrapper is local to a configuration-specific
+\t\t * section in some Samsung source drops and can become an unresolved
+\t\t * symbol when this helper is emitted later in the translation unit.
+\t\t */
+\t\tif (cpu_isolated(cpu))
 \t\t\tcontinue;
 
 \t\tvalue = pm_qos_request_for_cpu(PM_QOS_CPU_DMA_LATENCY, cpu);
@@ -778,9 +784,17 @@ failed:
     for needle in (
         "static uint32_t a52_lpm_cluster_qos(",
         "latency_us = a52_lpm_cluster_qos(&mask);",
+        "if (cpu_isolated(cpu))",
     ):
         if needle not in C:
             raise SystemExit(f"audit failed: LPM QoS fix missing: {needle}")
+
+    qos_start = C.find("static uint32_t a52_lpm_cluster_qos(")
+    qos_end = C.find("static int cluster_select(", qos_start)
+    if qos_start < 0 or qos_end < 0:
+        raise SystemExit("audit failed: could not bound LPM QoS helper")
+    if "check_cpu_isolated(" in C[qos_start:qos_end]:
+        raise SystemExit("audit failed: fragile vendor isolation wrapper remains in QoS helper")
 
     if C.count("suspend_set_ops(&lpm_suspend_ops);") != 1:
         raise SystemExit("audit failed: suspend_set_ops must appear exactly once")

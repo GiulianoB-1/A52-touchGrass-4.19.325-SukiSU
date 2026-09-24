@@ -179,9 +179,17 @@ jobs:
           python3 scripts/115_apply_a52_efficiency_p1.py "$KERNEL" \
             2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
 
-          python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
-          python3 scripts/117_migrate_mglru_trace_to_proc.py "$KERNEL" \
-            2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          # Phase 112 in the pinned reconstruction already exports
+          # /proc/lru_gen_trace. Older cached trees needed Phase 117 to migrate
+          # the debugfs-only recorder. Keep the fallback compatible with both.
+          if grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"; then
+            echo "MGLRU recorder already has procfs export; Phase 117 migration not required." \
+              | tee artifacts/mglru-procfs-migration-apply.txt
+          else
+            python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+            python3 scripts/117_migrate_mglru_trace_to_proc.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          fi
 
           python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
           python3 scripts/116_apply_a52_scheduler_recorder.py "$KERNEL" \

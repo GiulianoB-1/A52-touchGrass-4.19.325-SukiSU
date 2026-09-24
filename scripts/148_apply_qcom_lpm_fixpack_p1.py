@@ -596,11 +596,12 @@ static uint32_t a52_lpm_cluster_qos(const struct cpumask *mask)
 \t\tuint32_t value;
 
 \t\t/*
-\t\t * Use the core isolation predicate directly here.  Some Samsung
-\t\t * vendor wrappers are configuration-local and are not safe to call
-\t\t * from this helper when emitted later in the translation unit.
+\t\t * Test the exported scheduler isolation mask directly. In this
+\t\t * Samsung 4.19 tree cpu_isolated() can resolve through the vendor
+\t\t * check_cpu_isolated() wrapper, which is not linked in every config.
+\t\t * cpu_isolated_mask is the actual WALT/core_ctl isolation state.
 \t\t */
-\t\tif (cpu_isolated(cpu))
+\t\tif (cpumask_test_cpu(cpu, cpu_isolated_mask))
 \t\t\tcontinue;
 
 \t\tvalue = pm_qos_request_for_cpu(PM_QOS_CPU_DMA_LATENCY, cpu);
@@ -783,7 +784,7 @@ failed:
     for needle in (
         "static uint32_t a52_lpm_cluster_qos(",
         "latency_us = a52_lpm_cluster_qos(&mask);",
-        "if (cpu_isolated(cpu))",
+        "if (cpumask_test_cpu(cpu, cpu_isolated_mask))",
     ):
         if needle not in C:
             raise SystemExit(f"audit failed: LPM QoS fix missing: {needle}")
@@ -792,8 +793,16 @@ failed:
     qos_end = C.find("static int cluster_select(", qos_start)
     if qos_start < 0 or qos_end < 0:
         raise SystemExit("audit failed: could not bound LPM QoS helper")
-    if "check_cpu_isolated(" in C[qos_start:qos_end]:
-        raise SystemExit("audit failed: fragile vendor isolation wrapper remains in QoS helper")
+    qos_blob = C[qos_start:qos_end]
+    for forbidden_iso in ("check_cpu_isolated(", "cpu_isolated("):
+        if forbidden_iso in qos_blob:
+            raise SystemExit(
+                f"audit failed: fragile isolation helper remains in QoS helper: {forbidden_iso}"
+            )
+    if "cpumask_test_cpu(cpu, cpu_isolated_mask)" not in qos_blob:
+        raise SystemExit(
+            "audit failed: direct cpu_isolated_mask test missing from QoS helper"
+        )
 
     if C.count("suspend_set_ops(&lpm_suspend_ops);") != 1:
         raise SystemExit("audit failed: suspend_set_ops must appear exactly once")

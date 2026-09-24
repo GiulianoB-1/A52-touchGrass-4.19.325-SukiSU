@@ -166,10 +166,22 @@ def patch(text: str) -> str:
     probe_anchor = "static int a52_legacy_gdsc_probe(struct platform_device *pdev)\n"
     text = one(text, probe_anchor, BLOCK + "\n" + probe_anchor, "proxy helper insertion")
 
-    call_anchor = "\tplatform_set_drvdata(pdev, gdsc);\n"
+    # Match the unique semantic line instead of assuming tabs. Earlier source
+    # sanitization can normalize this generated provider to four-space indent.
+    call_matches = [
+        line for line in text.splitlines(keepends=True)
+        if line.strip() == "platform_set_drvdata(pdev, gdsc);"
+    ]
+    if len(call_matches) != 1:
+        raise SystemExit(
+            "Phase374 MDSS probe acquisition: expected exactly one "
+            f"platform_set_drvdata semantic anchor, found {len(call_matches)}"
+        )
+    call_anchor = call_matches[0]
+    indent = call_anchor[: len(call_anchor) - len(call_anchor.lstrip())]
     call = (
-        "\tif (gdsc->profile == A52_GDSC_PROFILE_MDSS)\n"
-        "\t\ta52_p374_mdss_proxy_acquire(pdev, gdsc);\n\n"
+        f"{indent}if (gdsc->profile == A52_GDSC_PROFILE_MDSS)\n"
+        f"{indent}    a52_p374_mdss_proxy_acquire(pdev, gdsc);\n\n"
         + call_anchor
     )
     text = one(text, call_anchor, call, "MDSS probe acquisition")

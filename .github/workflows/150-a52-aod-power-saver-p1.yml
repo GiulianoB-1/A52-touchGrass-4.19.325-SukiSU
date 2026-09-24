@@ -129,13 +129,17 @@ jobs:
           PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
           COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
 
-          grep -Fq 'A52 AOD P150: cap high-luminance LPM states to 10nit' "$PANEL"
-          grep -Fq '#define A52_AOD_MAX_NIT LPM_10NIT' "$PANEL"
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'static int a52_aod_last_lpm_bl[MAX_DISPLAY_NDX];' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
           test "$(grep -Fc 'int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);' "$PANEL")" -eq 2
           test "$(grep -Fc 'switch (lpm_bl_level) {' "$PANEL")" -eq 2
           grep -Fq 'case LPM_30NIT:' "$PANEL"
           grep -Fq 'case LPM_60NIT:' "$PANEL"
-          grep -Fq 'return A52_AOD_MAX_NIT;' "$PANEL"
+          grep -Fq 'vdd->panel_lpm.esd_recovery' "$PANEL"
           grep -Fq 'unlikely(vdd->is_factory_mode)' "$PANEL"
           grep -Fq 'Hz : 30Hz' "$COMMON"
 
@@ -175,11 +179,16 @@ jobs:
           grep -Eq '^CONFIG_PANEL_S6E3FC3_AMS646YD01_FHD=y$' "$KERNEL/out/.config"
 
           # AOD saver is present in both entry and live brightness paths.
-          grep -Fq 'A52 AOD P150: cap high-luminance LPM states to 10nit' "$PANEL"
-          grep -Fq '#define A52_AOD_MAX_NIT LPM_10NIT' "$PANEL"
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'static int a52_aod_last_lpm_bl[MAX_DISPLAY_NDX];' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
           test "$(grep -Fc 'int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);' "$PANEL")" -eq 2
           test "$(grep -Fc 'switch (lpm_bl_level) {' "$PANEL")" -eq 2
-          grep -Fq '" [A52 AOD saver]"' "$PANEL"
+          grep -Fq '" [power cap]"' "$PANEL"
+          grep -Fq 'skip duplicate LPM brightness' "$PANEL"
 
           # Preserve the supported Samsung AOD architecture.
           grep -Fq 'Hz : 30Hz' "$COMMON"
@@ -273,9 +282,9 @@ jobs:
 # P149 run 35983892365 / a8398165830dcdbefa6256b59fd14db0115e8399
 #
 # P150 is deliberately conservative:
-# - AMS646YD01 already enters Samsung panel LPM at 30 Hz.
-# - Same-panel Samsung sources do not enable LFD or LPM regulator undervolting.
-# - Keep native 2/10-nit requests unchanged.
-# - Map only 30/60-nit AOD requests to the existing native 10-nit command.
-# - Factory mode bypasses the cap.
+# - AMS646YD01 remains on Samsung's proven 30-Hz panel LPM path.
+# - Keep native 2/10/30-nit AOD requests unchanged.
+# - Map only normal-user 60-nit AOD requests to the native 30-nit command.
+# - Factory mode retains the original 60-nit command.
+# - Suppress repeated identical live LPM brightness DSI writes, except during ESD recovery.
 # - No panel voltage, refresh/LFD, DSI timing, self-display or ESD behavior changed.

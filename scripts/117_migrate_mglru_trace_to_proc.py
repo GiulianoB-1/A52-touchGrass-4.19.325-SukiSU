@@ -58,14 +58,26 @@ elif new_open not in s:
 
 dbg = 'debugfs_create_file("lru_gen_trace", 0444, NULL, NULL, &mglru_rec_trace_fops);'
 proc = 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);'
-if proc not in s:
-    if s.count(dbg) != 1:
-        raise SystemExit(f"expected exactly one MGLRU debugfs trace registration, found {s.count(dbg)}")
-    s = s.replace(
-        dbg,
-        dbg + "\n\t/* A52 MGLRU recorder procfs export */\n\t" + proc,
-        1,
-    )
+if marker not in s:
+    if proc in s:
+        # Newer recorder P2 already creates /proc/lru_gen_trace directly.
+        # Do not duplicate the proc entry; just annotate the inherited
+        # registration so this migration remains idempotent.
+        if s.count(proc) != 1:
+            raise SystemExit(f"expected exactly one inherited MGLRU proc registration, found {s.count(proc)}")
+        s = s.replace(
+            proc,
+            "/* A52 MGLRU recorder procfs export */\n\t" + proc,
+            1,
+        )
+    else:
+        if s.count(dbg) != 1:
+            raise SystemExit(f"expected exactly one MGLRU debugfs trace registration, found {s.count(dbg)}")
+        s = s.replace(
+            dbg,
+            dbg + "\n\t/* A52 MGLRU recorder procfs export */\n\t" + proc,
+            1,
+        )
 
 for needle in (
     marker,

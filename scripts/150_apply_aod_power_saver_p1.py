@@ -317,7 +317,7 @@ static void a52_aod_lpm_bl_cache(
         "vdd->panel_func.br_func[BR_FUNC_HBM_GAMMA] = ss_brightness_gamma_mode2_hbm;",
         "vdd->panel_func.br_func[BR_FUNC_VRR] = ss_vrr;",
         "vdd->panel_func.br_func[BR_FUNC_HBM_VRR] = ss_vrr_hbm;",
-        "vdd->vrr.cur_refresh_rate = vdd->vrr.adjusted_refresh_rate = 120;",
+        "vrr->cur_refresh_rate = vrr->adjusted_refresh_rate = 120;",
     ):
         if needle not in P:
             raise SystemExit(f"audit failed: normal display behavior changed/missing: {needle}")

@@ -9,8 +9,10 @@ root = Path(sys.argv[1]).resolve()
 smmu = root / "drivers/iommu/arm-smmu.c"
 pon = root / "drivers/input/misc/qpnp-power-on.c"
 gkeys = root / "drivers/input/keyboard/gpio_keys.c"
+cam_smmu = root / "techpack/camera/drivers/cam_smmu/cam_smmu_api.c"
+cam_cpas = root / "techpack/camera/drivers/cam_cpas/cam_cpas_intf.c"
 
-for p in (smmu, pon, gkeys):
+for p in (smmu, pon, gkeys, cam_smmu, cam_cpas):
     if not p.is_file():
         raise SystemExit(f"missing required source: {p}")
 
@@ -70,7 +72,64 @@ replace_once(
 )
 
 # -------------------------------------------------------------------------
-# 2) Rescue-path providers must not depend on the global async experiment.
+# 2) Second P153 ramoops: camera CDM raced camera SMMU/CPAS initialization.
+#    Keep only the camera infrastructure providers synchronous. Consumers
+#    remain under the global async-default policy so we preserve the experiment.
+# -------------------------------------------------------------------------
+replace_once(
+    cam_smmu,
+    '''static struct platform_driver cam_smmu_driver = {
+	.probe = cam_smmu_probe,
+	.remove = cam_smmu_remove,
+	.driver = {
+		.name = "msm_cam_smmu",
+		.owner = THIS_MODULE,
+		.of_match_table = msm_cam_smmu_dt_match,
+		.suppress_bind_attrs = true,
+	},
+''',
+    '''static struct platform_driver cam_smmu_driver = {
+	.probe = cam_smmu_probe,
+	.remove = cam_smmu_remove,
+	.driver = {
+		.name = "msm_cam_smmu",
+		.owner = THIS_MODULE,
+		.of_match_table = msm_cam_smmu_dt_match,
+		.suppress_bind_attrs = true,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS, /* A52 P154: camera SMMU provider */
+	},
+''',
+    "Camera SMMU forced synchronous",
+)
+
+replace_once(
+    cam_cpas,
+    '''static struct platform_driver cam_cpas_driver = {
+	.probe = cam_cpas_dev_probe,
+	.remove = cam_cpas_dev_remove,
+	.driver = {
+		.name = CAM_CPAS_DEV_NAME,
+		.owner = THIS_MODULE,
+		.of_match_table = cam_cpas_dt_match,
+		.suppress_bind_attrs = true,
+	},
+''',
+    '''static struct platform_driver cam_cpas_driver = {
+	.probe = cam_cpas_dev_probe,
+	.remove = cam_cpas_dev_remove,
+	.driver = {
+		.name = CAM_CPAS_DEV_NAME,
+		.owner = THIS_MODULE,
+		.of_match_table = cam_cpas_dt_match,
+		.suppress_bind_attrs = true,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS, /* A52 P154: camera CPAS provider */
+	},
+''',
+    "Camera CPAS forced synchronous",
+)
+
+# -------------------------------------------------------------------------
+# 3) Rescue-path providers must not depend on the global async experiment.
 # -------------------------------------------------------------------------
 replace_once(
     pon,
@@ -151,6 +210,8 @@ replace_once(
 st = smmu.read_text()
 pt = pon.read_text()
 gt = gkeys.read_text()
+cst = cam_smmu.read_text()
+cpt = cam_cpas.read_text()
 
 if st.count("PROBE_FORCE_SYNCHRONOUS, /* A52 P154: SMMU ordering */") != 2:
     raise SystemExit("P154 SMMU forced-sync audit failed")
@@ -161,9 +222,16 @@ if gt.count("PROBE_FORCE_SYNCHRONOUS, /* A52 P154: rescue key */") != 1:
 if gt.count("A52 P154 rescue hardening") != 1:
     raise SystemExit("P154 GPIO held-state report audit failed")
 
+if cst.count("PROBE_FORCE_SYNCHRONOUS, /* A52 P154: camera SMMU provider */") != 1:
+    raise SystemExit("P154 camera SMMU forced-sync audit failed")
+if cpt.count("PROBE_FORCE_SYNCHRONOUS, /* A52 P154: camera CPAS provider */") != 1:
+    raise SystemExit("P154 camera CPAS forced-sync audit failed")
+
 print("A52 P154 applied")
 print("  forced sync: arm-smmu")
 print("  forced sync: qsmmuv500-tbu")
+print("  forced sync: camera SMMU provider")
+print("  forced sync: camera CPAS provider")
 print("  forced sync: qcom,qpnp-power-on")
 print("  forced sync: gpio-keys")
 print("  rescue: gpio-keys reports held state immediately at probe")

@@ -76,18 +76,76 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
-      - name: Require exact prepared source boundary
+      - name: Restore exact 35461116688 pre-build source on P134 miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Require usable source boundary
         run: |
           set -Eeuo pipefail
           echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
-          test "${{ steps.p134_source.outputs.cache-hit }}" = "true"
+          echo "prebuild cache hit: ${{ steps.prebuild_source.outputs.cache-hit }}"
           test -d workspace/touchgrass-a52xq/.git
+
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'static void dev_map_hash_remove_netdev' workspace/touchgrass-a52xq/kernel/bpf/devmap.c
+          else
+            if [ "${{ steps.prebuild_source.outputs.cache-hit }}" != "true" ]; then
+              echo "::error::Both prepared P134 and pre-build 35461116688 source caches are unavailable."
+              exit 1
+            fi
+            grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
+            grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' workspace/touchgrass-a52xq/mm/vmscan.c
+            grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+            grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
+          fi
 
       - name: Prepare workspace
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts release
           chmod +x scripts/*.sh scripts/*.py
+
+      - name: Rebuild prepared P134 boundary on cache miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            "$KERNEL" artifacts/f2fs-stable325-p1.txt artifacts/f2fs-stable325-patches
+          python3 scripts/119_apply_f2fs_gc_merge_p2.py "$KERNEL"
+          python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py "$KERNEL" artifacts/f2fs-inmem-p3a
+
+          mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
+          cp -a "$KERNEL/fs/f2fs" artifacts/pre-atgc-p3b/fs/
+          cp -a "$KERNEL/include/trace/events/f2fs.h" artifacts/pre-atgc-p3b/include/trace/events/
+
+          python3 scripts/122_apply_f2fs_atgc_p3b.py "$KERNEL" artifacts/f2fs-atgc-p3b
+          python3 scripts/123_enable_f2fs_atgc_p3c.py "$KERNEL" artifacts/f2fs-atgc-p3c
+          python3 scripts/124_apply_f2fs_atgc_p4.py "$KERNEL" artifacts/f2fs-atgc-p4
+          python3 scripts/125_apply_f2fs_block_age_p5a.py "$KERNEL" artifacts/f2fs-block-age-p5a
+          python3 scripts/126_enable_f2fs_block_age_p5b.py "$KERNEL" artifacts/f2fs-block-age-p5b
+          python3 scripts/127_apply_f2fs_gc_cp_p6.py "$KERNEL" artifacts/f2fs-gc-cp-p6
+          python3 scripts/128_apply_f2fs_correctness_p7.py "$KERNEL" artifacts/f2fs-correctness-p7
+          python3 scripts/129_apply_bpf_bootfix_p1.py "$KERNEL" artifacts/bpf-bootfix-p1
+          python3 scripts/134_apply_bpf_devmap_rndis_clean_fix.py "$KERNEL" artifacts/bpf-devmap-rndis-clean-p134
+
+          git -C "$KERNEL" diff --check
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'F2FS_MOUNT_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
+
+      - name: Save rebuilt P134 source cache
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Replay production chain through boot-tested P149
         run: |

@@ -16,6 +16,8 @@ permissions:
   actions: write
 
 env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
@@ -43,7 +45,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            repo git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
             clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
 
@@ -91,11 +93,44 @@ jobs:
             scripts/319_reconstruct_phase206_from_verified_artifact.sh
 
       - name: Restore pinned GKI source
+        id: gki-source-cache
         uses: actions/cache/restore@v4
         with:
           path: gki
-          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
-          fail-on-cache-miss: true
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync exact official GKI source on cache miss
+        if: steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b "$GKI_MANIFEST_BRANCH" \
+            --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 \
+            https://android.googlesource.com/kernel/common \
+            "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+
+      - name: Validate exact pinned GKI source
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common/.git
+          test -x gki/build/build.sh
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          git -C gki/common diff --check
+
+      - name: Save pinned GKI source cache
+        if: steps.gki-source-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: ${{ steps.gki-source-cache.outputs.cache-primary-key }}
 
       - name: Restore exact TouchGrass source
         id: touchgrass-cache

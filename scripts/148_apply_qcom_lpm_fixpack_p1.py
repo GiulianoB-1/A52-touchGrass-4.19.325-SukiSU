@@ -13,6 +13,11 @@ BATTERY_MARKER = "A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness"
 IPI_SRC = "c153dfba1ab33cbb48a8a1154e8a72cbba6d4b40"
 IRQWORK_SRC = "9af2c23239abec9d846c4a24125ab910dcb34ec5"
 RESERVATION_SRC = "dc23aae552c1579a8eb258ade569814544e8a745"
+FBT_UCLAMP_SRC = "22b04fa8056494bbaa43a218635162b338aeb15f"
+STARTCPU_UCLAMP_SRC = "02ee287af9e317ef70cc41ca6fa0d7bfc376c3d0"
+WALT_ASYM_SRC = "f6c1bf1f0258ab346e5fcbe77508662ba2f6b527"
+LPM_QOS_SRC = "b4d4fb25b9fbf1c40d46a8a1abfec57b2ce1ac70"
+LPM_PROBE_SRC = "41e4398ad7af12646c43825cded8b6e6b39c4eda"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -38,8 +43,10 @@ def main() -> int:
     sugov = root / "kernel/sched/cpufreq_schedutil.c"
     fair = root / "kernel/sched/fair.c"
     walt = root / "kernel/sched/walt.c"
+    topology = root / "kernel/sched/topology.c"
+    core = root / "kernel/sched/core.c"
 
-    for path in (lpm, lpm_of, lpm_h, cfg, sugov, fair, walt):
+    for path in (lpm, lpm_of, lpm_h, cfg, sugov, fair, walt, topology, core):
         if not path.is_file():
             raise SystemExit(f"missing required file: {path}")
 
@@ -50,6 +57,8 @@ def main() -> int:
     sg = sugov.read_text()
     fa = fair.read_text()
     wa = walt.read_text()
+    to = topology.read_text()
+    cc = core.read_text()
 
     # Require the exact Qualcomm vendor architecture that is actually active
     # on A52. P148 deliberately does not replace it with generic TEO.
@@ -90,6 +99,21 @@ def main() -> int:
     ):
         if needle not in blob:
             raise SystemExit(f"WALT/fair baseline missing: {needle}")
+
+    for needle in (
+        "static inline unsigned long uclamp_task_util(struct task_struct *p)",
+        "new_util = wake_util + task_util_est(p);",
+        "bool boosted = schedtune_task_boost(p) > 0 ||",
+    ):
+        if needle not in fa:
+            raise SystemExit(f"uclamp/WALT placement baseline missing: {needle}")
+
+    boost_start = cc.find("bool uclamp_boosted(struct task_struct *p)")
+    if boost_start < 0:
+        raise SystemExit("uclamp_boosted helper missing")
+    boost_end = cc.find("bool uclamp_latency_sensitive(struct task_struct *p)", boost_start)
+    if boost_end < 0 or "schedtune_task_boost(p) > 0" not in cc[boost_start:boost_end]:
+        raise SystemExit("uclamp_boosted no longer preserves SchedTune compatibility")
 
     # ------------------------------------------------------------------
     # 1) Raw spin locks for the cluster synchronization path.
@@ -455,6 +479,180 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
         "WALT stale reservation clear",
     )
 
+    # ------------------------------------------------------------------
+    # 8) Qualcomm FBT placement: use task utilization after UCLAMP_MIN/MAX
+    # instead of raw task_util_est(). This avoids waking a larger CPU for a
+    # task whose explicit UCLAMP_MAX says otherwise.
+    # ------------------------------------------------------------------
+    fa = replace_once(
+        fa,
+        """\t\t\twake_util = cpu_util_without(i, p);
+\t\t\tnew_util = wake_util + task_util_est(p);
+""",
+        f"""\t\t\twake_util = cpu_util_without(i, p);
+\t\t\t/* Qualcomm {FBT_UCLAMP_SRC}: honor task uclamp in FBT. */
+\t\t\tnew_util = wake_util + uclamp_task_util(p);
+""",
+        "FBT uclamp task utilization",
+    )
+
+    # ------------------------------------------------------------------
+    # 9) Qualcomm start-CPU selection: explicit UCLAMP_MIN boost must affect
+    # the initial capacity group. Our uclamp_boosted() helper already retains
+    # Samsung SchedTune boost semantics, so this does not drop legacy boosts.
+    # ------------------------------------------------------------------
+    fa = replace_once(
+        fa,
+        """\tbool boosted = schedtune_task_boost(p) > 0 ||
+\t\t\ttask_boost_policy(p) == SCHED_BOOST_ON_BIG ||
+\t\t\ttask_boost == TASK_BOOST_ON_MID;
+""",
+        f"""\t/* Qualcomm {STARTCPU_UCLAMP_SRC}: include explicit uclamp boost. */
+\tbool boosted = uclamp_boosted(p) ||
+\t\t\ttask_boost_policy(p) == SCHED_BOOST_ON_BIG ||
+\t\t\ttask_boost == TASK_BOOST_ON_MID;
+""",
+        "get_start_cpu uclamp boost",
+    )
+
+    # ------------------------------------------------------------------
+    # 10) Qualcomm WALT/EAS hotplug correctness: do not fabricate an
+    # asymmetric sched_domain merely to keep EAS alive. WALT may keep the
+    # energy perf domains while the static-key topology pointer stays truthful.
+    # ------------------------------------------------------------------
+    to = replace_once(
+        to,
+        """\t/* EAS is enabled for asymmetric CPU capacity topologies. */
+\tif (!per_cpu(sd_asym_cpucapacity, cpu)) {
+\t\tif (sched_debug()) {
+\t\t\tpr_info("rd %*pbl: CPUs do not have asymmetric capacities\\n",
+\t\t\t\t\tcpumask_pr_args(cpu_map));
+\t\t}
+\t\tgoto free;
+\t}
+""",
+        f"""\t/* Qualcomm {WALT_ASYM_SRC}: WALT keeps EAS perf domains alive
+\t * without abusing the sched_asym_cpucapacity static-key topology.
+\t */
+#ifndef CONFIG_SCHED_WALT
+\tif (!per_cpu(sd_asym_cpucapacity, cpu)) {{
+\t\tif (sched_debug()) {{
+\t\t\tpr_info("rd %*pbl: CPUs do not have asymmetric capacities\\n",
+\t\t\t\t\tcpumask_pr_args(cpu_map));
+\t\t}}
+\t\tgoto free;
+\t}}
+#endif
+""",
+        "WALT EAS asymmetry gate",
+    )
+
+    to = replace_once(
+        to,
+        """\tsd = lowest_flag_domain(cpu, SD_ASYM_CPUCAPACITY);
+\t/*
+\t * EAS gets disabled when there are no asymmetric capacity
+\t * CPUs in the system. For example, all big CPUs are
+\t * hotplugged out on a b.L system. We want EAS enabled
+\t * all the time to get both power and perf benefits. So,
+\t * lets assign sd_asym_cpucapacity to the only available
+\t * sched domain. This is also important for a single cluster
+\t * systems which wants to use EAS.
+\t *
+\t * Setting sd_asym_cpucapacity() to a sched domain which
+\t * has all symmetric capacity CPUs is technically incorrect but
+\t * works well for us in getting EAS enabled all the time.
+\t */
+\tif (!sd)
+\t\tsd = cpu_rq(cpu)->sd;
+
+\trcu_assign_pointer(per_cpu(sd_asym_cpucapacity, cpu), sd);
+""",
+        f"""\tsd = lowest_flag_domain(cpu, SD_ASYM_CPUCAPACITY);
+\t/* Qualcomm {WALT_ASYM_SRC}: keep this pointer topology-correct. */
+\trcu_assign_pointer(per_cpu(sd_asym_cpucapacity, cpu), sd);
+""",
+        "fake asymmetric sched_domain removal",
+    )
+
+    # ------------------------------------------------------------------
+    # 11) Qualcomm LPM cluster PM-QoS: isolated CPUs should not constrain the
+    # whole cluster's idle depth. Adapt the newer behavior to Samsung's
+    # existing per-CPU PM_QOS_CPU_DMA_LATENCY implementation.
+    # ------------------------------------------------------------------
+    cluster_anchor = """static int cluster_select(struct lpm_cluster *cluster, bool from_idle,
+\t\t\t\t\t\t\tint *ispred)
+"""
+    qos_helper = f"""/*
+ * Qualcomm {LPM_QOS_SRC}: isolated CPUs must not hold the rest of the cluster
+ * in a shallower LPM state.
+ */
+static uint32_t a52_lpm_cluster_qos(const struct cpumask *mask)
+{{
+\tuint32_t latency = PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE;
+\tint cpu;
+
+\tfor_each_cpu(cpu, mask) {{
+\t\tuint32_t value;
+
+\t\tif (check_cpu_isolated(cpu))
+\t\t\tcontinue;
+
+\t\tvalue = pm_qos_request_for_cpu(PM_QOS_CPU_DMA_LATENCY, cpu);
+\t\tif (value < latency)
+\t\t\tlatency = value;
+\t}}
+
+\treturn latency;
+}}
+
+""" + cluster_anchor
+    c = replace_once(c, cluster_anchor, qos_helper,
+                     "isolated-core cluster PM-QoS helper")
+    c = replace_once(
+        c,
+        """\tif (cpumask_and(&mask, cpu_online_mask, &cluster->child_cpus))
+\t\tlatency_us = pm_qos_request_for_cpumask(PM_QOS_CPU_DMA_LATENCY,
+\t\t\t\t\t\t\t&mask);
+""",
+        """\tif (cpumask_and(&mask, cpu_online_mask, &cluster->child_cpus))
+\t\tlatency_us = a52_lpm_cluster_qos(&mask);
+""",
+        "cluster PM-QoS isolated-core aggregation",
+    )
+
+    # ------------------------------------------------------------------
+    # 12) Qualcomm LPM probe correctness: only publish suspend/s2idle ops
+    # after all probe steps that can fail. P148 already removes the dedicated
+    # DMA debug ring, so the related allocation leak is eliminated entirely.
+    # ------------------------------------------------------------------
+    c = replace_once(
+        c,
+        """\tsuspend_set_ops(&lpm_suspend_ops);
+\ts2idle_set_ops(&lpm_s2idle_ops);
+""",
+        "",
+        "early suspend/s2idle ops removal",
+    )
+    c = replace_once(
+        c,
+        """\tset_update_ipi_history_callback(update_ipi_history);
+
+\treturn 0;
+failed:
+""",
+        f"""\tset_update_ipi_history_callback(update_ipi_history);
+
+\t/* Qualcomm {LPM_PROBE_SRC}: publish PM callbacks at no-fail probe tail. */
+\tsuspend_set_ops(&lpm_suspend_ops);
+\ts2idle_set_ops(&lpm_s2idle_ops);
+
+\treturn 0;
+failed:
+""",
+        "late suspend/s2idle ops publication",
+    )
+
     # Later Qualcomm WALT fixed raw-frequency caching around rejected down-rate
     # transitions. Samsung already carries the equivalent restore-and-recompute
     # behavior, and already suppresses unchanged resolved frequencies.
@@ -472,6 +670,7 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
     sugov.write_text(sg)
     fair.write_text(fa)
     walt.write_text(wa)
+    topology.write_text(to)
 
     C = lpm.read_text()
     O = lpm_of.read_text()
@@ -479,6 +678,7 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
     SG = sugov.read_text()
     FA = fair.read_text()
     WA = walt.read_text()
+    TO = topology.read_text()
 
     required = (
         MARKER,
@@ -512,14 +712,20 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
         "num_dbg_elements",
         "KLPMDEBUG",
         "#include <soc/qcom/minidump.h>",
-        "spin_lock(&cluster->sync_lock);",
-        "spin_unlock(&cluster->sync_lock);",
-        "spin_lock(&p->sync_lock);",
-        "spin_unlock(&p->sync_lock);",
     )
     for needle in forbidden:
         if needle in C:
             raise SystemExit(f"audit failed: stale code remains: {needle}")
+
+    legacy_lock_lines = {
+        "spin_lock(&cluster->sync_lock);",
+        "spin_unlock(&cluster->sync_lock);",
+        "spin_lock(&p->sync_lock);",
+        "spin_unlock(&p->sync_lock);",
+    }
+    for line in C.splitlines():
+        if line.strip() in legacy_lock_lines:
+            raise SystemExit(f"audit failed: legacy idle lock remains: {line.strip()}")
 
     # Explicitly verify that policy knobs and prediction machinery were not
     # "optimized" away in this fix pack.
@@ -557,6 +763,29 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
     if "clear_reserved(rq->push_cpu);" not in WA:
         raise SystemExit("audit failed: stale WALT reservation clear missing")
 
+    for needle in (
+        "new_util = wake_util + uclamp_task_util(p);",
+        "bool boosted = uclamp_boosted(p) ||",
+    ):
+        if needle not in FA:
+            raise SystemExit(f"audit failed: uclamp placement fix missing: {needle}")
+
+    if "sd = cpu_rq(cpu)->sd;" in TO[TO.find("static void update_top_cache_domain("):]:
+        raise SystemExit("audit failed: fake asymmetric sched_domain remains")
+    if "#ifndef CONFIG_SCHED_WALT" not in TO:
+        raise SystemExit("audit failed: WALT EAS asymmetry gate missing")
+
+    for needle in (
+        "static uint32_t a52_lpm_cluster_qos(",
+        "latency_us = a52_lpm_cluster_qos(&mask);",
+    ):
+        if needle not in C:
+            raise SystemExit(f"audit failed: LPM QoS fix missing: {needle}")
+
+    if C.count("suspend_set_ops(&lpm_suspend_ops);") != 1:
+        raise SystemExit("audit failed: suspend_set_ops must appear exactly once")
+    if C.count("s2idle_set_ops(&lpm_s2idle_ops);") != 1:
+        raise SystemExit("audit failed: s2idle_set_ops must appear exactly once")
     print("[audit] qcom governor rating 30 / msm_idle preserved: PASS")
     print("[audit] Qualcomm CPU + IPI + cluster prediction preserved: PASS")
     print("[audit] raw cluster synchronization locks: PASS")
@@ -575,6 +804,11 @@ static inline void a52_sugov_irq_work_queue(struct irq_work *work)
     print(f"[source] {IPI_SRC}: abort core LPM when an IPI is pending")
     print(f"[source] {IRQWORK_SRC}: queue schedutil irq_work on an online CPU")
     print(f"[source] {RESERVATION_SRC}: clear stale WALT CPU reservations")
+    print(f"[source] {FBT_UCLAMP_SRC}: FBT honors task UCLAMP_MIN/MAX")
+    print(f"[source] {STARTCPU_UCLAMP_SRC}: start CPU honors uclamp boost")
+    print(f"[source] {WALT_ASYM_SRC}: WALT/EAS hotplug static-key correctness")
+    print(f"[source] {LPM_QOS_SRC}: isolated CPUs do not constrain cluster LPM QoS")
+    print(f"[source] {LPM_PROBE_SRC}: publish suspend ops only at successful probe tail")
     print("[done] A52 P148 Qualcomm LPM + WALT/schedutil battery fix pack applied")
     return 0
 

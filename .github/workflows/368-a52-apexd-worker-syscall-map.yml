@@ -39,6 +39,8 @@ jobs:
     name: Build Phase368 apexd worker syscall map
     runs-on: ubuntu-22.04
     timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v4

@@ -255,125 +255,40 @@ start_window:
     # 2) Qualcomm runtime-PM correctness.
     # Never perform a clock/gear devfreq transition while HBA runtime PM is
     # already suspended. Pin the runtime-PM status without forcing a resume.
+    # Patch only the stable scale-call sequence instead of replacing the
+    # entire Samsung function body.
     # ------------------------------------------------------------------
-    old_target = """static int ufshcd_devfreq_target(struct device *dev,
-				unsigned long *freq, u32 flags)
-{
-	int ret = 0;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	ktime_t start;
-	bool scale_up, sched_clk_scaling_suspend_work = false;
-	struct list_head *clk_list = &hba->clk_list_head;
-	struct ufs_clk_info *clki;
-	unsigned long irq_flags;
+    target = function_block(c, "static int ufshcd_devfreq_target(struct device *dev,")
+    old_scale = """\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
 
-	if (!ufshcd_is_clkscaling_supported(hba))
-		return -EINVAL;
-
-	spin_lock_irqsave(hba->host->host_lock, irq_flags);
-	if (ufshcd_eh_in_progress(hba)) {
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		return 0;
-	}
-
-	if (!hba->clk_scaling.active_reqs)
-		sched_clk_scaling_suspend_work = true;
-
-	if (list_empty(clk_list)) {
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		goto out;
-	}
-
-	clki = list_first_entry(&hba->clk_list_head, struct ufs_clk_info, list);
-	scale_up = (*freq == clki->max_freq) ? true : false;
-	if (!ufshcd_is_devfreq_scaling_required(hba, scale_up)) {
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		ret = 0;
-		goto out; /* no state change required */
-	}
-	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-
-	start = ktime_get();
-	ret = ufshcd_devfreq_scale(hba, scale_up);
-	trace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
-		(scale_up ? "up" : "down"),
-		ktime_to_us(ktime_sub(ktime_get(), start)), ret);
-
-out:
-	if (sched_clk_scaling_suspend_work)
-		queue_work(hba->clk_scaling.workq,
-			   &hba->clk_scaling.suspend_work);
-
-	return ret;
-}
+\tstart = ktime_get();
+\tret = ufshcd_devfreq_scale(hba, scale_up);
+\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
 """
-    new_target = f"""static int ufshcd_devfreq_target(struct device *dev,
-				unsigned long *freq, u32 flags)
-{{
-	int ret = 0;
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	ktime_t start;
-	bool scale_up, sched_clk_scaling_suspend_work = false;
-	struct list_head *clk_list = &hba->clk_list_head;
-	struct ufs_clk_info *clki;
-	unsigned long irq_flags;
+    new_scale = f"""\tspin_unlock_irqrestore(hba->host->host_lock, irq_flags);
 
-	if (!ufshcd_is_clkscaling_supported(hba))
-		return -EINVAL;
+\t/*
+\t * {MARKER}
+\t * Qualcomm {DEVFREQ_RPM_SRC}: devfreq may race runtime suspend.
+\t * Pin the PM state without waking the host and retry later if it
+\t * is already suspended.
+\t */
+\tpm_runtime_get_noresume(hba->dev);
+\tif (!pm_runtime_active(hba->dev)) {{
+\t\tpm_runtime_put_noidle(hba->dev);
+\t\tret = -EAGAIN;
+\t\tgoto out;
+\t}}
 
-	spin_lock_irqsave(hba->host->host_lock, irq_flags);
-	if (ufshcd_eh_in_progress(hba)) {{
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		return 0;
-	}}
-
-	if (!hba->clk_scaling.active_reqs)
-		sched_clk_scaling_suspend_work = true;
-
-	if (list_empty(clk_list)) {{
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		goto out;
-	}}
-
-	clki = list_first_entry(&hba->clk_list_head, struct ufs_clk_info, list);
-	scale_up = (*freq == clki->max_freq) ? true : false;
-	if (!ufshcd_is_devfreq_scaling_required(hba, scale_up)) {{
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		ret = 0;
-		goto out; /* no state change required */
-	}}
-	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-
-	/*
-	 * {MARKER}
-	 * Qualcomm {DEVFREQ_RPM_SRC}: devfreq may race runtime suspend.
-	 * Pin the PM state without waking the host and retry later if it
-	 * is already suspended.
-	 */
-	pm_runtime_get_noresume(hba->dev);
-	if (!pm_runtime_active(hba->dev)) {{
-		pm_runtime_put_noidle(hba->dev);
-		ret = -EAGAIN;
-		goto out;
-	}}
-
-	start = ktime_get();
-	ret = ufshcd_devfreq_scale(hba, scale_up);
-	pm_runtime_put(hba->dev);
-	trace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
-		(scale_up ? "up" : "down"),
-		ktime_to_us(ktime_sub(ktime_get(), start)), ret);
-
-out:
-	if (sched_clk_scaling_suspend_work)
-		queue_work(hba->clk_scaling.workq,
-			   &hba->clk_scaling.suspend_work);
-
-	return ret;
-}}
+\tstart = ktime_get();
+\tret = ufshcd_devfreq_scale(hba, scale_up);
+\tpm_runtime_put(hba->dev);
+\ttrace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
 """
-    c = replace_once(c, old_target, new_target,
-                     "UFS devfreq runtime-active guard")
+    if old_scale not in target:
+        raise SystemExit("UFS devfreq runtime-active guard: scale-call anchor missing")
+    target_new = target.replace(old_scale, new_scale, 1)
+    c = replace_once(c, target, target_new, "UFS devfreq runtime-active guard")
 
     # ------------------------------------------------------------------
     # 3) Merge the planned autosuspend phase into P149.

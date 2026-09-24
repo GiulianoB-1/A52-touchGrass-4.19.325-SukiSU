@@ -1,0 +1,274 @@
+name: 147 - A52 TEO Tick Bailout P3
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/147-a52-cpuidle-teo-tick-bailout-p3.yml
+      - scripts/147_apply_teo_tick_bailout_p3.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-teo-p147-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P146_BASELINE_SHA: 24f87ad8b02aff34804464daa5e6c11f40c592ac
+  P146_BASELINE_RUN: '35960921027'
+
+jobs:
+  build:
+    name: Build exact P146 baseline + TEO tick bailout P3
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P146 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P146_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p147-teo-tick-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-p146-teo-active-${{ runner.os }}-
+            a52xq-p145-teo-baseline-${{ runner.os }}-
+            a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Require exact prepared source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          test "${{ steps.p134_source.outputs.cache-hit }}" = "true"
+          test -d workspace/touchgrass-a52xq/.git
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Replay production chain P135 through P143
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Replay P145 TEO baseline
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/145_apply_teo_baseline_p1.py \
+            workspace/touchgrass-a52xq backports/145_teo_4.19.c \
+            | tee artifacts/cpuidle-teo-baseline-p145.txt
+
+      - name: Replay boot-tested P146 active TEO P2
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq \
+            | tee artifacts/cpuidle-teo-active-p146.txt
+
+          TEO=workspace/touchgrass-a52xq/drivers/cpuidle/governors/teo.c
+          grep -Fq 'A52 TEO P2: upstream 449914 remove broken recent-intercepts + active' "$TEO"
+          grep -Fq '.rating =	21,' "$TEO"
+          ! grep -Fq 'NR_RECENT' "$TEO"
+
+      - name: Apply P147 TEO tick bailout P3
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/147_apply_teo_tick_bailout_p3.py" \
+            -o /tmp/147_apply_teo_tick_bailout_p3.py
+
+          python3 -m py_compile /tmp/147_apply_teo_tick_bailout_p3.py
+          python3 /tmp/147_apply_teo_tick_bailout_p3.py workspace/touchgrass-a52xq \
+            | tee artifacts/cpuidle-teo-tick-bailout-p147.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
+          MENU="$KERNEL/drivers/cpuidle/governors/menu.c"
+
+          grep -Fq 'A52 TEO P3: upstream 04bae shallow-idle tick bailout' "$TEO"
+          grep -Fq 'out_tick:' "$TEO"
+          grep -Fq 'duration_ns = teo_target_residency_ns(&drv->states[idx]);' "$TEO"
+          grep -Fq '.rating =	21,' "$TEO"
+          grep -Fq '.rating =	20,' "$MENU"
+          ! grep -Fq 'NR_RECENT' "$TEO"
+          ! grep -Fq 'teo_cpu_is_utilized' "$TEO"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- drivers/cpuidle/governors/teo.c \
+            > artifacts/cpuidle-teo-tick-bailout-p147.diff
+
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/cpuidle-teo-tick-bailout-p147-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P147 image and source
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
+          MENU="$KERNEL/drivers/cpuidle/governors/menu.c"
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+
+          grep -Fxq 'CONFIG_CPU_IDLE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_IDLE_GOV_MENU=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_IDLE_GOV_TEO=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_NO_HZ_IDLE=y' "$KERNEL/out/.config"
+
+          grep -Fq 'A52 TEO P3: upstream 04bae shallow-idle tick bailout' "$TEO"
+          grep -Fq 'out_tick:' "$TEO"
+          grep -Fq '*stop_tick = false;' "$TEO"
+          grep -Fq 'duration_ns >= TICK_NSEC) || tick_nohz_tick_stopped())' "$TEO"
+          grep -Fq '.rating =	21,' "$TEO"
+          grep -Fq '.rating =	20,' "$MENU"
+          ! grep -Fq 'NR_RECENT' "$TEO"
+          ! grep -Fq 'UTIL_THRESHOLD_SHIFT' "$TEO"
+          ! grep -Fq 'sched_cpu_util(' "$TEO"
+          grep -aFq 'teo' "$KERNEL/out/vmlinux"
+
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
+          grep -Fq 'A52 SCHEDUTIL P2: Android17 79443a7e limits_changed synchronization' "$SUGOV"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          git -C "$KERNEL" diff --check
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P147 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p147.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p147.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p147.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p147.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p147.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P146-BASE35960921027 + TEO-TICK-P147/' scripts/.package-p147.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P147-CPUIDLE-TEO-TICK-BAILOUT-P3.zip/' scripts/.package-p147.sh
+          chmod +x scripts/.package-p147.sh
+          ./scripts/.package-p147.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p147.sh
+
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p147-teo-tick-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P147 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-BASE35960921027-TEO-TICK-P147-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/cpuidle-teo-active-p146.txt
+            artifacts/cpuidle-teo-tick-bailout-p147.txt
+            artifacts/cpuidle-teo-tick-bailout-p147.diff
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+# P146 exact boot-tested baseline: run 35960921027 / 24f87ad8b02aff34804464daa5e6c11f40c592ac
+# P147 upstream source: 04bae4e2267d49eb9cfec403acd0462b8d00d637
+# Active TEO remains rating 21; menu remains built as rating-20 fallback.

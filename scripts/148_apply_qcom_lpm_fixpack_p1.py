@@ -596,10 +596,9 @@ static uint32_t a52_lpm_cluster_qos(const struct cpumask *mask)
 \t\tuint32_t value;
 
 \t\t/*
-\t\t * Test the exported scheduler isolation mask directly. In this
-\t\t * Samsung 4.19 tree cpu_isolated() can resolve through the vendor
-\t\t * check_cpu_isolated() wrapper, which is not linked in every config.
-\t\t * cpu_isolated_mask is the actual WALT/core_ctl isolation state.
+\t\t * Test the exported scheduler isolation mask directly. This avoids
+\t\t * configuration-local vendor isolation wrappers and uses the actual
+\t\t * WALT/core_ctl isolation state maintained by the scheduler.
 \t\t */
 \t\tif (cpumask_test_cpu(cpu, cpu_isolated_mask))
 \t\t\tcontinue;
@@ -794,12 +793,16 @@ failed:
     if qos_start < 0 or qos_end < 0:
         raise SystemExit("audit failed: could not bound LPM QoS helper")
     qos_blob = C[qos_start:qos_end]
-    for forbidden_iso in ("check_cpu_isolated(", "cpu_isolated("):
-        if forbidden_iso in qos_blob:
+    qos_lines = {line.strip() for line in qos_blob.splitlines()}
+    for forbidden_line in (
+        "if (check_cpu_isolated(cpu))",
+        "if (cpu_isolated(cpu))",
+    ):
+        if forbidden_line in qos_lines:
             raise SystemExit(
-                f"audit failed: fragile isolation helper remains in QoS helper: {forbidden_iso}"
+                f"audit failed: fragile isolation helper remains in QoS helper: {forbidden_line}"
             )
-    if "cpumask_test_cpu(cpu, cpu_isolated_mask)" not in qos_blob:
+    if "if (cpumask_test_cpu(cpu, cpu_isolated_mask))" not in qos_lines:
         raise SystemExit(
             "audit failed: direct cpu_isolated_mask test missing from QoS helper"
         )

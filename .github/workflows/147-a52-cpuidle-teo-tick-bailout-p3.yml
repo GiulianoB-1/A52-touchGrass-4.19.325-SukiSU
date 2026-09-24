@@ -1,4 +1,4 @@
-name: 147 - A52 TEO Tick Bailout P3
+name: 147 - A52 Qualcomm LPM WALT Schedutil Fix Pack P1
 
 on:
   push:
@@ -6,14 +6,14 @@ on:
       - agent/a52-opt-p1-mglru-cass-uclamp-sugov
     paths:
       - .github/workflows/147-a52-cpuidle-teo-tick-bailout-p3.yml
-      - scripts/147_apply_teo_tick_bailout_p3.py
+      - scripts/147_apply_qcom_walt_sugov_fixpack_p1.py
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: a52-teo-p147-${{ github.ref }}
+  group: a52-qcom-walt-sugov-p147-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   build:
-    name: Build exact P146 baseline + TEO tick bailout P3
+    name: Build exact P146 + Qualcomm LPM WALT schedutil fixes
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -54,7 +54,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-p147-teo-tick-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-p147-qcom-walt-sugov-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-p146-teo-active-${{ runner.os }}-
             a52xq-p145-teo-baseline-${{ runner.os }}-
@@ -103,51 +103,58 @@ jobs:
           python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
           git -C workspace/touchgrass-a52xq diff --check
 
-      - name: Replay P145 TEO baseline
+      - name: Replay P145 and boot-tested P146 TEO fallback
         run: |
           set -Eeuo pipefail
           python3 scripts/145_apply_teo_baseline_p1.py \
             workspace/touchgrass-a52xq backports/145_teo_4.19.c \
             | tee artifacts/cpuidle-teo-baseline-p145.txt
-
-      - name: Replay boot-tested P146 active TEO P2
-        run: |
-          set -Eeuo pipefail
           python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq \
-            | tee artifacts/cpuidle-teo-active-p146.txt
+            | tee artifacts/cpuidle-teo-p146.txt
 
           TEO=workspace/touchgrass-a52xq/drivers/cpuidle/governors/teo.c
           grep -Fq 'A52 TEO P2: upstream 449914 remove broken recent-intercepts + active' "$TEO"
           grep -Fq '.rating =	21,' "$TEO"
-          ! grep -Fq 'NR_RECENT' "$TEO"
 
-      - name: Apply P147 TEO tick bailout P3
+      - name: Apply P147 Qualcomm LPM WALT schedutil fix pack
         run: |
           set -Eeuo pipefail
 
           curl -fsSL \
-            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/147_apply_teo_tick_bailout_p3.py" \
-            -o /tmp/147_apply_teo_tick_bailout_p3.py
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/147_apply_qcom_walt_sugov_fixpack_p1.py" \
+            -o /tmp/147_apply_qcom_walt_sugov_fixpack_p1.py
 
-          python3 -m py_compile /tmp/147_apply_teo_tick_bailout_p3.py
-          python3 /tmp/147_apply_teo_tick_bailout_p3.py workspace/touchgrass-a52xq \
-            | tee artifacts/cpuidle-teo-tick-bailout-p147.txt
+          python3 -m py_compile /tmp/147_apply_qcom_walt_sugov_fixpack_p1.py
+          python3 /tmp/147_apply_qcom_walt_sugov_fixpack_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/qcom-walt-sugov-fixpack-p147.txt
 
           KERNEL=workspace/touchgrass-a52xq
-          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
-          MENU="$KERNEL/drivers/cpuidle/governors/menu.c"
+          LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          FAIR="$KERNEL/kernel/sched/fair.c"
+          TOPO="$KERNEL/kernel/sched/topology.c"
+          SH="$KERNEL/kernel/sched/sched.h"
+          SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
 
-          grep -Fq 'A52 TEO P3: upstream 04bae shallow-idle tick bailout' "$TEO"
-          grep -Fq 'out_tick:' "$TEO"
-          grep -Fq 'duration_ns = teo_target_residency_ns(&drv->states[idx]);' "$TEO"
-          grep -Fq '.rating =	21,' "$TEO"
-          grep -Fq '.rating =	20,' "$MENU"
-          ! grep -Fq 'NR_RECENT' "$TEO"
-          ! grep -Fq 'teo_cpu_is_utilized' "$TEO"
+          grep -Fq 'A52 P147: Qualcomm LPM + WALT/schedutil correctness pack' "$LPM"
+          grep -Fq '.name = "qcom",' "$LPM"
+          grep -Fq '.rating = 30,' "$LPM"
+          grep -Fq 'static struct cpuidle_driver msm_idle_driver' "$LPM"
+          grep -Fq 'a52_lpm_cluster_qos' "$LPM"
+          grep -Fq 'dma_free_coherent(&pdev->dev, size, lpm_debug, lpm_debug_phys);' "$LPM"
+          grep -Fq 'walt_irq_work_queue(&sg_policy->irq_work);' "$SUGOV"
+          grep -Fq 'new_util = wake_util + uclamp_task_util(p);' "$FAIR"
+          grep -Fq 'bool boosted = uclamp_boosted(p) ||' "$FAIR"
+          grep -Fq '#ifndef CONFIG_SCHED_WALT' "$TOPO"
+          grep -Fq 'walt_irq_work_queue(struct irq_work *work)' "$SH"
           git -C "$KERNEL" diff --check
 
-          git -C "$KERNEL" diff -- drivers/cpuidle/governors/teo.c \
-            > artifacts/cpuidle-teo-tick-bailout-p147.diff
+          git -C "$KERNEL" diff -- \
+            drivers/cpuidle/lpm-levels.c \
+            kernel/sched/fair.c \
+            kernel/sched/topology.c \
+            kernel/sched/sched.h \
+            kernel/sched/cpufreq_schedutil.c \
+            > artifacts/qcom-walt-sugov-fixpack-p147.diff
 
       - name: Build integrated kernel
         run: |
@@ -156,7 +163,7 @@ jobs:
           ccache --show-stats || true
           START=$(date +%s)
           ./scripts/57_build_resukisu_susfs_manual_detection.sh \
-            2>&1 | tee artifacts/cpuidle-teo-tick-bailout-p147-build.log
+            2>&1 | tee artifacts/qcom-walt-sugov-fixpack-p147-build.log
           RC=${PIPESTATUS[0]}
           END=$(date +%s)
           echo "kernel_build_seconds=$((END-START))"
@@ -164,13 +171,16 @@ jobs:
           ccache --show-stats || true
           exit "$RC"
 
-      - name: Audit P147 image and source
+      - name: Audit P147 image and retained stack
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
-          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
-          MENU="$KERNEL/drivers/cpuidle/governors/menu.c"
+          LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          FAIR="$KERNEL/kernel/sched/fair.c"
+          TOPO="$KERNEL/kernel/sched/topology.c"
+          SH="$KERNEL/kernel/sched/sched.h"
           SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
 
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
@@ -179,23 +189,38 @@ jobs:
           grep -Fxq 'CONFIG_CPU_IDLE_GOV_MENU=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_CPU_IDLE_GOV_TEO=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_NO_HZ_IDLE=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_SCHED_WALT=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_UCLAMP_TASK=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y' "$KERNEL/out/.config"
 
-          grep -Fq 'A52 TEO P3: upstream 04bae shallow-idle tick bailout' "$TEO"
-          grep -Fq 'out_tick:' "$TEO"
-          grep -Fq '*stop_tick = false;' "$TEO"
-          grep -Fq 'duration_ns >= TICK_NSEC) || tick_nohz_tick_stopped())' "$TEO"
+          # Active Qualcomm idle stack remains the highest-rated device path.
+          grep -Fq '.name = "qcom",' "$LPM"
+          grep -Fq '.rating = 30,' "$LPM"
+          grep -Fq 'static struct cpuidle_driver msm_idle_driver' "$LPM"
           grep -Fq '.rating =	21,' "$TEO"
-          grep -Fq '.rating =	20,' "$MENU"
-          ! grep -Fq 'NR_RECENT' "$TEO"
-          ! grep -Fq 'UTIL_THRESHOLD_SHIFT' "$TEO"
-          ! grep -Fq 'sched_cpu_util(' "$TEO"
-          grep -aFq 'teo' "$KERNEL/out/vmlinux"
 
-          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          # New Qualcomm/WALT correctness fixes.
+          grep -Fq 'latency_us = a52_lpm_cluster_qos(&mask);' "$LPM"
+          grep -Fq 'dma_free_coherent(&pdev->dev, size, lpm_debug, lpm_debug_phys);' "$LPM"
+          test "$(grep -Fc 'suspend_set_ops(&lpm_suspend_ops);' "$LPM")" -eq 1
+          test "$(grep -Fc 's2idle_set_ops(&lpm_s2idle_ops);' "$LPM")" -eq 1
+          grep -Fq 'walt_irq_work_queue(&sg_policy->irq_work);' "$SUGOV"
+          grep -Fq 'irq_work_queue_on(work, cpumask_any(cpu_online_mask));' "$SH"
+          grep -Fq 'new_util = wake_util + uclamp_task_util(p);' "$FAIR"
+          grep -Fq 'bool boosted = uclamp_boosted(p) ||' "$FAIR"
+          ! sed -n '/static void update_top_cache_domain(/,/^}/p' "$TOPO" | grep -Fq 'sd = cpu_rq(cpu)->sd;'
+
+          # Existing modern scheduler stack is retained.
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$SH"
           grep -Fq 'A52 SCHEDUTIL IOWAIT P1: Android17 6.18 fixed boost floor + uclamp-safe boost' "$SUGOV"
           grep -Fq 'A52 SCHEDUTIL P2: Android17 79443a7e limits_changed synchronization' "$SUGOV"
+          grep -Fq 'A52 MGLRU Modern P4: upstream 081488051d28 underprotected page cache' "$KERNEL/mm/vmscan.c"
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
           grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          # No tuning changes in this fix pack.
+          grep -Fq '#define NL_RATIO 75' "$SUGOV"
+          grep -Fq '#define DEFAULT_HISPEED_LOAD 90' "$SUGOV"
 
           git -C "$KERNEL" diff --check
 
@@ -233,8 +258,8 @@ jobs:
           PY
 
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p147.sh
-          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P146-BASE35960921027 + TEO-TICK-P147/' scripts/.package-p147.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P147-CPUIDLE-TEO-TICK-BAILOUT-P3.zip/' scripts/.package-p147.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P146-BASE35960921027 + QCOM-WALT-P147/' scripts/.package-p147.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P147-QCOM-LPM-WALT-SUGOV-FIXPACK-P1.zip/' scripts/.package-p147.sh
           chmod +x scripts/.package-p147.sh
           ./scripts/.package-p147.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p147.sh
@@ -254,21 +279,29 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-p147-teo-tick-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-p147-qcom-walt-sugov-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload P147 flashable ZIP and audit
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-BASE35960921027-TEO-TICK-P147-${{ github.run_number }}
+          name: A52XQ-BASE35960921027-QCOM-WALT-P147-${{ github.run_number }}
           path: |
             release/
-            artifacts/cpuidle-teo-active-p146.txt
-            artifacts/cpuidle-teo-tick-bailout-p147.txt
-            artifacts/cpuidle-teo-tick-bailout-p147.diff
+            artifacts/qcom-walt-sugov-fixpack-p147.txt
+            artifacts/qcom-walt-sugov-fixpack-p147.diff
             artifacts/package-sha256.txt
           if-no-files-found: error
           retention-days: 14
 
-# P146 exact boot-tested baseline: run 35960921027 / 24f87ad8b02aff34804464daa5e6c11f40c592ac
-# P147 upstream source: 04bae4e2267d49eb9cfec403acd0462b8d00d637
-# Active TEO remains rating 21; menu remains built as rating-20 fallback.
+# Exact boot-tested baseline:
+# P146 run 35960921027 / 24f87ad8b02aff34804464daa5e6c11f40c592ac
+#
+# P147 correctness pack:
+# - Qualcomm 9af2c232: schedutil irq_work avoids offline CPUs
+# - Qualcomm 22b04fa8: FBT honors task uclamp
+# - Qualcomm 02ee287a: start CPU honors uclamp boost
+# - Qualcomm f6c1bf1f: WALT/EAS asym-capacity hotplug static-key fix
+# - Qualcomm b4d4fb25 adapted: isolated CPUs do not constrain cluster LPM QoS
+# - Qualcomm 41e4398a: publish suspend ops late + free coherent probe allocation
+#
+# No frequency, voltage, rate-limit, hispeed, RTG, PL or idle timing tuning.

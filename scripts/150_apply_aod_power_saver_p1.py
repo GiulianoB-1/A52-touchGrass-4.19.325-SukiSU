@@ -167,19 +167,19 @@ static void a52_aod_lpm_bl_cache(
     )
 
     duplicate_anchor = """	if (SS_IS_CMDS_NULL(set_lpm_bl)) {
-		LCD_ERR(vdd, "No cmds for alpm_ctrl..\n");
+		LCD_ERR(vdd, "No cmds for alpm_ctrl..\\n");
 		return;
 	}
 
 	memcpy(&set->cmds[LPM_BL_CMDID_CTRL].ss_txbuf[1],
 """
     duplicate_new = """	if (SS_IS_CMDS_NULL(set_lpm_bl)) {
-		LCD_ERR(vdd, "No cmds for alpm_ctrl..\n");
+		LCD_ERR(vdd, "No cmds for alpm_ctrl..\\n");
 		return;
 	}
 
 	if (a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)) {
-		LCD_DEBUG(vdd, "[AOD P150] skip duplicate LPM brightness: %d nit\n",
+		LCD_DEBUG(vdd, "[AOD P150] skip duplicate LPM brightness: %d nit\\n",
 				lpm_bl_level);
 		return;
 	}
@@ -193,18 +193,18 @@ static void a52_aod_lpm_bl_cache(
     send_anchor = """	/* send lpm bl cmd */
 	ss_send_cmd(vdd, TX_LPM_BL_CMD);
 
-	LCD_INFO(vdd, "[Panel LPM] bl_level : %s\n",
+	LCD_INFO(vdd, "[Panel LPM] bl_level : %s\\n",
 """
     send_new = """	/* send lpm bl cmd */
 	ss_send_cmd(vdd, TX_LPM_BL_CMD);
 	a52_aod_lpm_bl_cache(vdd, lpm_bl_level);
 
-	LCD_INFO(vdd, "[AOD P150] requested=%dnit effective=%dnit%s\n",
+	LCD_INFO(vdd, "[AOD P150] requested=%dnit effective=%dnit%s\\n",
 			vdd->panel_lpm.lpm_bl_level, lpm_bl_level,
 			(vdd->panel_lpm.lpm_bl_level != lpm_bl_level) ?
 			" [power cap]" : "");
 
-	LCD_INFO(vdd, "[Panel LPM] bl_level : %s\n",
+	LCD_INFO(vdd, "[Panel LPM] bl_level : %s\\n",
 """
     if send_anchor not in set_new:
         raise SystemExit("live AOD send/cache anchor missing")
@@ -219,12 +219,12 @@ static void a52_aod_lpm_bl_cache(
     update_new = update_fn.replace(
         """	struct dsi_panel_cmd_set *set_lpm_bl;
 
-	LCD_INFO(vdd, "%s++\n", __func__);
+	LCD_INFO(vdd, "%s++\\n", __func__);
 """,
         """	struct dsi_panel_cmd_set *set_lpm_bl;
 	int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);
 
-	LCD_INFO(vdd, "%s++\n", __func__);
+	LCD_INFO(vdd, "%s++\\n", __func__);
 
 	/* New LPM entry/exit invalidates the live-brightness TX cache. */
 	a52_aod_lpm_bl_cache(vdd, 0);
@@ -242,15 +242,15 @@ static void a52_aod_lpm_bl_cache(
         1,
     )
 
-    log_anchor = """	LCD_INFO(vdd, "%s--\n", __func__);
+    log_anchor = """	LCD_INFO(vdd, "%s--\\n", __func__);
 """
     log_new = """	if (enable)
-		LCD_INFO(vdd, "[AOD P150] entry requested=%dnit effective=%dnit%s\n",
+		LCD_INFO(vdd, "[AOD P150] entry requested=%dnit effective=%dnit%s\\n",
 				vdd->panel_lpm.lpm_bl_level, lpm_bl_level,
 				(vdd->panel_lpm.lpm_bl_level != lpm_bl_level) ?
 				" [power cap]" : "");
 
-	LCD_INFO(vdd, "%s--\n", __func__);
+	LCD_INFO(vdd, "%s--\\n", __func__);
 """
     if log_anchor not in update_new:
         raise SystemExit("AOD entry logging anchor missing")

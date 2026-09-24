@@ -140,6 +140,7 @@ jobs:
           SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
           FAIR="$KERNEL/kernel/sched/fair.c"
           WALT="$KERNEL/kernel/sched/walt.c"
+          TOPO="$KERNEL/kernel/sched/topology.c"
 
           grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$LPM"
           grep -Fq 'raw_spin_lock(&cluster->sync_lock);' "$LPM"
@@ -170,11 +171,25 @@ jobs:
           grep -Fq 'clear_reserved(this_cpu);' "$FAIR"
           grep -Fq 'clear_reserved(rq->push_cpu);' "$WALT"
 
+          grep -Fq 'new_util = wake_util + uclamp_task_util(p);' "$FAIR"
+          grep -Fq 'bool boosted = uclamp_boosted(p) ||' "$FAIR"
+          grep -Fq '#ifndef CONFIG_SCHED_WALT' "$TOPO"
+          ! sed -n '/static void update_top_cache_domain(/,/^}/p' "$TOPO" | grep -Fq 'sd = cpu_rq(cpu)->sd;'
+
+          grep -Fq 'static uint32_t a52_lpm_cluster_qos(' "$LPM"
+          grep -Fq 'latency_us = a52_lpm_cluster_qos(&mask);' "$LPM"
+          test "$(grep -Fc 'suspend_set_ops(&lpm_suspend_ops);' "$LPM")" -eq 1
+          test "$(grep -Fc 's2idle_set_ops(&lpm_s2idle_ops);' "$LPM")" -eq 1
+
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- \
             drivers/cpuidle/lpm-levels.c \
             drivers/cpuidle/lpm-levels-of.c \
             drivers/cpuidle/lpm-levels.h \
+            kernel/sched/cpufreq_schedutil.c \
+            kernel/sched/fair.c \
+            kernel/sched/walt.c \
+            kernel/sched/topology.c \
             > artifacts/qcom-lpm-walt-fixpack-p148.diff
 
       - name: Build integrated kernel
@@ -199,6 +214,9 @@ jobs:
           LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
           TEO="$KERNEL/drivers/cpuidle/governors/teo.c"
           SUGOV="$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          FAIR="$KERNEL/kernel/sched/fair.c"
+          WALT="$KERNEL/kernel/sched/walt.c"
+          TOPO="$KERNEL/kernel/sched/topology.c"
 
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
@@ -236,7 +254,15 @@ jobs:
           grep -Fq 'irq_work_queue_on(work, cpu)' "$SUGOV"
           grep -Fq 'sg_policy->cached_raw_freq = sg_policy->prev_cached_raw_freq;' "$SUGOV"
           grep -Fq 'queued = stop_one_cpu_nowait(cpu_of(busiest)' "$KERNEL/kernel/sched/fair.c"
-          grep -Fq 'clear_reserved(rq->push_cpu);' "$KERNEL/kernel/sched/walt.c"
+          grep -Fq 'clear_reserved(rq->push_cpu);' "$WALT"
+          grep -Fq 'new_util = wake_util + uclamp_task_util(p);' "$FAIR"
+          grep -Fq 'bool boosted = uclamp_boosted(p) ||' "$FAIR"
+          grep -Fq '#ifndef CONFIG_SCHED_WALT' "$TOPO"
+          ! sed -n '/static void update_top_cache_domain(/,/^}/p' "$TOPO" | grep -Fq 'sd = cpu_rq(cpu)->sd;'
+          grep -Fq 'static uint32_t a52_lpm_cluster_qos(' "$LPM"
+          grep -Fq 'latency_us = a52_lpm_cluster_qos(&mask);' "$LPM"
+          test "$(grep -Fc 'suspend_set_ops(&lpm_suspend_ops);' "$LPM")" -eq 1
+          test "$(grep -Fc 's2idle_set_ops(&lpm_s2idle_ops);' "$LPM")" -eq 1
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
           grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
 
@@ -313,5 +339,7 @@ jobs:
 
 # Exact boot-tested base: P146 run 35960921027 / 24f87ad...
 # P147 is intentionally not replayed: it only changes dormant generic TEO.
-# P148 modifies the actually active Qualcomm qcom/msm_idle path and folds in compatible WALT/schedutil correctness fixes.
+# P148 modifies the actually active Qualcomm qcom/msm_idle path and folds in compatible WALT/schedutil/uclamp/EAS correctness fixes.
+# Includes isolated-core cluster QoS, late suspend-op publication, online schedutil irq_work,
+# WALT reservation cleanup, uclamp-aware FBT/start-CPU placement and asym-capacity hotplug correctness.
 # No frequency tables, rate-limit values, hispeed, RTG, PL, voltage, or boost policy tuning is changed.

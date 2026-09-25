@@ -321,7 +321,7 @@ jobs:
           fi
 
           cp phase357-gki-out/config/final.config "$BUILD/.config"
-          BASE_CMDLINE="$(sed -n 's/^CONFIG_CMDLINE="\\(.*\\)"$/\\1/p' "$BUILD/.config")"
+          BASE_CMDLINE="$(grep '^CONFIG_CMDLINE=' "$BUILD/.config" | sed -e 's/^CONFIG_CMDLINE="//' -e 's/"$//')"
           echo "Phase380 config: inherited CMDLINE length=${#BASE_CMDLINE}"
           if [ -z "$BASE_CMDLINE" ]; then
             echo "ERROR: Phase357 CONFIG_CMDLINE was not found" >&2

@@ -57,8 +57,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-p152-boot-async-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-phase378-16k-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
+            a52xq-phase378-16k-${{ runner.os }}-
+            a52xq-p152-boot-async-${{ runner.os }}-
             a52xq-p150-aod-power-${{ runner.os }}-
             a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-
             a52xq-p148-qcom-battery-${{ runner.os }}-
@@ -73,7 +75,17 @@ jobs:
           ccache --set-config=compression_level=6
           ccache --zero-stats
 
+      - name: Restore prepared P152 16K + IncFS source cache
+        id: p152_16k_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
+          restore-keys: |
+            a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-
+
       - name: Restore exact prepared P134 feature source cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         id: p134_source
         uses: actions/cache/restore@v4
         with:
@@ -81,7 +93,7 @@ jobs:
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Restore exact 35461116688 pre-build source on P134 miss
-        if: steps.p134_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
         id: prebuild_source
         uses: actions/cache/restore@v4
         with:
@@ -89,7 +101,7 @@ jobs:
           key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Restore exact 35196552336 prepared source on deeper cache miss
-        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         id: base351_source
         uses: actions/cache/restore@v4
         with:
@@ -97,7 +109,7 @@ jobs:
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Restore Linux stable checkpoint cache
-        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         id: stable_cache
         uses: actions/cache/restore@v4
         with:
@@ -111,7 +123,7 @@ jobs:
           chmod +x scripts/*.sh scripts/*.py
 
       - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
-        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -174,7 +186,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Rebuild exact 35461116688 pre-build boundary
-        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -212,12 +224,17 @@ jobs:
       - name: Require usable source boundary
         run: |
           set -Eeuo pipefail
+          echo "P152 16K cache hit: ${{ steps.p152_16k_source.outputs.cache-hit }}"
           echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
           echo "prebuild cache hit: ${{ steps.prebuild_source.outputs.cache-hit }}"
           echo "base351 cache hit: ${{ steps.base351_source.outputs.cache-hit }}"
           test -d workspace/touchgrass-a52xq/.git
 
-          if [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
+          if [ "${{ steps.p152_16k_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' workspace/touchgrass-a52xq/fs/incfs/vfs.c
+            grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+            grep -Fq 'A52 BOOT RESCUE P137' workspace/touchgrass-a52xq/drivers/input/input.c
+          elif [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
             grep -Fq 'static void dev_map_hash_remove_netdev' workspace/touchgrass-a52xq/kernel/bpf/devmap.c
           else
             grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
@@ -227,7 +244,7 @@ jobs:
           fi
 
       - name: Rebuild prepared P134 boundary on cache miss
-        if: steps.p134_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -257,13 +274,14 @@ jobs:
           grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
 
       - name: Save rebuilt P134 source cache
-        if: steps.p134_source.outputs.cache-hit != 'true'
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Replay production chain through boot-tested P149
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -288,6 +306,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P150 AOD power saver
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -323,6 +342,7 @@ jobs:
             > artifacts/aod-power-saver-p150.diff
 
       - name: Apply boot-proven P151 deferred init + first async batch
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -340,6 +360,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P152 second selective async peripheral batch
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -363,6 +384,7 @@ jobs:
             drivers/vibrator/dc/dc_vibrator.c \
             > artifacts/boot-async-p151-p152.diff
       - name: Apply kernel-only 16K ARM64 page geometry
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -390,6 +412,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Backport Android IncFS 16K-page compatibility
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -411,6 +434,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save prepared P152 16K source cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -595,7 +619,7 @@ jobs:
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
           CFG="$KERNEL/out/.config"
-          ZIP="$(find release -maxdepth 1 -name 'A52-P378-P152-16K-FIRST-BOOT.zip' -type f | head -1)"
+          ZIP="$(find release -maxdepth 1 -name '*A52-P378-P152-16K-FIRST-BOOT.zip' -type f | head -1)"
 
           test -s "$ZIP"
           grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' "$CFG"
@@ -627,6 +651,8 @@ jobs:
             echo "boot_rescue_retained=yes"
             echo "flashable=yes"
             echo "hardware_validated=no"
+            echo "prepared_16k_cache_hit=${{ steps.p152_16k_source.outputs.cache-hit }}"
+            echo "compiler_cache_hit=${{ steps.ccache_restore.outputs.cache-hit }}"
           } > artifacts/phase378-metadata.txt
 
       - name: Save compiler cache

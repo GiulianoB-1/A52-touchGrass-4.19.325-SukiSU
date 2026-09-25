@@ -411,7 +411,10 @@ jobs:
           mkdir -p "$OUT"/{package,compile,config,source,audit}
           cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
           cp "$BUILD/.config" "$OUT/config/final.config"
-          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$FUTEX" "$BLK" "$LOOP" "$USB" "$GSERIAL" "$UDCCORE" "$DWC3G" "$DWC3CORE" "$OUT/source/"
+          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$BLK" "$LOOP" "$USB" "$GSERIAL" "$DWC3G" "$OUT/source/"
+          cp "$FUTEX" "$OUT/source/futex-core.c"
+          cp "$UDCCORE" "$OUT/source/usb-udc-core.c"
+          cp "$DWC3CORE" "$OUT/source/dwc3-core.c"
           cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py "$OUT/audit/"
           cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
 

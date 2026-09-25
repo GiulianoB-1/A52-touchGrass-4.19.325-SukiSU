@@ -483,8 +483,10 @@ jobs:
 
           KERNEL=workspace/touchgrass-a52xq
           CFG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          KCFG="$KERNEL/arch/arm64/Kconfig"
 
-          grep -Fxq 'CONFIG_FORCE_MAX_ZONEORDER=9' "$CFG"
+          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE) # A52 P380: keep 4MiB physical pageblocks' "$KCFG"
+          ! grep -Eq '^CONFIG_FORCE_MAX_ZONEORDER=' "$CFG"
           grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
           grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
           grep -Fq 'A52 P380 ION_DT_FAIL:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
@@ -499,6 +501,7 @@ jobs:
 
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- \
+            arch/arm64/Kconfig \
             arch/arm64/configs/a52xq_defconfig \
             kernel/dma/contiguous.c \
             drivers/staging/android/ion/msm/msm_ion_of.c \
@@ -571,6 +574,9 @@ jobs:
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
           test -s "$CFG"
+
+          echo '=== Phase380 generated allocator/page geometry ==='
+          grep -E '^(CONFIG_ARM64_(4K|16K|64K)_PAGES=|# CONFIG_ARM64_(4K|16K|64K)_PAGES|CONFIG_ARM64_PAGE_SHIFT=|CONFIG_ARM64_VA_BITS(_[0-9]+)?=|CONFIG_PGTABLE_LEVELS=|CONFIG_FORCE_MAX_ZONEORDER=|CONFIG_CMA_ALIGNMENT=)' "$CFG" || true
 
           grep -Fxq '# CONFIG_ARM64_4K_PAGES is not set' "$CFG"
           grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' "$CFG"

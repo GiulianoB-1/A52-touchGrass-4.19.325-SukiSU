@@ -121,7 +121,30 @@ static int a52_r377_sampler_fn(void *unused)
 \treturn 0;
 }
 """
-    return one(text, old, new, "dense census window")
+    text = one(text, old, new, "dense census window")
+
+    # Phase380 replaced the Phase377 census with a VDC-only sampler.  The new
+    # evidence shows apexd worker teardown ending around 17.94 s, so Phase381
+    # needs the full apexd thread census active again in that exact window.
+    text = one(
+        text,
+        "static int __init a52_r380_vdc_init(void)\n",
+        "static int __init __used a52_r380_vdc_init(void)\n",
+        "retire VDC init helper",
+    )
+    text = one(
+        text,
+        "late_initcall(a52_r380_vdc_init);\n",
+        "/* Phase381 retires the Phase380 VDC-only runtime sampler. */\n",
+        "disable VDC late init",
+    )
+    text = one(
+        text,
+        "/* Phase380 replaces the Phase377 apexd census at runtime. */\n",
+        "late_initcall(a52_r377_init); /* Phase381 dense apexd census */\n",
+        "reactivate Phase377 census",
+    )
+    return text
 
 
 def patch_ufs(text: str) -> str:
@@ -478,7 +501,7 @@ static int gs_bind(struct usb_composite_dev *cdev)
 def validate(root: Path) -> None:
     checks = {
         REC: ("A52_PHASE381_RECORDER_ADMISSION_V1", 'strncmp(fmt, "USB381", 6)'),
-        SYSCALL: ("A52_PHASE381_DENSE_APEX_CENSUS_V1", "17950U, 18050U, 18150U, 18300U"),
+        SYSCALL: ("A52_PHASE381_DENSE_APEX_CENSUS_V1", "late_initcall(a52_r377_init); /* Phase381 dense apexd census */"),
         UFS: ("A52_PHASE381_DENSE_UFS_WINDOW_V1", "17500U, 17800U, 17950U, 18050U, 18200U, 18500U"),
         BLK: ("A52_PHASE381_BLK_FREEZE_WAIT_V1", 'B381 W+ id=%d q=%px d=%d z=%u'),
         LOOP: ("A52_PHASE381_LOOP_WORKER_FRONTIER_V1", 'L381 W+ n=%d rq=%px op=%u aio=%u'),

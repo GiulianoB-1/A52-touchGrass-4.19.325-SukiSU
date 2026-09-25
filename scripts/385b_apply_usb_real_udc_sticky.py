@@ -291,7 +291,9 @@ def patch_recorder(text: str) -> str:
 {
 	switch (field) {
 '''
-    new = '''void a52_ackfr_usbdiag_set(unsigned int field, int value)
+    new = '''static void a52_r385_fixed_usbdiag(unsigned int field, int value);
+
+void a52_ackfr_usbdiag_set(unsigned int field, int value)
 {
 	a52_r385_fixed_usbdiag(field, value);
 	switch (field) {

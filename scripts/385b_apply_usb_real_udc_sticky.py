@@ -64,6 +64,9 @@ STICKY_BLOCK = '''
 #define A52_R385_FIXED_COMMIT     0x385b0de5U
 #define A52_R385_FIXED_VERSION    1U
 
+static const char a52_r385_fixed_marker[] __used =
+	"A52_PHASE385_FIXED_STICKY_V1";
+
 struct a52_r385_fixed {
 	u64 magic;
 	u64 seq;
@@ -430,6 +433,11 @@ def patch_simple(text: str) -> str:
     new = """	platform_set_drvdata(pdev, simple);
 	simple->dev = dev;
 	/* A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1 */
+	{
+		static const char a52_r385_ofsimple_marker[] __used =
+			"A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1";
+		(void)a52_r385_ofsimple_marker;
+	}
 	a52_ackfr_sticky385_ofsimple(1U, 0);
 """
     text = one(text, old, new, "OF-simple probe entry")
@@ -445,7 +453,7 @@ def patch_simple(text: str) -> str:
 def validate(root: Path) -> None:
     checks = {
         HDR: ("A52_PHASE385_FIXED_STICKY_V1", "a52_ackfr_sticky385_ofsimple"),
-        REC: ("A52_PHASE385_FIXED_STICKY_V1", "A52_R385_FIXED_PHYS",
+        REC: ('"A52_PHASE385_FIXED_STICKY_V1"', "A52_R385_FIXED_PHYS",
               "0xB1BFFE00ULL", "core_initcall(a52_r385_fixed_init)",
               "a52_r385_fixed_usbdiag(field, value)"),
         UFS: ("A52_PHASE385_FIXED_TAIL_PRESERVE_V1",
@@ -456,7 +464,7 @@ def validate(root: Path) -> None:
               "a52_ackfr_sticky385_freeze"),
         UDC: ("A52_PHASE385_FIXED_UDC_IDENTITY_V1",
               "a52_ackfr_sticky385_usb_identity"),
-        SIMPLE: ("A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1",
+        SIMPLE: ('"A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1"',
                  'compatible = "qcom,dwc-usb3-msm"',
                  "a52_ackfr_sticky385_ofsimple(1U, 0)"),
     }

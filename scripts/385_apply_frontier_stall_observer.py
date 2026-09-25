@@ -377,7 +377,7 @@ def patch_udc(text: str) -> str:
     if anchor not in text:
         raise SystemExit("Phase385 UDC lock anchor missing")
 
-    block = r'''
+    block = '''
 /* A52_PHASE385_UDC_IDENTITY_OBSERVER_V1 */
 static struct task_struct *a52_r385_usb_observer_task;
 

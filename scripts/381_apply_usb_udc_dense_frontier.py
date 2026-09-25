@@ -182,11 +182,16 @@ def patch_dwc3(text: str) -> str:
     old = '''int dwc3_gadget_init(struct dwc3 *dwc)
 {
 \tint ret;
+\tint irq;
+\tstruct device *dev;
+
 '''
     new = '''/* A52_PHASE381_DWC3_GADGET_TRACE_V1 */
 int dwc3_gadget_init(struct dwc3 *dwc)
 {
 \tint ret;
+\tint irq;
+\tstruct device *dev;
 
 \ta52_ackfr_record("V381 DWC3 init dev=%s max=%u",
 \t\t\t  dev_name(dwc->dev), dwc->maximum_speed);
@@ -214,10 +219,15 @@ int dwc3_gadget_init(struct dwc3 *dwc)
     old = '''static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 {
 \tstruct dwc3\t\t*dwc = gadget_to_dwc(g);
+\tstruct dwc3_vendor\t*vdwc = container_of(dwc, struct dwc3_vendor, dwc);
+\tint\t\t\tret;
+
 '''
     new = '''static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 {
 \tstruct dwc3\t\t*dwc = gadget_to_dwc(g);
+\tstruct dwc3_vendor\t*vdwc = container_of(dwc, struct dwc3_vendor, dwc);
+\tint\t\t\tret;
 
 \ta52_ackfr_record("V381 DWC3 pullup req=%d state=%u speed=%u",
 \t\t\t  !!is_on, g->state, g->speed);

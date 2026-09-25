@@ -54,8 +54,7 @@ new_block = r'''static void a52_probe_census_checkpoint(unsigned int elapsed_ms,
 	overflow = a52_probe_census_overflow;
 	spin_unlock_irqrestore(&a52_probe_census_lock, flags);
 
-	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_BEGIN t_ms=%u final=%u used=%u overflow=%u probe_count=%d
-",
+	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_BEGIN t_ms=%u final=%u used=%u overflow=%u probe_count=%d\\n",
 		 elapsed_ms, final ? 1 : 0, used, overflow,
 		 atomic_read(&probe_count));
 
@@ -76,16 +75,14 @@ new_block = r'''static void a52_probe_census_checkpoint(unsigned int elapsed_ms,
 		}
 
 		if (rec.state != A52_PC_OK)
-			pr_emerg("A52_PROBE_CENSUS t_ms=%u state=%s attempts=%u ret=%d drv=%s dev=%s age_ms=%u
-",
+			pr_emerg("A52_PROBE_CENSUS t_ms=%u state=%s attempts=%u ret=%d drv=%s dev=%s age_ms=%u\\n",
 				 elapsed_ms,
 				 a52_probe_census_state_name(rec.state),
 				 rec.attempts, rec.ret, rec.driver, rec.device,
 				 jiffies_to_msecs(jiffies - rec.started));
 	}
 
-	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_END t_ms=%u ok=%u running=%u fail=%u defer=%u reject=%u overflow=%u probe_count=%d
-",
+	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_END t_ms=%u ok=%u running=%u fail=%u defer=%u reject=%u overflow=%u probe_count=%d\\n",
 		 elapsed_ms, ok, running, fail, defer, reject, overflow,
 		 atomic_read(&probe_count));
 
@@ -95,16 +92,14 @@ new_block = r'''static void a52_probe_census_checkpoint(unsigned int elapsed_ms,
 	 * is already in the ramoops dmesg zone.
 	 */
 	kmsg_dump(KMSG_DUMP_OOPS);
-	pr_emerg("A52_PROBE_CENSUS SNAPSHOT_DONE t_ms=%u
-", elapsed_ms);
+	pr_emerg("A52_PROBE_CENSUS SNAPSHOT_DONE t_ms=%u\\n", elapsed_ms);
 }
 
 static int a52_probe_census_finalizer(void *unused)
 {
 	unsigned int elapsed_ms;
 
-	pr_notice("A52_PROBE_CENSUS early recorder thread running
-");
+	pr_notice("A52_PROBE_CENSUS early recorder thread running\\n");
 
 	for (elapsed_ms = A52_PROBE_CENSUS_CHECKPOINT_MS;
 	     elapsed_ms <= A52_PROBE_CENSUS_FINAL_MS;
@@ -115,14 +110,12 @@ static int a52_probe_census_finalizer(void *unused)
 			elapsed_ms == A52_PROBE_CENSUS_FINAL_MS);
 	}
 
-	pr_emerg("A52_PROBE_CENSUS FINAL_REBOOT recovery at %u ms
-",
+	pr_emerg("A52_PROBE_CENSUS FINAL_REBOOT recovery at %u ms\\n",
 		 A52_PROBE_CENSUS_FINAL_MS);
 	kmsg_dump(KMSG_DUMP_OOPS);
 	machine_restart("recovery");
 
-	pr_emerg("A52_PROBE_CENSUS machine_restart returned unexpectedly
-");
+	pr_emerg("A52_PROBE_CENSUS machine_restart returned unexpectedly\\n");
 	return 0;
 }
 
@@ -132,12 +125,10 @@ static int __init a52_probe_census_init(void)
 
 	task = kthread_run(a52_probe_census_finalizer, NULL, "a52_probe_census");
 	if (IS_ERR(task))
-		pr_err("A52_PROBE_CENSUS failed to start early recorder: %ld
-",
+		pr_err("A52_PROBE_CENSUS failed to start early recorder: %ld\\n",
 		       PTR_ERR(task));
 	else
-		pr_notice("A52_PROBE_CENSUS EARLY_ARMED interval_ms=%u final_ms=%u
-",
+		pr_notice("A52_PROBE_CENSUS EARLY_ARMED interval_ms=%u final_ms=%u\\n",
 			  A52_PROBE_CENSUS_CHECKPOINT_MS,
 			  A52_PROBE_CENSUS_FINAL_MS);
 

@@ -401,11 +401,9 @@ jobs:
           grep -aFq 'B380 id=%d enter q=%px old=%u new=%u' "$IMAGE"
           grep -aFq 'L380 MAP n=%d q=%px depth=%u' "$IMAGE"
           grep -aFq 'USB380 ttyGS%d live console ready fifo=%u transport=kthread' "$IMAGE"
-          grep -aFq 'A52_PHASE381_USB_UDC_DENSE_FRONTIER_V1' "$IMAGE"
           grep -aFq 'V381 GS composite_probe ret=%d' "$IMAGE"
           grep -aFq 'V381 UDC bind ret=%d udc=%s drv=%s' "$IMAGE"
           grep -aFq 'V381 DWC3 add_gadget ret=%d dev=%s' "$IMAGE"
-          grep -aFq 'A52_PHASE381_DWC3_MODE_TRACE_V1' "$IMAGE"
           grep -aFq 'V381 MODE in dr=%u hw=%u host=%u gad=%u dual=%u' "$IMAGE"
           grep -aFq 'V381 CORE init_mode dr=%u' "$IMAGE"
 

@@ -422,108 +422,21 @@ def patch_simple(text: str) -> str:
                    "#include <linux/reset.h>\n" + inc,
                    "OF-simple recorder include")
 
-    old = '''	int			ret;
-
-	simple = devm_kzalloc(dev, sizeof(*simple), GFP_KERNEL);
-	if (!simple)
-		return -ENOMEM;
-'''
-    new = '''	int			ret;
-	unsigned int		a52_stage = 1U;
-
+    old = """static int dwc3_of_simple_probe(struct platform_device *pdev)
+{
+"""
+    new = """static int dwc3_of_simple_probe(struct platform_device *pdev)
+{
 	/* A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1 */
-	a52_ackfr_sticky385_ofsimple(a52_stage, 0);
-	simple = devm_kzalloc(dev, sizeof(*simple), GFP_KERNEL);
-	if (!simple) {
-		a52_ackfr_sticky385_ofsimple(0x80000000U | a52_stage, -ENOMEM);
-		return -ENOMEM;
-	}
-'''
+	a52_ackfr_sticky385_ofsimple(1U, 0);
+"""
     text = one(text, old, new, "OF-simple probe entry")
 
-    old = '''	simple->resets = of_reset_control_array_get_optional_exclusive(np);
-	if (IS_ERR(simple->resets)) {
-		ret = PTR_ERR(simple->resets);
-		dev_err(dev, "failed to get device resets, err=%d\n", ret);
-		return ret;
-	}
-'''
-    new = '''	a52_stage = 2U;
-	simple->resets = of_reset_control_array_get_optional_exclusive(np);
-	if (IS_ERR(simple->resets)) {
-		ret = PTR_ERR(simple->resets);
-		dev_err(dev, "failed to get device resets, err=%d\n", ret);
-		a52_ackfr_sticky385_ofsimple(0x80000000U | a52_stage, ret);
-		return ret;
-	}
-'''
-    text = one(text, old, new, "OF-simple reset lookup")
-
-    old = '''	ret = reset_control_deassert(simple->resets);
-	if (ret)
-		goto err_resetc_put;
-
-	ret = clk_bulk_get_all(simple->dev, &simple->clks);
-'''
-    new = '''	a52_stage = 3U;
-	ret = reset_control_deassert(simple->resets);
-	if (ret)
-		goto err_resetc_put;
-
-	a52_stage = 4U;
-	ret = clk_bulk_get_all(simple->dev, &simple->clks);
-'''
-    text = one(text, old, new, "OF-simple reset/clock stage")
-
-    old = '''	simple->num_clocks = ret;
-	ret = clk_bulk_prepare_enable(simple->num_clocks, simple->clks);
-	if (ret)
-		goto err_resetc_assert;
-
-	ret = of_platform_populate(np, NULL, NULL, dev);
-'''
-    new = '''	simple->num_clocks = ret;
-	a52_stage = 5U;
-	ret = clk_bulk_prepare_enable(simple->num_clocks, simple->clks);
-	if (ret)
-		goto err_resetc_assert;
-
-	a52_stage = 6U;
-	ret = of_platform_populate(np, NULL, NULL, dev);
-'''
-    text = one(text, old, new, "OF-simple clock/populate stage")
-
-    old = '''	pm_runtime_get_sync(dev);
-
-	return 0;
-'''
-    new = '''	pm_runtime_get_sync(dev);
-	a52_ackfr_sticky385_ofsimple(7U, 0);
-
-	return 0;
-'''
-    text = one(text, old, new, "OF-simple success sticky")
-
-    old = '''err_resetc_put:
-	reset_control_put(simple->resets);
-	return ret;
-}
-'''
-    new = '''err_resetc_put:
-	reset_control_put(simple->resets);
-	a52_ackfr_sticky385_ofsimple(0x80000000U | a52_stage, ret);
-	return ret;
-}
-'''
-    text = one(text, old, new, "OF-simple error sticky")
-
-    old = '''static const struct of_device_id of_dwc3_simple_match[] = {
-	{ .compatible = "rockchip,rk3399-dwc3" },
-'''
-    new = '''static const struct of_device_id of_dwc3_simple_match[] = {
+    old = """static const struct of_device_id of_dwc3_simple_match[] = {
+"""
+    new = """static const struct of_device_id of_dwc3_simple_match[] = {
 	{ .compatible = "qcom,dwc-usb3-msm" },
-	{ .compatible = "rockchip,rk3399-dwc3" },
-'''
+"""
     return one(text, old, new, "Qualcomm parent compatible")
 
 
@@ -543,7 +456,7 @@ def validate(root: Path) -> None:
               "a52_ackfr_sticky385_usb_identity"),
         SIMPLE: ("A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1",
                  'compatible = "qcom,dwc-usb3-msm"',
-                 "a52_ackfr_sticky385_ofsimple(7U, 0)"),
+                 "a52_ackfr_sticky385_ofsimple(1U, 0)"),
     }
     for rel, tokens in checks.items():
         data = (root / rel).read_text(encoding="utf-8")

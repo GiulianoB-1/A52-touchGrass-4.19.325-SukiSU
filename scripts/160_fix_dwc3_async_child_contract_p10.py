@@ -20,11 +20,11 @@ core_marker = "A52 P160: DWC3 child must complete synchronously for MSM glue"
 msm_marker = "A52 P160: DWC3 child drvdata readiness guard"
 
 if core_marker not in core_s:
-    old = '''	.driver		= {
+    old = r'''	.driver		= {
 		.name	= "dwc3",
 		.of_match_table	= of_match_ptr(of_dwc3_match),
 '''
-    new = '''	.driver		= {
+    new = r'''	.driver		= {
 		.name	= "dwc3",
 		/*
 		 * A52 P160: DWC3 child must complete synchronously for MSM glue.
@@ -42,14 +42,14 @@ if core_marker not in core_s:
     core_s = core_s.replace(old, new, 1)
 
 if msm_marker not in msm_s:
-    old_find = '''	mdwc->dwc3 = of_find_device_by_node(dwc3_node);
+    old_find = r'''	mdwc->dwc3 = of_find_device_by_node(dwc3_node);
 	of_node_put(dwc3_node);
 	if (!mdwc->dwc3) {
 		dev_err(&pdev->dev, "failed to get dwc3 platform device\n");
 		goto put_dwc3;
 	}
 '''
-    new_find = '''	mdwc->dwc3 = of_find_device_by_node(dwc3_node);
+    new_find = r'''	mdwc->dwc3 = of_find_device_by_node(dwc3_node);
 	of_node_put(dwc3_node);
 	if (!mdwc->dwc3) {
 		/*
@@ -69,13 +69,13 @@ if msm_marker not in msm_s:
         raise SystemExit(f"dwc3-msm child-device anchor count={msm_s.count(old_find)}")
     msm_s = msm_s.replace(old_find, new_find, 1)
 
-    old_drvdata = '''	dwc = platform_get_drvdata(mdwc->dwc3);
+    old_drvdata = r'''	dwc = platform_get_drvdata(mdwc->dwc3);
 	if (!dwc) {
 		dev_err(&pdev->dev, "Failed to get dwc3 device\n");
 		goto put_dwc3;
 	}
 '''
-    new_drvdata = '''	dwc = platform_get_drvdata(mdwc->dwc3);
+    new_drvdata = r'''	dwc = platform_get_drvdata(mdwc->dwc3);
 	if (!dwc) {
 		/*
 		 * A52 P160: DWC3 child drvdata readiness guard.

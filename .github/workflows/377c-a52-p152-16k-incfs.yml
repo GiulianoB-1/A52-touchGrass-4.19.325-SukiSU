@@ -392,8 +392,13 @@ jobs:
       - name: Backport Android IncFS 16K-page compatibility
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile scripts/377c_apply_incfs_16k_compat.py
-          python3 scripts/377c_apply_incfs_16k_compat.py workspace/touchgrass-a52xq \
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/377c_apply_incfs_16k_compat.py" \
+            -o /tmp/377c_apply_incfs_16k_compat.py
+
+          python3 -m py_compile /tmp/377c_apply_incfs_16k_compat.py
+          python3 /tmp/377c_apply_incfs_16k_compat.py workspace/touchgrass-a52xq \
             | tee artifacts/phase377c-incfs-16k-apply.txt
 
           KERNEL=workspace/touchgrass-a52xq

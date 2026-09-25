@@ -736,7 +736,7 @@ jobs:
               'write_boot;\n'
               'sync;\n'
               'ui_print "Verifying P164 marker in flashed boot partition...";\n'
-              'dd if="$BLOCK" bs=1M count=64 2>/dev/null | grep -a -q "A52_P164_VIDC_CORE" || abort "P164 read-back verification failed: boot partition does not contain the P164 kernel marker";\n'
+              'dd if="\$BLOCK" bs=1M count=64 2>/dev/null | grep -a -q "A52_P164_VIDC_CORE" || abort "P164 read-back verification failed: boot partition does not contain the P164 kernel marker";\n'
               'ui_print "P164 boot partition read-back verification: PASS";',
               1,
           )

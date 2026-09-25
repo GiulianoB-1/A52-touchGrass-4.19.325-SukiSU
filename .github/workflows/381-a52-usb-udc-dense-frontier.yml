@@ -322,6 +322,7 @@ jobs:
           GSERIAL="$ROOT/drivers/usb/gadget/legacy/serial.c"
           UDCCORE="$ROOT/drivers/usb/gadget/udc/core.c"
           DWC3G="$ROOT/drivers/usb/dwc3/gadget.c"
+          DWC3CORE="$ROOT/drivers/usb/dwc3/core.c"
           echo "Phase381 patchers passed check-only audits"
           if ! git -C "$ROOT" diff --check; then
             echo "WARNING: git diff --check reported formatting issues; continuing to compile"
@@ -342,11 +343,14 @@ jobs:
           }
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable U_SERIAL_CONSOLE
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_G_SERIAL
+          "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DWC3_DUAL_ROLE
+          "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DWC3_HOST
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_DWC3_GADGET
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-str CMDLINE \
             "$BASE_CMDLINE console=ttyGS0,115200 loglevel=7 ignore_loglevel hung_task_timeout_secs=10 workqueue.watchdog_thresh=10 panic=0 hung_task_panic=0 softlockup_panic=0 panic_on_warn=0"
           echo "Phase380 config: requested USB console options"
-          grep -E '^(CONFIG_CMDLINE=|CONFIG_LOG_BUF_SHIFT=|CONFIG_U_SERIAL_CONSOLE=|CONFIG_USB_G_SERIAL=)' "$BUILD/.config" || true
+          grep -E '^(CONFIG_CMDLINE=|CONFIG_LOG_BUF_SHIFT=|CONFIG_U_SERIAL_CONSOLE=|CONFIG_USB_G_SERIAL=|CONFIG_USB_DWC3_(HOST|GADGET|DUAL_ROLE)=)' "$BUILD/.config" || true
 
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
@@ -354,6 +358,9 @@ jobs:
           grep -Fxq 'CONFIG_PHY_QCOM_QMP=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_U_SERIAL_CONSOLE=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_USB_G_SERIAL=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_USB_DWC3_GADGET=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_USB_DWC3_DUAL_ROLE is not set' "$BUILD/.config"
+          grep -Fxq '# CONFIG_USB_DWC3_HOST is not set' "$BUILD/.config"
           grep -Fxq 'CONFIG_LOG_BUF_SHIFT=19' "$BUILD/.config"
           grep -Fxq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
           grep -Fq 'console=ttyGS0,115200' "$BUILD/.config"
@@ -398,12 +405,15 @@ jobs:
           grep -aFq 'V381 GS composite_probe ret=%d' "$IMAGE"
           grep -aFq 'V381 UDC bind ret=%d udc=%s drv=%s' "$IMAGE"
           grep -aFq 'V381 DWC3 add_gadget ret=%d dev=%s' "$IMAGE"
+          grep -aFq 'A52_PHASE381_DWC3_MODE_TRACE_V1' "$IMAGE"
+          grep -aFq 'V381 MODE in dr=%u hw=%u host=%u gad=%u dual=%u' "$IMAGE"
+          grep -aFq 'V381 CORE init_mode dr=%u' "$IMAGE"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}
           cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
           cp "$BUILD/.config" "$OUT/config/final.config"
-          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$FUTEX" "$BLK" "$LOOP" "$USB" "$GSERIAL" "$UDCCORE" "$DWC3G" "$OUT/source/"
+          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$FUTEX" "$BLK" "$LOOP" "$USB" "$GSERIAL" "$UDCCORE" "$DWC3G" "$DWC3CORE" "$OUT/source/"
           cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py "$OUT/audit/"
           cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
 
@@ -449,12 +459,18 @@ jobs:
           ------------------------------
           CONFIG_U_SERIAL_CONSOLE=y
           CONFIG_USB_G_SERIAL=y
+          CONFIG_USB_DWC3_GADGET=y
+          # CONFIG_USB_DWC3_DUAL_ROLE is not set
+          # CONFIG_USB_DWC3_HOST is not set
           CONFIG_LOG_BUF_SHIFT=19
           ttyGS0 console FIFO = 256 KiB
           console draining uses dedicated a52_usb_console kthread rather
           than system_wq.
-          Phase381 additionally persists g_serial, UDC-core and DWC3 gadget
+          Phase381 additionally persists DWC3 dr_mode/hardware mode selection,
+          core mode branch, g_serial, UDC-core and DWC3 gadget
           registration/bind/pullup results as V381 records.
+          The debug build forces DWC3 gadget-only mode so the UDC is created
+          at probe time without waiting for DRD/OTG role switching.
 
           Built-in debug command line appends:
           console=ttyGS0,115200 loglevel=7 ignore_loglevel

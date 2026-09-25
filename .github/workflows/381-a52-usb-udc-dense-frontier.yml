@@ -1,5 +1,5 @@
 name: Phase381 - USB UDC + dense 18-19s frontier
-run-name: Phase380 - USB live console + block/UFS debug
+run-name: Phase381 - USB UDC + dense 18-19s frontier
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
     branches:
       - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
+      - .github/workflows/381-a52-usb-udc-dense-frontier.yml
       - .github/workflows/380-a52-usb-block-live-debug.yml
       - scripts/360_apply_ufs_defer_pinpoint.py
       - scripts/361_apply_ufs_platform_gate.py
@@ -26,6 +27,7 @@ on:
       - scripts/378_apply_ufs_completion_flight_recorder.py
       - scripts/379_apply_ufs_sideband_sampler.py
       - scripts/380_apply_usb_block_live_debug.py
+      - scripts/381_apply_usb_udc_dense_frontier.py
 
 permissions:
   contents: read

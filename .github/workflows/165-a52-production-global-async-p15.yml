@@ -608,9 +608,10 @@ jobs:
               'patch_cmdline "sched_cass" "sched_cass=1";\n'
               'write_boot;\n'
               'sync;\n'
-              'ui_print "Verifying P165 marker in flashed boot partition...";\n'
-              'dd if="$BLOCK" bs=1M count=64 2>/dev/null | grep -a -q "A52_P165_PRODUCTION_ASYNC" || abort "P165 read-back verification failed: boot partition does not contain the production kernel marker";\n'
-              'ui_print "P165 boot partition read-back verification: PASS";',
+              'ui_print "Verifying flashed boot image byte-for-byte...";\n'
+              'P165_BOOT_BYTES=\$(wc -c < "\$AKHOME/boot-new.img");\n'
+              'cmp -n "\$P165_BOOT_BYTES" "\$AKHOME/boot-new.img" "\$BLOCK" >/dev/null 2>&1 || abort "P165 read-back verification failed: boot partition differs from the image AnyKernel wrote";\n'
+              'ui_print "P165 boot partition byte-for-byte read-back verification: PASS";',
               1,
           )
           p.write_text(s)
@@ -630,8 +631,8 @@ jobs:
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'A52_P165_PRODUCTION_ASYNC'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq 'P165 boot partition read-back verification: PASS'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'cmp -n "$P165_BOOT_BYTES" "$AKHOME/boot-new.img" "$BLOCK"'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'P165 boot partition byte-for-byte read-back verification: PASS'
           sha256sum "$ZIP" | tee artifacts/package-sha256.txt
 
       - name: Save compiler cache
@@ -676,4 +677,4 @@ jobs:
 # - adds only msm-dsi-display + msm_drm as production display safety exceptions
 # - intentionally omits P155/P156/P161/P163/P164 census/forensic code
 # - restores normal full Android boot; no timed recovery reboot
-# - package verifies A52_P165_PRODUCTION_ASYNC by reading boot partition after flashing
+# - package verifies the exact generated boot-new.img byte-for-byte against the boot partition after flashing

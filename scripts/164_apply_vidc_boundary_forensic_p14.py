@@ -117,10 +117,10 @@ static bool a52_p164_is_vidc(struct device *dev, struct device_driver *drv)
         raise SystemExit(f"P164 dma anchor count={dd_s.count(dma_anchor)}")
     dd_s = dd_s.replace(dma_anchor, dma_repl, 1)
 
-    sysfs_anchor = """	if (driver_sysfs_add(dev)) {
+    sysfs_anchor = r"""	if (driver_sysfs_add(dev)) {
 		printk(KERN_ERR "%s: driver_sysfs_add(%s) failed\n",
 """
-    sysfs_repl = """	if (driver_sysfs_add(dev)) {
+    sysfs_repl = r"""	if (driver_sysfs_add(dev)) {
 		if (a52_p164_vidc)
 			a52_p164_vidc_stage = 5; /* driver sysfs failed */
 		printk(KERN_ERR "%s: driver_sysfs_add(%s) failed\n",

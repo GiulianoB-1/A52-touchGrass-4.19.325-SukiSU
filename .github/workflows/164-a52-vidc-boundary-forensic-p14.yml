@@ -802,3 +802,5 @@ jobs:
 # - records the VIDC path through generic really_probe() and platform_drv_probe()
 # - emits A52_P164_VIDC_CORE and A52_P164_PLATFORM_VIDC at/after 10s
 # - no new functional probe-order changes; this phase exists only to resolve the 0 -> -22 contradiction
+
+# retry after P164 literal-anchor fix

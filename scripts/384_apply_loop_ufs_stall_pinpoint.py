@@ -211,7 +211,7 @@ def patch_core(text: str) -> str:
         text,
         '''int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
 {
-	const bool pm = flags & BLK_MQ_REQ_PREEMPT;
+\tconst bool pm = flags & BLK_MQ_REQ_PM;
 ''',
         '''/* A52_PHASE384_QUEUE_REF_CENSUS_V1 */
 static atomic_t a52_r384_qget_id = ATOMIC_INIT(0);
@@ -219,26 +219,31 @@ static atomic_t a52_r384_qput_id = ATOMIC_INIT(0);
 
 int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
 {
-	const bool pm = flags & BLK_MQ_REQ_PREEMPT;
+\tconst bool pm = flags & BLK_MQ_REQ_PM;
 ''',
         "queue ref census state",
     )
 
     text = one(
         text,
-        '''		if (success)
-			return 0;
+        '''\trwsem_acquire_read(&q->q_lockdep_map, 0, 0, _RET_IP_);
+\trwsem_release(&q->q_lockdep_map, _RET_IP_);
+\treturn 0;
+}
 ''',
-        '''		if (success) {
-			u64 a52_ms = a52_ackfr_frontier_elapsed_ms();
-			int a52_id;
-			if (a52_ms <= 2000U &&
-			    (a52_id = atomic_inc_return(&a52_r384_qget_id)) <= 192)
-				a52_ackfr_record("B384 G id=%d q=%px dep=%d",
-						 a52_id, q,
-						 atomic_read(&q->mq_freeze_depth));
-			return 0;
-		}
+        '''\t{
+\t\tu64 a52_ms = a52_ackfr_frontier_elapsed_ms();
+\t\tint a52_id;
+
+\t\tif (a52_ms <= 2000U &&
+\t\t    (a52_id = atomic_inc_return(&a52_r384_qget_id)) <= 192)
+\t\t\ta52_ackfr_record("B384 G id=%d q=%px dep=%d",
+\t\t\t\t\t a52_id, q, READ_ONCE(q->mq_freeze_depth));
+\t}
+\trwsem_acquire_read(&q->q_lockdep_map, 0, 0, _RET_IP_);
+\trwsem_release(&q->q_lockdep_map, _RET_IP_);
+\treturn 0;
+}
 ''',
         "queue get census",
     )
@@ -247,19 +252,19 @@ int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
         text,
         '''void blk_queue_exit(struct request_queue *q)
 {
-	percpu_ref_put(&q->q_usage_counter);
+\tpercpu_ref_put(&q->q_usage_counter);
 }
 ''',
         '''void blk_queue_exit(struct request_queue *q)
 {
-	u64 a52_ms = a52_ackfr_frontier_elapsed_ms();
-	int a52_id;
+\tu64 a52_ms = a52_ackfr_frontier_elapsed_ms();
+\tint a52_id;
 
-	percpu_ref_put(&q->q_usage_counter);
-	if (a52_ms <= 2000U &&
-	    (a52_id = atomic_inc_return(&a52_r384_qput_id)) <= 192)
-		a52_ackfr_record("B384 P id=%d q=%px dep=%d",
-				 a52_id, q, atomic_read(&q->mq_freeze_depth));
+\tpercpu_ref_put(&q->q_usage_counter);
+\tif (a52_ms <= 2000U &&
+\t    (a52_id = atomic_inc_return(&a52_r384_qput_id)) <= 192)
+\t\ta52_ackfr_record("B384 P id=%d q=%px dep=%d",
+\t\t\t\t a52_id, q, READ_ONCE(q->mq_freeze_depth));
 }
 ''',
         "queue put census",

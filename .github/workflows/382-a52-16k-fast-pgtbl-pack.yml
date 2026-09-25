@@ -778,9 +778,6 @@ jobs:
           grep -Fq 'A52 P382 FAST_PGTBL_READY:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
           grep -Fq 'page_to_phys(page) + table_off' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
           grep -Fq 'size_t count = PAGE_ALIGN(size) >> PAGE_SHIFT' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
-          grep -Fq 'A52 P382 FAST_PGTBL_PACK:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
-          grep -Fq 'A52 P382 FAST_PGTBL_READY:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
-          grep -Fq 'page_to_phys(page) + table_off' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
           grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
@@ -828,7 +825,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-phase381-16k-cma-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-phase382-16k-fast-pgtbl-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload Phase382 fast-SMMU page-table package
         uses: actions/upload-artifact@v4

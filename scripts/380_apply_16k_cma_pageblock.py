@@ -18,11 +18,12 @@ def main() -> None:
         raise SystemExit(f"usage: {sys.argv[0]} <kernel-tree>")
 
     root = Path(sys.argv[1]).resolve()
+    kconfig = root / "arch/arm64/Kconfig"
     cfg = root / "arch/arm64/configs/a52xq_defconfig"
     cma = root / "kernel/dma/contiguous.c"
     ion = root / "drivers/staging/android/ion/msm/msm_ion_of.c"
 
-    for p in (cfg, cma, ion):
+    for p in (kconfig, cfg, cma, ion):
         if not p.is_file():
             raise SystemExit(f"missing source file: {p}")
 
@@ -40,18 +41,36 @@ def main() -> None:
     #
     # Native 16K with MAX_ORDER=9 restores the same 4 MiB physical granularity:
     #   16K * 2^8 = 4 MiB
+    # FORCE_MAX_ZONEORDER has no Kconfig prompt, so a value written only to
+    # defconfig is ignored and regenerated from its Kconfig defaults. Change
+    # the 16K/non-THP default at the source of truth instead.
+    replace_once(
+        kconfig,
+        '''config FORCE_MAX_ZONEORDER
+\tint
+\tdefault "14" if (ARM64_64K_PAGES && TRANSPARENT_HUGEPAGE)
+\tdefault "12" if (ARM64_16K_PAGES && TRANSPARENT_HUGEPAGE)
+\tdefault "11"
+''',
+        '''config FORCE_MAX_ZONEORDER
+\tint
+\tdefault "14" if (ARM64_64K_PAGES && TRANSPARENT_HUGEPAGE)
+\tdefault "12" if (ARM64_16K_PAGES && TRANSPARENT_HUGEPAGE)
+\tdefault "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE) # A52 P380: keep 4MiB physical pageblocks
+\tdefault "11"
+''',
+        "P380 hidden FORCE_MAX_ZONEORDER 16K default",
+    )
+
+    # Remove any stale explicit assignment from the requested defconfig. Since
+    # the symbol is hidden, the generated .config must come from Kconfig.
     cfg_text = cfg.read_text()
-    if "CONFIG_FORCE_MAX_ZONEORDER=9" not in cfg_text:
-        if "CONFIG_FORCE_MAX_ZONEORDER=11" not in cfg_text:
-            raise SystemExit("a52xq_defconfig: expected CONFIG_FORCE_MAX_ZONEORDER=11")
-        cfg.write_text(cfg_text.replace(
-            "CONFIG_FORCE_MAX_ZONEORDER=11",
-            "CONFIG_FORCE_MAX_ZONEORDER=9",
-            1,
-        ))
-        print(f"{cfg}: set CONFIG_FORCE_MAX_ZONEORDER=9")
-    else:
-        print(f"{cfg}: CONFIG_FORCE_MAX_ZONEORDER=9 already set")
+    if "CONFIG_FORCE_MAX_ZONEORDER=9\n" in cfg_text:
+        cfg.write_text(cfg_text.replace("CONFIG_FORCE_MAX_ZONEORDER=9\n", "", 1))
+        print(f"{cfg}: removed stale hidden FORCE_MAX_ZONEORDER override")
+    elif "CONFIG_FORCE_MAX_ZONEORDER=11\n" in cfg_text:
+        cfg.write_text(cfg_text.replace("CONFIG_FORCE_MAX_ZONEORDER=11\n", "", 1))
+        print(f"{cfg}: removed stale hidden FORCE_MAX_ZONEORDER override")
 
     replace_once(
         cma,
@@ -97,8 +116,10 @@ def main() -> None:
     )
 
     # Static postconditions.
-    if "CONFIG_FORCE_MAX_ZONEORDER=9" not in cfg.read_text():
-        raise SystemExit("P380 final config request missing")
+    if 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE)' not in kconfig.read_text():
+        raise SystemExit("P380 hidden Kconfig default missing")
+    if "CONFIG_FORCE_MAX_ZONEORDER=" in cfg.read_text():
+        raise SystemExit("P380 defconfig must not try to override hidden FORCE_MAX_ZONEORDER")
     if "A52 P380 CMA_GEOM" not in cma.read_text():
         raise SystemExit("P380 CMA marker missing")
     if "A52 P380 ION_DT_OK" not in ion.read_text():

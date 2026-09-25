@@ -1,0 +1,442 @@
+name: Phase378 - UFS completion flight recorder
+run-name: Phase378 - UFS completion flight recorder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/378-a52-ufs-completion-flight-recorder.yml
+      - scripts/360_apply_ufs_defer_pinpoint.py
+      - scripts/361_apply_ufs_platform_gate.py
+      - scripts/362_apply_ufs_qmp_flat_bridge.py
+      - scripts/363_remove_phase340_60s_reboot.py
+      - scripts/364_apply_apexd_syscall_ring.py
+      - scripts/365_apply_apexd_writev_futex.py
+      - scripts/366_apply_apexd_futex_threads.py
+      - scripts/367_apply_apexd_kernel_futex_wake.py
+      - scripts/368_apply_apexd_worker_syscall_map.py
+      - scripts/369_apply_post_apex_frontier.py
+      - scripts/370_apply_latest_apex_worker.py
+      - scripts/371_apply_thread_worker_state.py
+      - scripts/372_apply_future_worker_correlation.py
+      - scripts/373_apply_apex_mount_blocker.py
+      - scripts/377_apply_apexd_live_thread_census.py
+      - scripts/378_apply_ufs_completion_flight_recorder.py
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  JOBS: '4'
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase378-ufs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase378 UFS completion flight recorder
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/357_apply_init_exit_cause.py \
+            scripts/358_apply_pid1_syscall_trace.py \
+            scripts/359_apply_pid1_writev_payload.py \
+            scripts/360_apply_ufs_defer_pinpoint.py \
+            scripts/361_apply_ufs_platform_gate.py \
+            scripts/362_apply_ufs_qmp_flat_bridge.py \
+            scripts/363_remove_phase340_60s_reboot.py \
+            scripts/364_apply_apexd_syscall_ring.py \
+            scripts/365_apply_apexd_writev_futex.py \
+            scripts/366_apply_apexd_futex_threads.py \
+            scripts/367_apply_apexd_kernel_futex_wake.py \
+            scripts/368_apply_apexd_worker_syscall_map.py \
+            scripts/369_apply_post_apex_frontier.py \
+            scripts/370_apply_latest_apex_worker.py \
+            scripts/371_apply_thread_worker_state.py \
+            scripts/372_apply_future_worker_correlation.py \
+            scripts/373_apply_apex_mount_blocker.py \
+            scripts/377_apply_apexd_live_thread_census.py \
+            scripts/378_apply_ufs_completion_flight_recorder.py
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j"$JOBS" --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase345 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Build Phase346 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Validate Phase346 baseline
+        run: |
+          set -Eeuo pipefail
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/compile/Image
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+          grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' gki/common/kernel/exit.c
+
+      - name: Save Phase346 baseline cache v2
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Rebuild exact Phase357 baseline
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Reapply Phase358 and Phase359 source lineage
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Audit inherited UFS compatibility fixes
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+      - name: Apply Phase360 through Phase378 and compile
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase378-gki-out"
+
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT"
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT" --check-only
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT"
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT" --check-only
+          python3 scripts/362_apply_ufs_qmp_flat_bridge.py --root "$ROOT"
+          python3 scripts/362_apply_ufs_qmp_flat_bridge.py --root "$ROOT" --check-only
+          python3 scripts/363_remove_phase340_60s_reboot.py --root "$ROOT"
+          python3 scripts/363_remove_phase340_60s_reboot.py --root "$ROOT" --check-only
+          python3 scripts/364_apply_apexd_syscall_ring.py --root "$ROOT"
+          python3 scripts/364_apply_apexd_syscall_ring.py --root "$ROOT" --check-only
+          python3 scripts/365_apply_apexd_writev_futex.py --root "$ROOT"
+          python3 scripts/365_apply_apexd_writev_futex.py --root "$ROOT" --check-only
+          python3 scripts/366_apply_apexd_futex_threads.py --root "$ROOT"
+          python3 scripts/366_apply_apexd_futex_threads.py --root "$ROOT" --check-only
+          python3 scripts/367_apply_apexd_kernel_futex_wake.py --root "$ROOT"
+          python3 scripts/367_apply_apexd_kernel_futex_wake.py --root "$ROOT" --check-only
+          python3 scripts/368_apply_apexd_worker_syscall_map.py --root "$ROOT"
+          python3 scripts/368_apply_apexd_worker_syscall_map.py --root "$ROOT" --check-only
+          python3 scripts/369_apply_post_apex_frontier.py --root "$ROOT"
+          python3 scripts/369_apply_post_apex_frontier.py --root "$ROOT" --check-only
+          python3 scripts/370_apply_latest_apex_worker.py --root "$ROOT"
+          python3 scripts/370_apply_latest_apex_worker.py --root "$ROOT" --check-only
+          python3 scripts/371_apply_thread_worker_state.py --root "$ROOT"
+          python3 scripts/371_apply_thread_worker_state.py --root "$ROOT" --check-only
+          python3 scripts/372_apply_future_worker_correlation.py --root "$ROOT"
+          python3 scripts/372_apply_future_worker_correlation.py --root "$ROOT" --check-only
+          python3 scripts/373_apply_apex_mount_blocker.py --root "$ROOT"
+          python3 scripts/373_apply_apex_mount_blocker.py --root "$ROOT" --check-only
+          python3 scripts/377_apply_apexd_live_thread_census.py --root "$ROOT"
+          python3 scripts/377_apply_apexd_live_thread_census.py --root "$ROOT" --check-only
+          python3 scripts/378_apply_ufs_completion_flight_recorder.py --root "$ROOT"
+          python3 scripts/378_apply_ufs_completion_flight_recorder.py --root "$ROOT" --check-only
+
+          CORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          QCOM="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          DD="$ROOT/drivers/base/dd.c"
+          PHY="$ROOT/drivers/phy/qualcomm/phy-qcom-qmp.c"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          SYSCALL="$ROOT/arch/arm64/kernel/syscall.c"
+          FUTEX="$ROOT/kernel/futex/core.c"
+          [ -f "$FUTEX" ] || FUTEX="$ROOT/kernel/futex.c"
+          echo "Phase378 patchers passed check-only audits"
+          grep -Fq 'A52_PHASE362_UFS_QMP_FLAT_BRIDGE_V1' "$PHY"
+          grep -Fq 'qcom,ufs-phy-qmp-v3' "$PHY"
+          grep -Fq 'P362 FLAT_DETECTED children=0 phys=1' "$PHY"
+          grep -Fq 'qcom_qmp_phy_create_a52_flat' "$PHY"
+          grep -Fq 'A52_PHASE363_REMOVE_60S_REBOOT_V1' "$REC"
+          grep -Fq 'P276 340C t=60 continue=1' "$REC"
+          grep -Fq 'A52_PHASE364_APEXD_SYSCALL_RING_V1' "$SYSCALL"
+          grep -Fq 'A52_R364_SIDEBAND_PHYS    0xB1BF0000ULL' "$SYSCALL"
+          grep -Fq '!strncmp(current->comm, "apexd", TASK_COMM_LEN)' "$SYSCALL"
+          grep -Fq 'A52_PHASE365_APEXD_WRITEV_FUTEX_V1' "$SYSCALL"
+          grep -Fq 'A52_R365_SLOT_BYTES       1024U' "$SYSCALL"
+          grep -Fq 'A52_R365_PAYLOAD_BYTES    844U' "$SYSCALL"
+          grep -Fq 'A52_PHASE366_APEXD_FUTEX_THREADS_V1' "$SYSCALL"
+          grep -Fq 'A52_R366_RING_SLOTS         56U' "$SYSCALL"
+          grep -Fq 'A52_R366_LATCH_REPLICAS     8U' "$SYSCALL"
+          grep -Fq 'A52_PHASE367_APEXD_KERNEL_FUTEX_WAKE_V1' "$FUTEX"
+          grep -Fq 'A52_PHASE368_APEXD_WORKER_SYSCALL_MAP_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE369_POST_APEX_FRONTIER_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE370_LATEST_APEX_WORKER_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE371_THREAD_WORKER_STATE_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE372_FUTURE_WORKER_CORRELATION_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE373_APEX_MOUNT_BLOCKER_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1' "$SYSCALL"
+          grep -Fq 'A52_PHASE378_UFS_COMPLETION_FLIGHT_RECORDER_V1' "$CORE"
+          grep -Fq 'A52UFS378 SNAP' "$CORE"
+          grep -Fq 'atomic64_inc(&a52_r378_hook_done_count);' "$CORE"
+          ! grep -Fq 'late_initcall(a52_r373_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r372_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r371_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r370_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r369_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r368_init);' "$SYSCALL"
+          ! grep -Fq 'late_initcall(a52_r367_init);' "$FUTEX"
+          grep -Fq 'READ_ONCE(current->clear_child_tid)' "$FUTEX"
+          if ! git -C "$ROOT" diff --check; then
+            echo "WARNING: git diff --check reported formatting issues; continuing to compile"
+          fi
+
+          cp phase357-gki-out/config/final.config "$BUILD/.config"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          cmp -s phase357-gki-out/config/final.config "$BUILD/.config"
+          grep -Fxq 'CONFIG_PHY_QCOM_QMP=y' "$BUILD/.config"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          grep -aFq 'P360 c=1 QCOM stage=devm_phy_get' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=bus_probe_end' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=pm_activate' "$IMAGE"
+          grep -aFq 'P362 FLAT_DETECTED children=0 phys=1' "$IMAGE"
+          grep -aFq 'P362 FLAT_PROVIDER create_ret=%d' "$IMAGE"
+          grep -aFq 'P276 340C t=60 continue=1' "$IMAGE"
+          grep -aFq 'A52_PHASE364_APEXD_SYSCALL_RING_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE365_APEXD_WRITEV_FUTEX_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE366_APEXD_FUTEX_THREADS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE367_APEXD_KERNEL_FUTEX_WAKE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE368_APEXD_WORKER_SYSCALL_MAP_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE369_POST_APEX_FRONTIER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE370_LATEST_APEX_WORKER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE371_THREAD_WORKER_STATE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE372_FUTURE_WORKER_CORRELATION_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE373_APEX_MOUNT_BLOCKER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE378_UFS_COMPLETION_FLIGHT_RECORDER_V1' "$IMAGE"
+          grep -aFq 'A52UFS378 SNAP' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{package,compile,config,source,audit}
+          cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$FUTEX" "$OUT/source/"
+          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py "$OUT/audit/"
+          cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
+
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source phase357-gki-out/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
+
+          cat > "$OUT/PHASE378-SCHEMA.txt" <<'SCHEMA'
+          Phase378 UFS completion flight recorder
+          ========================================
+          Runtime lineage: exact Phase377 source plus Phase378 UFS-only diagnostics.
+
+          Phase377 hardware result
+          ------------------------
+          - an apexd worker was captured in TASK_UNINTERRUPTIBLE
+          - wchan: wait_on_page_read()
+          - upper page-read / EROFS / block read paths match TouchGrass closely
+          - Qualcomm reports UFSHCI 2.0, so the UTRLCNR completion mode is not used
+
+          Phase378 discriminator
+          ----------------------
+          The UFS hot path is behaviorally unchanged. IRQ-side instrumentation only
+          increments counters and stores last-event state. Process-context snapshots
+          are emitted near 18, 19, 20, 25 and 35 seconds.
+
+          Interpret the persistent A52UFS378 records as follows:
+
+          1. Hardware / PHY / power-side pending request:
+             TAG has out=1 and/or db=1 with growing age_ms.
+
+          2. Vendor-hook short circuit:
+             COUNT hook > 0 and a TAG remains cmd!=NULL with out=0, db=0,
+             reported as ghost=1. This matches the early return after
+             trace_android_vh_ufs_compl_rsp_check_done() and before scsi_done().
+
+          3. Frontier below UFS/SCSI:
+             no aged pending tags, hook=0, ghost=0 while the Phase377 census still
+             catches wait_on_page_read(). Continue into SCSI/block/bio/page unlock.
+
+          No UFS power policy, clock policy, doorbell handling, hook return value,
+          command result, or scsi_done behavior is changed by this phase.
+          SCHEMA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          r=Path('phase378-gki-out')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          audit={}
+          for line in (r/'audit/phase377-inherited-ufs-audit.txt').read_text().splitlines():
+              if '=' in line:
+                  k,v=line.split('=',1); audit[k]=v
+          ident={
+              'phase':'378',
+              'name':'UFS-COMPLETION-FLIGHT-RECORDER-V1',
+              'base_phase':'357',
+              'source_lineage':['357','358','359','360','361','362','363','364','365','366','367','368','369','370','371','372','373','377','378'],
+              'hardware_validated':False,
+              'boot_img_size':(r/'package/boot.img').stat().st_size,
+              'boot_img_sha256':sha(r/'package/boot.img'),
+              'image_sha256':sha(r/'compile/Image'),
+              'inherited_ufs_compatibility':audit,
+              'git_sha':os.getenv('GITHUB_SHA'),
+          }
+          (r/'BUILD-IDENTITY.json').write_text(json.dumps(ident,indent=2,sort_keys=True)+'\n')
+          PY
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase378
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE378-UFS-COMPLETION-FLIGHT-RECORDER-${{ github.run_number }}
+          path: phase378-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE378-UFS-COMPLETION-FLIGHT-RECORDER-${{ github.run_number }}-BOOT-IMG
+          path: phase378-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

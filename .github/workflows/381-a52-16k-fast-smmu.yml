@@ -63,7 +63,7 @@ jobs:
           key: a52xq-phase381-16k-fast-smmu-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-phase381-16k-fast-smmu-${{ runner.os }}-
-            a52xq-phase381-16k-cma-${{ runner.os }}-
+            a52xq-phase380-16k-cma-${{ runner.os }}-
             a52xq-phase379-16k-census-${{ runner.os }}-
             a52xq-phase378-16k-${{ runner.os }}-
             a52xq-p152-boot-async-${{ runner.os }}-
@@ -471,7 +471,7 @@ jobs:
           git -C "$KERNEL" diff -- fs/exec.c fs/binfmt_elf.c fs/pstore/ram.c \
             > artifacts/phase379-boot-census.diff
 
-      - name: Apply Phase381 16K CMA pageblock compatibility
+      - name: Apply retained Phase380 16K CMA pageblock compatibility
         run: |
           set -Eeuo pipefail
 
@@ -487,12 +487,10 @@ jobs:
           CFG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
           KCFG="$KERNEL/arch/arm64/Kconfig"
 
-          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE) # A52 P381: keep 4MiB physical pageblocks' "$KCFG"
+          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE) # A52 P380: keep 4MiB physical pageblocks' "$KCFG"
           ! grep -Eq '^CONFIG_FORCE_MAX_ZONEORDER=' "$CFG"
           grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
           grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
-          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
-          grep -Fq '#define FAST_PAGE_MASK (~(FAST_PAGE_SIZE - 1))' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
           grep -Fq 'A52 P380 ION_DT_FAIL:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
 
           python3 - <<'PY'
@@ -500,7 +498,7 @@ jobs:
           max_order = 9
           physical = page_size << (max_order - 1)
           assert physical == 4 * 1024 * 1024, physical
-          print(f"P381 physical MAX_ORDER/pageblock target: {physical // 1024 // 1024} MiB")
+          print(f"P380 physical MAX_ORDER/pageblock target: {physical // 1024 // 1024} MiB")
           PY
 
           git -C "$KERNEL" diff --check
@@ -699,7 +697,7 @@ jobs:
 
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p381.sh
 
-          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P381-CMA-PAGEBLOCK/'             scripts/.package-p381.sh
+          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P381-FAST-SMMU/'             scripts/.package-p381.sh
 
           sed -i             's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P381-P152-16K-FAST-SMMU.zip/'             scripts/.package-p381.sh
 
@@ -707,18 +705,19 @@ jobs:
           ./scripts/.package-p381.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p381.sh
 
-          cat > release/PHASE380-READ-ME-FIRST.txt <<'EOF'
-          A52 PHASE 380 - NATIVE 16K CMA/PAGEBLOCK FIX
+          cat > release/PHASE381-READ-ME-FIRST.txt <<'EOF'
+          A52 PHASE 381 - NATIVE 16K FAST-SMMU FIX
 
           Baseline: P152 / run 36058491006.
           Kernel: native ARM64 16 KiB pages, PAGE_SHIFT=14, VA_BITS=47.
           IncFS: Android 16K compatibility backport applied.
           Userspace/UN1CA: unchanged and still expected to advertise 4K initially.
 
-          Phase 380 preserves the original 4 MiB physical buddy/CMA pageblock
-          granularity while using native 16 KiB pages by setting MAX_ORDER=9.
-          This is intended to restore the downstream lagoon QSEECOM / secure
-          display / ADSP / CMA reserved-memory geometry without changing DT sizes.
+          Phase 380 CMA/pageblock compatibility is retained.
+
+          Phase 381 separates the Qualcomm fast-SMMU hardware granule (4 KiB)
+          from the Linux CPU page size (16 KiB). IOVA/PTE math remains 4 KiB,
+          while CPU backing allocation/remap/free counts use PAGE_SIZE.
 
           Phase 379 exec/ELF census diagnostics and the ~12 second snapshot are
           retained. UN1CA/userspace remains untouched. Keep the known-good P152
@@ -743,12 +742,15 @@ jobs:
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
           grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
           grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
+          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq '#define FAST_PAGE_MASK (~(FAST_PAGE_SIZE - 1))' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'size_t count = PAGE_ALIGN(size) >> PAGE_SHIFT' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
           grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P381-CMA-PAGEBLOCK'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P381-FAST-SMMU'
 
           cp "$CFG" artifacts/phase381-final.config
           sha256sum "$ZIP" | tee artifacts/phase381-package-sha256.txt
@@ -789,10 +791,10 @@ jobs:
           path: .ccache
           key: a52xq-phase381-16k-cma-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload Phase381 CMA/pageblock package
+      - name: Upload Phase381 fast-SMMU package
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE380-P152-BASE36058491006-16K-FAST-SMMU-${{ github.run_number }}
+          name: A52XQ-PHASE381-P152-BASE36058491006-16K-FAST-SMMU-${{ github.run_number }}
           path: |
             release/
             artifacts/phase381-final.config
@@ -817,7 +819,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE380-16K-FAST-SMMU-FAILED-${{ github.run_number }}
+          name: A52XQ-PHASE381-16K-FAST-SMMU-FAILED-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30

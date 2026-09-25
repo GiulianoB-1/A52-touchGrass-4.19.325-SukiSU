@@ -123,16 +123,24 @@ static bool a52_ramoops_boot_hold_active(void)
 
     replace_once(
         exec_c,
-        '''\tif (displaced)
+        '''\tfree_bprm(bprm);
+\tkfree(pathbuf);
+\tif (filename)
+\t\tputname(filename);
+\tif (displaced)
 \t\tput_files_struct(displaced);
 \treturn retval;
 
 out:
 ''',
-        '''\tif (displaced)
-\t\tput_files_struct(displaced);
+        '''\tfree_bprm(bprm);
+\tkfree(pathbuf);
 \tpr_info("A52 P379 EXEC_OK: pid=%d comm=%s file=%s rc=%d\\n",
 \t\tcurrent->pid, current->comm, a52_p379_name, retval);
+\tif (filename)
+\t\tputname(filename);
+\tif (displaced)
+\t\tput_files_struct(displaced);
 \treturn retval;
 
 out:

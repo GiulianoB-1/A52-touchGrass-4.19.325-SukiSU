@@ -140,7 +140,7 @@ void blk_mq_freeze_queue_wait(struct request_queue *q)
 \t\t\t\t  q->mq_freeze_depth);
 }
 '''
-    new = r'''/* A52_PHASE384_FREEZE_WAIT_HEARTBEAT_V1 */
+    new = '''/* A52_PHASE384_FREEZE_WAIT_HEARTBEAT_V1 */
 /* A52_PHASE385_FREEZE_OBSERVER_V1
  *
  * Restore the original wait_event semantics. Phase384's timeout wakeups could

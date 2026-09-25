@@ -62,7 +62,7 @@ jobs:
           key: a52xq-phase380-16k-cma-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-phase380-16k-cma-${{ runner.os }}-
-            a52xq-phase380-16k-census-${{ runner.os }}-
+            a52xq-phase379-16k-census-${{ runner.os }}-
             a52xq-phase378-16k-${{ runner.os }}-
             a52xq-p152-boot-async-${{ runner.os }}-
             a52xq-p150-aod-power-${{ runner.os }}-
@@ -445,7 +445,7 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
 
-      - name: Apply Phase380 early 16K boot census diagnostics
+      - name: Apply retained Phase379 early 16K boot census diagnostics
         run: |
           set -Eeuo pipefail
 
@@ -664,7 +664,7 @@ jobs:
 
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p380.sh
 
-          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P380-BOOT-CENSUS/'             scripts/.package-p380.sh
+          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P380-CMA-PAGEBLOCK/'             scripts/.package-p380.sh
 
           sed -i             's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P380-P152-16K-CMA-PAGEBLOCK.zip/'             scripts/.package-p380.sh
 
@@ -672,8 +672,8 @@ jobs:
           ./scripts/.package-p380.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p380.sh
 
-          cat > release/PHASE379-READ-ME-FIRST.txt <<'EOF'
-          A52 PHASE 379 - NATIVE 16K EARLY BOOT CENSUS
+          cat > release/PHASE380-READ-ME-FIRST.txt <<'EOF'
+          A52 PHASE 380 - NATIVE 16K CMA/PAGEBLOCK FIX
 
           Baseline: P152 / run 36058491006.
           Kernel: native ARM64 16 KiB pages, PAGE_SHIFT=14, VA_BITS=47.
@@ -703,13 +703,17 @@ jobs:
           grep -Fxq 'CONFIG_ARM64_VA_BITS_47=y' "$CFG"
           grep -Fxq 'CONFIG_ARM64_VA_BITS=47' "$CFG"
           grep -Fxq 'CONFIG_PGTABLE_LEVELS=3' "$CFG"
+          grep -Fxq 'CONFIG_FORCE_MAX_ZONEORDER=9' "$CFG"
+          grep -Fxq 'CONFIG_CMA_ALIGNMENT=8' "$CFG"
           grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
           grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P380-BOOT-CENSUS'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P380-CMA-PAGEBLOCK'
 
           cp "$CFG" artifacts/phase380-final.config
           sha256sum "$ZIP" | tee artifacts/phase380-package-sha256.txt
@@ -734,6 +738,7 @@ jobs:
             echo "phase380_force_max_zoneorder=9"
             echo "phase380_physical_pageblock_bytes=4194304"
             echo "phase380_cma_alignment_order=8"
+            echo "phase380_required_cma_align_bytes=4194304"
             echo "prepared_16k_cache_hit=${{ steps.p152_16k_source.outputs.cache-hit }}"
             echo "compiler_cache_hit=${{ steps.ccache_restore.outputs.cache-hit }}"
           } > artifacts/phase380-metadata.txt
@@ -745,10 +750,10 @@ jobs:
           path: .ccache
           key: a52xq-phase380-16k-cma-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload Phase380 boot-census package
+      - name: Upload Phase380 CMA/pageblock package
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE379-P152-BASE36058491006-16K-CMA-PAGEBLOCK-${{ github.run_number }}
+          name: A52XQ-PHASE380-P152-BASE36058491006-16K-CMA-PAGEBLOCK-${{ github.run_number }}
           path: |
             release/
             artifacts/phase380-final.config
@@ -771,7 +776,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE379-16K-CMA-PAGEBLOCK-FAILED-${{ github.run_number }}
+          name: A52XQ-PHASE380-16K-CMA-PAGEBLOCK-FAILED-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30

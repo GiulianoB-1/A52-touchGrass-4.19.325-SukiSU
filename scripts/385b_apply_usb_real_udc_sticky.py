@@ -98,7 +98,14 @@ struct a52_r385_fixed {
 
 static void *a52_r385_fixed_base;
 static DEFINE_SPINLOCK(a52_r385_fixed_lock);
-static struct a52_r385_fixed a52_r385_fixed_state;
+static struct a52_r385_fixed a52_r385_fixed_state = {
+	.usb_diag = { -9999, -9999, -9999, -9999, -9999,
+		      -9999, -9999, -9999, -9999 },
+	.udc = "-",
+	.gadget = "-",
+	.parent = "-",
+	.driver = "-",
+};
 
 static u32 a52_r385_fixed_crc32c(const void *buffer, size_t len)
 {
@@ -242,21 +249,12 @@ EXPORT_SYMBOL_GPL(a52_ackfr_sticky385_ofsimple);
 
 static int __init a52_r385_fixed_init(void)
 {
-	unsigned int i;
-
 	BUILD_BUG_ON(sizeof(struct a52_r385_fixed) != A52_R385_FIXED_COPY_BYTES);
 	a52_r385_fixed_base = memremap(A52_R385_FIXED_PHYS,
 		A52_R385_FIXED_BYTES, MEMREMAP_WB);
 	if (!a52_r385_fixed_base)
 		return 0;
 
-	memset(&a52_r385_fixed_state, 0, sizeof(a52_r385_fixed_state));
-	for (i = 0; i < ARRAY_SIZE(a52_r385_fixed_state.usb_diag); i++)
-		a52_r385_fixed_state.usb_diag[i] = -9999;
-	strscpy(a52_r385_fixed_state.udc, "-", sizeof(a52_r385_fixed_state.udc));
-	strscpy(a52_r385_fixed_state.gadget, "-", sizeof(a52_r385_fixed_state.gadget));
-	strscpy(a52_r385_fixed_state.parent, "-", sizeof(a52_r385_fixed_state.parent));
-	strscpy(a52_r385_fixed_state.driver, "-", sizeof(a52_r385_fixed_state.driver));
 	memset(a52_r385_fixed_base, 0, A52_R385_FIXED_BYTES);
 	wmb();
 	__flush_dcache_area(a52_r385_fixed_base, A52_R385_FIXED_BYTES);

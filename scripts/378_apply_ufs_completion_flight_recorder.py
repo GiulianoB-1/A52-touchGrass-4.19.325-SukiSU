@@ -153,7 +153,7 @@ static void a52_r378_start_snapshots(struct ufs_hba *hba)
 	a52_r378_work_ready = true;
 	a52_r378_snap_index = 0;
 	a52_persistent_diag_mark(
-		"A52UFS378 READY t_ms=%llu nutrs=%d ufs_version=0x%x\n",
+		"A52UFS378 READY t_ms=%llu nutrs=%u ufs_version=0x%x\n",
 		(unsigned long long)div_u64(ktime_get_boottime_ns(), NSEC_PER_MSEC),
 		hba->nutrs, hba->ufs_version);
 	a52_r378_schedule_next();

@@ -61,7 +61,7 @@ jobs:
           key: a52xq-phase379-16k-census-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-phase379-16k-census-${{ runner.os }}-
-            a52xq-phase379-16k-${{ runner.os }}-
+            a52xq-phase378-16k-${{ runner.os }}-
             a52xq-p152-boot-async-${{ runner.os }}-
             a52xq-p150-aod-power-${{ runner.os }}-
             a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-
@@ -631,8 +631,8 @@ jobs:
           ./scripts/.package-p379.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p379.sh
 
-          cat > release/PHASE378-READ-ME-FIRST.txt <<'EOF'
-          A52 PHASE 378 - NATIVE 16K EARLY BOOT CENSUS
+          cat > release/PHASE379-READ-ME-FIRST.txt <<'EOF'
+          A52 PHASE 379 - NATIVE 16K EARLY BOOT CENSUS
 
           Baseline: P152 / run 36058491006.
           Kernel: native ARM64 16 KiB pages, PAGE_SHIFT=14, VA_BITS=47.
@@ -700,10 +700,10 @@ jobs:
           path: .ccache
           key: a52xq-phase379-16k-census-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload Phase379 first-boot package
+      - name: Upload Phase379 boot-census package
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE378-P152-BASE36058491006-16K-BOOT-CENSUS-${{ github.run_number }}
+          name: A52XQ-PHASE379-P152-BASE36058491006-16K-BOOT-CENSUS-${{ github.run_number }}
           path: |
             release/
             artifacts/phase379-final.config
@@ -724,7 +724,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE378-16K-BOOT-CENSUS-FAILED-${{ github.run_number }}
+          name: A52XQ-PHASE379-16K-BOOT-CENSUS-FAILED-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30

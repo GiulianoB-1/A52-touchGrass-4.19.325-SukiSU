@@ -11,6 +11,7 @@ UFS = Path("drivers/scsi/ufs/ufshcd.c")
 SERIAL = Path("drivers/usb/gadget/legacy/serial.c")
 UDC = Path("drivers/usb/gadget/udc/core.c")
 DWC3 = Path("drivers/usb/dwc3/gadget.c")
+DWC3CORE = Path("drivers/usb/dwc3/core.c")
 
 
 def one(text: str, old: str, new: str, label: str) -> str:
@@ -174,6 +175,71 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver)
     return text
 
 
+def patch_dwc3_core(text: str) -> str:
+    if "A52_PHASE381_DWC3_MODE_TRACE_V1" in text:
+        return text
+    text = add_recorder_include(text, "#include <linux/usb/otg.h>\n", "DWC3 core include")
+
+    old = '''\tmode = dwc->dr_mode;
+\thw_mode = DWC3_GHWPARAMS0_MODE(dwc->hwparams.hwparams0);
+
+'''
+    new = '''\tmode = dwc->dr_mode;
+\thw_mode = DWC3_GHWPARAMS0_MODE(dwc->hwparams.hwparams0);
+
+\t/* A52_PHASE381_DWC3_MODE_TRACE_V1 */
+\ta52_ackfr_record("V381 MODE in dr=%u hw=%u host=%u gad=%u dual=%u",
+\t\t\t  dwc->dr_mode, hw_mode,
+\t\t\t  IS_ENABLED(CONFIG_USB_DWC3_HOST),
+\t\t\t  IS_ENABLED(CONFIG_USB_DWC3_GADGET),
+\t\t\t  IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE));
+'''
+    text = one(text, old, new, "DWC3 get_dr_mode input")
+
+    old = '''\tif (mode != dwc->dr_mode) {
+\t\tdev_warn(dev,
+\t\t\t "Configuration mismatch. dr_mode forced to %s\\n",
+\t\t\t mode == USB_DR_MODE_HOST ? "host" : "gadget");
+
+\t\tdwc->dr_mode = mode;
+\t}
+
+\treturn 0;
+}
+'''
+    new = '''\tif (mode != dwc->dr_mode) {
+\t\tdev_warn(dev,
+\t\t\t "Configuration mismatch. dr_mode forced to %s\\n",
+\t\t\t mode == USB_DR_MODE_HOST ? "host" : "gadget");
+
+\t\tdwc->dr_mode = mode;
+\t}
+\ta52_ackfr_record("V381 MODE out dr=%u hw=%u", dwc->dr_mode, hw_mode);
+
+\treturn 0;
+}
+'''
+    text = one(text, old, new, "DWC3 get_dr_mode output")
+
+    old = '''static int dwc3_core_init_mode(struct dwc3 *dwc)
+{
+\tstruct device *dev = dwc->dev;
+\tint ret;
+
+\tswitch (dwc->dr_mode) {
+'''
+    new = '''static int dwc3_core_init_mode(struct dwc3 *dwc)
+{
+\tstruct device *dev = dwc->dev;
+\tint ret;
+
+\ta52_ackfr_record("V381 CORE init_mode dr=%u", dwc->dr_mode);
+\tswitch (dwc->dr_mode) {
+'''
+    text = one(text, old, new, "DWC3 core init branch")
+    return text
+
+
 def patch_dwc3(text: str) -> str:
     if "A52_PHASE381_DWC3_GADGET_TRACE_V1" in text:
         return text
@@ -243,6 +309,7 @@ def validate(root: Path) -> None:
         SERIAL: ("A52_PHASE381_GSERIAL_BIND_TRACE_V1", "V381 GS composite_probe"),
         UDC: ("A52_PHASE381_UDC_CORE_TRACE_V1", "V381 UDC bind ret="),
         DWC3: ("A52_PHASE381_DWC3_GADGET_TRACE_V1", "V381 DWC3 add_gadget ret="),
+        DWC3CORE: ("A52_PHASE381_DWC3_MODE_TRACE_V1", "V381 CORE init_mode dr="),
     }
     for rel, tokens in checks.items():
         data = (root / rel).read_text(encoding="utf-8")
@@ -252,7 +319,7 @@ def validate(root: Path) -> None:
 
 
 def run(root: Path) -> None:
-    paths = (REC, UFS, SERIAL, UDC, DWC3)
+    paths = (REC, UFS, SERIAL, UDC, DWC3, DWC3CORE)
     for rel in paths:
         if not (root / rel).is_file():
             raise SystemExit(f"Phase381 missing source: {rel}")
@@ -267,6 +334,8 @@ def run(root: Path) -> None:
     p.write_text(patch_udc(p.read_text()), encoding="utf-8")
     p = root / DWC3
     p.write_text(patch_dwc3(p.read_text()), encoding="utf-8")
+    p = root / DWC3CORE
+    p.write_text(patch_dwc3_core(p.read_text()), encoding="utf-8")
     validate(root)
 
 

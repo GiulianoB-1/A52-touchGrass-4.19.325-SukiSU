@@ -11,6 +11,7 @@ UFS = Path("drivers/scsi/ufs/ufshcd.c")
 BLK = Path("block/blk-mq.c")
 LOOP = Path("drivers/block/loop.c")
 USB = Path("drivers/usb/gadget/function/u_serial.c")
+SYSCALL = Path("arch/arm64/kernel/syscall.c")
 
 
 def one(text: str, old: str, new: str, label: str) -> str:
@@ -81,7 +82,8 @@ def patch_recorder(text: str) -> str:
 \t       !strncmp(message, "U380 ", 5) ||
 \t       !strncmp(message, "B380 ", 5) ||
 \t       !strncmp(message, "L380 ", 5) ||
-\t       !strncmp(message, "USB380 ", 7);
+\t       !strncmp(message, "USB380 ", 7) ||
+\t       !strncmp(message, "V380 ", 5);
 """
     text = one(text, crit_old, crit_new, "critical Phase380 prefixes")
     return text
@@ -677,12 +679,179 @@ struct gs_console {
     return text
 
 
+
+VDC_BLOCK = r'''
+/* A52_PHASE380_VDC_LIVE_CENSUS_V1
+ *
+ * The Phase379 hardware capture changed the live frontier: all observed
+ * apexd processes exited by ~12.85 s, while the third /system/bin/vdc
+ * instance exec'd at ~16.48 s and had no exit record before the protected
+ * stream ended at ~17.345 s. Retire the now-obsolete Phase377 apexd census
+ * and sample the latest live vdc task from a dedicated kthread.
+ *
+ * Records go through a52_ackfr_record(), so they inherit the main recorder's
+ * RS48 + CRC32C + three-bank persistence.
+ */
+#define A52_R380_VDC_SNAPSHOT_COUNT 6U
+#define A52_R380_VDC_STACK_ENTRIES  8U
+
+static const u32 a52_r380_vdc_target_ms[A52_R380_VDC_SNAPSHOT_COUNT] = {
+	16600U, 17000U, 17500U, 18000U, 20000U, 25000U,
+};
+static struct task_struct *a52_r380_vdc_sampler_task;
+
+static struct task_struct *a52_r380_get_latest_vdc(void)
+{
+	struct task_struct *g;
+	struct task_struct *best = NULL;
+	pid_t best_pid = 0;
+	char comm[TASK_COMM_LEN];
+
+	rcu_read_lock();
+	for_each_process(g) {
+		if (g->pid != g->tgid)
+			continue;
+		get_task_comm(comm, g);
+		if (strncmp(comm, "vdc", TASK_COMM_LEN))
+			continue;
+		if (g->pid <= best_pid)
+			continue;
+		best = g;
+		best_pid = g->pid;
+	}
+	if (best)
+		get_task_struct(best);
+	rcu_read_unlock();
+	return best;
+}
+
+static void a52_r380_vdc_snapshot(unsigned int snapshot_id)
+{
+	struct task_struct *p;
+	struct pt_regs *regs;
+	unsigned long stack[A52_R380_VDC_STACK_ENTRIES];
+	char sym[KSYM_SYMBOL_LEN];
+	unsigned int nr = 0;
+	unsigned int i;
+	unsigned long wchan;
+	u64 user_pc = 0, user_lr = 0, user_sp = 0;
+
+	p = a52_r380_get_latest_vdc();
+	if (!p) {
+		a52_ackfr_record("V380 S%u none", snapshot_id);
+		return;
+	}
+
+	wchan = get_wchan(p);
+	if (try_get_task_stack(p)) {
+		nr = stack_trace_save_tsk(p, stack,
+			A52_R380_VDC_STACK_ENTRIES, 0);
+		if (p->mm) {
+			regs = task_pt_regs(p);
+			user_pc = READ_ONCE(regs->pc);
+			user_lr = READ_ONCE(regs->regs[30]);
+			user_sp = READ_ONCE(regs->sp);
+		}
+		put_task_stack(p);
+	}
+
+	if (wchan) {
+		sprint_symbol(sym, wchan);
+		a52_ackfr_record("V380 S%u p=%d st=%lx cpu=%u rq=%u w=%s",
+			snapshot_id, p->pid, READ_ONCE(p->state),
+			(unsigned int)task_cpu(p), (unsigned int)READ_ONCE(p->on_rq),
+			sym);
+	} else {
+		a52_ackfr_record("V380 S%u p=%d st=%lx cpu=%u rq=%u w=0",
+			snapshot_id, p->pid, READ_ONCE(p->state),
+			(unsigned int)task_cpu(p), (unsigned int)READ_ONCE(p->on_rq));
+	}
+
+	a52_ackfr_record("V380 U%u p=%d pc=%llx lr=%llx sp=%llx nr=%u",
+		snapshot_id, p->pid,
+		(unsigned long long)user_pc, (unsigned long long)user_lr,
+		(unsigned long long)user_sp, nr);
+
+	for (i = 0; i < nr; i++) {
+		sprint_symbol(sym, stack[i]);
+		a52_ackfr_record("V380 K%u p=%d i=%u %s",
+			snapshot_id, p->pid, i, sym);
+	}
+
+	put_task_struct(p);
+}
+
+static int a52_r380_vdc_sampler_fn(void *unused)
+{
+	unsigned int next = 0;
+	u64 now_ms;
+
+	(void)unused;
+	while (!kthread_should_stop() && next < A52_R380_VDC_SNAPSHOT_COUNT) {
+		now_ms = div_u64(ktime_get_boottime_ns(), NSEC_PER_MSEC);
+		if (now_ms >= a52_r380_vdc_target_ms[next]) {
+			a52_r380_vdc_snapshot(next);
+			next++;
+			continue;
+		}
+		if (msleep_interruptible(10) && kthread_should_stop())
+			break;
+	}
+	return 0;
+}
+
+static int __init a52_r380_vdc_init(void)
+{
+	a52_ackfr_record("V380 READY targets=16600,17000,17500,18000,20000,25000");
+	a52_r380_vdc_sampler_task =
+		kthread_run(a52_r380_vdc_sampler_fn, NULL, "a52_r380_vdc");
+	if (IS_ERR(a52_r380_vdc_sampler_task)) {
+		a52_ackfr_record("V380 kthread_err=%ld",
+			PTR_ERR(a52_r380_vdc_sampler_task));
+		a52_r380_vdc_sampler_task = NULL;
+	}
+	return 0;
+}
+late_initcall(a52_r380_vdc_init);
+
+'''
+
+
+def patch_syscall(text: str) -> str:
+    if "A52_PHASE380_VDC_LIVE_CENSUS_V1" in text:
+        return text
+    if "A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1" not in text:
+        raise SystemExit("Phase380 VDC census requires Phase377 lineage")
+
+    inc = "#include <linux/a52_ack_secure_flight_recorder.h>\\n"
+    if inc not in text:
+        anchor = "#include <linux/rcupdate.h>\\n"
+        text = one(text, anchor, anchor + inc, "vdc recorder include")
+
+    text = one(
+        text,
+        "static int __init a52_r377_init(void)\\n",
+        "static int __init __used a52_r377_init(void)\\n",
+        "retire Phase377 init",
+    )
+    text = one(
+        text,
+        "late_initcall(a52_r377_init);\\n",
+        "/* Phase380 replaces the Phase377 apexd census at runtime. */\\n",
+        "disable Phase377 sampler",
+    )
+
+    anchor = "static int __init __used a52_r377_init(void)\\n"
+    text = one(text, anchor, VDC_BLOCK + anchor, "Phase380 VDC census")
+    return text
+
 def validate(root: Path) -> None:
     rec = (root / REC).read_text(encoding="utf-8")
     ufs = (root / UFS).read_text(encoding="utf-8")
     blk = (root / BLK).read_text(encoding="utf-8")
     loop = (root / LOOP).read_text(encoding="utf-8")
     usb = (root / USB).read_text(encoding="utf-8")
+    syscall = (root / SYSCALL).read_text(encoding="utf-8")
 
     checks = (
         ("recorder legacy retired", "A52_PHASE380_LEGACY_PROBES_RETIRED_V1" in rec),
@@ -704,6 +873,11 @@ def validate(root: Path) -> None:
         ("USB 256K FIFO", "#define GS_CONSOLE_BUF_SIZE\t(256 * 1024)" in usb),
         ("USB no console system_wq", "schedule_work(&cons->work);" not in usb),
         ("USB dedicated thread", '"a52_usb_console"' in usb),
+        ("VDC census", "A52_PHASE380_VDC_LIVE_CENSUS_V1" in syscall),
+        ("VDC dedicated thread", '"a52_r380_vdc"' in syscall),
+        ("Phase377 runtime census retired",
+         "late_initcall(a52_r377_init);" not in syscall),
+        ("VDC early snapshot", "16600U, 17000U, 17500U" in syscall),
     )
     bad = [name for name, ok in checks if not ok]
     if bad:
@@ -718,7 +892,7 @@ def validate(root: Path) -> None:
 
 
 def apply(root: Path) -> None:
-    paths = [REC, UFS, BLK, LOOP, USB]
+    paths = [REC, UFS, BLK, LOOP, USB, SYSCALL]
     for p in paths:
         if not (root / p).is_file():
             raise SystemExit(f"Phase380 required source missing: {p}")
@@ -733,6 +907,9 @@ def apply(root: Path) -> None:
                              encoding="utf-8")
     (root / USB).write_text(patch_usb((root / USB).read_text(encoding="utf-8")),
                             encoding="utf-8")
+    (root / SYSCALL).write_text(
+        patch_syscall((root / SYSCALL).read_text(encoding="utf-8")),
+        encoding="utf-8")
     validate(root)
 
 

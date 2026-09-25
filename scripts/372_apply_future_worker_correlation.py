@@ -416,8 +416,6 @@ static void a52_r372_worker_return(struct pt_regs *regs, int scno)
 
 static int __init a52_r372_init(void)
 {
-	unsigned int i;
-
 	BUILD_BUG_ON(sizeof(struct a52_r372_record) != A52_R372_SLOT_BYTES);
 	BUILD_BUG_ON(A52_R372_SLOTS_PER_COPY * A52_R372_SLOT_BYTES !=
 		     A52_R372_COPY_BYTES);

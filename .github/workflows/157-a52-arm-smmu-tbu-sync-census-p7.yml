@@ -603,7 +603,6 @@ jobs:
             artifacts/probe-census-p155.diff
             artifacts/probe-census-early-p156.txt
             artifacts/probe-census-early-p156.diff
-            artifacts/probe-census-p156-audit.txt
             artifacts/arm-smmu-tbu-sync-p157.txt
             artifacts/arm-smmu-tbu-sync-p157.diff
             artifacts/probe-census-p157-audit.txt

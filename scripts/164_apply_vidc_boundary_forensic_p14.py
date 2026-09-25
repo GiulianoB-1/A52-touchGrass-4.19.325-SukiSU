@@ -195,7 +195,7 @@ static bool a52_p164_is_vidc(struct device *dev, struct device_driver *drv)
         raise SystemExit(f"P164 failed anchor count={dd_s.count(failed_anchor)}")
     dd_s = dd_s.replace(failed_anchor, failed_repl, 1)
 
-    checkpoint_anchor = '''	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_END t_ms=%u ok=%u running=%u fail=%u defer=%u reject=%u overflow=%u probe_count=%d\\n",
+    checkpoint_anchor = r'''	pr_emerg("A52_PROBE_CENSUS CHECKPOINT_END t_ms=%u ok=%u running=%u fail=%u defer=%u reject=%u overflow=%u probe_count=%d\\n",
 		 elapsed_ms, ok, running, fail, defer, reject, overflow,
 		 atomic_read(&probe_count));
 '''

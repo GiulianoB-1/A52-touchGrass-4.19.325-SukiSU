@@ -1,0 +1,560 @@
+name: 154 - A52 Global Async + Camera Providers Sync P4
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/154-a52-global-async-camera-providers-sync-p4.yml
+      - scripts/150_apply_aod_power_saver_p1.py
+      - scripts/151_apply_boot_async_deferred_init_p1.py
+      - scripts/152_apply_boot_async_peripherals_p2.py
+      - scripts/153_apply_global_async_probe_p3.py
+      - scripts/154_force_camera_providers_sync_p4.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-global-async-camera-sync-p154-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P150_BASELINE_SHA: 763a272cba83463fc495b3787812a1e78157250f
+  P150_BASELINE_RUN: '36054686392'
+
+jobs:
+  build:
+    name: Build P153 global async + camera provider sync P154
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P150 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P150_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-p154-camera-provider-sync-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-p153-global-async-${{ runner.os }}-
+            a52xq-p152-boot-async-${{ runner.os }}-
+            a52xq-p150-aod-power-${{ runner.os }}-
+            a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-
+            a52xq-p148-qcom-battery-${{ runner.os }}-
+            a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
+            a52xq-f2fs325-p1-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Restore exact 35461116688 pre-build source on P134 miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Restore exact 35196552336 prepared source on deeper cache miss
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        id: base351_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
+
+      - name: Restore Linux stable checkpoint cache
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        id: stable_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/linux-stable-checkpoint-cache
+          key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release workspace
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          ./scripts/84_apply_android17_binder_alloc.sh
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_a619_gpu_modernization.py workspace/touchgrass-a52xq
+          python3 scripts/87_apply_a619_gpu_modernization_p2.py workspace/touchgrass-a52xq
+          python3 scripts/90_apply_a619_gpu_modernization_p3.py workspace/touchgrass-a52xq
+          python3 scripts/91_apply_a619_gpu_modernization_p4.py workspace/touchgrass-a52xq
+          python3 scripts/94_apply_a619_gpu_modernization_p5.py workspace/touchgrass-a52xq
+
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq
+
+          python3 scripts/98_apply_fuse_passthrough_modern_p1.py workspace/touchgrass-a52xq
+          python3 scripts/99_apply_fuse_passthrough_modern_p2.py workspace/touchgrass-a52xq
+          python3 scripts/101_apply_fuse_passthrough_modern_p3.py workspace/touchgrass-a52xq
+          python3 scripts/102_apply_fuse_negotiation_probe.py workspace/touchgrass-a52xq
+          python3 scripts/103_apply_fuse_740_init_compat.py workspace/touchgrass-a52xq
+
+          python3 scripts/104_apply_a619_gpu_undervolt_p1.py workspace/touchgrass-a52xq
+          python3 scripts/105_apply_a619_gpu_undervolt_p1_diag.py workspace/touchgrass-a52xq
+          python3 scripts/106_apply_mglru_modern_p1.py workspace/touchgrass-a52xq
+
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Rebuild exact 35461116688 pre-build boundary
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
+          python3 scripts/115_apply_a52_efficiency_p1.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
+
+          # Phase 112 in the pinned reconstruction already exports
+          # /proc/lru_gen_trace. Older cached trees needed Phase 117 to migrate
+          # the debugfs-only recorder. Keep the fallback compatible with both.
+          if grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"; then
+            echo "MGLRU recorder already has procfs export; Phase 117 migration not required." \
+              | tee artifacts/mglru-procfs-migration-apply.txt
+          else
+            python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+            python3 scripts/117_migrate_mglru_trace_to_proc.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          fi
+
+          python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
+          python3 scripts/116_apply_a52_scheduler_recorder.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-scheduler-recorder-apply.txt
+
+          python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
+          python3 scripts/104_apply_fuse_740_upstream_passthrough.py "$KERNEL" \
+            2>&1 | tee artifacts/fuse-740-native-apply.txt
+
+          git -C "$KERNEL" diff --check
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+
+      - name: Require usable source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          echo "prebuild cache hit: ${{ steps.prebuild_source.outputs.cache-hit }}"
+          echo "base351 cache hit: ${{ steps.base351_source.outputs.cache-hit }}"
+          test -d workspace/touchgrass-a52xq/.git
+
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'static void dev_map_hash_remove_netdev' workspace/touchgrass-a52xq/kernel/bpf/devmap.c
+          else
+            grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
+            grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' workspace/touchgrass-a52xq/mm/vmscan.c
+            grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+            grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
+          fi
+
+      - name: Rebuild prepared P134 boundary on cache miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            "$KERNEL" artifacts/f2fs-stable325-p1.txt artifacts/f2fs-stable325-patches
+          python3 scripts/119_apply_f2fs_gc_merge_p2.py "$KERNEL"
+          python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py "$KERNEL" artifacts/f2fs-inmem-p3a
+
+          mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
+          cp -a "$KERNEL/fs/f2fs" artifacts/pre-atgc-p3b/fs/
+          cp -a "$KERNEL/include/trace/events/f2fs.h" artifacts/pre-atgc-p3b/include/trace/events/
+
+          python3 scripts/122_apply_f2fs_atgc_p3b.py "$KERNEL" artifacts/f2fs-atgc-p3b
+          python3 scripts/123_enable_f2fs_atgc_p3c.py "$KERNEL" artifacts/f2fs-atgc-p3c
+          python3 scripts/124_apply_f2fs_atgc_p4.py "$KERNEL" artifacts/f2fs-atgc-p4
+          python3 scripts/125_apply_f2fs_block_age_p5a.py "$KERNEL" artifacts/f2fs-block-age-p5a
+          python3 scripts/126_enable_f2fs_block_age_p5b.py "$KERNEL" artifacts/f2fs-block-age-p5b
+          python3 scripts/127_apply_f2fs_gc_cp_p6.py "$KERNEL" artifacts/f2fs-gc-cp-p6
+          python3 scripts/128_apply_f2fs_correctness_p7.py "$KERNEL" artifacts/f2fs-correctness-p7
+          python3 scripts/129_apply_bpf_bootfix_p1.py "$KERNEL" artifacts/bpf-bootfix-p1
+          python3 scripts/134_apply_bpf_devmap_rndis_clean_fix.py "$KERNEL" artifacts/bpf-devmap-rndis-clean-p134
+
+          git -C "$KERNEL" diff --check
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'F2FS_MOUNT_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
+
+      - name: Save rebuilt P134 source cache
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Replay production chain through boot-tested P149
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
+          python3 scripts/145_apply_teo_baseline_p1.py workspace/touchgrass-a52xq backports/145_teo_4.19.c
+          python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq
+          python3 scripts/148_apply_qcom_lpm_fixpack_p1.py workspace/touchgrass-a52xq
+          python3 scripts/149_apply_ufs_runtime_autosuspend_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/ufs-runtime-autosuspend-p149.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P150 AOD power saver
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/150_apply_aod_power_saver_p1.py" \
+            -o /tmp/150_apply_aod_power_saver_p1.py
+
+          python3 -m py_compile /tmp/150_apply_aod_power_saver_p1.py
+          python3 /tmp/150_apply_aod_power_saver_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/aod-power-saver-p150.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
+
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'static int a52_aod_last_lpm_bl[MAX_DISPLAY_NDX];' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
+          test "$(grep -Fc 'int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);' "$PANEL")" -eq 2
+          test "$(grep -Fc 'switch (lpm_bl_level) {' "$PANEL")" -eq 2
+          grep -Fq 'case LPM_30NIT:' "$PANEL"
+          grep -Fq 'case LPM_60NIT:' "$PANEL"
+          grep -Fq 'vdd->panel_lpm.esd_recovery' "$PANEL"
+          grep -Fq 'unlikely(vdd->is_factory_mode)' "$PANEL"
+          grep -Fq 'Hz : 30Hz' "$COMMON"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c \
+            > artifacts/aod-power-saver-p150.diff
+
+      - name: Apply boot-proven P151 deferred init + first async batch
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/151_apply_boot_async_deferred_init_p1.py" \
+            -o /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 -m py_compile /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 /tmp/151_apply_boot_async_deferred_init_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-deferred-p151.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/nfc/sec_nfc.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P152 second selective async peripheral batch
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/152_apply_boot_async_peripherals_p2.py" \
+            -o /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 -m py_compile /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 /tmp/152_apply_boot_async_peripherals_p2.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-peripherals-p152.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/sensors/sx9360.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- \
+            arch/arm64/configs/a52xq_defconfig \
+            drivers/nfc/sec_nfc.c \
+            drivers/fingerprint/et7xx-spi.c \
+            drivers/sensors/sx9360.c \
+            drivers/vibrator/dc/dc_vibrator.c \
+            > artifacts/boot-async-p151-p152.diff
+      - name: Apply P153 global async-default policy
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/153_apply_global_async_probe_p3.py" \
+            -o /tmp/153_apply_global_async_probe_p3.py
+          python3 -m py_compile /tmp/153_apply_global_async_probe_p3.py
+          python3 /tmp/153_apply_global_async_probe_p3.py workspace/touchgrass-a52xq \
+            | tee artifacts/global-async-default-p153.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          DD="$KERNEL/drivers/base/dd.c"
+          grep -Fq 'A52 P153: default all ordinary initial driver probing asynchronous' "$DD"
+          grep -Fq 'case PROBE_FORCE_SYNCHRONOUS:' "$DD"
+          grep -Fq 'case PROBE_PREFER_ASYNCHRONOUS:' "$DD"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- drivers/base/dd.c > artifacts/global-async-default-p153.diff
+      - name: Apply P154 camera provider sync exceptions
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/154_force_camera_providers_sync_p4.py" \
+            -o /tmp/154_force_camera_providers_sync_p4.py
+          python3 -m py_compile /tmp/154_force_camera_providers_sync_p4.py
+          python3 /tmp/154_force_camera_providers_sync_p4.py workspace/touchgrass-a52xq \
+            | tee artifacts/camera-provider-sync-p154.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'PROBE_FORCE_SYNCHRONOUS, /* A52 P154 */' "$KERNEL/techpack/camera/drivers/cam_smmu/cam_smmu_api.c"
+          grep -Fq 'PROBE_FORCE_SYNCHRONOUS, /* A52 P154 */' "$KERNEL/techpack/camera/drivers/cam_cpas/cam_cpas_intf.c"
+          grep -Fq 'A52 P153: default all ordinary initial driver probing asynchronous' "$KERNEL/drivers/base/dd.c"
+          grep -Fq 'PROBE_FORCE_SYNCHRONOUS, /* A52 P154 */' "$KERNEL/techpack/camera/drivers/cam_smmu/cam_smmu_api.c"
+          grep -Fq 'PROBE_FORCE_SYNCHRONOUS, /* A52 P154 */' "$KERNEL/techpack/camera/drivers/cam_cpas/cam_cpas_intf.c"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- \
+            techpack/camera/drivers/cam_smmu/cam_smmu_api.c \
+            techpack/camera/drivers/cam_cpas/cam_cpas_intf.c \
+            > artifacts/camera-provider-sync-p154.diff
+      - name: Build integrated kernel
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/global-async-camera-sync-p154-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Audit P154 image and retained stack
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
+          UFS="$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          NFC="$KERNEL/drivers/nfc/sec_nfc.c"
+          FP="$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          GRIP="$KERNEL/drivers/sensors/sx9360.c"
+          VIB="$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$CFG"
+
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$CFG"
+          grep -Fxq 'CONFIG_SPARSEMEM=y' "$CFG"
+          grep -Fxq 'CONFIG_NO_BOOTMEM=y' "$CFG"
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$NFC")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$FP")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$GRIP")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$VIB")" -eq 1
+
+          grep -Fq 'A52 P153: default all ordinary initial driver probing asynchronous' "$KERNEL/drivers/base/dd.c"
+          grep -Fq 'case PROBE_FORCE_SYNCHRONOUS:' "$KERNEL/drivers/base/dd.c"
+          grep -Fq 'case PROBE_PREFER_ASYNCHRONOUS:' "$KERNEL/drivers/base/dd.c"
+          grep -Eq '^CONFIG_PANEL_S6E3FC3_AMS646YD01_FHD=y$' "$CFG"
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'Hz : 30Hz' "$COMMON"
+
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$UFS"
+          grep -Fq '#define UFSHCD_AUTO_SUSPEND_DELAY_MS 2000' "$UFS"
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$LPM"
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          {
+            echo 'P154 final config:'
+            grep -E '^(CONFIG_(DEFERRED_STRUCT_PAGE_INIT|SPARSEMEM|NO_BOOTMEM)=)' "$CFG"
+            echo
+            echo 'Async drivers:'
+            grep -n 'PROBE_PREFER_ASYNCHRONOUS, /\* A52 P151 \*/' "$NFC" "$FP"
+            grep -n 'PROBE_PREFER_ASYNCHRONOUS, /\* A52 P152 \*/' "$GRIP" "$VIB"
+          } | tee artifacts/global-async-camera-sync-p154-audit.txt
+
+          git -C "$KERNEL" diff --check
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P154 flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p154.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p154.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p154.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p154.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p154.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P153-BUILD36063006657 + GLOBAL-ASYNC-CAMSYNC-P154/' scripts/.package-p154.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P154-GLOBAL-ASYNC-CAMERA-PROVIDERS-SYNC-P4.zip/' scripts/.package-p154.sh
+          chmod +x scripts/.package-p154.sh
+          ./scripts/.package-p154.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p154.sh
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-p152-boot-async-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P154 flashable ZIP and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P153-36063006657-CAMERA-SYNC-P154-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/aod-power-saver-p150.txt
+            artifacts/boot-async-deferred-p151.txt
+            artifacts/boot-async-peripherals-p152.txt
+            artifacts/boot-async-p151-p152.diff
+            artifacts/boot-async-p152-audit.txt
+            artifacts/global-async-default-p153.txt
+            artifacts/global-async-default-p153.diff
+            artifacts/global-async-p153-audit.txt
+            artifacts/camera-provider-sync-p154.txt
+            artifacts/camera-provider-sync-p154.diff
+            artifacts/global-async-camera-sync-p154-audit.txt
+            artifacts/package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+# P154 experiment:
+# P153 global async-default remains active.
+# Only camera SMMU and camera CPAS are forced synchronous.
+# This directly addresses the P153 ramoops ordering crash:
+# cam_hw_cdm_probe -> cam_smmu_get_handle -> strcmp(NULL, ...).
+# The next boot therefore exposes the next ordering-sensitive dependency, if any.

@@ -190,10 +190,41 @@ jobs:
             phase346-gki-out
           key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
 
+      - name: Restore Phase357 baseline cache
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
       - name: Rebuild exact Phase357 baseline
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
         env:
           PHASE357_PREWARMED_PHASE346: '1'
         run: bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 baseline
+        run: |
+          set -Eeuo pipefail
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' gki/common/kernel/exit.c
+
+      - name: Save Phase357 baseline cache
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
 
       - name: Reapply Phase358 and Phase359 source lineage
         run: |
@@ -340,8 +371,9 @@ jobs:
           grep -aFq 'A52_PHASE372_FUTURE_WORKER_CORRELATION_V1' "$IMAGE"
           grep -aFq 'A52_PHASE373_APEX_MOUNT_BLOCKER_V1' "$IMAGE"
           grep -aFq 'A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE378_UFS_COMPLETION_FLIGHT_RECORDER_V1' "$IMAGE"
           grep -aFq 'A52UFS378 SNAP' "$IMAGE"
+          grep -aFq 'A52UFS378 COUNT' "$IMAGE"
+          grep -aFq 'A52UFS378 TAG' "$IMAGE"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}

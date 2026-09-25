@@ -733,7 +733,11 @@ jobs:
               'dump_boot;\n'
               'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
               'patch_cmdline "sched_cass" "sched_cass=1";\n'
-              'write_boot;',
+              'write_boot;\n'
+              'sync;\n'
+              'ui_print "Verifying P164 marker in flashed boot partition...";\n'
+              'dd if="$BLOCK" bs=1M count=64 2>/dev/null | grep -a -q "A52_P164_VIDC_CORE" || abort "P164 read-back verification failed: boot partition does not contain the P164 kernel marker";\n'
+              'ui_print "P164 boot partition read-back verification: PASS";',
               1,
           )
           p.write_text(s)
@@ -753,6 +757,8 @@ jobs:
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'A52_P164_VIDC_CORE'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'P164 boot partition read-back verification: PASS'
           sha256sum "$ZIP" | tee artifacts/package-sha256.txt
 
       - name: Save compiler cache
@@ -804,3 +810,5 @@ jobs:
 # - no new functional probe-order changes; this phase exists only to resolve the 0 -> -22 contradiction
 
 # retry after P164 literal-anchor fix
+
+# P164 flash read-back guard: after write_boot, read /dev/block/by-name/boot and require A52_P164_VIDC_CORE.

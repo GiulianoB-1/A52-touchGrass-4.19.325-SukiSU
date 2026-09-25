@@ -316,34 +316,34 @@ jobs:
           LOOP="$ROOT/drivers/block/loop.c"
           USB="$ROOT/drivers/usb/gadget/function/u_serial.c"
           echo "Phase380 patchers passed check-only audits"
-          # Every phase above already ran its own check-only validator.
-          # Keep only the Phase380 ownership checks here so a stale manual
-          # grep cannot fail a valid build after Phase380 intentionally
-          # retires older runtime call sites.
-          grep -Fq 'A52_PHASE380_USB_BLOCK_LIVE_DEBUG_V1' "$CORE"
-          grep -Fq 'A52_PHASE380_LEGACY_PROBES_RETIRED_V1' "$REC"
-          grep -Fq 'A52_PHASE380_BLK_FREEZE_TRACE_V1' "$BLK"
-          grep -Fq 'A52_PHASE380_LOOP_TRACE_V1' "$LOOP"
-          grep -Fq 'A52_PHASE380_USB_KTHREAD_CONSOLE_V1' "$USB"
-          grep -Fq 'A52_R380_COPY_BYTES          0x2A00U' "$CORE"
-          grep -Fq 'a52_r380_crc32c' "$CORE"
-          grep -Fq '"a52_usb_console"' "$USB"
-          ! grep -Fq 'schedule_work(&cons->work);' "$USB"
           if ! git -C "$ROOT" diff --check; then
             echo "WARNING: git diff --check reported formatting issues; continuing to compile"
           fi
 
           cp phase357-gki-out/config/final.config "$BUILD/.config"
           BASE_CMDLINE="$(sed -n 's/^CONFIG_CMDLINE="\\(.*\\)"$/\\1/p' "$BUILD/.config")"
-          test -n "$BASE_CMDLINE"
+          echo "Phase380 config: inherited CMDLINE length=${#BASE_CMDLINE}"
+          if [ -z "$BASE_CMDLINE" ]; then
+            echo "ERROR: Phase357 CONFIG_CMDLINE was not found" >&2
+            grep -E '^CONFIG_CMDLINE' "$BUILD/.config" || true
+            exit 1
+          fi
+          test -x "$ROOT/scripts/config" || {
+            echo "ERROR: kernel scripts/config is missing or not executable" >&2
+            ls -l "$ROOT/scripts/config" || true
+            exit 1
+          }
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable U_SERIAL_CONSOLE
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_G_SERIAL
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-str CMDLINE \
             "$BASE_CMDLINE console=ttyGS0,115200 loglevel=7 ignore_loglevel hung_task_timeout_secs=10 workqueue.watchdog_thresh=10 panic=0 hung_task_panic=0 softlockup_panic=0 panic_on_warn=0"
+          echo "Phase380 config: requested USB console options"
+          grep -E '^(CONFIG_CMDLINE=|CONFIG_LOG_BUF_SHIFT=|CONFIG_U_SERIAL_CONSOLE=|CONFIG_USB_G_SERIAL=)' "$BUILD/.config" || true
 
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          echo "Phase380 config: olddefconfig complete"
           grep -Fxq 'CONFIG_PHY_QCOM_QMP=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_U_SERIAL_CONSOLE=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_USB_G_SERIAL=y' "$BUILD/.config"

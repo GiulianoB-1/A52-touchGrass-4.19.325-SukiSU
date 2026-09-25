@@ -394,14 +394,15 @@ jobs:
           grep -aFq 'B380 id=%d enter q=%px old=%u new=%u' "$IMAGE"
           grep -aFq 'L380 MAP n=%d q=%px depth=%u' "$IMAGE"
           grep -aFq 'USB380 ttyGS%d live console ready fifo=%u transport=kthread' "$IMAGE"
-          grep -aFq 'A52_PHASE381_RECORDER_ADMISSION_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_DENSE_APEX_CENSUS_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_DENSE_UFS_WINDOW_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_BLK_FREEZE_WAIT_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_LOOP_WORKER_FRONTIER_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_LEGACY_DWC3_MSM_BRIDGE_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_FORCE_USB_PERIPHERAL_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE381_GSERIAL_BIND_TRACE_V1' "$IMAGE"
+          # Phase381 comments are source-audit markers and are intentionally
+          # not expected in Image. Audit actual compiled diagnostic strings.
+          grep -aFq 'B381 W+ id=%d q=%px d=%d z=%u' "$IMAGE"
+          grep -aFq 'L381 Q n=%d rq=%px op=%u s=%llu b=%u' "$IMAGE"
+          grep -aFq 'L381 W+ n=%d rq=%px op=%u aio=%u' "$IMAGE"
+          grep -aFq 'USB381 Q enter legacy=1' "$IMAGE"
+          grep -aFq 'USB381 C force-peripheral' "$IMAGE"
+          grep -aFq 'USB381 C init-mode ret=%d mode=%u' "$IMAGE"
+          grep -aFq 'USB381 GS bind ready acm=%u ports=%u' "$IMAGE"
           grep -aFq 'qcom,dwc-usb3-msm' "$IMAGE"
 
           rm -rf "$OUT"

@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 MARK = "A52_PHASE385_FRONTIER_STALL_OBSERVER_V1"
+HDR = Path("include/linux/a52_ack_secure_flight_recorder.h")
 REC = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 UFS = Path("drivers/scsi/ufs/ufshcd.c")
 BLK = Path("block/blk-mq.c")
@@ -18,6 +19,25 @@ def one(text: str, old: str, new: str, label: str) -> str:
     if count != 1:
         raise SystemExit("Phase385 %s: expected 1 anchor, found %d" % (label, count))
     return text.replace(old, new, 1)
+
+
+
+def patch_header(text: str) -> str:
+    if "A52_PHASE385_STICKY_FIXED_V1" in text:
+        return text
+
+    block = '''
+/* A52_PHASE385_STICKY_FIXED_V1 */
+void a52_ackfr_sticky_resync(void);
+void a52_ackfr_sticky_heartbeat(unsigned int sample, u64 elapsed_ms);
+void a52_ackfr_sticky_freeze(unsigned int active, u64 q, int depth,
+                             unsigned int nr, unsigned int zero, u64 age_ms);
+void a52_ackfr_sticky_usb_identity(const char *udc, const char *gadget,
+                                   const char *parent, const char *driver,
+                                   unsigned int pullup_capable);
+
+'''
+    return one(text, "\n#endif\n", block + "\n#endif\n", "sticky header API")
 
 
 def patch_recorder(text: str) -> str:
@@ -71,6 +91,258 @@ def patch_recorder(text: str) -> str:
 ''',
         "recorder critical retention",
     )
+
+    if "A52_PHASE385_STICKY_FIXED_V1" not in text:
+        text = one(
+            text,
+            "void a52_ackfr_usbdiag_set(unsigned int field, int value)\n",
+            "static void a52_r385_sticky_usb_refresh(void);\n\n"
+            "void a52_ackfr_usbdiag_set(unsigned int field, int value)\n",
+            "sticky USB refresh forward declaration",
+        )
+        text = one(
+            text,
+            '''\tdefault:
+\t\tbreak;
+\t}
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_usbdiag_set);
+''',
+            '''\tdefault:
+\t\tbreak;
+\t}
+\ta52_r385_sticky_usb_refresh();
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_usbdiag_set);
+''',
+            "sticky USB update hook",
+        )
+
+        sticky_block = '''
+/* A52_PHASE385_STICKY_FIXED_V1
+ *
+ * RS48 is a high-rate circular recorder. Preserve the state that must survive
+ * ring turnover in the otherwise-unused final 0x200 bytes of Phase380's
+ * 0xB1BF8000..0xB1BFFFFF UFS sideband:
+ *
+ *   copy 0: 0xB1BFFE00..0xB1BFFEFF
+ *   copy 1: 0xB1BFFF00..0xB1BFFFFF
+ *
+ * Each copy is a complete 256-byte CRC32C-protected snapshot. Updates preserve
+ * earlier fields, so a later heartbeat cannot erase the USB identity/state.
+ */
+#define A52_R385_STICKY_PHYS       0xB1BFFE00ULL
+#define A52_R385_STICKY_BYTES      0x200U
+#define A52_R385_STICKY_COPY       0x100U
+#define A52_R385_STICKY_MAGIC      0x353833594b434954ULL
+#define A52_R385_STICKY_COMMIT     0x385c0de5U
+#define A52_R385_STICKY_VERSION    1U
+
+struct a52_r385_sticky_record {
+\tu64 magic;
+\tu64 seq;
+\tu64 ns;
+\tu64 frontier_ms;
+\tu64 freeze_age_ms;
+\tu64 freeze_q;
+\tu32 version;
+\tu32 event;
+\tu32 heartbeat;
+\tu32 freeze_active;
+\ts32 freeze_depth;
+\tu32 freeze_nr;
+\tu32 freeze_zero;
+\ts32 usb_mode_in;
+\ts32 usb_hw_mode;
+\ts32 usb_mode_out;
+\ts32 usb_core_mode;
+\ts32 usb_gadget_init;
+\ts32 usb_gadget_add_rc;
+\ts32 usb_gs_probe_rc;
+\ts32 usb_udc_bind_rc;
+\ts32 usb_pullup_rc;
+\tchar udc[32];
+\tchar gadget[32];
+\tchar parent[40];
+\tchar driver[24];
+\tu32 pullup_capable;
+\tu32 crc32c;
+\tu32 commit;
+\tu32 reserved;
+};
+
+static DEFINE_SPINLOCK(a52_r385_sticky_lock);
+static struct a52_r385_sticky_record a52_r385_sticky_shadow;
+static void *a52_r385_sticky_map;
+
+static u32 a52_r385_sticky_crc32c(const void *buffer, size_t len)
+{
+\tconst u8 *bytes = buffer;
+\tu32 crc = ~0U;
+\tsize_t index;
+\tunsigned int bit;
+
+\tfor (index = 0; index < len; index++) {
+\t\tcrc ^= bytes[index];
+\t\tfor (bit = 0; bit < 8; bit++)
+\t\t\tcrc = (crc >> 1) ^
+\t\t\t\t((crc & 1) ? 0x82f63b78U : 0U);
+\t}
+\treturn ~crc;
+}
+
+static void a52_r385_sticky_refresh_usb_locked(void)
+{
+\tstruct a52_r385_sticky_record *r = &a52_r385_sticky_shadow;
+
+\tr->usb_mode_in = atomic_read(&a52_r382_usb_mode_in);
+\tr->usb_hw_mode = atomic_read(&a52_r382_usb_hw_mode);
+\tr->usb_mode_out = atomic_read(&a52_r382_usb_mode_out);
+\tr->usb_core_mode = atomic_read(&a52_r382_usb_core_mode);
+\tr->usb_gadget_init = atomic_read(&a52_r382_usb_gadget_init);
+\tr->usb_gadget_add_rc = atomic_read(&a52_r382_usb_gadget_add_rc);
+\tr->usb_gs_probe_rc = atomic_read(&a52_r382_usb_gs_probe_rc);
+\tr->usb_udc_bind_rc = atomic_read(&a52_r382_usb_udc_bind_rc);
+\tr->usb_pullup_rc = atomic_read(&a52_r382_usb_pullup_rc);
+}
+
+static void a52_r385_sticky_flush_locked(void)
+{
+\tstruct a52_r385_sticky_record *r = &a52_r385_sticky_shadow;
+\tvoid *dst0;
+\tvoid *dst1;
+
+\tr->magic = A52_R385_STICKY_MAGIC;
+\tr->version = A52_R385_STICKY_VERSION;
+\tr->seq++;
+\tr->ns = ktime_get_boottime_ns();
+\ta52_r385_sticky_refresh_usb_locked();
+\tr->commit = A52_R385_STICKY_COMMIT;
+\tr->crc32c = a52_r385_sticky_crc32c(
+\t\tr, offsetof(struct a52_r385_sticky_record, crc32c));
+
+\tif (!READ_ONCE(a52_r385_sticky_map))
+\t\treturn;
+
+\tdst0 = a52_r385_sticky_map;
+\tdst1 = (u8 *)a52_r385_sticky_map + A52_R385_STICKY_COPY;
+\tmemcpy(dst0, r, sizeof(*r));
+\tmemcpy(dst1, r, sizeof(*r));
+\twmb();
+\t__flush_dcache_area(dst0, sizeof(*r));
+\t__flush_dcache_area(dst1, sizeof(*r));
+}
+
+static void a52_r385_sticky_usb_refresh(void)
+{
+\tunsigned long flags;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\ta52_r385_sticky_shadow.event = 4U;
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+}
+
+void a52_ackfr_sticky_resync(void)
+{
+\tunsigned long flags;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_sticky_resync);
+
+void a52_ackfr_sticky_heartbeat(unsigned int sample, u64 elapsed_ms)
+{
+\tunsigned long flags;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\ta52_r385_sticky_shadow.event = 1U;
+\ta52_r385_sticky_shadow.heartbeat = sample;
+\ta52_r385_sticky_shadow.frontier_ms = elapsed_ms;
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_sticky_heartbeat);
+
+void a52_ackfr_sticky_freeze(unsigned int active, u64 q, int depth,
+\t\t\t     unsigned int nr, unsigned int zero, u64 age_ms)
+{
+\tunsigned long flags;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\ta52_r385_sticky_shadow.event = active ? 2U : 3U;
+\ta52_r385_sticky_shadow.freeze_active = active;
+\ta52_r385_sticky_shadow.freeze_q = q;
+\ta52_r385_sticky_shadow.freeze_depth = depth;
+\ta52_r385_sticky_shadow.freeze_nr = nr;
+\ta52_r385_sticky_shadow.freeze_zero = zero;
+\ta52_r385_sticky_shadow.freeze_age_ms = age_ms;
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_sticky_freeze);
+
+void a52_ackfr_sticky_usb_identity(const char *udc, const char *gadget,
+\t\t\t\t   const char *parent, const char *driver,
+\t\t\t\t   unsigned int pullup_capable)
+{
+\tunsigned long flags;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\ta52_r385_sticky_shadow.event = 5U;
+\tstrscpy(a52_r385_sticky_shadow.udc, udc ? udc : "-",
+\t\tsizeof(a52_r385_sticky_shadow.udc));
+\tstrscpy(a52_r385_sticky_shadow.gadget, gadget ? gadget : "-",
+\t\tsizeof(a52_r385_sticky_shadow.gadget));
+\tstrscpy(a52_r385_sticky_shadow.parent, parent ? parent : "-",
+\t\tsizeof(a52_r385_sticky_shadow.parent));
+\tstrscpy(a52_r385_sticky_shadow.driver, driver ? driver : "-",
+\t\tsizeof(a52_r385_sticky_shadow.driver));
+\ta52_r385_sticky_shadow.pullup_capable = pullup_capable;
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+}
+EXPORT_SYMBOL_GPL(a52_ackfr_sticky_usb_identity);
+
+static int __init a52_r385_sticky_init(void)
+{
+\tvoid *mapping;
+\tunsigned long flags;
+
+\tBUILD_BUG_ON(sizeof(struct a52_r385_sticky_record) !=
+\t\t     A52_R385_STICKY_COPY);
+
+\tmapping = memremap(A52_R385_STICKY_PHYS,
+\t\tA52_R385_STICKY_BYTES, MEMREMAP_WB);
+\tif (!mapping)
+\t\treturn 0;
+
+\tspin_lock_irqsave(&a52_r385_sticky_lock, flags);
+\tWRITE_ONCE(a52_r385_sticky_map, mapping);
+\ta52_r385_sticky_shadow.usb_mode_in = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_hw_mode = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_mode_out = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_core_mode = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_gadget_init = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_gadget_add_rc = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_gs_probe_rc = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_udc_bind_rc = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_shadow.usb_pullup_rc = A52_R382_USB_UNSEEN;
+\ta52_r385_sticky_flush_locked();
+\tspin_unlock_irqrestore(&a52_r385_sticky_lock, flags);
+\treturn 0;
+}
+subsys_initcall(a52_r385_sticky_init);
+
+'''
+        text = one(
+            text,
+            "EXPORT_SYMBOL_GPL(a52_ackfr_usbdiag_emit);\n",
+            "EXPORT_SYMBOL_GPL(a52_ackfr_usbdiag_emit);\n\n" + sticky_block,
+            "sticky fixed-slot implementation",
+        )
     return text
 
 
@@ -91,7 +363,21 @@ static const u32 a52_r380_target_ms[A52_R380_SNAPSHOT_COUNT] = {
 \t250U, 275U, 300U, 350U, 425U,
 };
 '''
-    return one(text, old, new, "dense UFS frontier")
+    text = one(text, old, new, "dense UFS frontier")
+
+    old = '''\tmemset(a52_r380_sideband, 0, A52_R380_SIDEBAND_BYTES);
+\twmb();
+\t__flush_dcache_area(a52_r380_sideband, A52_R380_SIDEBAND_BYTES);
+\tWRITE_ONCE(a52_r380_hba, hba);
+'''
+    new = '''\tmemset(a52_r380_sideband, 0, A52_R380_SIDEBAND_BYTES);
+\twmb();
+\t__flush_dcache_area(a52_r380_sideband, A52_R380_SIDEBAND_BYTES);
+\t/* Phase385 rewrites its mirrored fixed slot after the Phase380 clear. */
+\ta52_ackfr_sticky_resync();
+\tWRITE_ONCE(a52_r380_hba, hba);
+'''
+    return one(text, old, new, "sticky resync after UFS sideband clear")
 
 
 def patch_blk(text: str) -> str:
@@ -458,8 +744,9 @@ late_initcall(a52_r385_usb_observer_init);
 
 def validate(root: Path) -> None:
     checks = {
-        REC: (MARK, 'strncmp(fmt, "P385", 4)', 'strncmp(fmt, "B385", 4)', 'strncmp(fmt, "V385", 4)'),
-        UFS: ("A52_PHASE385_DENSE_UFS_FRONTIER_V1", "230U, 240U", "300U, 350U, 425U"),
+        HDR: ("A52_PHASE385_STICKY_FIXED_V1", "a52_ackfr_sticky_resync", "a52_ackfr_sticky_usb_identity"),
+        REC: (MARK, "A52_PHASE385_STICKY_FIXED_V1", "A52_R385_STICKY_PHYS", "A52_R385_STICKY_COPY", 'strncmp(fmt, "P385", 4)', 'strncmp(fmt, "B385", 4)', 'strncmp(fmt, "V385", 4)'),
+        UFS: ("A52_PHASE385_DENSE_UFS_FRONTIER_V1", "230U, 240U", "300U, 350U, 425U", "a52_ackfr_sticky_resync();"),
         BLK: ("A52_PHASE385_FREEZE_OBSERVER_V1", "P385 H s=%u", "B385 W s=%u", "B385 X s=%d", "wait_event(q->mq_freeze_wq"),
         CORE: ("A52_PHASE385_LOW_PERTURBATION_QUEUE_V1", "false && a52_ms <= 2000U"),
         LOOP: ("A52_PHASE385_LOW_PERTURBATION_LOOP_V1", "atomic_read(&a52_r384_loop_stage_id) < 0"),
@@ -485,6 +772,7 @@ def main() -> None:
         return
 
     patches = (
+        (HDR, patch_header),
         (REC, patch_recorder),
         (UFS, patch_ufs),
         (BLK, patch_blk),

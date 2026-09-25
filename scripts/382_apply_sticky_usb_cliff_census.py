@@ -469,10 +469,21 @@ def patch_census(text: str) -> str:
          "#define A52_R377_COMMIT             0x382c0de5U\n"),
         ("#define A52_R377_VERSION            1U\n",
          "#define A52_R377_VERSION            2U\n"),
-        ("\tu8 reserved[4];\n", "\tu32 crc32c;\n"),
     ]
     for old, new in replacements:
         text = one(text, old, new, "census macro/record update")
+
+    struct_start = text.find("struct a52_r377_record {")
+    if struct_start < 0:
+        raise SystemExit("Phase382 census record struct missing")
+    struct_end = text.find("};", struct_start)
+    if struct_end < 0:
+        raise SystemExit("Phase382 census record struct unterminated")
+    record = text[struct_start:struct_end]
+    if record.count("\tu8 reserved[4];\n") != 1:
+        raise SystemExit("Phase382 census reserved field is not unique in record struct")
+    record = record.replace("\tu8 reserved[4];\n", "\tu32 crc32c;\n", 1)
+    text = text[:struct_start] + record + text[struct_end:]
 
     old = """static void a52_r377_write_slot(unsigned int slot,
 \t\t\t\tconst struct a52_r377_record *r)
@@ -617,6 +628,11 @@ def patch_blk(text: str) -> str:
 }
 """
     repl = """/* A52_PHASE382_FREEZE_CLIFF_V1 */
+/* A52_PHASE382_BLOCK_SOFTIRQ_COMPARE_V1 */
+static atomic_t a52_r382_blk_softirq_enq = ATOMIC_INIT(0);
+static atomic_t a52_r382_blk_softirq_run = ATOMIC_INIT(0);
+static atomic_t a52_r382_blk_complete = ATOMIC_INIT(0);
+
 static bool a52_r382_block_cliff_window(void)
 {
 \tu64 ms = div_u64(ktime_get_boottime_ns(), NSEC_PER_MSEC);
@@ -639,6 +655,71 @@ void blk_mq_freeze_queue_wait(struct request_queue *q)
 }
 """
     text = one(text, anchor, repl, "freeze wait cliff trace")
+
+    old = """\twhile (!list_empty(&local_list)) {
+\t\tstruct request *rq;
+
+\t\trq = list_entry(local_list.next, struct request, ipi_list);
+\t\tlist_del_init(&rq->ipi_list);
+\t\trq->q->mq_ops->complete(rq);
+\t}
+}
+"""
+    new = """\twhile (!list_empty(&local_list)) {
+\t\tstruct request *rq;
+
+\t\trq = list_entry(local_list.next, struct request, ipi_list);
+\t\tlist_del_init(&rq->ipi_list);
+\t\tif (a52_r382_block_cliff_window()) {
+\t\t\tint a52_id = atomic_inc_return(&a52_r382_blk_softirq_run);
+\t\t\tif (a52_id <= 32)
+\t\t\t\ta52_ackfr_record("B380 SR id=%d q=%px rq=%px cpu=%u",
+\t\t\t\t\t a52_id, rq->q, rq, raw_smp_processor_id());
+\t\t}
+\t\trq->q->mq_ops->complete(rq);
+\t}
+}
+"""
+    text = one(text, old, new, "BLOCK_SOFTIRQ run trace")
+
+    old = """\tif (list->next == &rq->ipi_list)
+\t\traise_softirq_irqoff(BLOCK_SOFTIRQ);
+\tlocal_irq_restore(flags);
+}
+"""
+    new = """\tif (a52_r382_block_cliff_window()) {
+\t\tint a52_id = atomic_inc_return(&a52_r382_blk_softirq_enq);
+\t\tif (a52_id <= 32)
+\t\t\ta52_ackfr_record("B380 SQ id=%d q=%px rq=%px cpu=%u",
+\t\t\t\t a52_id, rq->q, rq, raw_smp_processor_id());
+\t}
+\tif (list->next == &rq->ipi_list)
+\t\traise_softirq_irqoff(BLOCK_SOFTIRQ);
+\tlocal_irq_restore(flags);
+}
+"""
+    text = one(text, old, new, "BLOCK_SOFTIRQ enqueue trace")
+
+    old = """void blk_mq_complete_request(struct request *rq)
+{
+\tbool skip = false;
+
+\ttrace_android_vh_blk_mq_complete_request(&skip, rq);
+"""
+    new = """void blk_mq_complete_request(struct request *rq)
+{
+\tbool skip = false;
+
+\tif (a52_r382_block_cliff_window() && rq->q->nr_hw_queues == 1) {
+\t\tint a52_id = atomic_inc_return(&a52_r382_blk_complete);
+\t\tif (a52_id <= 32)
+\t\t\ta52_ackfr_record("B380 BC id=%d q=%px rq=%px st=%u cpu=%u",
+\t\t\t\t a52_id, rq->q, rq, blk_mq_rq_state(rq),
+\t\t\t\t raw_smp_processor_id());
+\t}
+\ttrace_android_vh_blk_mq_complete_request(&skip, rq);
+"""
+    text = one(text, old, new, "blk completion entry trace")
 
     old = "bool a52_trace = a52_id <= 24;\n"
     new = "bool a52_trace = a52_id <= 24 || a52_r382_block_cliff_window();\n"
@@ -710,7 +791,7 @@ def validate(root: Path) -> None:
         REC: (MARK, "a52_r382_diag_format", "V382 A s=%u", "strncmp(fmt, \"V382\", 4)"),
         UFS: ("A52_PHASE382_RAW_USB_SNAPSHOT_V1", "18525U", "a52_ackfr_usbdiag_emit(next)"),
         SYSCALL: ("A52_PHASE382_CLIFF_CENSUS_V1", "18350U, 18500U, 18550U", "dst2", "crc32c"),
-        BLK: ("A52_PHASE382_FREEZE_CLIFF_V1", "B380 F enter"),
+        BLK: ("A52_PHASE382_FREEZE_CLIFF_V1", "A52_PHASE382_BLOCK_SOFTIRQ_COMPARE_V1", "B380 F enter", "B380 SQ id=%d", "B380 SR id=%d", "B380 BC id=%d"),
         LOOP: ("A52_PHASE382_LOOP_CLIFF_V1", "a52_r382_loop_late_issue"),
         SERIAL: ("A52_ACKFR_USB_GS_PROBE_RC",),
         UDC: ("A52_PHASE382_UDC_BIND_STICKY_V1",),

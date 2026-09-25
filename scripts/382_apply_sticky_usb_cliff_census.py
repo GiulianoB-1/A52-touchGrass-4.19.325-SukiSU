@@ -202,11 +202,11 @@ def patch_recorder(text: str) -> str:
     text = one(text, old, new, "Phase243 diagnostic admission")
 
     old = """\t       !strncmp(message, "V380 ", 5) ||
-\t       !strncmp(message, "V381 ", 5);
+\t       !strncmp(message, "V381 ", 5); /* A52_PHASE381_RETENTION_V1 */
 """
     new = """\t       !strncmp(message, "V380 ", 5) ||
 \t       !strncmp(message, "V381 ", 5) ||
-\t       !strncmp(message, "V382 ", 5);
+\t       !strncmp(message, "V382 ", 5); /* A52_PHASE381_RETENTION_V1 */
 """
     text = one(text, old, new, "critical V382")
     return text

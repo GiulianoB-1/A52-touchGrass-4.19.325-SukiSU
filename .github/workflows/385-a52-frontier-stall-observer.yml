@@ -1,0 +1,603 @@
+name: Phase385 - frontier stall observer
+run-name: Phase385 - frontier stall observer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/385-a52-frontier-stall-observer.yml
+      - .github/workflows/384-a52-loop-ufs-stall-pinpoint.yml
+      - .github/workflows/382-a52-sticky-usb-cliff.yml
+      - .github/workflows/381-a52-usb-udc-dense-frontier.yml
+      - .github/workflows/380-a52-usb-block-live-debug.yml
+      - scripts/360_apply_ufs_defer_pinpoint.py
+      - scripts/361_apply_ufs_platform_gate.py
+      - scripts/362_apply_ufs_qmp_flat_bridge.py
+      - scripts/363_remove_phase340_60s_reboot.py
+      - scripts/364_apply_apexd_syscall_ring.py
+      - scripts/365_apply_apexd_writev_futex.py
+      - scripts/366_apply_apexd_futex_threads.py
+      - scripts/367_apply_apexd_kernel_futex_wake.py
+      - scripts/368_apply_apexd_worker_syscall_map.py
+      - scripts/369_apply_post_apex_frontier.py
+      - scripts/370_apply_latest_apex_worker.py
+      - scripts/371_apply_thread_worker_state.py
+      - scripts/372_apply_future_worker_correlation.py
+      - scripts/373_apply_apex_mount_blocker.py
+      - scripts/377_apply_apexd_live_thread_census.py
+      - scripts/378_apply_ufs_completion_flight_recorder.py
+      - scripts/379_apply_ufs_sideband_sampler.py
+      - scripts/380_apply_usb_block_live_debug.py
+      - scripts/381_apply_usb_udc_dense_frontier.py
+      - scripts/382_apply_sticky_usb_cliff_census.py
+      - scripts/383_apply_event_frontier_loop_aio.py
+      - scripts/384_apply_loop_ufs_stall_pinpoint.py
+      - scripts/385_apply_frontier_stall_observer.py
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  JOBS: '4'
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase380-usb-block-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase385 frontier stall observer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/357_apply_init_exit_cause.py \
+            scripts/358_apply_pid1_syscall_trace.py \
+            scripts/359_apply_pid1_writev_payload.py \
+            scripts/360_apply_ufs_defer_pinpoint.py \
+            scripts/361_apply_ufs_platform_gate.py \
+            scripts/362_apply_ufs_qmp_flat_bridge.py \
+            scripts/363_remove_phase340_60s_reboot.py \
+            scripts/364_apply_apexd_syscall_ring.py \
+            scripts/365_apply_apexd_writev_futex.py \
+            scripts/366_apply_apexd_futex_threads.py \
+            scripts/367_apply_apexd_kernel_futex_wake.py \
+            scripts/368_apply_apexd_worker_syscall_map.py \
+            scripts/369_apply_post_apex_frontier.py \
+            scripts/370_apply_latest_apex_worker.py \
+            scripts/371_apply_thread_worker_state.py \
+            scripts/372_apply_future_worker_correlation.py \
+            scripts/373_apply_apex_mount_blocker.py \
+            scripts/377_apply_apexd_live_thread_census.py \
+            scripts/378_apply_ufs_completion_flight_recorder.py \
+            scripts/379_apply_ufs_sideband_sampler.py \
+            scripts/380_apply_usb_block_live_debug.py \
+            scripts/385_apply_frontier_stall_observer.py
+
+      - name: Restore Phase346 baseline cache v2
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source cache
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j"$JOBS" --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase345 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Build Phase346 baseline when needed
+        if: steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Validate Phase346 baseline
+        run: |
+          set -Eeuo pipefail
+          test -s phase346-gki-out/package/boot.img
+          test -s phase346-gki-out/compile/Image
+          test -s phase346-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase346-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE346_DMA_RAW_SIDEBAND_V1' gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+          grep -Fq 'A52_PHASE343_INSTRUCTION_COUNTER_FRONTIER_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' gki/common/kernel/exit.c
+
+      - name: Save Phase346 baseline cache v2
+        if: steps.phase346-v2.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase357 baseline cache
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Rebuild exact Phase357 baseline
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 baseline
+        run: |
+          set -Eeuo pipefail
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'Attempted to kill init! exitcode=0x%08x' gki/common/kernel/exit.c
+
+      - name: Save Phase357 baseline cache
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Reapply Phase358 and Phase359 source lineage
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Audit inherited UFS compatibility fixes
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+      - name: Apply Phase360 through Phase380 and compile
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase385-gki-out"
+
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT"
+          python3 scripts/360_apply_ufs_defer_pinpoint.py --root "$ROOT" --check-only
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT"
+          python3 scripts/361_apply_ufs_platform_gate.py --root "$ROOT" --check-only
+          python3 scripts/362_apply_ufs_qmp_flat_bridge.py --root "$ROOT"
+          python3 scripts/362_apply_ufs_qmp_flat_bridge.py --root "$ROOT" --check-only
+          python3 scripts/363_remove_phase340_60s_reboot.py --root "$ROOT"
+          python3 scripts/363_remove_phase340_60s_reboot.py --root "$ROOT" --check-only
+          python3 scripts/364_apply_apexd_syscall_ring.py --root "$ROOT"
+          python3 scripts/364_apply_apexd_syscall_ring.py --root "$ROOT" --check-only
+          python3 scripts/365_apply_apexd_writev_futex.py --root "$ROOT"
+          python3 scripts/365_apply_apexd_writev_futex.py --root "$ROOT" --check-only
+          python3 scripts/366_apply_apexd_futex_threads.py --root "$ROOT"
+          python3 scripts/366_apply_apexd_futex_threads.py --root "$ROOT" --check-only
+          python3 scripts/367_apply_apexd_kernel_futex_wake.py --root "$ROOT"
+          python3 scripts/367_apply_apexd_kernel_futex_wake.py --root "$ROOT" --check-only
+          python3 scripts/368_apply_apexd_worker_syscall_map.py --root "$ROOT"
+          python3 scripts/368_apply_apexd_worker_syscall_map.py --root "$ROOT" --check-only
+          python3 scripts/369_apply_post_apex_frontier.py --root "$ROOT"
+          python3 scripts/369_apply_post_apex_frontier.py --root "$ROOT" --check-only
+          python3 scripts/370_apply_latest_apex_worker.py --root "$ROOT"
+          python3 scripts/370_apply_latest_apex_worker.py --root "$ROOT" --check-only
+          python3 scripts/371_apply_thread_worker_state.py --root "$ROOT"
+          python3 scripts/371_apply_thread_worker_state.py --root "$ROOT" --check-only
+          python3 scripts/372_apply_future_worker_correlation.py --root "$ROOT"
+          python3 scripts/372_apply_future_worker_correlation.py --root "$ROOT" --check-only
+          python3 scripts/373_apply_apex_mount_blocker.py --root "$ROOT"
+          python3 scripts/373_apply_apex_mount_blocker.py --root "$ROOT" --check-only
+          python3 scripts/377_apply_apexd_live_thread_census.py --root "$ROOT"
+          python3 scripts/377_apply_apexd_live_thread_census.py --root "$ROOT" --check-only
+          python3 scripts/378_apply_ufs_completion_flight_recorder.py --root "$ROOT"
+          python3 scripts/378_apply_ufs_completion_flight_recorder.py --root "$ROOT" --check-only
+          python3 scripts/379_apply_ufs_sideband_sampler.py --root "$ROOT"
+          python3 scripts/379_apply_ufs_sideband_sampler.py --root "$ROOT" --check-only
+          python3 scripts/380_apply_usb_block_live_debug.py --root "$ROOT"
+          python3 scripts/380_apply_usb_block_live_debug.py --root "$ROOT" --check-only
+          python3 scripts/381_apply_usb_udc_dense_frontier.py --root "$ROOT"
+          python3 scripts/381_apply_usb_udc_dense_frontier.py --root "$ROOT" --check-only
+          python3 scripts/382_apply_sticky_usb_cliff_census.py --root "$ROOT"
+          python3 scripts/382_apply_sticky_usb_cliff_census.py --root "$ROOT" --check-only
+          python3 scripts/383_apply_event_frontier_loop_aio.py --root "$ROOT"
+          python3 scripts/383_apply_event_frontier_loop_aio.py --root "$ROOT" --check-only
+          python3 scripts/384_apply_loop_ufs_stall_pinpoint.py --root "$ROOT"
+          python3 scripts/384_apply_loop_ufs_stall_pinpoint.py --root "$ROOT" --check-only
+          python3 scripts/385_apply_frontier_stall_observer.py --root "$ROOT"
+          python3 scripts/385_apply_frontier_stall_observer.py --root "$ROOT" --check-only
+
+          CORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          QCOM="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          DD="$ROOT/drivers/base/dd.c"
+          PHY="$ROOT/drivers/phy/qualcomm/phy-qcom-qmp.c"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          SYSCALL="$ROOT/arch/arm64/kernel/syscall.c"
+          FUTEX="$ROOT/kernel/futex/core.c"
+          [ -f "$FUTEX" ] || FUTEX="$ROOT/kernel/futex.c"
+          BLK="$ROOT/block/blk-mq.c"
+          LOOP="$ROOT/drivers/block/loop.c"
+          USB="$ROOT/drivers/usb/gadget/function/u_serial.c"
+          GSERIAL="$ROOT/drivers/usb/gadget/legacy/serial.c"
+          UDCCORE="$ROOT/drivers/usb/gadget/udc/core.c"
+          DWC3G="$ROOT/drivers/usb/dwc3/gadget.c"
+          DWC3CORE="$ROOT/drivers/usb/dwc3/core.c"
+          echo "Phase383 patchers passed check-only audits"
+          if ! git -C "$ROOT" diff --check; then
+            echo "WARNING: git diff --check reported formatting issues; continuing to compile"
+          fi
+
+          cp phase357-gki-out/config/final.config "$BUILD/.config"
+          BASE_CMDLINE="$(grep '^CONFIG_CMDLINE=' "$BUILD/.config" | sed -e 's/^CONFIG_CMDLINE="//' -e 's/"$//')"
+          echo "Phase380 config: inherited CMDLINE length=${#BASE_CMDLINE}"
+          if [ -z "$BASE_CMDLINE" ]; then
+            echo "ERROR: Phase357 CONFIG_CMDLINE was not found" >&2
+            grep -E '^CONFIG_CMDLINE' "$BUILD/.config" || true
+            exit 1
+          fi
+          test -x "$ROOT/scripts/config" || {
+            echo "ERROR: kernel scripts/config is missing or not executable" >&2
+            ls -l "$ROOT/scripts/config" || true
+            exit 1
+          }
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable U_SERIAL_CONSOLE
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_G_SERIAL
+          "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DWC3_DUAL_ROLE
+          "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DWC3_HOST
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_DWC3_GADGET
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-str CMDLINE \
+            "$BASE_CMDLINE console=ttyGS0,115200 loglevel=7 ignore_loglevel hung_task_timeout_secs=10 workqueue.watchdog_thresh=10 panic=0 hung_task_panic=0 softlockup_panic=0 panic_on_warn=0"
+          echo "Phase380 config: requested USB console options"
+          grep -E '^(CONFIG_CMDLINE=|CONFIG_LOG_BUF_SHIFT=|CONFIG_U_SERIAL_CONSOLE=|CONFIG_USB_G_SERIAL=|CONFIG_USB_DWC3_(HOST|GADGET|DUAL_ROLE)=)' "$BUILD/.config" || true
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          echo "Phase380 config: olddefconfig complete"
+          grep -Fxq 'CONFIG_PHY_QCOM_QMP=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_U_SERIAL_CONSOLE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_USB_G_SERIAL=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_USB_DWC3_GADGET=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_USB_DWC3_DUAL_ROLE is not set' "$BUILD/.config"
+          grep -Fxq '# CONFIG_USB_DWC3_HOST is not set' "$BUILD/.config"
+          grep -Fxq 'CONFIG_LOG_BUF_SHIFT=19' "$BUILD/.config"
+          grep -Fxq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
+          grep -Fq 'console=ttyGS0,115200' "$BUILD/.config"
+          grep -Fq 'hung_task_timeout_secs=10' "$BUILD/.config"
+          grep -Fq 'workqueue.watchdog_thresh=10' "$BUILD/.config"
+          grep -Fq 'panic=0' "$BUILD/.config"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          grep -aFq 'P360 c=1 QCOM stage=devm_phy_get' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=bus_probe_end' "$IMAGE"
+          grep -aFq 'P361 c=1 PREPROBE stage=pm_activate' "$IMAGE"
+          grep -aFq 'P362 FLAT_DETECTED children=0 phys=1' "$IMAGE"
+          grep -aFq 'P362 FLAT_PROVIDER create_ret=%d' "$IMAGE"
+          grep -aFq 'P276 340C t=60 continue=1' "$IMAGE"
+          grep -aFq 'A52_PHASE364_APEXD_SYSCALL_RING_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE365_APEXD_WRITEV_FUTEX_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE366_APEXD_FUTEX_THREADS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE367_APEXD_KERNEL_FUTEX_WAKE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE368_APEXD_WORKER_SYSCALL_MAP_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE369_POST_APEX_FRONTIER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE370_LATEST_APEX_WORKER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE371_THREAD_WORKER_STATE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE372_FUTURE_WORKER_CORRELATION_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE373_APEX_MOUNT_BLOCKER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1' "$IMAGE"
+          grep -aFq 'A52UFS378 SNAP' "$IMAGE"
+          grep -aFq 'A52UFS378 COUNT' "$IMAGE"
+          grep -aFq 'A52UFS378 TAG' "$IMAGE"
+          grep -aFq 'A52_PHASE379_UFS_SIDEBAND_SAMPLER_V1' "$IMAGE"
+          grep -aFq 'UFS_SNAPSHOT' "$IMAGE"
+          grep -aFq 'UFS_TAG' "$IMAGE"
+          grep -aFq 'A52_PHASE380_USB_BLOCK_LIVE_DEBUG_V1' "$IMAGE"
+          grep -aFq 'U380 READY nutrs=%u ver=%x copies=3 crc=crc32c' "$IMAGE"
+          grep -aFq 'B380 id=%d enter q=%px old=%u new=%u' "$IMAGE"
+          grep -aFq 'L380 MAP n=%d q=%px depth=%u' "$IMAGE"
+          grep -aFq 'USB380 ttyGS%d live console ready fifo=%u transport=kthread' "$IMAGE"
+          grep -aFq 'V381 GS composite_probe ret=%d' "$IMAGE"
+          grep -aFq 'V381 UDC bind ret=%d udc=%s drv=%s' "$IMAGE"
+          grep -aFq 'V381 DWC3 add_gadget ret=%d dev=%s' "$IMAGE"
+          grep -aFq 'V381 MODE in dr=%u hw=%u host=%u gad=%u dual=%u' "$IMAGE"
+          grep -aFq 'V381 CORE init_mode dr=%u' "$IMAGE"
+          grep -aFq 'V382 A s=%u mi=%d hw=%d mo=%d ci=%d' "$IMAGE"
+          grep -aFq 'V382 B s=%u gi=%d ga=%d gp=%d ub=%d pr=%d' "$IMAGE"
+          grep -aFq 'B380 F enter q=%px dep=%d zero=%u' "$IMAGE"
+          grep -aFq 'P383 trigger loop=%u t=%llu' "$IMAGE"
+          grep -aFq 'L383 W n=%d rq=%px aio=%u op=%u' "$IMAGE"
+          grep -aFq 'L383 A rq=%px n=%d rw=%u bytes=%u' "$IMAGE"
+          grep -aFq 'L383 R rq=%px ret=%d' "$IMAGE"
+          grep -aFq 'L383 C rq=%px ret=%ld ret2=%ld' "$IMAGE"
+          grep -aFq 'L383 X rq=%px final=%u ref=%d ret=%d' "$IMAGE"
+          grep -aFq 'B384 W q=%px dep=%d nr=%u n=%u zero=0' "$IMAGE"
+          grep -aFq 'B384 G id=%d q=%px dep=%d' "$IMAGE"
+          grep -aFq 'B384 P id=%d q=%px dep=%d' "$IMAGE"
+          grep -aFq 'U384 C%u tr=%lld se=%lld hk=%lld dn=%lld irq=%lld li=%x lc=%lx' "$IMAGE"
+          grep -aFq 'L384 Q n=%d q=%px rq=%px op=%u b=%u' "$IMAGE"
+          grep -aFq 'L384 W n=%d rq=%px aio=%u op=%u b=%u' "$IMAGE"
+          grep -aFq 'L384 X n=%d rq=%px f=%u ref=%d ret=%d' "$IMAGE"
+          grep -aFq 'A52_PHASE385_FRONTIER_STALL_OBSERVER_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE385_FREEZE_OBSERVER_V1' "$IMAGE"
+          grep -aFq 'P385 H s=%u ms=%llu' "$IMAGE"
+          grep -aFq 'B385 W s=%u q=%px dep=%d nr=%u age=%llu zero=%u' "$IMAGE"
+          grep -aFq 'V385 U s=%u udc=%s gad=%s par=%s drv=%s pull=%u' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{package,compile,config,source,audit}
+          cp "$IMAGE" "$BUILD/System.map" "$OUT/compile/"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$CORE" "$QCOM" "$DD" "$PHY" "$REC" "$SYSCALL" "$BLK" "$LOOP" "$USB" "$GSERIAL" "$DWC3G" "$OUT/source/"
+          cp "$FUTEX" "$OUT/source/futex-core.c"
+          cp "$UDCCORE" "$OUT/source/usb-udc-core.c"
+          cp "$DWC3CORE" "$OUT/source/dwc3-core.c"
+          cp "$ROOT/include/linux/a52_ack_secure_flight_recorder.h" "$OUT/source/"
+          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py scripts/382_apply_sticky_usb_cliff_census.py scripts/383_apply_event_frontier_loop_aio.py scripts/384_apply_loop_ufs_stall_pinpoint.py scripts/385_apply_frontier_stall_observer.py "$OUT/audit/"
+          cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
+
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source phase357-gki-out/package/boot.img \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c '%s' "$OUT/package/boot.img")" -eq 100663296
+
+          cat > "$OUT/PHASE385-SCHEMA.txt" <<'SCHEMA'
+          Phase385 frontier stall observer
+          ===================================
+          Purpose
+          -------
+          Continue the UFS/loop/block investigation while simultaneously
+          streaming printk to a PC through the normal USB-C port.
+
+          Cleanup
+          -------
+          Runtime starts for obsolete Phase273/339/340/341/343 diagnostics
+          are retired. In particular, the Phase343 SCHED_FIFO CPU5 busy loop
+          no longer runs and the old 0xB1BF8000 ownership conflict is removed.
+
+          Persistent UFS sideband
+          -----------------------
+          Phase383 inherits Phase380 ownership of 0xB1BF8000..0xB1BFFFFF.
+          Records are 256 bytes, CRC32C protected and written to three
+          independent raw copies. Eleven snapshots concentrate on 18.300 through
+          18.650 seconds, including 25 ms spacing around the 18.5 s cliff.
+          The 36-byte reserved field now carries sticky USB mode/bind/pullup state.
+          Compact U380 records
+          are also routed through the existing RS48 + CRC32C + triple-bank
+          main recorder.
+
+          Block/loop correlation
+          ----------------------
+          B380 records identify blk_mq_update_nr_requests queue freeze,
+          quiesce and return boundaries.
+          L380 records map loopN to request_queue and capture bounded
+          loop request issue/completion activity.
+
+          USB live console + bind tracing
+          ------------------------------
+          CONFIG_U_SERIAL_CONSOLE=y
+          CONFIG_USB_G_SERIAL=y
+          CONFIG_USB_DWC3_GADGET=y
+          # CONFIG_USB_DWC3_DUAL_ROLE is not set
+          # CONFIG_USB_DWC3_HOST is not set
+          CONFIG_LOG_BUF_SHIFT=19
+          ttyGS0 console FIFO = 256 KiB
+          console draining uses dedicated a52_usb_console kthread rather
+          than system_wq.
+          Phase383 stops using an absolute boottime frontier. The trigger is
+          the creation of loop49, which was the final APEX loop device in the
+          Phase382 capture. All late diagnostics are relative to that trigger.
+
+          Event-relative census
+          ---------------------
+          The apexd live-thread census runs at +50, +150, +250 and +350 ms,
+          capturing up to 9 threads per snapshot. Raw census remains CRC32C
+          plus three physical copies.
+
+          Loop AIO stages
+          ---------------
+          L383 records distinguish worker entry, AIO submit, submit return,
+          kiocb callback and the two-reference completion handoff. B380 block
+          completion/softirq tracing is also event-relative. UFS snapshots run
+          from +25 through +425 ms.
+
+          USB sticky state remains enabled. Phase383 also makes the UDC bind
+          sticky value specific to g_serial instead of any gadget driver.
+
+          Built-in debug command line appends:
+          console=ttyGS0,115200 loglevel=7 ignore_loglevel
+          hung_task_timeout_secs=10 workqueue.watchdog_thresh=10
+          panic=0 hung_task_panic=0 softlockup_panic=0 panic_on_warn=0
+
+          Phase384 additions
+          ------------------
+          - preserves Phase383 event-relative loop/AIO tracing
+          - records queue get/put activity for the first 2 seconds after loop49
+          - turns traced blk-mq freeze waits into 250 ms diagnostic heartbeats
+            without changing the eventual wait-for-zero requirement
+          - gives loop46..49 an independent 384-record lifecycle budget
+          - extends UFS snapshots through +20 seconds
+          - records UFS IRQ count/status alongside TRC/seen/hook/scsi_done counters
+
+          Phase385 additions
+          ------------------
+          - restores the original blk-mq wait_event freeze semantics
+          - moves freeze diagnosis to an independent observer kthread
+          - emits dense P385 heartbeats from +230 ms through +2 s
+          - reports active freeze queue zero/depth/age without waking it
+          - suppresses Phase384 broad queue get/put and high-volume L384 logs
+          - retargets UFS snapshots densely through the +225..+425 ms silence
+          - snapshots the actual generic UDC/gadget/driver identity post-frontier
+
+          This is a debug-only g_serial build. g_serial claims the UDC, so
+          Android ADB/MTP should not be expected while this kernel is booted.
+          SCHEMA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          r=Path('phase385-gki-out')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          audit={}
+          for line in (r/'audit/phase377-inherited-ufs-audit.txt').read_text().splitlines():
+              if '=' in line:
+                  k,v=line.split('=',1); audit[k]=v
+          ident={
+              'phase':'385',
+              'name':'FRONTIER-STALL-OBSERVER-V1',
+              'base_phase':'357',
+              'source_lineage':['357','358','359','360','361','362','363','364','365','366','367','368','369','370','371','372','373','377','378','379','380','381','382','383','384','385'],
+              'hardware_validated':False,
+              'boot_img_size':(r/'package/boot.img').stat().st_size,
+              'boot_img_sha256':sha(r/'package/boot.img'),
+              'image_sha256':sha(r/'compile/Image'),
+              'inherited_ufs_compatibility':audit,
+              'git_sha':os.getenv('GITHUB_SHA'),
+          }
+          (r/'BUILD-IDENTITY.json').write_text(json.dumps(ident,indent=2,sort_keys=True)+'\n')
+          PY
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase385
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE385-FRONTIER-STALL-OBSERVER-${{ github.run_number }}
+          path: phase385-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE385-FRONTIER-STALL-OBSERVER-${{ github.run_number }}-BOOT-IMG
+          path: phase385-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

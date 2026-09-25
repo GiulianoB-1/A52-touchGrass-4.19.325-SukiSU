@@ -71,7 +71,6 @@ jobs:
             a52xq-p149-ufs-runtime-autosuspend-${{ runner.os }}-
             a52xq-p148-qcom-battery-${{ runner.os }}-
             a52xq-p143-uclamp-rq-idle-${{ runner.os }}-
-            a52xq-f2fs325-p1-${{ runner.os }}-
 
       - name: Configure compiler cache
         run: |

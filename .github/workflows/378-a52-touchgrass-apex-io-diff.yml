@@ -1,0 +1,177 @@
+name: Phase378 - TouchGrass APEX IO differential
+run-name: Phase378 - TouchGrass APEX IO differential
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase372-future-worker-correlation-v1
+    paths:
+      - .github/workflows/378-a52-touchgrass-apex-io-diff.yml
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase378-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Compare TouchGrass and GKI APEX IO paths
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore cached GKI tree
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Require cached GKI tree
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase346-v2.outputs.cache-hit }}" = true
+          test -d gki/common
+          echo "cached-gki-head=$(git -C gki/common rev-parse HEAD)"
+
+      - name: Fetch exact TouchGrass source
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          git init -q workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch -q --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout -q --detach FETCH_HEAD
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+
+      - name: Generate focused IO comparison report
+        run: |
+          set -Eeuo pipefail
+          A="$PWD/workspace/touchgrass-a52xq"
+          B="$PWD/gki/common"
+          OUT="$PWD/phase378-report"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/diffs"
+
+          {
+            echo '# Phase378 TouchGrass 4.19 vs GKI 5.10 APEX I/O differential'
+            echo
+            echo "TouchGrass: $TOUCHGRASS_COMMIT"
+            echo "GKI base:   $GKI_COMMON_SHA"
+            echo
+            echo '## All read_cache_page/read_mapping_page callers - TouchGrass'
+            git -C "$A" grep -n -E '\b(read_cache_page(_gfp)?|read_mapping_page(_gfp)?)\s*\(' -- ':!Documentation' ':!tools' || true
+            echo
+            echo '## All read_cache_page/read_mapping_page callers - GKI'
+            git -C "$B" grep -n -E '\b(read_cache_page(_gfp)?|read_mapping_page(_gfp)?)\s*\(' -- ':!Documentation' ':!tools' || true
+            echo
+            echo '## wait_on_page_read definitions'
+            git -C "$A" grep -n -A18 -B4 'static struct page \*wait_on_page_read' -- mm/filemap.c || true
+            echo '--- GKI ---'
+            git -C "$B" grep -n -A18 -B4 'static struct page \*wait_on_page_read' -- mm/filemap.c || true
+            echo
+            echo '## loop completion/path symbols'
+            for f in drivers/block/loop.c drivers/md/dm-verity-target.c drivers/md/dm-bufio.c mm/filemap.c; do
+              echo "### $f TouchGrass"
+              git -C "$A" grep -n -E 'loop_queue_rq|loop_handle_cmd|lo_rw_aio|lo_complete_rq|verity_(map|end_io|work|verify)|dm_bufio|wait_on_page_read|read_cache_page' -- "$f" || true
+              echo "### $f GKI"
+              git -C "$B" grep -n -E 'loop_queue_rq|loop_handle_cmd|lo_rw_aio|lo_complete_rq|verity_(map|end_io|work|verify)|dm_bufio|wait_on_page_read|read_cache_page' -- "$f" || true
+            done
+            echo
+            echo '## filesystem readpage/readahead handlers'
+            for tree in "$A" "$B"; do
+              echo "### $tree"
+              git -C "$tree" grep -n -E '\.(readpage|readahead)\s*=|readpage\s*\(' -- fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
+            done
+            echo
+            echo '## block completion primitives used by loop/dm'
+            for tree in "$A" "$B"; do
+              echo "### $tree"
+              git -C "$tree" grep -n -E 'blk_mq_complete_request|bio_endio|submit_bio|generic_make_request|end_page_read|unlock_page' -- drivers/block/loop.c drivers/md/dm-verity-target.c drivers/md/dm-bufio.c fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
+            done
+          } > "$OUT/report.txt"
+
+          for f in \
+            mm/filemap.c \
+            drivers/block/loop.c \
+            drivers/md/dm-verity-target.c \
+            drivers/md/dm-bufio.c \
+            fs/namespace.c \
+            fs/pnode.c \
+            fs/erofs/data.c \
+            fs/erofs/zdata.c \
+            fs/erofs/inode.c \
+            fs/ext4/readpage.c \
+            fs/f2fs/data.c \
+            fs/block_dev.c \
+            block/blk-core.c \
+            block/blk-mq.c; do
+              safe="${f//\//__}"
+              if test -f "$A/$f" && test -f "$B/$f"; then
+                diff -u "$A/$f" "$B/$f" > "$OUT/diffs/$safe.diff" || true
+              else
+                {
+                  echo "TouchGrass exists: $(test -f "$A/$f" && echo yes || echo no)"
+                  echo "GKI exists: $(test -f "$B/$f" && echo yes || echo no)"
+                } > "$OUT/diffs/$safe.diff"
+              fi
+          done
+
+          python3 - "$A" "$B" "$OUT" <<'PY'
+          import re,sys
+          from pathlib import Path
+          A,B,OUT=map(Path,sys.argv[1:])
+          specs={
+            'mm/filemap.c':['wait_on_page_read','do_read_cache_page'],
+            'drivers/block/loop.c':['loop_queue_rq','loop_handle_cmd','lo_rw_aio','lo_rw_aio_complete','lo_rw_aio_do_completion','lo_complete_rq','loop_configure'],
+            'drivers/md/dm-verity-target.c':['verity_map','verity_end_io','verity_work','verity_verify_io','verity_ctr'],
+            'drivers/md/dm-bufio.c':['dm_bufio_read','dm_bufio_prefetch','submit_io','write_dirty_buffer'],
+          }
+          def fn(src,name):
+            m=re.search(r'(^[^\n]*\b'+re.escape(name)+r'\s*\([^;]*?\)\s*\{)',src,re.M|re.S)
+            if not m:return None
+            start=src.rfind('\n',0,m.start())+1; brace=src.find('{',m.start()); d=0
+            for i in range(brace,len(src)):
+              if src[i]=='{':d+=1
+              elif src[i]=='}':
+                d-=1
+                if d==0:return src[start:i+1]
+            return None
+          with (OUT/'functions.txt').open('w') as o:
+            for p,names in specs.items():
+              o.write(f'\n===== {p} =====\n')
+              for name in names:
+                o.write(f'\n--- {name}: TouchGrass ---\n')
+                s=(A/p).read_text(errors='replace') if (A/p).exists() else ''
+                o.write((fn(s,name) or '<missing>')+'\n')
+                o.write(f'\n--- {name}: GKI ---\n')
+                s=(B/p).read_text(errors='replace') if (B/p).exists() else ''
+                o.write((fn(s,name) or '<missing>')+'\n')
+          PY
+
+          tar -C "$OUT" -czf phase378-touchgrass-io-diff.tar.gz .
+          echo '=== report summary ==='
+          sed -n '1,260p' "$OUT/report.txt"
+
+      - name: Upload comparison report
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE378-TOUCHGRASS-APEX-IO-DIFF
+          path: |
+            phase378-report/
+            phase378-touchgrass-io-diff.tar.gz
+          if-no-files-found: error

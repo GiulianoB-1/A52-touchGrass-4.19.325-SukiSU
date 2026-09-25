@@ -24,7 +24,7 @@ def patch_header(text: str) -> str:
     if "A52_PHASE385_FIXED_STICKY_V1" in text:
         return text
 
-    block = r'''
+    block = '''
 /* A52_PHASE385_FIXED_STICKY_V1 */
 void a52_ackfr_sticky385_usb_identity(const char *udc, const char *gadget,
                                       const char *parent, const char *driver,
@@ -42,7 +42,7 @@ void a52_ackfr_sticky385_ofsimple(unsigned int stage, int ret);
                "sticky header declarations")
 
 
-STICKY_BLOCK = r'''
+STICKY_BLOCK = '''
 /* A52_PHASE385_FIXED_STICKY_V1
  *
  * The RS48 stream can wrap in roughly 230 ms under this debug load. Keep

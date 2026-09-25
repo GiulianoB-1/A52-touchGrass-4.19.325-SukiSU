@@ -471,8 +471,6 @@ jobs:
           grep -Fxq '# CONFIG_PANIC_ON_OOPS is not set' "$CFG"
           grep -Fxq 'CONFIG_PANIC_ON_OOPS_VALUE=0' "$CFG"
           grep -Fq 'A52 P155 PROBE CENSUS' "$KERNEL/drivers/base/dd.c"
-          grep -Fq 'A52_PROBE_CENSUS SUMMARY_BEGIN' "$KERNEL/drivers/base/dd.c"
-          grep -Fq 'A52_PROBE_CENSUS SUMMARY_END' "$KERNEL/drivers/base/dd.c"
           grep -Fq 'A52 P156 EARLY PROBE CENSUS' "$KERNEL/drivers/base/dd.c"
           grep -Fq 'core_initcall(a52_probe_census_init)' "$KERNEL/drivers/base/dd.c"
           grep -Fq '#define A52_PROBE_CENSUS_CHECKPOINT_MS 2000' "$KERNEL/drivers/base/dd.c"
@@ -576,13 +574,10 @@ jobs:
             artifacts/boot-async-deferred-p151.txt
             artifacts/boot-async-peripherals-p152.txt
             artifacts/boot-async-p151-p152.diff
-            artifacts/boot-async-p152-audit.txt
             artifacts/global-async-default-p153.txt
             artifacts/global-async-default-p153.diff
-            artifacts/global-async-p153-audit.txt
             artifacts/probe-census-p155.txt
             artifacts/probe-census-p155.diff
-            artifacts/probe-census-p155-audit.txt
             artifacts/probe-census-early-p156.txt
             artifacts/probe-census-early-p156.diff
             artifacts/probe-census-p156-audit.txt

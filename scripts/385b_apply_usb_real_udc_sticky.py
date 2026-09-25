@@ -422,11 +422,11 @@ def patch_simple(text: str) -> str:
                    "#include <linux/reset.h>\n" + inc,
                    "OF-simple recorder include")
 
-    old = """static int dwc3_of_simple_probe(struct platform_device *pdev)
-{
+    old = """	platform_set_drvdata(pdev, simple);
+	simple->dev = dev;
 """
-    new = """static int dwc3_of_simple_probe(struct platform_device *pdev)
-{
+    new = """	platform_set_drvdata(pdev, simple);
+	simple->dev = dev;
 	/* A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1 */
 	a52_ackfr_sticky385_ofsimple(1U, 0);
 """

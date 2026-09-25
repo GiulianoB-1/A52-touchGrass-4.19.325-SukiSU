@@ -77,32 +77,36 @@ jobs:
             git -C "$A" grep -n -E '\b(read_cache_page(_gfp)?|read_mapping_page(_gfp)?)\s*\(' -- ':!Documentation' ':!tools' || true
             echo
             echo '## All read_cache_page/read_mapping_page callers - GKI'
-            git -C "$B" grep -n -E '\b(read_cache_page(_gfp)?|read_mapping_page(_gfp)?)\s*\(' -- ':!Documentation' ':!tools' || true
+            grep -RInE '\b(read_cache_page(_gfp)?|read_mapping_page(_gfp)?)\s*\(' "$B" --include='*.c' --include='*.h' --exclude-dir=.git || true
+            echo
+            echo
+            echo '## UFS completion and vendor-hook registration - GKI'
+            grep -RInE 'android_vh_ufs_compl_rsp_check_done|register_trace_.*ufs.*compl|ufshcd_has_utrlcnr|ufshcd_trc_handler' "$B" --include='*.c' --include='*.h' --exclude-dir=.git || true
             echo
             echo '## wait_on_page_read definitions'
             git -C "$A" grep -n -A18 -B4 'static struct page \*wait_on_page_read' -- mm/filemap.c || true
             echo '--- GKI ---'
-            git -C "$B" grep -n -A18 -B4 'static struct page \*wait_on_page_read' -- mm/filemap.c || true
+            grep -n -A18 -B4 'static struct page \*wait_on_page_read' "$B/mm/filemap.c" || true
             echo
             echo '## loop completion/path symbols'
             for f in drivers/block/loop.c drivers/md/dm-verity-target.c drivers/md/dm-bufio.c mm/filemap.c; do
               echo "### $f TouchGrass"
               git -C "$A" grep -n -E 'loop_queue_rq|loop_handle_cmd|lo_rw_aio|lo_complete_rq|verity_(map|end_io|work|verify)|dm_bufio|wait_on_page_read|read_cache_page' -- "$f" || true
               echo "### $f GKI"
-              git -C "$B" grep -n -E 'loop_queue_rq|loop_handle_cmd|lo_rw_aio|lo_complete_rq|verity_(map|end_io|work|verify)|dm_bufio|wait_on_page_read|read_cache_page' -- "$f" || true
+              grep -nE 'loop_queue_rq|loop_handle_cmd|lo_rw_aio|lo_complete_rq|verity_(map|end_io|work|verify)|dm_bufio|wait_on_page_read|read_cache_page' "$B/$f" || true
             done
             echo
             echo '## filesystem readpage/readahead handlers'
-            for tree in "$A" "$B"; do
-              echo "### $tree"
-              git -C "$tree" grep -n -E '\.(readpage|readahead)\s*=|readpage\s*\(' -- fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
-            done
+            echo '### TouchGrass'
+            git -C "$A" grep -n -E '\.(readpage|readahead)\s*=|readpage\s*\(' -- fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
+            echo '### GKI'
+            grep -RInE '\.(readpage|readahead)\s*=|readpage\s*\(' "$B/fs/erofs" "$B/fs/ext4" "$B/fs/f2fs" --include='*.c' --include='*.h' 2>/dev/null || true
             echo
             echo '## block completion primitives used by loop/dm'
-            for tree in "$A" "$B"; do
-              echo "### $tree"
-              git -C "$tree" grep -n -E 'blk_mq_complete_request|bio_endio|submit_bio|generic_make_request|end_page_read|unlock_page' -- drivers/block/loop.c drivers/md/dm-verity-target.c drivers/md/dm-bufio.c fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
-            done
+            echo '### TouchGrass'
+            git -C "$A" grep -n -E 'blk_mq_complete_request|bio_endio|submit_bio|generic_make_request|end_page_read|unlock_page' -- drivers/block/loop.c drivers/md/dm-verity-target.c drivers/md/dm-bufio.c fs/erofs fs/ext4 fs/f2fs 2>/dev/null || true
+            echo '### GKI'
+            grep -RInE 'blk_mq_complete_request|bio_endio|submit_bio|generic_make_request|end_page_read|unlock_page' "$B/drivers/block/loop.c" "$B/drivers/md/dm-verity-target.c" "$B/drivers/md/dm-bufio.c" "$B/fs/erofs" "$B/fs/ext4" "$B/fs/f2fs" 2>/dev/null || true
           } > "$OUT/report.txt"
 
           for f in \
@@ -119,7 +123,10 @@ jobs:
             fs/f2fs/data.c \
             fs/block_dev.c \
             block/blk-core.c \
-            block/blk-mq.c; do
+            block/blk-mq.c \
+            drivers/scsi/ufs/ufshcd.c \
+            drivers/scsi/ufs/ufshcd.h \
+            drivers/scsi/ufs/ufs-qcom.c; do
               safe="${f//\//__}"
               if test -f "$A/$f" && test -f "$B/$f"; then
                 diff -u "$A/$f" "$B/$f" > "$OUT/diffs/$safe.diff" || true
@@ -140,6 +147,7 @@ jobs:
             'drivers/block/loop.c':['loop_queue_rq','loop_handle_cmd','lo_rw_aio','lo_rw_aio_complete','lo_rw_aio_do_completion','lo_complete_rq','loop_configure'],
             'drivers/md/dm-verity-target.c':['verity_map','verity_end_io','verity_work','verity_verify_io','verity_ctr'],
             'drivers/md/dm-bufio.c':['dm_bufio_read','dm_bufio_prefetch','submit_io','write_dirty_buffer'],
+            'drivers/scsi/ufs/ufshcd.c':['ufshcd_trc_handler','__ufshcd_transfer_req_compl','ufshcd_sl_intr','ufshcd_send_command','ufshcd_queuecommand'],
           }
           def fn(src,name):
             m=re.search(r'(^[^\n]*\b'+re.escape(name)+r'\s*\([^;]*?\)\s*\{)',src,re.M|re.S)
@@ -165,7 +173,7 @@ jobs:
 
           tar -C "$OUT" -czf phase378-touchgrass-io-diff.tar.gz .
           echo '=== report summary ==='
-          sed -n '1,260p' "$OUT/report.txt"
+          sed -n '1,360p' "$OUT/report.txt"
 
       - name: Upload comparison report
         uses: actions/upload-artifact@v4

@@ -823,25 +823,25 @@ def patch_syscall(text: str) -> str:
     if "A52_PHASE377_APEXD_LIVE_THREAD_CENSUS_V1" not in text:
         raise SystemExit("Phase380 VDC census requires Phase377 lineage")
 
-    inc = "#include <linux/a52_ack_secure_flight_recorder.h>\\n"
+    inc = "#include <linux/a52_ack_secure_flight_recorder.h>\n"
     if inc not in text:
-        anchor = "#include <linux/rcupdate.h>\\n"
+        anchor = "#include <linux/rcupdate.h>\n"
         text = one(text, anchor, anchor + inc, "vdc recorder include")
 
     text = one(
         text,
-        "static int __init a52_r377_init(void)\\n",
-        "static int __init __used a52_r377_init(void)\\n",
+        "static int __init a52_r377_init(void)\n",
+        "static int __init __used a52_r377_init(void)\n",
         "retire Phase377 init",
     )
     text = one(
         text,
-        "late_initcall(a52_r377_init);\\n",
-        "/* Phase380 replaces the Phase377 apexd census at runtime. */\\n",
+        "late_initcall(a52_r377_init);\n",
+        "/* Phase380 replaces the Phase377 apexd census at runtime. */\n",
         "disable Phase377 sampler",
     )
 
-    anchor = "static int __init __used a52_r377_init(void)\\n"
+    anchor = "static int __init __used a52_r377_init(void)\n"
     text = one(text, anchor, VDC_BLOCK + anchor, "Phase380 VDC census")
     return text
 

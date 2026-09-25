@@ -224,14 +224,31 @@ int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
         "queue ref census state",
     )
 
-    text = one(
-        text,
-        '''\trwsem_acquire_read(&q->q_lockdep_map, 0, 0, _RET_IP_);
-\trwsem_release(&q->q_lockdep_map, _RET_IP_);
-\treturn 0;
-}
-''',
-        '''\t{
+    fn_anchor = "int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)"
+    start = text.find(fn_anchor)
+    if start < 0:
+        raise SystemExit("Phase384 queue get census: blk_queue_enter missing")
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit("Phase384 queue get census: opening brace missing")
+    depth = 0
+    end = -1
+    for pos in range(brace, len(text)):
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                end = pos + 1
+                break
+    if end < 0:
+        raise SystemExit("Phase384 queue get census: closing brace missing")
+
+    body = text[start:end]
+    ret = body.rfind("\treturn 0;")
+    if ret < 0:
+        raise SystemExit("Phase384 queue get census: successful return missing")
+    body = body[:ret] + '''\t{
 \t\tu64 a52_ms = a52_ackfr_frontier_elapsed_ms();
 \t\tint a52_id;
 
@@ -240,13 +257,8 @@ int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
 \t\t\ta52_ackfr_record("B384 G id=%d q=%px dep=%d",
 \t\t\t\t\t a52_id, q, READ_ONCE(q->mq_freeze_depth));
 \t}
-\trwsem_acquire_read(&q->q_lockdep_map, 0, 0, _RET_IP_);
-\trwsem_release(&q->q_lockdep_map, _RET_IP_);
-\treturn 0;
-}
-''',
-        "queue get census",
-    )
+''' + body[ret:]
+    text = text[:start] + body + text[end:]
 
     text = one(
         text,

@@ -38,8 +38,9 @@ helper = r'''/*
  * async-default policy.
  *
  * Sources:
- *  - P156 8s census RUNNING set: arm-smmu, UFS, KGSL, SDHCI, display,
- *    ADC-TM and camera CDM/ICP/CCI/sensor providers/consumers.
+ *  - P156 8s census persistent set: subsys PIL, KGSL, ADC-TM, SM5714,
+ *    FTS touch, DSI display and camera CDM; msm-dwc3 returned -EINVAL.
+ *  - Earlier global-async runs also exposed SMMU/UFS/SDHCI ordering risk.
  *  - P156 hard Oops traces: cam_hw_cdm_probe -> cam_smmu_get_handle and
  *    cam_icp_probe -> cam_hfi_mgr_init while camera providers were incomplete.
  *  - P153 rescue test: PMIC power-key input was not guaranteed ready early.
@@ -54,7 +55,10 @@ static bool a52_probe_force_sync(const struct device_driver *drv)
 		"kgsl-3d",
 		"sdhci-msm",
 		"qcom,adc-tm",
+		"sm5714",
+		"fts_touch",
 		"msm-dsi-display",
+		"msm-dwc3",
 
 		/* Camera ordering chain exposed by P156 Oopses/census. */
 		"msm_cam_smmu",
@@ -101,7 +105,10 @@ for token in (
     '"arm-smmu"',
     '"ufshcd-qcom"',
     '"kgsl-3d"',
+    '"sm5714"',
+    '"fts_touch"',
     '"msm-dsi-display"',
+    '"msm-dwc3"',
     '"msm_cam_smmu"',
     '"msm_cam_cdm"',
     '"cam_icp"',
@@ -113,7 +120,7 @@ for token in (
 dd.write_text(s)
 
 print("A52 P157 census-derived synchronous exception set applied")
-print("  critical sync: SMMU/UFS/KGSL/SDHCI/ADC-TM/display/subsys PIL")
+print("  critical sync: SMMU/UFS/KGSL/SDHCI/ADC-TM/SM5714/FTS/display/USB/subsys PIL")
 print("  camera sync: SMMU/CPAS/CDM/ICP/CCI/sensor ordering chain")
 print("  rescue sync: QPNP power-key naming variants")
 print("  every other ordinary driver remains P153 async-default")

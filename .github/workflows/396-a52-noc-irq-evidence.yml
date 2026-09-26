@@ -210,11 +210,21 @@ jobs:
           echo "Phase396 R48 and NoC IRQ source audit: PASS"
 
           echo "Phase396 compiled-artifact audit"
-          grep -aFq 'A52_PHASE396_NOC_IRQ_EVIDENCE_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE396_R48_TWO_COPY_V1' "$IMAGE"
-          grep -aFq 'N396 MAP q=%u hw=%llu t=%u md=%u' "$IMAGE"
-          grep -aFq 'N396 S ms=%llu q=%u t=%u sw=%x hw=%x ok=%x dp=%u pc=%016llx' "$IMAGE"
-          grep -aFq 'N396 ARM map=%u fast=%u wc=%u kt=%ld' "$IMAGE"
+          grep -aFq 'BOOT rs=ready phase=396 focus=noc-irq roots=%u copies=2 crc=crc32c' "$IMAGE" || {
+            echo "ERROR: Phase396 two-copy boot marker missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'N396 MAP q=%u hw=%llu t=%u md=%u' "$IMAGE" || {
+            echo "ERROR: Phase396 IRQ mapping record missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'N396 S ms=%llu q=%u t=%u sw=%x hw=%x ok=%x dp=%u pc=%016llx' "$IMAGE" || {
+            echo "ERROR: Phase396 IRQ state sample missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'N396 ARM map=%u fast=%u wc=%u kt=%ld' "$IMAGE" || {
+            echo "ERROR: Phase396 IRQ arming record missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'N396 DONE ms=%llu wc=%u hits=%u' "$IMAGE" || {
+            echo "ERROR: Phase396 IRQ completion record missing from Image" >&2; exit 1;
+          }
           grep -Fq ' a52_p396_init' "$BUILD/System.map"
           grep -Fq ' a52_ackfr_noc_irq_hit' "$BUILD/System.map"
           test -s "$BUILD/kernel/irq/handle.o"

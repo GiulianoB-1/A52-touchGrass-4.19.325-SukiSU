@@ -70,17 +70,19 @@ def patch_dsi(text: str) -> str:
     text = one(text, old, new, "DMA wait entry")
 
     old = '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
-		a52_ackfr_record("GDM S08 ret=%d irq=%d in=%x st=%x", ret,
+		a52_ackfr_record("P276 303 S08 ret=%d irq=%d in=%x st=%x", ret,
 			atomic_read(&dsi_ctrl->dma_irq_trig),
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL),
 			DSI_R32(&dsi_ctrl->hw, DSI_STATUS));
+		a52_p326_q2_recorded = true;
 	}
 '''
     new = '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
-		a52_ackfr_record("GDM S08 ret=%d irq=%d in=%x st=%x", ret,
+		a52_ackfr_record("P276 303 S08 ret=%d irq=%d in=%x st=%x", ret,
 			atomic_read(&dsi_ctrl->dma_irq_trig),
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL),
 			DSI_R32(&dsi_ctrl->hw, DSI_STATUS));
+		a52_p326_q2_recorded = true;
 		a52_ackfr_record("P276 387D w ret=%d trig=%d hw=%x",
 			ret, atomic_read(&dsi_ctrl->dma_irq_trig),
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));

@@ -9,15 +9,17 @@ kernel = Path(sys.argv[1]).resolve()
 dd = kernel / "drivers/base/dd.c"
 defconfig = kernel / "arch/arm64/configs/a52xq_defconfig"
 vidc = kernel / "techpack/video/msm/vidc/msm_v4l2_vidc.c"
+vidc_res = kernel / "techpack/video/msm/vidc/msm_vidc_res_parse.c"
 platform = kernel / "drivers/base/platform.c"
 
-for path in (dd, defconfig, vidc, platform):
+for path in (dd, defconfig, vidc, vidc_res, platform):
     if not path.is_file():
         raise SystemExit(f"missing required source: {path}")
 
 s = dd.read_text()
 cfg = defconfig.read_text()
 vidc_s = vidc.read_text()
+vidc_res_s = vidc_res.read_text()
 platform_s = platform.read_text()
 
 marker = "A52 P165: production-safe async exception set"
@@ -69,6 +71,32 @@ if marker not in s:
         raise SystemExit(f"P165 build-marker anchor count={s.count(helper_anchor)}")
     s = s.replace(helper_anchor, marker_decl + helper_anchor, 1)
 
+# P164 proved the only remaining census FAIL was the intentionally
+# non-matching Lito VIDC SKU node.  Both qcom,vidc0 (sku-index 0) and
+# qcom,vidc1 (sku-index 1) are described in DT; msm_decide_dt_node()
+# rejects whichever one does not match the efuse-selected sku_version.
+# That is device absence/not-applicability, not a broken probe, so use
+# -ENODEV instead of -EINVAL.  Driver core already treats -ENODEV as a
+# normal rejected match.
+sku_marker = "A52 P165: VIDC non-matching SKU is not a probe failure"
+if sku_marker not in vidc_res_s:
+    old = r'''\tif (sku_index != res->sku_version) {
+\t\td_vpr_h("Failed to parse dt: sku_index %d sku_version %d\\n",
+\t\t\tsku_index, res->sku_version);
+\t\treturn -EINVAL;
+\t}
+'''
+    new = r'''\tif (sku_index != res->sku_version) {
+\t\td_vpr_h("Failed to parse dt: sku_index %d sku_version %d\\n",
+\t\t\tsku_index, res->sku_version);
+\t\t/* A52 P165: VIDC non-matching SKU is not a probe failure */
+\t\treturn -ENODEV;
+\t}
+'''
+    if vidc_res_s.count(old) != 1:
+        raise SystemExit(f"P165 VIDC SKU mismatch anchor count={vidc_res_s.count(old)}")
+    vidc_res_s = vidc_res_s.replace(old, new, 1)
+
 # Production configuration must retain the pre-diagnostic panic behavior.
 for token in ("CONFIG_PANIC_ON_OOPS=y", "CONFIG_PANIC_ON_OOPS_VALUE=1"):
     if token not in cfg:
@@ -102,6 +130,9 @@ for token in (
     if token in s:
         raise SystemExit(f"P165 diagnostic residue in dd.c: {token}")
 
+if sku_marker not in vidc_res_s or "return -ENODEV;" not in vidc_res_s:
+    raise SystemExit("P165 VIDC SKU semantic fix missing")
+
 for token in (
     "A52 P163 VIDC forensic stage recorder",
     "A52_P163_VIDC_DIAG",
@@ -117,12 +148,14 @@ for token in (
         raise SystemExit(f"P165 platform forensic residue: {token}")
 
 dd.write_text(s)
+vidc_res.write_text(vidc_res_s)
 
 print("A52 P165 production-safe async exception set applied")
 print("  global P153 async-default retained")
 print("  sync: arm-smmu + crash-proven camera chain")
 print("  sync: msm-dsi-display + msm_drm")
 print("  P158 QSMMUv500 and P160 DWC3 source-level fixes retained")
+print("  VIDC: non-matching efuse SKU node returns -ENODEV (REJECT), not -EINVAL (FAIL)")
 print("  no probe census, no forced recovery, no VIDC forensic")
 print("  production panic_on_oops behavior retained")
 print(f"  compiled flash identity marker: {build_marker}")

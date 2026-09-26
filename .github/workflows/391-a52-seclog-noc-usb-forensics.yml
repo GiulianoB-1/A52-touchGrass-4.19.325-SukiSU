@@ -551,8 +551,14 @@ jobs:
           if grep -Fq '0xB1400000ULL' "$REC"; then
             echo "ERROR: unsafe Phase389 B1400000 mapping remains in recorder source" >&2; exit 1;
           fi
-          grep -aFq 'A52_PHASE391_DWC3_CORE_SPLIT_V1' "$IMAGE" || {
-            echo "ERROR: Phase391 DWC3 core split missing from Image" >&2; exit 1;
+          grep -Fq 'A52_PHASE391_DWC3_CORE_SPLIT_V1' "$DWC3CORE" || {
+            echo "ERROR: Phase391 DWC3 core split marker missing from source" >&2; exit 1;
+          }
+          test -s "$BUILD/drivers/usb/dwc3/core.o" || {
+            echo "ERROR: compiled dwc3/core.o missing" >&2; exit 1;
+          }
+          llvm-nm "$BUILD/drivers/usb/dwc3/core.o" | grep -Fq ' U a52_ackfr_sticky385_ofsimple' || {
+            echo "ERROR: compiled DWC3 core does not reference Phase391 sticky stage recorder" >&2; exit 1;
           }
           grep -Fq 'a52_ackfr_sticky385_ofsimple(0x222U, ret)' "$DWC3CORE" || {
             echo "ERROR: Phase391 ULPI split missing" >&2; exit 1;

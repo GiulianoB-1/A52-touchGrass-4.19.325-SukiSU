@@ -69,26 +69,19 @@ def patch_dsi(text: str) -> str:
 '''
     text = one(text, old, new, "DMA wait entry")
 
-    old = '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
-		a52_ackfr_record("P276 303 S08 ret=%d irq=%d in=%x st=%x", ret,
-			atomic_read(&dsi_ctrl->dma_irq_trig),
-			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL),
-			DSI_R32(&dsi_ctrl->hw, DSI_STATUS));
-		a52_p326_q2_recorded = true;
-	}
+    old = '''	ret = wait_for_completion_timeout(
+			&dsi_ctrl->irq_info.cmd_dma_done,
+			msecs_to_jiffies(DSI_CTRL_TX_TO_MS));
 '''
-    new = '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
-		a52_ackfr_record("P276 303 S08 ret=%d irq=%d in=%x st=%x", ret,
-			atomic_read(&dsi_ctrl->dma_irq_trig),
-			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL),
-			DSI_R32(&dsi_ctrl->hw, DSI_STATUS));
-		a52_p326_q2_recorded = true;
+    new = '''	ret = wait_for_completion_timeout(
+			&dsi_ctrl->irq_info.cmd_dma_done,
+			msecs_to_jiffies(DSI_CTRL_TX_TO_MS));
+	if (a52_p293_gdm_armed(dsi_ctrl))
 		a52_ackfr_record("P276 387D w ret=%d trig=%d hw=%x",
 			ret, atomic_read(&dsi_ctrl->dma_irq_trig),
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
-	}
 '''
-    text = one(text, old, new, "DMA wait result")
+    text = one(text, old, new, "DMA wait call")
 
     old = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
 		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);

@@ -452,9 +452,32 @@ jobs:
           grep -aFq 'P385 H s=%u ms=%llu' "$IMAGE"
           grep -aFq 'B385 W s=%u q=%px dep=%d nr=%u age=%llu zero=%u' "$IMAGE"
           grep -aFq 'V385 U s=%u udc=%s gad=%s par=%s drv=%s pull=%u' "$IMAGE"
-          grep -aFq 'A52_PHASE385_FIXED_STICKY_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE385_OF_SIMPLE_QCOM_BRIDGE_V1' "$IMAGE"
-          grep -aFq 'qcom,dwc-usb3-msm' "$IMAGE"
+          echo "Phase385b compiled-artifact audit"
+          grep -aFq 'qcom,dwc-usb3-msm' "$IMAGE" || {
+            echo "ERROR: qcom,dwc-usb3-msm compatible missing from Image" >&2
+            exit 1
+          }
+          grep -Fq ' a52_ackfr_sticky385_usb_identity' "$BUILD/System.map" || {
+            echo "ERROR: fixed sticky USB identity symbol missing from System.map" >&2
+            exit 1
+          }
+          grep -Fq ' a52_ackfr_sticky385_heartbeat' "$BUILD/System.map" || {
+            echo "ERROR: fixed sticky heartbeat symbol missing from System.map" >&2
+            exit 1
+          }
+          grep -Fq ' a52_ackfr_sticky385_freeze' "$BUILD/System.map" || {
+            echo "ERROR: fixed sticky freeze symbol missing from System.map" >&2
+            exit 1
+          }
+          grep -Fq ' a52_ackfr_sticky385_ufs' "$BUILD/System.map" || {
+            echo "ERROR: fixed sticky UFS symbol missing from System.map" >&2
+            exit 1
+          }
+          grep -Fq ' a52_ackfr_sticky385_ofsimple' "$BUILD/System.map" || {
+            echo "ERROR: OF-simple sticky symbol missing from System.map" >&2
+            exit 1
+          }
+          echo "Phase385b compiled-artifact audit: PASS"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}

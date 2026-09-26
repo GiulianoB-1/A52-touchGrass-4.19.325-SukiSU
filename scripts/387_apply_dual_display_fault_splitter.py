@@ -83,11 +83,9 @@ def patch_dsi(text: str) -> str:
 '''
     text = one(text, old, new, "DMA wait call")
 
-    old = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
-		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+    old = '''		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
 '''
-    new = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
-		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+    new = '''		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
 		if (a52_p293_gdm_armed(dsi_ctrl)) {
 			a52_ackfr_record("P276 387D f st=%x done=%u hw=%x",
 				status, !!(status & DSI_CMD_MODE_DMA_DONE),
@@ -98,7 +96,7 @@ def patch_dsi(text: str) -> str:
 				a52_ackfr_record("P276 387D b=0 engine_done=0");
 		}
 '''
-    text = one(text, old, new, "DMA fallback status")
+    text = one(text, old, new, "DMA fallback status read")
 
     # Record every ISR entry during the exact-F0 target, not only DMA_DONE.
     old = '''	/* clear interrupts */

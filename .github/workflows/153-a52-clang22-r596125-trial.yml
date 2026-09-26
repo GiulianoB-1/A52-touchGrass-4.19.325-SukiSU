@@ -6,6 +6,7 @@ on:
       - agent/a52-opt-p1-mglru-cass-uclamp-sugov
     paths:
       - .github/workflows/153-a52-clang22-r596125-trial.yml
+      - scripts/153_patch_clang22_binder_mm_compat.py
   workflow_dispatch:
 
 permissions:
@@ -357,6 +358,22 @@ jobs:
             drivers/sensors/sx9360.c \
             drivers/vibrator/dc/dc_vibrator.c \
             > artifacts/boot-async-p151-p152.diff
+      - name: Apply P153 Binder Linux 4.19 MM compatibility
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/153_patch_clang22_binder_mm_compat.py" \
+            -o /tmp/153_patch_clang22_binder_mm_compat.py
+          python3 -m py_compile /tmp/153_patch_clang22_binder_mm_compat.py
+          python3 /tmp/153_patch_clang22_binder_mm_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/clang22-binder-mm-compat.txt
+
+          BINDER=workspace/touchgrass-a52xq/drivers/android/binder_alloc.c
+          grep -Fq 'A52 Clang22 P153: Linux 4.19 binder_page_insert MM compat' "$BINDER"
+          ! grep -Fq 'lock_vma_under_rcu(mm, addr)' "$BINDER"
+          ! grep -Fq 'vma_lookup(mm, addr)' "$BINDER"
+          git -C workspace/touchgrass-a52xq diff --check
       - name: Install pinned AOSP Clang 22 r596125
         run: |
           set -Eeuo pipefail
@@ -584,6 +601,7 @@ jobs:
             artifacts/boot-async-peripherals-p152.txt
             artifacts/boot-async-p151-p152.diff
             artifacts/boot-async-p152-audit.txt
+            artifacts/clang22-binder-mm-compat.txt
             artifacts/clang22-toolchain.txt
             artifacts/clang22-override-audit.txt
             artifacts/clang22-build-audit.txt

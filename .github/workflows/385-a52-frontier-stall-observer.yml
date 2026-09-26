@@ -496,8 +496,11 @@ jobs:
           grep -Fq ' dwc3_qcom_probe' "$BUILD/System.map" || {
             echo "ERROR: dwc3_qcom_probe missing from System.map" >&2; exit 1;
           }
-          grep -Fq 'a52_r386_stage' "$BUILD/System.map" || {
-            echo "ERROR: Phase386 sticky stage helper missing from System.map" >&2; exit 1;
+          test -s "$BUILD/drivers/usb/dwc3/dwc3-qcom.o" || {
+            echo "ERROR: compiled dwc3-qcom.o missing" >&2; exit 1;
+          }
+          llvm-nm "$BUILD/drivers/usb/dwc3/dwc3-qcom.o" | grep -Fq ' U a52_ackfr_sticky385_ofsimple' || {
+            echo "ERROR: Phase386 compiled QCOM glue does not reference sticky stage recorder" >&2; exit 1;
           }
           if grep -Fq '{ .compatible = "qcom,dwc-usb3-msm" },' "$DWC3SIMPLE"; then
             echo "ERROR: OF-simple still owns qcom,dwc-usb3-msm" >&2; exit 1;

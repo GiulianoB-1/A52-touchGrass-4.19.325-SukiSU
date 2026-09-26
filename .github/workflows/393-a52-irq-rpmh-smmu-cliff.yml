@@ -108,7 +108,7 @@ jobs:
             scripts/386_apply_qcom_dwc3_glue_bridge.py \
             scripts/387_apply_dual_display_fault_splitter.py \
             scripts/392_apply_persistent_gap_backend.py \
-            scripts/decode_phase392_persistent_gap.py
+            scripts/decode_phase392_persistent_gap.py \
             scripts/393_apply_irq_rpmh_smmu_cliff.py \
             scripts/decode_phase393_irq_sideband.py \
             scripts/decode_phase393_persistent_gap.py

@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/153-a52-clang22-r596125-trial.yml
       - scripts/153_patch_clang22_binder_mm_compat.py
+      - scripts/154_patch_clang22_lagoon_clock_ub.py
   workflow_dispatch:
 
 permissions:
@@ -374,6 +375,23 @@ jobs:
           ! grep -Fq 'lock_vma_under_rcu(mm, addr)' "$BINDER"
           ! grep -Fq 'vma_lookup(mm, addr)' "$BINDER"
           git -C workspace/touchgrass-a52xq diff --check
+      - name: Apply P154 Lagoon GPU clock Clang 22 compatibility
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/154_patch_clang22_lagoon_clock_ub.py" \
+            -o /tmp/154_patch_clang22_lagoon_clock_ub.py
+          python3 -m py_compile /tmp/154_patch_clang22_lagoon_clock_ub.py
+          python3 /tmp/154_patch_clang22_lagoon_clock_ub.py workspace/touchgrass-a52xq \
+            | tee artifacts/clang22-lagoon-clock-compat.txt
+
+          GPUCC=workspace/touchgrass-a52xq/drivers/clk/qcom/gpucc-lagoon.c
+          CLK=workspace/touchgrass-a52xq/drivers/clk/clk.c
+          grep -Fq 'DEFINE_VDD_REGULATORS(vdd_gx, VDD_GX_NUM, 1, vdd_gx_corner)' "$GPUCC"
+          grep -Fq 'DEFINE_VDD_REGULATORS(vdd_mx, VDD_NUM, 1, vdd_corner)' "$GPUCC"
+          grep -Fq 'if (!ret)' "$CLK"
+          git -C workspace/touchgrass-a52xq diff --check
       - name: Install pinned AOSP Clang 22 r596125
         run: |
           set -Eeuo pipefail
@@ -602,6 +620,7 @@ jobs:
             artifacts/boot-async-p151-p152.diff
             artifacts/boot-async-p152-audit.txt
             artifacts/clang22-binder-mm-compat.txt
+            artifacts/clang22-lagoon-clock-compat.txt
             artifacts/clang22-toolchain.txt
             artifacts/clang22-override-audit.txt
             artifacts/clang22-build-audit.txt

@@ -208,12 +208,19 @@ def patch_core(text: str) -> str:
     text = one(
         text,
         '\tret = dwc3_get_dr_mode(dwc);\n'
-        '\tif (ret)\n\t\tgoto err_free_event_buffers;\n\n'
+        '\tif (ret)\n\t\tgoto err3;\n\n'
+        '\tret = dwc3_alloc_scratch_buffers(dwc);\n'
+        '\tif (ret)\n\t\tgoto err3;\n\n'
         '\tret = dwc3_core_init(dwc);\n',
         '\tret = dwc3_get_dr_mode(dwc);\n'
         '\tif (ret) {\n'
         '\t\ta52_ackfr_sticky385_ofsimple(0x20fU, ret);\n'
-        '\t\tgoto err_free_event_buffers;\n'
+        '\t\tgoto err3;\n'
+        '\t}\n\n'
+        '\tret = dwc3_alloc_scratch_buffers(dwc);\n'
+        '\tif (ret) {\n'
+        '\t\ta52_ackfr_sticky385_ofsimple(0x210U, ret);\n'
+        '\t\tgoto err3;\n'
         '\t}\n\n'
         '\t/* A52_PHASE386_CORE_STAGE_V2 */\n'
         '\ta52_ackfr_sticky385_ofsimple(0x201U, 0);\n'

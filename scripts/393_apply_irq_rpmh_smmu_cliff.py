@@ -305,6 +305,7 @@ def patch_smmu(text: str) -> str:
     p = fn.find("dev_err_ratelimited")
     if p < 0:
         raise SystemExit("Phase393 SMMU context report anchor missing")
+    p = fn.rfind("\n", 0, p) + 1
     inject = (
         '\ta52_ackfr_record("M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",\n'
         '\t\tirq, idx, fsr, fsynr, iova);\n\n'
@@ -323,6 +324,7 @@ def patch_smmu(text: str) -> str:
         p = fn.find("dev_err_ratelimited")
     if p < 0:
         raise SystemExit("Phase393 SMMU global report anchor missing")
+    p = fn.rfind("\n", 0, p) + 1
     inject = (
         '\ta52_ackfr_record("M393 G irq=%d g=%x s0=%x s1=%x s2=%x",\n'
         '\t\tirq, gfsr, gfsynr0, gfsynr1, gfsynr2);\n\n'

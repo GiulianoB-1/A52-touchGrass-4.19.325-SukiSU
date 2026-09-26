@@ -1,0 +1,161 @@
+name: Phase395 - NoC wall discriminator
+run-name: Phase395 - NoC wall discriminator
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/395-a52-noc-wall-discriminator.yml
+      - scripts/395_apply_noc_wall_discriminator.py
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase395-noc-wall-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase395 NoC wall discriminator
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile scripts/395_apply_noc_wall_discriminator.py
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Validate Phase357 cache
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+
+      - name: Reapply Phase358 and Phase359
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Build Phase395 from proven Phase394 compile recipe
+        run: |
+          set -Eeuo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/394-a52-mode-fixup-fifo-early.yml").read_text().splitlines()
+          start = next(i for i,l in enumerate(src)
+                       if l.strip() == "- name: Apply Phase360 through Phase394 and compile")
+          runline = next(i for i in range(start + 1, len(src))
+                         if src[i].strip() == "run: |")
+          end = next(i for i in range(runline + 1, len(src))
+                     if src[i].startswith("      - name:"))
+          body = []
+          for line in src[runline + 1:end]:
+              body.append(line[10:] if line.startswith("          ") else line)
+          script = "\n".join(body) + "\n"
+
+          needle = 'python3 scripts/394_apply_mode_fixup_fifo_early.py --root "$ROOT" --check-only\n'
+          insert = needle + (
+              'python3 scripts/395_apply_noc_wall_discriminator.py --root "$ROOT"\n'
+              'python3 scripts/395_apply_noc_wall_discriminator.py --root "$ROOT" --check-only\n'
+          )
+          if needle not in script:
+              raise SystemExit("Phase394 insertion anchor missing")
+          script = script.replace(needle, insert, 1)
+
+          script = script.replace("phase394-gki-out", "phase395-gki-out")
+          script = script.replace("PHASE394-SCHEMA.txt", "PHASE395-SCHEMA.txt")
+          script = script.replace("'phase':'394'", "'phase':'395'")
+          script = script.replace(
+              "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
+              "'name':'NOC-WALL-DISCRIMINATOR-V1'")
+          script = script.replace(
+              "'392','393','394']",
+              "'392','393','394','395']")
+          script = script.replace(
+              "grep -Fq '#define A52_R341_INTERVAL_MS 10U' \"$REC\"",
+              "grep -Fq '#define A52_R341_INTERVAL_MS 250U' \"$REC\"")
+          script = script.replace(
+              "ERROR: Phase393 10 ms hardirq timer interval missing",
+              "ERROR: Phase395 250 ms hardirq timer interval missing")
+
+          Path("/tmp/phase395-build.sh").write_text(
+              "set -Eeuo pipefail\n" + script)
+          PY
+
+          bash /tmp/phase395-build.sh
+
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase395-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+
+          grep -Fq 'A52_PHASE395_NOC_WALL_V1'             "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq 'N395 KDONE n=%u ms=%llu stop=%u'             "$ROOT/block/blk-mq.c"
+          grep -Fq 'N395 ICC e n=%u ms=%llu dev=%s src=%s dst=%s'             "$ROOT/drivers/interconnect/qcom/icc-rpmh.c"
+          grep -Fq 'N395 BCM A ms=%llu n0=%d a0=%x d0=%x ret=%d'             "$ROOT/drivers/interconnect/qcom/bcm-voter.c"
+
+          grep -aFq 'A52_PHASE395_NOC_WALL_V1' "$IMAGE"
+          grep -aFq 'N395 KDONE n=%u ms=%llu stop=%u' "$IMAGE"
+          grep -aFq 'N395 ICC e n=%u ms=%llu dev=%s src=%s dst=%s' "$IMAGE"
+          grep -aFq 'N395 BCM A ms=%llu n0=%d a0=%x d0=%x ret=%d' "$IMAGE"
+          grep -aFq 'N395 BCM W ms=%llu n0=%d a0=%x d0=%x ret=%d' "$IMAGE"
+          grep -aFq 'N395 BCM S ms=%llu n0=%d a0=%x d0=%x ret=%d' "$IMAGE"
+          grep -Fq ' qnoc_probe' "$BUILD/System.map"
+
+          cp "$ROOT/drivers/interconnect/qcom/icc-rpmh.c" "$OUT/source/"
+          cp "$ROOT/drivers/interconnect/qcom/bcm-voter.c" "$OUT/source/"
+          cp scripts/395_apply_noc_wall_discriminator.py "$OUT/audit/"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z |             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+          echo "Phase395 NoC wall compiled-artifact audit: PASS"
+
+      - name: Upload Phase395
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE395-NOC-WALL-${{ github.run_number }}
+          path: phase395-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase395 boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE395-NOC-WALL-${{ github.run_number }}-BOOT-IMG
+          path: phase395-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

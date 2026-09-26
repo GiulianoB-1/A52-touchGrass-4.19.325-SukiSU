@@ -527,7 +527,8 @@ jobs:
           test -s "$BUILD/drivers/usb/dwc3/dwc3-qcom.o" || {
             echo "ERROR: compiled dwc3-qcom.o missing" >&2; exit 1;
           }
-          llvm-nm "$BUILD/drivers/usb/dwc3/dwc3-qcom.o" | grep -Fq ' U a52_ackfr_sticky385_ofsimple' || {
+          llvm-nm "$BUILD/drivers/usb/dwc3/dwc3-qcom.o" > "$RUNNER_TEMP/phase394-dwc3-qcom.nm"
+          grep -Fq ' U a52_ackfr_sticky385_ofsimple' "$RUNNER_TEMP/phase394-dwc3-qcom.nm" || {
             echo "ERROR: Phase386 compiled QCOM glue does not reference sticky stage recorder" >&2; exit 1;
           }
           if grep -Fq '{ .compatible = "qcom,dwc-usb3-msm" },' "$DWC3SIMPLE"; then
@@ -573,7 +574,8 @@ jobs:
           grep -Fq 'a52_ackfr_record("V392 CORE st=22e ulpi_timeout ret=%d", ret)' "$DWC3CORE" || {
             echo "ERROR: Phase392 ULPI timeout source record missing" >&2; exit 1;
           }
-          llvm-nm "$BUILD/drivers/usb/dwc3/core.o" | grep -Fq ' U a52_ackfr_record' || {
+          llvm-nm "$BUILD/drivers/usb/dwc3/core.o" > "$RUNNER_TEMP/phase394-dwc3-core.nm"
+          grep -Fq ' U a52_ackfr_record' "$RUNNER_TEMP/phase394-dwc3-core.nm" || {
             echo "ERROR: compiled DWC3 core does not reference main recorder" >&2; exit 1;
           }
           grep -Fq '(2U * SZ_1M)' scripts/392_apply_persistent_gap_backend.py || {

@@ -91,13 +91,13 @@ def patch_recorder(text: str) -> str:
     # Without this, Phase280 retention and the focused recorder filter would
     # silently drop RPMh/SMMU/runtime-PM/cpuidle evidence.
     text = one(text,
-        '       !strncmp(fmt, "V385", 4); /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n',
-        '       !strncmp(fmt, "V385", 4) || /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n'
-        '       !strncmp(fmt, "P393", 4) ||\n'
-        '       !strncmp(fmt, "R393", 4) ||\n'
-        '       !strncmp(fmt, "M393", 4) ||\n'
-        '       !strncmp(fmt, "D393", 4) ||\n'
-        '       !strncmp(fmt, "I393", 4); /* A52_PHASE393_CAUSAL_CLIFF_ADMISSION_V1 */\n',
+        '\t       !strncmp(fmt, "V385", 4); /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n',
+        '\t       !strncmp(fmt, "V385", 4) || /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n'
+        '\t       !strncmp(fmt, "P393", 4) ||\n'
+        '\t       !strncmp(fmt, "R393", 4) ||\n'
+        '\t       !strncmp(fmt, "M393", 4) ||\n'
+        '\t       !strncmp(fmt, "D393", 4) ||\n'
+        '\t       !strncmp(fmt, "I393", 4); /* A52_PHASE393_CAUSAL_CLIFF_ADMISSION_V1 */\n',
         "Phase393 retention admission")
     text = one(text,
         '\t    strncmp(fmt, "V385", 4))\n',

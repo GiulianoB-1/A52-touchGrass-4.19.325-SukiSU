@@ -75,9 +75,6 @@ def patch_dsi(text: str) -> str:
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL),
 			DSI_R32(&dsi_ctrl->hw, DSI_STATUS));
 	}
-	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
-		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
-		if (status & mask) {
 '''
     new = '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
 		a52_ackfr_record("GDM S08 ret=%d irq=%d in=%x st=%x", ret,
@@ -88,17 +85,32 @@ def patch_dsi(text: str) -> str:
 			ret, atomic_read(&dsi_ctrl->dma_irq_trig),
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
 	}
-	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
+'''
+    text = one(text, old, new, "DMA wait result")
+
+    old = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
+		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+'''
+    new = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
 		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
 		if (a52_p293_gdm_armed(dsi_ctrl))
 			a52_ackfr_record("P276 387D f st=%x done=%u hw=%x",
 				status, !!(status & DSI_CMD_MODE_DMA_DONE),
 				DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
-		if (status & mask) {
-			if (a52_p293_gdm_armed(dsi_ctrl))
-				a52_ackfr_record("P276 387D b=1 irq_lost=1");
 '''
     text = one(text, old, new, "DMA fallback status")
+
+    old = '''		if (status & mask) {
+			if (a52_p276r_deep_active())
+				a52_ackfr_record("P276 331B q=2 b=1 st=%x", status);
+'''
+    new = '''		if (status & mask) {
+			if (a52_p293_gdm_armed(dsi_ctrl))
+				a52_ackfr_record("P276 387D b=1 irq_lost=1");
+			if (a52_p276r_deep_active())
+				a52_ackfr_record("P276 331B q=2 b=1 st=%x", status);
+'''
+    text = one(text, old, new, "DMA fallback IRQ branch")
 
     old = '''		} else {
 #if defined(CONFIG_DISPLAY_SAMSUNG)

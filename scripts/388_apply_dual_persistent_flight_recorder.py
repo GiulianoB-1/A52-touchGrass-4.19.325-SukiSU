@@ -658,15 +658,15 @@ static inline void a52_p388_modeset_fail(unsigned int n, unsigned int stage,
 			return ret;
 '''),
         (
-'''					a52_ackfr_record("P276 387M n=%u st=3 r=%d conn=%d",
-						a52_p387_n, ret, connector->base.id);
-				return ret;
+'''				a52_ackfr_record("P276 387M n=%u st=3 r=%d conn=%d",
+					a52_p387_n, ret, connector->base.id);
+			return ret;
 ''',
-'''					a52_ackfr_record("P276 387M n=%u st=3 r=%d conn=%d",
-						a52_p387_n, ret, connector->base.id);
-				a52_p388_modeset_fail(a52_p387_n, 3U, ret,
-						      (u32)connector->base.id);
-				return ret;
+'''				a52_ackfr_record("P276 387M n=%u st=3 r=%d conn=%d",
+					a52_p387_n, ret, connector->base.id);
+			a52_p388_modeset_fail(a52_p387_n, 3U, ret,
+					      (u32)connector->base.id);
+			return ret;
 '''),
         (
 '''				a52_ackfr_record("P276 387M n=%u st=4 r=%d crtc=%d",
@@ -692,14 +692,14 @@ static inline void a52_p388_modeset_fail(unsigned int n, unsigned int stage,
 '''),
         (
 '''				a52_ackfr_record("P276 387M n=%u st=7 r=%d conn=%d",
-						a52_p387_n, ret, connector->base.id);
-				return ret;
+					a52_p387_n, ret, connector->base.id);
+			return ret;
 ''',
 '''				a52_ackfr_record("P276 387M n=%u st=7 r=%d conn=%d",
-						a52_p387_n, ret, connector->base.id);
-				a52_p388_modeset_fail(a52_p387_n, 7U, ret,
-						      (u32)connector->base.id);
-				return ret;
+					a52_p387_n, ret, connector->base.id);
+			a52_p388_modeset_fail(a52_p387_n, 7U, ret,
+					      (u32)connector->base.id);
+			return ret;
 '''),
         (
 '''			a52_ackfr_record("P276 387M n=%u st=10 r=%d", a52_p387_n, ret);

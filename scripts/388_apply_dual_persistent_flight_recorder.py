@@ -496,16 +496,27 @@ def patch_dsi(text: str) -> str:
 
     text = one(
         text,
-        '''			dsi_ctrl->irq_info.irq_stat_refcount[DSI_SINT_CMD_MODE_DMA_DONE],
+        '''	if (a52_p293_gdm_armed(dsi_ctrl))
+		a52_ackfr_record("P276 387D e trig=%d irqn=%d sw=%x ref=%u hw=%x",
+			atomic_read(&dsi_ctrl->dma_irq_trig),
+			dsi_ctrl->irq_info.irq_num,
+			dsi_ctrl->irq_info.irq_stat_mask,
+			dsi_ctrl->irq_info.irq_stat_refcount[DSI_SINT_CMD_MODE_DMA_DONE],
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
 ''',
-        '''			dsi_ctrl->irq_info.irq_stat_refcount[DSI_SINT_CMD_MODE_DMA_DONE],
+        '''	if (a52_p293_gdm_armed(dsi_ctrl)) {
+		a52_ackfr_record("P276 387D e trig=%d irqn=%d sw=%x ref=%u hw=%x",
+			atomic_read(&dsi_ctrl->dma_irq_trig),
+			dsi_ctrl->irq_info.irq_num,
+			dsi_ctrl->irq_info.irq_stat_mask,
+			dsi_ctrl->irq_info.irq_stat_refcount[DSI_SINT_CMD_MODE_DMA_DONE],
 			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
 		a52_uft_trace(A52_UFT_DSI_WAIT_ENTER,
 			(u32)atomic_read(&dsi_ctrl->dma_irq_trig),
 			(u32)dsi_ctrl->irq_info.irq_num,
 			(u32)dsi_ctrl->irq_info.irq_stat_mask,
-			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL)); /* A52_PHASE388_DSI_UFT_MIRROR_V1 */
+			DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
+	} /* A52_PHASE388_DSI_UFT_MIRROR_V1 */
 ''',
         "DSI wait entry mirror",
     )

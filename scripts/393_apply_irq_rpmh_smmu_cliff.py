@@ -87,9 +87,14 @@ def patch_recorder(text: str) -> str:
         "\t\t     A52_P392_BYTES);\n",
         "P392 triple-copy geometry assertion")
 
-    # Reuse the existing reserved64 field in the raw hrtimer sideband.
+    # Reuse the existing reserved64 field in the Phase341 raw hrtimer sideband.
+    # The same jiffies/version sequence also exists in Phase340 and Phase342,
+    # so scope this replacement to a52_r341_sideband_write() specifically.
     # Upper 32 bits = interrupted PID; lower bits = preempt count + IRQ-off.
-    text = one(text,
+    r341_sig = "static void a52_r341_sideband_write(u32 event, u32 cpu, u32 tick)"
+    r341_start, r341_end = function_bounds(text, r341_sig)
+    r341_fn = text[r341_start:r341_end]
+    r341_fn = one(r341_fn,
         "\tslot.jiffies64 = get_jiffies_64();\n"
         "\tslot.version = 1U;\n",
         "\tslot.jiffies64 = get_jiffies_64();\n"
@@ -98,6 +103,7 @@ def patch_recorder(text: str) -> str:
         "\t\t(irqs_disabled() ? 1ULL : 0ULL);\n"
         "\tslot.version = 1U;\n",
         "R341 interrupted task state")
+    text = text[:r341_start] + r341_fn + text[r341_end:]
 
     sig = "static void __used a52_r341_start(void)"
     _, end = function_bounds(text, sig)
@@ -355,9 +361,9 @@ def patch_pm(text: str) -> str:
         if call not in fn:
             raise SystemExit("Phase393 runtime PM call missing in " + sig)
         repl = (
-            f'a52_r393_pm_mark("{op}+", dev, rpmflags, 0, false);\\n\\t'
+            f'a52_r393_pm_mark("{op}+", dev, rpmflags, 0, false);\n\t'
             + call +
-            f'\\n\\ta52_r393_pm_mark("{op}-", dev, rpmflags, retval, true);'
+            f'\n\ta52_r393_pm_mark("{op}-", dev, rpmflags, retval, true);'
         )
         fn = fn.replace(call, repl, 1)
         text = text[:start] + fn + text[end:]
@@ -405,14 +411,14 @@ def patch_cpuidle(text: str) -> str:
     modern = "entered_state = target_state->enter(dev, drv, index);"
     if modern in fn:
         before = (
-            'do { u64 a52_ms; if (index >= 2 && a52_r393_idle_window(&a52_ms))\\n'
-            '\\t\\ta52_ackfr_record("I393 E ms=%llu cpu=%u st=%d fl=%x",\\n'
-            '\\t\\t\\t(unsigned long long)a52_ms, dev->cpu, index, target_state->flags); } while (0);\\n\\t'
+            'do { u64 a52_ms; if (index >= 2 && a52_r393_idle_window(&a52_ms))\n'
+            '\t\ta52_ackfr_record("I393 E ms=%llu cpu=%u st=%d fl=%x",\n'
+            '\t\t\t(unsigned long long)a52_ms, dev->cpu, index, target_state->flags); } while (0);\n\t'
         )
         after = (
-            '\\n\\tdo { u64 a52_ms; if (index >= 2 && a52_r393_idle_window(&a52_ms))\\n'
-            '\\t\\ta52_ackfr_record("I393 X ms=%llu cpu=%u st=%d ret=%d",\\n'
-            '\\t\\t\\t(unsigned long long)a52_ms, dev->cpu, index, entered_state); } while (0);'
+            '\n\tdo { u64 a52_ms; if (index >= 2 && a52_r393_idle_window(&a52_ms))\n'
+            '\t\ta52_ackfr_record("I393 X ms=%llu cpu=%u st=%d ret=%d",\n'
+            '\t\t\t(unsigned long long)a52_ms, dev->cpu, index, entered_state); } while (0);'
         )
         fn = fn.replace(modern, before + modern + after, 1)
     else:
@@ -420,14 +426,14 @@ def patch_cpuidle(text: str) -> str:
         if legacy not in fn:
             raise SystemExit("Phase393 cpuidle enter call missing")
         before = (
-            'do { u64 a52_ms; if (next_state >= 2 && a52_r393_idle_window(&a52_ms))\\n'
-            '\\t\\ta52_ackfr_record("I393 E ms=%llu cpu=%u st=%d",\\n'
-            '\\t\\t\\t(unsigned long long)a52_ms, dev->cpu, next_state); } while (0);\\n\\t'
+            'do { u64 a52_ms; if (next_state >= 2 && a52_r393_idle_window(&a52_ms))\n'
+            '\t\ta52_ackfr_record("I393 E ms=%llu cpu=%u st=%d",\n'
+            '\t\t\t(unsigned long long)a52_ms, dev->cpu, next_state); } while (0);\n\t'
         )
         after = (
-            '\\n\\tdo { u64 a52_ms; if (next_state >= 2 && a52_r393_idle_window(&a52_ms))\\n'
-            '\\t\\ta52_ackfr_record("I393 X ms=%llu cpu=%u st=%d ret=%d",\\n'
-            '\\t\\t\\t(unsigned long long)a52_ms, dev->cpu, next_state, entered_state); } while (0);'
+            '\n\tdo { u64 a52_ms; if (next_state >= 2 && a52_r393_idle_window(&a52_ms))\n'
+            '\t\ta52_ackfr_record("I393 X ms=%llu cpu=%u st=%d ret=%d",\n'
+            '\t\t\t(unsigned long long)a52_ms, dev->cpu, next_state, entered_state); } while (0);'
         )
         fn = fn.replace(legacy, before + legacy + after, 1)
     return text[:start] + fn + text[end:]

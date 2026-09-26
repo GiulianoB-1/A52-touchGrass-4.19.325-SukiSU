@@ -56,9 +56,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-clang22-thinlto-r596125-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            a52xq-clang22-thinlto-r596125-${{ runner.os }}-
+            a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-
 
       - name: Configure compiler cache
         run: |
@@ -390,6 +390,12 @@ jobs:
           grep -Fq 'DEFINE_VDD_REGULATORS(vdd_mx, VDD_NUM, 1, vdd_corner)' "$GPUCC"
           grep -Fq 'if (!ret)' "$CLK"
           git -C workspace/touchgrass-a52xq diff --check
+      - name: Restore pinned Clang 22 toolchain cache
+        id: clang22_toolchain_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .toolchains/aosp-clang
+          key: a52xq-aosp-clang-r596125-${{ runner.os }}-${{ env.AOSP_CLANG_COMMIT }}-v1
       - name: Install pinned AOSP Clang 22 r596125
         run: |
           set -Eeuo pipefail
@@ -399,16 +405,24 @@ jobs:
           OLD_CLANG="$KERNEL/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
 
           mkdir -p "$GITHUB_WORKSPACE/.toolchains" artifacts
-          rm -rf "$TOOLCHAIN_REPO"
-
-          git init -q "$TOOLCHAIN_REPO"
-          git -C "$TOOLCHAIN_REPO" remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
-          git -C "$TOOLCHAIN_REPO" sparse-checkout init --cone
-          git -C "$TOOLCHAIN_REPO" sparse-checkout set "$AOSP_CLANG_REVISION"
-          git -C "$TOOLCHAIN_REPO" -c protocol.version=2 fetch --depth=1 --filter=blob:none origin "$AOSP_CLANG_COMMIT"
-          git -C "$TOOLCHAIN_REPO" checkout --quiet --detach FETCH_HEAD
-
           NEW_CLANG="$TOOLCHAIN_REPO/$AOSP_CLANG_REVISION/bin/clang"
+          CACHE_OK=0
+          if [ -x "$NEW_CLANG" ] && [ -d "$TOOLCHAIN_REPO/.git" ]; then
+            if [ "$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD 2>/dev/null || true)" = "$AOSP_CLANG_COMMIT" ]; then
+              CACHE_OK=1
+              echo "Using cached AOSP Clang 22 toolchain"
+            fi
+          fi
+
+          if [ "$CACHE_OK" -ne 1 ]; then
+            rm -rf "$TOOLCHAIN_REPO"
+            git init -q "$TOOLCHAIN_REPO"
+            git -C "$TOOLCHAIN_REPO" remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+            git -C "$TOOLCHAIN_REPO" sparse-checkout init --cone
+            git -C "$TOOLCHAIN_REPO" sparse-checkout set "$AOSP_CLANG_REVISION"
+            git -C "$TOOLCHAIN_REPO" -c protocol.version=2 fetch --depth=1 --filter=blob:none origin "$AOSP_CLANG_COMMIT"
+            git -C "$TOOLCHAIN_REPO" checkout --quiet --detach FETCH_HEAD
+          fi
           test -x "$NEW_CLANG"
           test "$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD)" = "$AOSP_CLANG_COMMIT"
 
@@ -426,7 +440,14 @@ jobs:
           "$NEW_CLANG" --version | grep -Eq 'clang version 22([.]| )'
           echo "A52_CLANG_OVERRIDE=$NEW_CLANG" >> "$GITHUB_ENV"
 
-      - name: Override compiler only, retain GNU 10.3 binutils
+      - name: Save pinned Clang 22 toolchain cache
+        if: steps.clang22_toolchain_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .toolchains/aosp-clang
+          key: a52xq-aosp-clang-r596125-${{ runner.os }}-${{ env.AOSP_CLANG_COMMIT }}-v1
+
+      - name: Override compiler and LLD, retain GNU cross tools
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
@@ -656,7 +677,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-clang22-thinlto-r596125-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload P152 flashable ZIP and audit
         uses: actions/upload-artifact@v4

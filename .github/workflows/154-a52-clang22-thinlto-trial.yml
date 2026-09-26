@@ -517,11 +517,41 @@ jobs:
             "$CLANG_BIN/llvm-ar" --version | head -1
             "$CLANG_BIN/llvm-nm" --version | head -1
           } | tee artifacts/thinlto-request-audit.txt
+
+          # Keep ThinLTO's backend cache outside out/, because common.sh
+          # deletes the whole output tree at the start of every build.
+          echo "A52_THINLTO_CACHE_DIR=$GITHUB_WORKSPACE/.thinlto-link-cache" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/.thinlto-link-cache"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          makefile = Path('workspace/touchgrass-a52xq/Makefile')
+          s = makefile.read_text()
+          old = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=.thinlto-cache'
+          new = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=$(A52_THINLTO_CACHE_DIR)'
+          if s.count(old) != 1:
+              raise SystemExit(f'ThinLTO cache-dir anchor count: {s.count(old)}')
+          makefile.write_text(s.replace(old, new, 1))
+
+          # LLVM 22 treats SIGPIPE from llvm-nm as a fatal diagnostic.
+          # Old Android 4.19 Kbuild uses grep -q, which exits as soon as it
+          # finds __ksymtab and closes the pipe early. Consume the full stream.
+          build = Path('workspace/touchgrass-a52xq/scripts/Makefile.build')
+          s = build.read_text()
+          old = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep -q __ksymtab; then'
+          new = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep __ksymtab >/dev/null; then'
+          count = s.count(old)
+          if count < 1:
+              raise SystemExit('LLVM_NM grep-q anchor not found')
+          build.write_text(s.replace(old, new))
+          print(f'[patched] {count} llvm-nm grep-q pipeline(s)')
+          PY
       - name: Restore ThinLTO link cache
         id: thinlto_cache_restore
         uses: actions/cache/restore@v4
         with:
-          path: workspace/touchgrass-a52xq/.thinlto-cache
+          path: .thinlto-link-cache
           key: a52xq-thinlto-link-r596125-p154-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-thinlto-link-r596125-p154-${{ runner.os }}-
@@ -543,7 +573,7 @@ jobs:
           if [ "$RC" -eq 0 ]; then
             grep -Fxq 'CONFIG_LTO_CLANG=y' workspace/touchgrass-a52xq/out/.config
             grep -Fxq 'CONFIG_THINLTO=y' workspace/touchgrass-a52xq/out/.config
-            grep -Fq 'LTO vmlinux.o' artifacts/boot-async-p152-build.log
+            grep -Eq 'LTO[[:space:]]+vmlinux[.]o' artifacts/boot-async-p152-build.log
           fi
           exit "$RC"
 
@@ -551,7 +581,7 @@ jobs:
         if: always() && steps.thinlto_cache_restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: workspace/touchgrass-a52xq/.thinlto-cache
+          path: .thinlto-link-cache
           key: a52xq-thinlto-link-r596125-p154-${{ runner.os }}-${{ github.sha }}
 
       - name: Audit P152 image and retained stack
@@ -644,7 +674,7 @@ jobs:
           grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
           grep -Fxq '# CONFIG_LTO_NONE is not set' "$KERNEL/out/.config"
           "$A52_LLD_OVERRIDE" --version | grep -Fq 'LLD 22'
-          grep -Fq 'LTO vmlinux.o' artifacts/boot-async-p152-build.log
+          grep -Eq 'LTO[[:space:]]+vmlinux[.]o' artifacts/boot-async-p152-build.log
           strings "$VMLINUX" | grep -m1 '^Linux version ' | grep -Fq 'LLD 22.0.2'
           {
             echo '=== FINAL CONFIG ==='

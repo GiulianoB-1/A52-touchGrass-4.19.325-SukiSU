@@ -293,7 +293,12 @@ def patch_smmu(text: str) -> str:
     sig = "static irqreturn_t arm_smmu_global_fault(int irq, void *dev)"
     start, end = function_bounds(text, sig)
     fn = text[start:end]
-    p = fn.find("dev_err_ratelimited")
+    # Mainline/Android 5.10 global faults use __ratelimit() + dev_err(),
+    # unlike the context-fault handler which uses dev_err_ratelimited().
+    # Insert after the zero-GFSR early return and before ratelimited printing.
+    p = fn.find("if (__ratelimit(&rs))")
+    if p < 0:
+        p = fn.find("dev_err_ratelimited")
     if p < 0:
         raise SystemExit("Phase393 SMMU global report anchor missing")
     inject = (

@@ -621,8 +621,8 @@ jobs:
             echo "=== CLANG ==="
             "$A52_CLANG_OVERRIDE" --version
             echo
-            echo "=== GNU LINKER RETAINED ==="
-            "${GNU_PREFIX}ld" --version | head -2
+            echo "=== LLD LINKER ==="
+            "$A52_LLD_OVERRIDE" --version | head -2
             echo
             echo "=== FILE SIZES ==="
             stat -c 'Image_bytes=%s' "$IMAGE_FILE"
@@ -644,6 +644,8 @@ jobs:
           grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
           grep -Fxq '# CONFIG_LTO_NONE is not set' "$KERNEL/out/.config"
           "$A52_LLD_OVERRIDE" --version | grep -Fq 'LLD 22'
+          grep -Fq 'LTO vmlinux.o' artifacts/boot-async-p152-build.log
+          strings "$VMLINUX" | grep -m1 '^Linux version ' | grep -Fq 'LLD 22.0.2'
           {
             echo '=== FINAL CONFIG ==='
             grep -E 'CONFIG_(CC_OPTIMIZE|LTO|THINLTO|CFI)' "$KERNEL/out/.config" || true

@@ -103,14 +103,14 @@ def patch_dsi(text: str) -> str:
     text = one(text, old, new, "DMA fallback status")
 
     old = '''		if (status & mask) {
-			if (a52_p276r_deep_active())
-				a52_ackfr_record("P276 331B q=2 b=1 st=%x", status);
+			if (a52_p293_gdm_armed(dsi_ctrl))
+				a52_ackfr_record("P276 332C q=2 b=1 st=%x", status);
 '''
     new = '''		if (status & mask) {
 			if (a52_p293_gdm_armed(dsi_ctrl))
 				a52_ackfr_record("P276 387D b=1 irq_lost=1");
-			if (a52_p276r_deep_active())
-				a52_ackfr_record("P276 331B q=2 b=1 st=%x", status);
+			if (a52_p293_gdm_armed(dsi_ctrl))
+				a52_ackfr_record("P276 332C q=2 b=1 st=%x", status);
 '''
     text = one(text, old, new, "DMA fallback IRQ branch")
 

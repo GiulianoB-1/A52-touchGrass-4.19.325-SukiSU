@@ -67,6 +67,27 @@ jobs:
           python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
           python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
 
+      - name: Audit inherited UFS compatibility fixes
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
       - name: Build Phase395 from proven Phase394 compile recipe
         run: |
           set -Eeuo pipefail

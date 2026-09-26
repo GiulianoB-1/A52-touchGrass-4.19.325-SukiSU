@@ -87,6 +87,28 @@ def patch_recorder(text: str) -> str:
         "\t\t     A52_P392_BYTES);\n",
         "P392 triple-copy geometry assertion")
 
+    # Admit all Phase393 causal records through both inherited recorder gates.
+    # Without this, Phase280 retention and the focused recorder filter would
+    # silently drop RPMh/SMMU/runtime-PM/cpuidle evidence.
+    text = one(text,
+        '       !strncmp(fmt, "V385", 4); /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n',
+        '       !strncmp(fmt, "V385", 4) || /* A52_PHASE385_FRONTIER_STALL_OBSERVER_V1 */\n'
+        '       !strncmp(fmt, "P393", 4) ||\n'
+        '       !strncmp(fmt, "R393", 4) ||\n'
+        '       !strncmp(fmt, "M393", 4) ||\n'
+        '       !strncmp(fmt, "D393", 4) ||\n'
+        '       !strncmp(fmt, "I393", 4); /* A52_PHASE393_CAUSAL_CLIFF_ADMISSION_V1 */\n',
+        "Phase393 retention admission")
+    text = one(text,
+        '\t    strncmp(fmt, "V385", 4))\n',
+        '\t    strncmp(fmt, "V385", 4) &&\n'
+        '\t    strncmp(fmt, "P393", 4) &&\n'
+        '\t    strncmp(fmt, "R393", 4) &&\n'
+        '\t    strncmp(fmt, "M393", 4) &&\n'
+        '\t    strncmp(fmt, "D393", 4) &&\n'
+        '\t    strncmp(fmt, "I393", 4))\n',
+        "Phase393 focused recorder admission")
+
     # Reuse the existing reserved64 field in the Phase341 raw hrtimer sideband.
     # The same jiffies/version sequence also exists in Phase340 and Phase342,
     # so scope this replacement to a52_r341_sideband_write() specifically.
@@ -469,6 +491,10 @@ def validate(root: Path) -> None:
         "#define A52_P392_VERSION\t2U",
         "copy * A52_P392_COPY_BYTES",
         "current->pid << 32",
+        '!strncmp(fmt, "R393", 4)',
+        '!strncmp(fmt, "M393", 4)',
+        '!strncmp(fmt, "D393", 4)',
+        '!strncmp(fmt, "I393", 4)',
     ):
         if token not in r:
             raise SystemExit("Phase393 recorder token missing: " + token)

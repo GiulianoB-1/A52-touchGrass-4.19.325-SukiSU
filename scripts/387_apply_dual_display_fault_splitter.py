@@ -96,7 +96,17 @@ def patch_dsi(text: str) -> str:
 				a52_ackfr_record("P276 387D b=0 engine_done=0");
 		}
 '''
-    text = one(text, old, new, "DMA fallback status read")
+    wait_scope = '''	ret = wait_for_completion_timeout(
+			&dsi_ctrl->irq_info.cmd_dma_done,
+			msecs_to_jiffies(DSI_CTRL_TX_TO_MS));
+'''
+    scope_start = text.find(wait_scope)
+    scope_end = text.find("\ndone:\n", scope_start)
+    if scope_start < 0 or scope_end < 0:
+        raise SystemExit("Phase387 DMA wait scope boundary missing")
+    scope = text[scope_start:scope_end]
+    scope = one(scope, old, new, "DMA fallback status read")
+    text = text[:scope_start] + scope + text[scope_end:]
 
     # Record every ISR entry during the exact-F0 target, not only DMA_DONE.
     old = '''	/* clear interrupts */

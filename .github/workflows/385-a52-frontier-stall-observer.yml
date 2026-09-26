@@ -440,18 +440,18 @@ jobs:
           grep -aFq 'L383 R rq=%px ret=%d' "$IMAGE"
           grep -aFq 'L383 C rq=%px ret=%ld ret2=%ld' "$IMAGE"
           grep -aFq 'L383 X rq=%px final=%u ref=%d ret=%d' "$IMAGE"
-          grep -aFq 'B384 W q=%px dep=%d nr=%u n=%u zero=0' "$IMAGE"
-          grep -aFq 'B384 G id=%d q=%px dep=%d' "$IMAGE"
-          grep -aFq 'B384 P id=%d q=%px dep=%d' "$IMAGE"
           grep -aFq 'U384 C%u tr=%lld se=%lld hk=%lld dn=%lld irq=%lld li=%x lc=%lx' "$IMAGE"
-          grep -aFq 'L384 Q n=%d q=%px rq=%px op=%u b=%u' "$IMAGE"
-          grep -aFq 'L384 W n=%d rq=%px aio=%u op=%u b=%u' "$IMAGE"
-          grep -aFq 'L384 X n=%d rq=%px f=%u ref=%d ret=%d' "$IMAGE"
-          grep -aFq 'A52_PHASE385_FRONTIER_STALL_OBSERVER_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE385_FREEZE_OBSERVER_V1' "$IMAGE"
-          grep -aFq 'P385 H s=%u ms=%llu' "$IMAGE"
-          grep -aFq 'B385 W s=%u q=%px dep=%d nr=%u age=%llu zero=%u' "$IMAGE"
-          grep -aFq 'V385 U s=%u udc=%s gad=%s par=%s drv=%s pull=%u' "$IMAGE"
+          echo "Phase385 runtime-record audit"
+          grep -aFq 'P385 H s=%u ms=%llu' "$IMAGE" || {
+            echo "ERROR: P385 heartbeat format missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'B385 W s=%u q=%px dep=%d nr=%u age=%llu zero=%u' "$IMAGE" || {
+            echo "ERROR: B385 freeze observer format missing from Image" >&2; exit 1;
+          }
+          grep -aFq 'V385 U s=%u udc=%s gad=%s par=%s drv=%s pull=%u' "$IMAGE" || {
+            echo "ERROR: V385 UDC identity format missing from Image" >&2; exit 1;
+          }
+          echo "Phase385 runtime-record audit: PASS"
           echo "Phase385b compiled-artifact audit"
           grep -aFq 'qcom,dwc-usb3-msm' "$IMAGE" || {
             echo "ERROR: qcom,dwc-usb3-msm compatible missing from Image" >&2

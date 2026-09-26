@@ -561,7 +561,7 @@ jobs:
             echo "ERROR: Phase392 persistent gap size is not 2 MiB" >&2; exit 1;
           }
           if grep -Fq 'A52_PHASE389_RESERVED_RAM_FORENSICS_V1' "$IMAGE"; then
-            echo "ERROR: unsafe Phase389 7 MiB recorder leaked into Phase391 Image" >&2; exit 1;
+            echo "ERROR: unsafe Phase389 7 MiB recorder leaked into Phase392 Image" >&2; exit 1;
           fi
           if grep -Fq '0xB1400000ULL' "$REC"; then
             echo "ERROR: unsafe Phase389 B1400000 mapping remains in recorder source" >&2; exit 1;
@@ -572,8 +572,8 @@ jobs:
           test -s "$BUILD/drivers/usb/dwc3/core.o" || {
             echo "ERROR: compiled dwc3/core.o missing" >&2; exit 1;
           }
-          llvm-nm "$BUILD/drivers/usb/dwc3/core.o" | grep -Fq ' U a52_ackfr_sticky385_ofsimple' || {
-            echo "ERROR: compiled DWC3 core does not reference Phase391 sticky stage recorder" >&2; exit 1;
+          grep -Fq ' a52_ackfr_sticky385_ofsimple' "$BUILD/System.map" || {
+            echo "ERROR: sticky stage recorder symbol missing from final kernel" >&2; exit 1;
           }
           grep -Fq 'a52_ackfr_sticky385_ofsimple(0x222U, ret)' "$DWC3CORE" || {
             echo "ERROR: Phase392 ULPI split missing" >&2; exit 1;

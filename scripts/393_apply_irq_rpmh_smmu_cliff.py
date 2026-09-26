@@ -239,10 +239,18 @@ def patch_rpmh(text: str) -> str:
     pos, anchor = min(positions)
     fn = fn[:pos] + '\ta52_r393_rpmh_send(msg, 0, false);\n' + fn[pos:]
 
+    # Android 5.10 has two common rpmh_rsc_send_data() shapes:
+    # newer variants return 'ret', while this pinned GKI branch returns 0
+    # after directly programming/triggering the TCS. Instrument whichever
+    # terminal success path the function actually contains.
     retpos = fn.rfind("\treturn ret;")
-    if retpos < 0:
-        raise SystemExit("Phase393 RPMh send return missing")
-    fn = fn[:retpos] + '\ta52_r393_rpmh_send(msg, ret, true);\n' + fn[retpos:]
+    if retpos >= 0:
+        fn = fn[:retpos] + '\ta52_r393_rpmh_send(msg, ret, true);\n' + fn[retpos:]
+    else:
+        retpos = fn.rfind("\treturn 0;")
+        if retpos < 0:
+            raise SystemExit("Phase393 RPMh send terminal return missing")
+        fn = fn[:retpos] + '\ta52_r393_rpmh_send(msg, 0, true);\n' + fn[retpos:]
     text = text[:start] + fn + text[end:]
 
     sig = "static irqreturn_t tcs_tx_done(int irq, void *p)"
@@ -463,7 +471,6 @@ def validate(root: Path) -> None:
     for token in (
         MARK,
         "a52_r393_rpmh_send(msg, 0, false)",
-        "a52_r393_rpmh_send(msg, ret, true)",
         "a52_r393_rpmh_irq(irq_status)",
         "R393 SEND",
         "R393 RET",
@@ -471,6 +478,9 @@ def validate(root: Path) -> None:
     ):
         if token not in p:
             raise SystemExit("Phase393 RPMh token missing: " + token)
+    if ("a52_r393_rpmh_send(msg, ret, true)" not in p and
+            "a52_r393_rpmh_send(msg, 0, true)" not in p):
+        raise SystemExit("Phase393 RPMh completion trace missing")
 
     for token in (
         "M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",

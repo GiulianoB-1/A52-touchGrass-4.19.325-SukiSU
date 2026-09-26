@@ -80,13 +80,13 @@ if marker not in s:
 # normal rejected match.
 sku_marker = "A52 P165: VIDC non-matching SKU is not a probe failure"
 if sku_marker not in vidc_res_s:
-    old = r'''\tif (sku_index != res->sku_version) {
+    old = '''\tif (sku_index != res->sku_version) {
 \t\td_vpr_h("Failed to parse dt: sku_index %d sku_version %d\\n",
 \t\t\tsku_index, res->sku_version);
 \t\treturn -EINVAL;
 \t}
 '''
-    new = r'''\tif (sku_index != res->sku_version) {
+    new = '''\tif (sku_index != res->sku_version) {
 \t\td_vpr_h("Failed to parse dt: sku_index %d sku_version %d\\n",
 \t\t\tsku_index, res->sku_version);
 \t\t/* A52 P165: VIDC non-matching SKU is not a probe failure */

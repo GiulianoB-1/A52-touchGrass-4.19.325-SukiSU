@@ -64,7 +64,7 @@ jobs:
           key: a52xq-phase382-16k-fast-pgtable-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-phase382-16k-fast-pgtable-${{ runner.os }}-
-            a52xq-phase382-16k-fast-smmu-${{ runner.os }}-
+            a52xq-phase381-16k-fast-smmu-${{ runner.os }}-
             a52xq-phase380-16k-cma-${{ runner.os }}-
             a52xq-phase379-16k-census-${{ runner.os }}-
             a52xq-phase378-16k-${{ runner.os }}-
@@ -510,7 +510,7 @@ jobs:
             drivers/staging/android/ion/msm/msm_ion_of.c \
             > artifacts/phase380-cma-pageblock.diff
 
-      - name: Apply Phase382 16K fast-SMMU compatibility
+      - name: Apply retained Phase381 16K fast-SMMU compatibility
         run: |
           set -Eeuo pipefail
 
@@ -740,6 +740,12 @@ jobs:
           from the Linux CPU page size (16 KiB). IOVA/PTE math remains 4 KiB,
           while CPU backing allocation/remap/free counts use PAGE_SIZE.
 
+          Phase 382 fixes the second half of that boundary: each hardware PTE
+          table still contains 512 x 8-byte entries, but alloc_page() now gives
+          it a 16 KiB Linux backing page. The direct software lookup therefore
+          advances between tables using PAGE_SIZE while keeping 4 KiB PTE
+          indexing inside each table.
+
           Phase 379 exec/ELF census diagnostics and the ~12 second snapshot are
           retained. UN1CA/userspace remains untouched. Keep the known-good P152
           package available for rollback.
@@ -817,7 +823,7 @@ jobs:
           path: .ccache
           key: a52xq-phase382-16k-cma-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload Phase382 fast-SMMU package
+      - name: Upload Phase382 fast-pgtable package
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE382-P152-BASE36058491006-16K-FAST-PGTABLE-${{ github.run_number }}

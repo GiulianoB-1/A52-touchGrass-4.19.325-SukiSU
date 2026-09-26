@@ -463,10 +463,13 @@ jobs:
           DD="$KERNEL/drivers/base/dd.c"
           CFGSRC="$KERNEL/arch/arm64/configs/a52xq_defconfig"
           VIDC="$KERNEL/techpack/video/msm/vidc/msm_v4l2_vidc.c"
+          VIDC_RES="$KERNEL/techpack/video/msm/vidc/msm_vidc_res_parse.c"
           PLAT="$KERNEL/drivers/base/platform.c"
 
           grep -Fq 'A52 P165: production-safe async exception set' "$DD"
           grep -Fq 'A52_P165_PRODUCTION_ASYNC' "$DD"
+          grep -Fq 'A52 P165: VIDC non-matching SKU is not a probe failure' "$VIDC_RES"
+          grep -Fq 'return -ENODEV;' "$VIDC_RES"
           grep -Fq '"msm-dsi-display"' "$DD"
           grep -Fq '"msm_drm"' "$DD"
           grep -Fxq 'CONFIG_PANIC_ON_OOPS=y' "$CFGSRC"
@@ -486,6 +489,7 @@ jobs:
             drivers/iommu/arm-smmu.c \
             drivers/usb/dwc3/core.c \
             drivers/usb/dwc3/dwc3-msm.c \
+            techpack/video/msm/vidc/msm_vidc_res_parse.c \
             > artifacts/production-async-p165.diff
 
       - name: Build integrated kernel
@@ -516,6 +520,7 @@ jobs:
           FP="$KERNEL/drivers/fingerprint/et7xx-spi.c"
           GRIP="$KERNEL/drivers/sensors/sx9360.c"
           VIB="$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+          VIDC_RES="$KERNEL/techpack/video/msm/vidc/msm_vidc_res_parse.c"
 
           test -s "$IMAGE"
           test -s "$KERNEL/out/vmlinux"
@@ -542,6 +547,8 @@ jobs:
           grep -Fq 'A52 P160: DWC3 child drvdata readiness guard' "$KERNEL/drivers/usb/dwc3/dwc3-msm.c"
           grep -Fq 'A52 P165: production-safe async exception set' "$KERNEL/drivers/base/dd.c"
           grep -Fq 'A52_P165_PRODUCTION_ASYNC' "$KERNEL/drivers/base/dd.c"
+          grep -Fq 'A52 P165: VIDC non-matching SKU is not a probe failure' "$VIDC_RES"
+          grep -Fq 'return -ENODEV;' "$VIDC_RES"
           grep -Fxq 'CONFIG_PANIC_ON_OOPS=y' "$CFG"
           grep -Fxq 'CONFIG_PANIC_ON_OOPS_VALUE=1' "$CFG"
 
@@ -675,6 +682,7 @@ jobs:
 # - retains P159 crash-proven arm-smmu + camera synchronous provider set
 # - retains P160 DWC3 core-child synchronous contract/readiness guard
 # - adds only msm-dsi-display + msm_drm as production display safety exceptions
+# - reclassifies the intentionally non-matching Lito VIDC SKU node from -EINVAL to -ENODEV
 # - intentionally omits P155/P156/P161/P163/P164 census/forensic code
 # - restores normal full Android boot; no timed recovery reboot
 # - package verifies the exact generated boot-new.img byte-for-byte against the boot partition after flashing

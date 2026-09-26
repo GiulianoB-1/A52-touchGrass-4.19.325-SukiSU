@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/294-a52-recovery-preserve-ramoops.yml'
+      - 'scripts/390_stage_a52_recovery_reserved_exporter.py'
 
 permissions:
   contents: read
@@ -63,8 +64,11 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/90_stage_a52_recovery_ramoops_exporter.py?ref=main" \
             --jq '.content' | tr -d '\n' | base64 --decode \
             > scripts/90_stage_a52_recovery_ramoops_exporter.py
-          chmod +x scripts/90_stage_a52_recovery_ramoops_exporter.py
-          python3 -m py_compile scripts/90_stage_a52_recovery_ramoops_exporter.py
+          gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/390_stage_a52_recovery_reserved_exporter.py?ref=main" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > scripts/390_stage_a52_recovery_reserved_exporter.py
+          chmod +x scripts/90_stage_a52_recovery_ramoops_exporter.py scripts/390_stage_a52_recovery_reserved_exporter.py
+          python3 -m py_compile scripts/90_stage_a52_recovery_ramoops_exporter.py scripts/390_stage_a52_recovery_reserved_exporter.py
 
       - name: Free runner disk space
         run: |
@@ -172,7 +176,7 @@ jobs:
               raise SystemExit('schedutil cleanup call missing after generic repair')
           PY
 
-      - name: Stage existing read-only early ramoops snapshot exporter
+      - name: Stage read-only early RAM snapshot exporters
         run: |
           set -Eeuo pipefail
           OUT=artifacts/a52-recovery-preserve-ramoops
@@ -180,10 +184,13 @@ jobs:
           python3 scripts/90_stage_a52_recovery_ramoops_exporter.py \
             --kernel workspace/touchgrass-a52xq \
             --output "$OUT"
+          python3 scripts/390_stage_a52_recovery_reserved_exporter.py \
+            --kernel workspace/touchgrass-a52xq \
+            --output "$OUT"
           git -C workspace/touchgrass-a52xq diff --check
           git -C workspace/touchgrass-a52xq diff --binary --no-ext-diff \
-            > "$OUT/recovery-raw-exporter.patch"
-          test -s "$OUT/recovery-raw-exporter.patch"
+            > "$OUT/recovery-raw-exporters.patch"
+          test -s "$OUT/recovery-raw-exporters.patch"
 
       - name: Disable recovery ramoops writers
         run: |
@@ -229,6 +236,8 @@ jobs:
           checks = {
               'snapshot_marker_in_image': b'a52_ramoops_raw: captured 0x%llx-0x%llx before ramoops init' in image,
               'device_marker_in_image': b'/dev/a52_ramoops_raw ready, size=%u' in image,
+              'reserved_snapshot_marker_in_image': b'a52_samsung_reserved_raw: captured 0x%llx-0x%llx before Samsung debug init' in image,
+              'reserved_device_marker_in_image': b'/dev/a52_samsung_reserved_raw ready, size=%u' in image,
               'pstore_core_builtin': 'CONFIG_PSTORE=y' in config,
               'pstore_ram_disabled': '# CONFIG_PSTORE_RAM is not set' in config,
               'pstore_console_disabled': '# CONFIG_PSTORE_CONSOLE is not set' in config,
@@ -246,6 +255,8 @@ jobs:
               'base_recovery_dump_size': 81788928,
               'base_recovery_dump_sha256': '2441125abef5c4aa85b1eeaa725c948f236c183d82352d50afe710ca192f9f71',
               'preserved_range': '0xB1B00000-0xB1BFFFFF',
+              'samsung_reserved_range': '0xB1000000-0xB1AFFFFF',
+              'samsung_reserved_device': '/dev/a52_samsung_reserved_raw',
               'checks': checks,
               'Image_sha256': hashlib.sha256(image).hexdigest(),
               'Image_gz_sha256': hashlib.sha256((out / 'Image.gz').read_bytes()).hexdigest(),
@@ -268,6 +279,11 @@ jobs:
           The existing recovery-only a52_ramoops_raw exporter remains built in and
           snapshots physical 0xB1B00000-0xB1BFFFFF during pure_initcall. Read it from
           /dev/a52_ramoops_raw as before.
+
+          Phase390 also snapshots physical 0xB1000000-0xB1AFFFFF (11 MiB) during
+          pure_initcall and exposes the frozen copy through
+          /dev/a52_samsung_reserved_raw. CONFIG_DEVMEM stays disabled and both
+          exporter devices are root-only/read-only.
 
           This artifact contains a kernel only. The final recovery.img is repacked
           separately from the user's exact 81,788,928-byte installed recovery dump.

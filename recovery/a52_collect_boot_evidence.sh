@@ -212,6 +212,30 @@ capture_command "$WORK/08-interrupts.txt" cat /proc/interrupts
 capture_command "$WORK/09-meminfo.txt" cat /proc/meminfo
 capture_command "$WORK/09b-proc-iomem.txt" cat /proc/iomem
 
+mkdir -p "$WORK/09c-reserved-memory"
+if [ -d /proc/device-tree/reserved-memory ]; then
+    {
+        echo "===== reserved-memory nodes ====="
+        find /proc/device-tree/reserved-memory -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort
+        echo
+        echo "===== node reg/compatible/no-map/reusable ====="
+        for n in /proc/device-tree/reserved-memory/*; do
+            [ -d "$n" ] || continue
+            echo "--- $n ---"
+            for p in reg compatible no-map reusable; do
+                if [ -e "$n/$p" ]; then
+                    echo "[$p]"
+                    od -An -tx1 -v "$n/$p" 2>/dev/null || true
+                    if [ "$p" = compatible ]; then
+                        tr '\000' '\n' < "$n/$p" 2>/dev/null || true
+                    fi
+                fi
+            done
+        done
+    } > "$WORK/09c-reserved-memory/summary.txt" 2>&1
+    copy_tree /proc/device-tree/reserved-memory "$WORK/09c-reserved-memory/raw"
+fi
+
 capture_dt_runtime "$WORK/10-active-ramoops-runtime"
 capture_reboot_reason "$WORK/11-reboot-reason.txt"
 

@@ -484,15 +484,23 @@ jobs:
           from pathlib import Path
           p = Path('scripts/common.sh')
           s = p.read_text()
-          old = '  export PATH="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin:$PATH"\n'
-          new = ('  if [ -n "${A52_LLD_OVERRIDE:-}" ]; then\n'
-                 '    export PATH="$(dirname "$A52_LLD_OVERRIDE"):$PATH"\n'
-                 '    export LD="$A52_LLD_OVERRIDE"\n'
-                 '  fi\n'
-                 '  export PATH="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin:$PATH"\n')
-          if s.count(old) != 1:
-              raise SystemExit(f'common.sh PATH anchor count: {s.count(old)}')
-          p.write_text(s.replace(old, new, 1))
+
+          path_old = '  export PATH="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin:$PATH"\n'
+          path_new = ('  if [ -n "${A52_LLD_OVERRIDE:-}" ]; then\n'
+                      '    export PATH="$(dirname "$A52_LLD_OVERRIDE"):$PATH"\n'
+                      '  fi\n'
+                      + path_old)
+          if s.count(path_old) != 1:
+              raise SystemExit(f'common.sh PATH anchor count: {s.count(path_old)}')
+          s = s.replace(path_old, path_new, 1)
+
+          make_old = '      CONFIG_BUILD_ARM64_DT_OVERLAY=y \\\n'
+          make_new = ('      CONFIG_BUILD_ARM64_DT_OVERLAY=y \\\n'
+                      '      LD="${A52_LLD_OVERRIDE:-${CROSS_COMPILE}ld}" \\\n')
+          if s.count(make_old) != 2:
+              raise SystemExit(f'common.sh make anchor count: {s.count(make_old)}')
+          s = s.replace(make_old, make_new)
+          p.write_text(s)
           PY
 
           "$KERNEL/scripts/config" --file "$KERNEL/arch/arm64/configs/a52xq_defconfig" \
@@ -509,6 +517,14 @@ jobs:
             "$CLANG_BIN/llvm-ar" --version | head -1
             "$CLANG_BIN/llvm-nm" --version | head -1
           } | tee artifacts/thinlto-request-audit.txt
+      - name: Restore ThinLTO link cache
+        id: thinlto_cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq/.thinlto-cache
+          key: a52xq-thinlto-link-r596125-p154-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-thinlto-link-r596125-p154-${{ runner.os }}-
       - name: Build integrated kernel
         run: |
           set -o pipefail
@@ -524,7 +540,19 @@ jobs:
           echo "kernel_build_seconds=$((END-START))"
           echo '=== CCACHE AFTER ==='
           ccache --show-stats || true
+          if [ "$RC" -eq 0 ]; then
+            grep -Fxq 'CONFIG_LTO_CLANG=y' workspace/touchgrass-a52xq/out/.config
+            grep -Fxq 'CONFIG_THINLTO=y' workspace/touchgrass-a52xq/out/.config
+            grep -Fq 'LTO vmlinux.o' artifacts/boot-async-p152-build.log
+          fi
           exit "$RC"
+
+      - name: Save ThinLTO link cache
+        if: always() && steps.thinlto_cache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq/.thinlto-cache
+          key: a52xq-thinlto-link-r596125-p154-${{ runner.os }}-${{ github.sha }}
 
       - name: Audit P152 image and retained stack
         run: |

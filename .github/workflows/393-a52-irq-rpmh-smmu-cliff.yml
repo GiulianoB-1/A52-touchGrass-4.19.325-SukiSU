@@ -43,6 +43,7 @@ on:
       - scripts/decode_phase392_persistent_gap.py
       - scripts/393_apply_irq_rpmh_smmu_cliff.py
       - scripts/decode_phase393_irq_sideband.py
+      - scripts/decode_phase393_persistent_gap.py
 
 permissions:
   contents: read
@@ -109,7 +110,8 @@ jobs:
             scripts/392_apply_persistent_gap_backend.py \
             scripts/decode_phase392_persistent_gap.py
             scripts/393_apply_irq_rpmh_smmu_cliff.py \
-            scripts/decode_phase393_irq_sideband.py
+            scripts/decode_phase393_irq_sideband.py \
+            scripts/decode_phase393_persistent_gap.py
 
       - name: Restore Phase346 baseline cache v2
         id: phase346-v2
@@ -370,6 +372,8 @@ jobs:
           DRMHELP="$ROOT/drivers/gpu/drm/drm_atomic_helper.c"
           RPMH="$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          PMRUNTIME="$ROOT/drivers/base/power/runtime.c"
+          CPUIDLE="$ROOT/drivers/cpuidle/cpuidle.c"
           echo "Phase383 patchers passed check-only audits"
           if ! git -C "$ROOT" diff --check; then
             echo "WARNING: git diff --check reported formatting issues; continuing to compile"
@@ -622,7 +626,25 @@ jobs:
           test -s "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o" || {
             echo "ERROR: compiled arm-smmu.o missing" >&2; exit 1;
           }
-          echo "Phase393 IRQ/RPMh/SMMU compiled-artifact audit: PASS"
+          grep -Fq '#define A52_P392_COPIES	3U' "$REC" || {
+            echo "ERROR: Phase393 persistent gap is not triple mirrored" >&2; exit 1;
+          }
+          grep -Fq '#define A52_P392_VERSION	2U' "$REC" || {
+            echo "ERROR: Phase393 persistent gap layout version missing" >&2; exit 1;
+          }
+          grep -Fq 'current->pid << 32' "$REC" || {
+            echo "ERROR: Phase393 hardirq interrupted-task state missing" >&2; exit 1;
+          }
+          grep -Fq 'D393 %s ms=%llu dev=%s' "$PMRUNTIME" || {
+            echo "ERROR: Phase393 runtime-PM causal trace missing" >&2; exit 1;
+          }
+          grep -Fq 'I393 E ms=%llu' "$CPUIDLE" || {
+            echo "ERROR: Phase393 cpuidle entry trace missing" >&2; exit 1;
+          }
+          grep -Fq 'I393 X ms=%llu' "$CPUIDLE" || {
+            echo "ERROR: Phase393 cpuidle exit trace missing" >&2; exit 1;
+          }
+          echo "Phase393 IRQ/RPMh/SMMU/PM/cpuidle/triple-persistence compiled-artifact audit: PASS"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}
@@ -638,8 +660,10 @@ jobs:
           cp "$DRMHELP" "$OUT/source/drm_atomic_helper.c"
           cp "$RPMH" "$OUT/source/rpmh-rsc.c"
           cp "$SMMU" "$OUT/source/arm-smmu.c"
+          cp "$PMRUNTIME" "$OUT/source/runtime-pm.c"
+          cp "$CPUIDLE" "$OUT/source/cpuidle.c"
           cp "$ROOT/include/linux/a52_ack_secure_flight_recorder.h" "$OUT/source/"
-          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py scripts/382_apply_sticky_usb_cliff_census.py scripts/383_apply_event_frontier_loop_aio.py scripts/384_apply_loop_ufs_stall_pinpoint.py scripts/385_apply_frontier_stall_observer.py scripts/385b_apply_usb_real_udc_sticky.py scripts/386_apply_qcom_dwc3_glue_bridge.py scripts/387_apply_dual_display_fault_splitter.py scripts/392_apply_persistent_gap_backend.py scripts/decode_phase392_persistent_gap.py scripts/393_apply_irq_rpmh_smmu_cliff.py scripts/decode_phase393_irq_sideband.py "$OUT/audit/"
+          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py scripts/382_apply_sticky_usb_cliff_census.py scripts/383_apply_event_frontier_loop_aio.py scripts/384_apply_loop_ufs_stall_pinpoint.py scripts/385_apply_frontier_stall_observer.py scripts/385b_apply_usb_real_udc_sticky.py scripts/386_apply_qcom_dwc3_glue_bridge.py scripts/387_apply_dual_display_fault_splitter.py scripts/392_apply_persistent_gap_backend.py scripts/decode_phase392_persistent_gap.py scripts/393_apply_irq_rpmh_smmu_cliff.py scripts/decode_phase393_irq_sideband.py scripts/decode_phase393_persistent_gap.py "$OUT/audit/"
           cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
 
           gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
@@ -773,7 +797,16 @@ jobs:
             +200 through +900 ms around the loop49 frontier
           - generic ARM-SMMU context/global faults are mirrored into the
             persistent recorder
-          - decoder: scripts/decode_phase393_irq_sideband.py
+          - hardirq decoder: scripts/decode_phase393_irq_sideband.py
+          - persistent-gap decoder: scripts/decode_phase393_persistent_gap.py
+          - persistent gap changes from one copy / 16,352 slots to three
+            mirrored copies / 5,450 slots; majority-bit recovery is attempted
+            before per-copy CRC validation
+          - hardirq samples also encode interrupted PID, preempt_count and
+            IRQ-disabled state in the existing reserved64 field
+          - runtime PM suspend/resume transitions are recorded from +200..900 ms
+            around the loop49 frontier, including device, usage count and result
+          - deep cpuidle state entry/exit is recorded over the same window
           - purpose: distinguish global timer/IRQ/AP execution collapse from
             scheduler/task-level deadlock and identify an in-flight RPMh/SMMU
             transaction at the instant of the NoC cliff

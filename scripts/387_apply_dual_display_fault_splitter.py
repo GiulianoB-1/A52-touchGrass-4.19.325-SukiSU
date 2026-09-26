@@ -95,34 +95,17 @@ def patch_dsi(text: str) -> str:
 '''
     new = '''	if (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
 		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
-		if (a52_p293_gdm_armed(dsi_ctrl))
+		if (a52_p293_gdm_armed(dsi_ctrl)) {
 			a52_ackfr_record("P276 387D f st=%x done=%u hw=%x",
 				status, !!(status & DSI_CMD_MODE_DMA_DONE),
 				DSI_R32(&dsi_ctrl->hw, DSI_INT_CTRL));
+			if (status & mask)
+				a52_ackfr_record("P276 387D b=1 irq_lost=1");
+			else
+				a52_ackfr_record("P276 387D b=0 engine_done=0");
+		}
 '''
     text = one(text, old, new, "DMA fallback status")
-
-    old = '''		if (status & mask) {
-			if (a52_p293_gdm_armed(dsi_ctrl))
-				a52_ackfr_record("P276 332C q=2 b=1 st=%x", status);
-'''
-    new = '''		if (status & mask) {
-			if (a52_p293_gdm_armed(dsi_ctrl))
-				a52_ackfr_record("P276 387D b=1 irq_lost=1");
-			if (a52_p293_gdm_armed(dsi_ctrl))
-				a52_ackfr_record("P276 332C q=2 b=1 st=%x", status);
-'''
-    text = one(text, old, new, "DMA fallback IRQ branch")
-
-    old = '''		} else {
-#if defined(CONFIG_DISPLAY_SAMSUNG)
-'''
-    new = '''		} else {
-			if (a52_p293_gdm_armed(dsi_ctrl))
-				a52_ackfr_record("P276 387D b=0 engine_done=0");
-#if defined(CONFIG_DISPLAY_SAMSUNG)
-'''
-    text = one(text, old, new, "DMA fallback branch")
 
     # Record every ISR entry during the exact-F0 target, not only DMA_DONE.
     old = '''	/* clear interrupts */

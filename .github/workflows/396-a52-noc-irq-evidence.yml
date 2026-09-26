@@ -1,0 +1,270 @@
+name: Phase396 - NoC IRQ evidence
+run-name: Phase396 - NoC IRQ evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/396-a52-noc-irq-evidence.yml
+      - scripts/396_apply_noc_irq_evidence.py
+      - scripts/decode_phase396_noc_irq.py
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase396-noc-irq-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase396 NoC IRQ evidence
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/395_apply_noc_wall_discriminator.py \
+            scripts/396_apply_noc_irq_evidence.py \
+            scripts/decode_phase396_noc_irq.py
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Validate Phase357 cache
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+
+      - name: Reapply Phase358 and Phase359
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Audit inherited UFS compatibility fixes
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+      - name: Audit Gladiator support in the A52 source tree
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== Phase396 Gladiator ERP source/DT audit ==="
+            echo "kernel=$(git -C "$ROOT" rev-parse HEAD)"
+            echo "targets=qcom,msm-gladiator-v2 qcom,msm-gladiator-v3 MSM_GLADIATOR_ERP gladiator_erp clear_gladiator_error"
+            grep -RnsE \
+              'qcom,msm-gladiator-v2|qcom,msm-gladiator-v3|MSM_GLADIATOR_ERP|gladiator_erp|clear_gladiator_error' \
+              "$ROOT/arch/arm64/boot/dts" \
+              "$ROOT/drivers/soc/qcom" \
+              "$ROOT/drivers/interconnect" \
+              "$ROOT/drivers/firmware" \
+              2>/dev/null || true
+          } | tee phase396-gladiator-audit.txt
+
+      - name: Build Phase396 from proven Phase394 compile recipe
+        run: |
+          set -Eeuo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/394-a52-mode-fixup-fifo-early.yml").read_text().splitlines()
+          start = next(i for i,l in enumerate(src)
+                       if l.strip() == "- name: Apply Phase360 through Phase394 and compile")
+          runline = next(i for i in range(start + 1, len(src))
+                         if src[i].strip() == "run: |")
+          end = next(i for i in range(runline + 1, len(src))
+                     if src[i].startswith("      - name:"))
+          body = []
+          for line in src[runline + 1:end]:
+              body.append(line[10:] if line.startswith("          ") else line)
+          script = "\n".join(body) + "\n"
+
+          needle = 'python3 scripts/394_apply_mode_fixup_fifo_early.py --root "$ROOT" --check-only\n'
+          insert = needle + (
+              'python3 scripts/395_apply_noc_wall_discriminator.py --root "$ROOT"\n'
+              'python3 scripts/395_apply_noc_wall_discriminator.py --root "$ROOT" --check-only\n'
+              'python3 scripts/396_apply_noc_irq_evidence.py --root "$ROOT"\n'
+              'python3 scripts/396_apply_noc_irq_evidence.py --root "$ROOT" --check-only\n'
+          )
+          if needle not in script:
+              raise SystemExit("Phase394 insertion anchor missing")
+          script = script.replace(needle, insert, 1)
+
+          cfg_anchor = '"$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19\n'
+          cfg_insert = cfg_anchor + (
+              '"$ROOT/scripts/config" --file "$BUILD/.config" --enable WATCHDOG\n'
+              '"$ROOT/scripts/config" --file "$BUILD/.config" --enable WATCHDOG_CORE\n'
+              '"$ROOT/scripts/config" --file "$BUILD/.config" --enable WATCHDOG_HANDLE_BOOT_ENABLED\n'
+              '"$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_WDT\n'
+          )
+          if cfg_anchor not in script:
+              raise SystemExit("Phase394 config insertion anchor missing")
+          script = script.replace(cfg_anchor, cfg_insert, 1)
+
+          script = script.replace("phase394-gki-out", "phase396-gki-out")
+          script = script.replace("PHASE394-SCHEMA.txt", "PHASE396-SCHEMA.txt")
+          script = script.replace("'phase':'394'", "'phase':'396'")
+          script = script.replace(
+              "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
+              "'name':'NOC-IRQ-EVIDENCE-V1'")
+          script = script.replace(
+              "'392','393','394']",
+              "'392','393','394','395','396']")
+          script = script.replace(
+              "grep -Fq '#define A52_R341_INTERVAL_MS 10U' \"$REC\"",
+              "grep -Fq '#define A52_R341_INTERVAL_MS 250U' \"$REC\"")
+          script = script.replace(
+              "ERROR: Phase393 10 ms hardirq timer interval missing",
+              "ERROR: Phase396 inherited 250 ms hardirq timer interval missing")
+
+          Path("/tmp/phase396-build.sh").write_text(
+              "set -Eeuo pipefail\n" + script)
+          PY
+
+          bash /tmp/phase396-build.sh
+
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase396-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          HDR="$ROOT/include/linux/a52_ack_secure_flight_recorder.h"
+          IRQH="$ROOT/kernel/irq/handle.c"
+          WDT="$ROOT/drivers/watchdog/qcom-wdt.c"
+
+          echo "Phase396 watchdog handoff audit"
+          grep -Fq 'qcom,msm-watchdog' "$WDT"
+          grep -Fq 'fixed_rate = 32765' "$WDT"
+          grep -Fq 'set_bit(WDOG_HW_RUNNING' "$WDT"
+          grep -Fxq 'CONFIG_WATCHDOG=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_WATCHDOG_CORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_WDT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' "$BUILD/.config"
+          echo "Phase396 watchdog handoff audit: PASS"
+
+          echo "Phase396 R48 and NoC IRQ source audit"
+          grep -Fq 'A52_PHASE396_NOC_IRQ_EVIDENCE_V1' "$REC"
+          grep -Fq 'A52_PHASE396_R48_TWO_COPY_V1' "$REC"
+          grep -Fq '#define A52_R179_BANK_ALL (A52_R179_BANK_FTRACE | A52_R179_BANK_RECORD)' "$REC"
+          ! grep -Fq '#define A52_R179_BANK_ALL (A52_R179_BANK_CONSOLE |' "$REC"
+          grep -Fq 'A52_P396_HIT_PHYS        0xB1BFF800ULL' "$REC"
+          grep -Fq '404U, 226U, 290U, 108U, 198U, 186U, 323U' "$REC"
+          grep -Fq 'N396 MAP q=%u hw=%llu t=%u md=%u' "$REC"
+          grep -Fq 'N396 S ms=%llu q=%u t=%u sw=%x hw=%x ok=%x dp=%u pc=%016llx' "$REC"
+          grep -Fq 'N396 ARM map=%u fast=%u wc=%u kt=%ld' "$REC"
+          grep -Fq 'a52_ackfr_noc_irq_hit(unsigned int irq);' "$HDR"
+          grep -Fq 'a52_ackfr_noc_irq_hit(irq);' "$IRQH"
+          grep -Fq 'A52_PHASE396_NOC_IRQ_EVIDENCE_V1' "$IRQH"
+          echo "Phase396 R48 and NoC IRQ source audit: PASS"
+
+          echo "Phase396 compiled-artifact audit"
+          grep -aFq 'A52_PHASE396_NOC_IRQ_EVIDENCE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE396_R48_TWO_COPY_V1' "$IMAGE"
+          grep -aFq 'N396 MAP q=%u hw=%llu t=%u md=%u' "$IMAGE"
+          grep -aFq 'N396 S ms=%llu q=%u t=%u sw=%x hw=%x ok=%x dp=%u pc=%016llx' "$IMAGE"
+          grep -aFq 'N396 ARM map=%u fast=%u wc=%u kt=%ld' "$IMAGE"
+          grep -Fq ' a52_p396_init' "$BUILD/System.map"
+          grep -Fq ' a52_ackfr_noc_irq_hit' "$BUILD/System.map"
+          test -s "$BUILD/kernel/irq/handle.o"
+          llvm-nm "$BUILD/kernel/irq/handle.o" > "$RUNNER_TEMP/phase396-handle.nm"
+          grep -Fq ' U a52_ackfr_noc_irq_hit' "$RUNNER_TEMP/phase396-handle.nm"
+          echo "Phase396 compiled-artifact audit: PASS"
+
+          cat > "$OUT/PHASE396-NOTES.txt" <<'EOF'
+          Phase396 NoC IRQ evidence
+          =========================
+          - Restores CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y while preserving QCOM_WDT.
+          - Verifies qcom,msm-watchdog fixed-rate bridge and WDOG_HW_RUNNING handoff.
+          - Frees console-ramoops from R48: R48 now mirrors to ftrace + record only.
+          - Keeps the separate 2 MiB Phase392 persistent gap triple-mirrored.
+          - Watches Samsung NOCERR identifiers 404, 226, 290, 108, 198, 186, 323.
+          - Resolves Linux IRQ, exact hwirq, and hwirq = target + 32 candidates.
+          - Samples descriptor/irqchip state densely from 17.6 s through 18.6 s.
+          - Preserves the first 12 watched IRQ hits in a two-copy raw lane at 0xB1BFF800.
+          - Includes a source/DT Gladiator ERP audit, but does not enable or port Gladiator yet.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE396-NOTES.txt"
+
+          cp "$REC" "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$HDR" "$OUT/source/a52_ack_secure_flight_recorder.h"
+          cp "$IRQH" "$OUT/source/irq-handle.c"
+          cp "$WDT" "$OUT/source/qcom-wdt.c"
+          cp scripts/395_apply_noc_wall_discriminator.py \
+             scripts/396_apply_noc_irq_evidence.py \
+             scripts/decode_phase396_noc_irq.py \
+             "$OUT/audit/"
+          cp phase396-gladiator-audit.txt "$OUT/audit/"
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+          echo "Phase396 NoC IRQ evidence build: PASS"
+
+      - name: Upload Phase396
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE396-NOC-IRQ-EVIDENCE-${{ github.run_number }}
+          path: phase396-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase396 boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE396-NOC-IRQ-EVIDENCE-${{ github.run_number }}-BOOT-IMG
+          path: phase396-gki-out/package/boot.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

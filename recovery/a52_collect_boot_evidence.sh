@@ -37,6 +37,30 @@ snapshot_early() {
                bs=4096 count=256 2> "$EARLY_ROOT/raw-copy.stderr" || true
         fi
 
+        DEBUG_DEV=""
+        for cand in \
+            /dev/block/by-name/debug \
+            /dev/block/platform/*/by-name/debug; do
+            [ -e "$cand" ] || continue
+            DEBUG_DEV="$cand"
+            break
+        done
+        if [ -n "$DEBUG_DEV" ]; then
+            log "Copying Samsung debug partition before any experimental writes"
+            echo "$DEBUG_DEV" > "$EARLY_ROOT/samsung-debug-device.txt"
+            dd if="$DEBUG_DEV" \
+               of="$EARLY_ROOT/samsung-debug-before.bin" \
+               bs=4096 2> "$EARLY_ROOT/samsung-debug-copy.stderr" || true
+            if have sha256sum && [ -f "$EARLY_ROOT/samsung-debug-before.bin" ]; then
+                sha256sum "$EARLY_ROOT/samsung-debug-before.bin" \
+                    > "$EARLY_ROOT/samsung-debug-before.sha256" 2>/dev/null || true
+            fi
+        else
+            echo "debug partition not found" > "$EARLY_ROOT/samsung-debug-copy.stderr"
+        fi
+
+        cat /proc/iomem > "$EARLY_ROOT/recovery-proc-iomem.txt" 2>/dev/null || true
+
         if [ ! -d /sys/fs/pstore ]; then
             mkdir -p /sys/fs/pstore
         fi
@@ -186,6 +210,7 @@ capture_command "$WORK/06-proc-bootconfig.txt" cat /proc/bootconfig
 capture_command "$WORK/07-mounts.txt" cat /proc/mounts
 capture_command "$WORK/08-interrupts.txt" cat /proc/interrupts
 capture_command "$WORK/09-meminfo.txt" cat /proc/meminfo
+capture_command "$WORK/09b-proc-iomem.txt" cat /proc/iomem
 
 capture_dt_runtime "$WORK/10-active-ramoops-runtime"
 capture_reboot_reason "$WORK/11-reboot-reason.txt"
@@ -204,11 +229,13 @@ done
 capture_android_logs "$WORK/13-android-persistent-logs"
 
 {
-    echo "collector_version=2"
+    echo "collector_version=3-debug-partition-preflight"
     echo "collection_started=$STAMP"
     echo "raw_exporter_present=$([ -e /dev/a52_ramoops_raw ] && echo yes || echo no)"
     echo "early_snapshot_present=$([ -f "$EARLY_ROOT/snapshot.started" ] && echo yes || echo no)"
     echo "pstore_files=$(find /sys/fs/pstore -type f 2>/dev/null | wc -l)"
+    echo "debug_partition_snapshot=$([ -f "$EARLY_ROOT/samsung-debug-before.bin" ] && echo yes || echo no)"
+    echo "debug_partition_bytes=$([ -f "$EARLY_ROOT/samsung-debug-before.bin" ] && wc -c < "$EARLY_ROOT/samsung-debug-before.bin" || echo 0)"
     echo "data_mounted=$(grep -q ' /data ' /proc/mounts 2>/dev/null && echo yes || echo no)"
 } > "$WORK/COLLECTION-STATUS.txt"
 

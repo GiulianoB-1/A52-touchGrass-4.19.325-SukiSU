@@ -5,6 +5,8 @@ import argparse
 import json
 from pathlib import Path
 
+# Workflow trigger revision 1
+
 SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 /*
  * Recovery-only A52 Samsung reserved-RAM snapshot exporter.

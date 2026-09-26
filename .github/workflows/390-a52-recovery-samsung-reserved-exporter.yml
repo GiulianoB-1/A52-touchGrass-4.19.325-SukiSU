@@ -1,3 +1,4 @@
+# Phase390 recovery reserved-RAM exporter
 name: 390 - A52 recovery Samsung reserved RAM exporter
 
 run-name: Build A52 4.19.206 recovery kernel with frozen Samsung reserved-RAM exporter

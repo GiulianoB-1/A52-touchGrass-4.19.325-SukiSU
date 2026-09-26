@@ -551,8 +551,11 @@ jobs:
           grep -aFq 'V392 CORE st=221 phy_setup ret=%d' "$IMAGE" || {
             echo "ERROR: Phase392 persistent USB stage records missing from Image" >&2; exit 1;
           }
-          grep -aFq 'V392 CORE st=22e ulpi_timeout ret=%d' "$IMAGE" || {
-            echo "ERROR: Phase392 ULPI timeout record missing from Image" >&2; exit 1;
+          grep -Fq 'a52_ackfr_record("V392 CORE st=22e ulpi_timeout ret=%d", ret)' "$DWC3CORE" || {
+            echo "ERROR: Phase392 ULPI timeout source record missing" >&2; exit 1;
+          }
+          llvm-nm "$BUILD/drivers/usb/dwc3/core.o" | grep -Fq ' U a52_ackfr_record' || {
+            echo "ERROR: compiled DWC3 core does not reference main recorder" >&2; exit 1;
           }
           grep -Fq '(2U * SZ_1M)' scripts/392_apply_persistent_gap_backend.py || {
             echo "ERROR: Phase392 persistent gap size is not 2 MiB" >&2; exit 1;

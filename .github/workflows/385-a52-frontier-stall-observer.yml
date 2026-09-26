@@ -36,6 +36,7 @@ on:
       - scripts/384_apply_loop_ufs_stall_pinpoint.py
       - scripts/385_apply_frontier_stall_observer.py
       - scripts/385b_apply_usb_real_udc_sticky.py
+      - scripts/386_apply_qcom_dwc3_glue_bridge.py
 
 permissions:
   contents: read
@@ -96,7 +97,8 @@ jobs:
             scripts/379_apply_ufs_sideband_sampler.py \
             scripts/380_apply_usb_block_live_debug.py \
             scripts/385_apply_frontier_stall_observer.py \
-            scripts/385b_apply_usb_real_udc_sticky.py
+            scripts/385b_apply_usb_real_udc_sticky.py \
+            scripts/386_apply_qcom_dwc3_glue_bridge.py
 
       - name: Restore Phase346 baseline cache v2
         id: phase346-v2
@@ -327,6 +329,8 @@ jobs:
           python3 scripts/385_apply_frontier_stall_observer.py --root "$ROOT" --check-only
           python3 scripts/385b_apply_usb_real_udc_sticky.py --root "$ROOT"
           python3 scripts/385b_apply_usb_real_udc_sticky.py --root "$ROOT" --check-only
+          python3 scripts/386_apply_qcom_dwc3_glue_bridge.py --root "$ROOT"
+          python3 scripts/386_apply_qcom_dwc3_glue_bridge.py --root "$ROOT" --check-only
 
           CORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
           QCOM="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
@@ -344,6 +348,7 @@ jobs:
           DWC3G="$ROOT/drivers/usb/dwc3/gadget.c"
           DWC3CORE="$ROOT/drivers/usb/dwc3/core.c"
           DWC3SIMPLE="$ROOT/drivers/usb/dwc3/dwc3-of-simple.c"
+          DWC3QCOM="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
           echo "Phase383 patchers passed check-only audits"
           if ! git -C "$ROOT" diff --check; then
             echo "WARNING: git diff --check reported formatting issues; continuing to compile"
@@ -368,6 +373,7 @@ jobs:
           "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DWC3_HOST
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_DWC3_GADGET
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_DWC3_OF_SIMPLE
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable USB_DWC3_QCOM
           "$ROOT/scripts/config" --file "$BUILD/.config" --disable USB_DUMMY_HCD
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-str CMDLINE \
@@ -383,6 +389,7 @@ jobs:
           grep -Fxq 'CONFIG_USB_G_SERIAL=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_USB_DWC3_GADGET=y' "$BUILD/.config"
           grep -Fxq 'CONFIG_USB_DWC3_OF_SIMPLE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_USB_DWC3_QCOM=y' "$BUILD/.config"
           grep -Fxq '# CONFIG_USB_DUMMY_HCD is not set' "$BUILD/.config"
           grep -Fxq '# CONFIG_USB_DWC3_DUAL_ROLE is not set' "$BUILD/.config"
           grep -Fxq '# CONFIG_USB_DWC3_HOST is not set' "$BUILD/.config"
@@ -478,6 +485,23 @@ jobs:
             exit 1
           }
           echo "Phase385b compiled-artifact audit: PASS"
+          echo "Phase386 QCOM glue compiled-artifact audit"
+          grep -aFq 'A52_PHASE386_QCOM_DWC3_GLUE_BRIDGE_V1' "$IMAGE" || {
+            echo "ERROR: Phase386 QCOM bridge marker missing from Image" >&2; exit 1;
+          }
+          grep -Fq ' dwc3_qcom_probe' "$BUILD/System.map" || {
+            echo "ERROR: dwc3_qcom_probe missing from System.map" >&2; exit 1;
+          }
+          grep -Fq 'a52_r386_stage' "$BUILD/System.map" || {
+            echo "ERROR: Phase386 sticky stage helper missing from System.map" >&2; exit 1;
+          }
+          if grep -Fq '{ .compatible = "qcom,dwc-usb3-msm" },' "$DWC3SIMPLE"; then
+            echo "ERROR: OF-simple still owns qcom,dwc-usb3-msm" >&2; exit 1;
+          fi
+          grep -Fq '{ .compatible = "qcom,dwc-usb3-msm" },' "$DWC3QCOM" || {
+            echo "ERROR: dwc3-qcom does not own qcom,dwc-usb3-msm" >&2; exit 1;
+          }
+          echo "Phase386 QCOM glue compiled-artifact audit: PASS"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{package,compile,config,source,audit}
@@ -487,9 +511,10 @@ jobs:
           cp "$FUTEX" "$OUT/source/futex-core.c"
           cp "$UDCCORE" "$OUT/source/usb-udc-core.c"
           cp "$DWC3SIMPLE" "$OUT/source/dwc3-of-simple.c"
+          cp "$DWC3QCOM" "$OUT/source/dwc3-qcom.c"
           cp "$DWC3CORE" "$OUT/source/dwc3-core.c"
           cp "$ROOT/include/linux/a52_ack_secure_flight_recorder.h" "$OUT/source/"
-          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py scripts/382_apply_sticky_usb_cliff_census.py scripts/383_apply_event_frontier_loop_aio.py scripts/384_apply_loop_ufs_stall_pinpoint.py scripts/385_apply_frontier_stall_observer.py scripts/385b_apply_usb_real_udc_sticky.py "$OUT/audit/"
+          cp scripts/360_apply_ufs_defer_pinpoint.py scripts/361_apply_ufs_platform_gate.py scripts/362_apply_ufs_qmp_flat_bridge.py scripts/363_remove_phase340_60s_reboot.py scripts/364_apply_apexd_syscall_ring.py scripts/365_apply_apexd_writev_futex.py scripts/366_apply_apexd_futex_threads.py scripts/367_apply_apexd_kernel_futex_wake.py scripts/368_apply_apexd_worker_syscall_map.py scripts/369_apply_post_apex_frontier.py scripts/370_apply_latest_apex_worker.py scripts/371_apply_thread_worker_state.py scripts/372_apply_future_worker_correlation.py scripts/373_apply_apex_mount_blocker.py scripts/377_apply_apexd_live_thread_census.py scripts/378_apply_ufs_completion_flight_recorder.py scripts/379_apply_ufs_sideband_sampler.py scripts/380_apply_usb_block_live_debug.py scripts/381_apply_usb_udc_dense_frontier.py scripts/382_apply_sticky_usb_cliff_census.py scripts/383_apply_event_frontier_loop_aio.py scripts/384_apply_loop_ufs_stall_pinpoint.py scripts/385_apply_frontier_stall_observer.py scripts/385b_apply_usb_real_udc_sticky.py scripts/386_apply_qcom_dwc3_glue_bridge.py "$OUT/audit/"
           cp phase377-inherited-ufs-audit.txt "$OUT/audit/"
 
           gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"

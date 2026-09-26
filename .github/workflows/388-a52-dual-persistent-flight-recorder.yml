@@ -7,6 +7,7 @@ on:
     branches:
       - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
+      - .github/workflows/388-a52-dual-persistent-flight-recorder.yml
       - .github/workflows/385-a52-frontier-stall-observer.yml
       - .github/workflows/384-a52-loop-ufs-stall-pinpoint.yml
       - .github/workflows/382-a52-sticky-usb-cliff.yml

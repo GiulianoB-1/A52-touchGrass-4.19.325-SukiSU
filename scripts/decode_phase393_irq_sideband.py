@@ -20,6 +20,9 @@ def parse_slot(buf: bytes) -> dict:
         return {"valid": False}
     vals = struct.unpack("<QQQQQIIIIII", buf)
     magic, ns, seq, j64, reserved, ver, idx, event, cpu, tick, commit = vals
+    interrupted_pid = (reserved >> 32) & 0xffffffff
+    preempt_count = (reserved >> 1) & 0x7fffffff
+    irqs_off = reserved & 1
     return {
         "valid": magic == MAGIC and commit == COMMIT and ver == 1,
         "magic": f"0x{magic:016x}",
@@ -27,6 +30,9 @@ def parse_slot(buf: bytes) -> dict:
         "seconds": ns / 1e9,
         "r48_sequence": seq,
         "jiffies64": j64,
+        "interrupted_pid": interrupted_pid,
+        "preempt_count": preempt_count,
+        "irqs_off": irqs_off,
         "index": idx,
         "event": event,
         "cpu": cpu,

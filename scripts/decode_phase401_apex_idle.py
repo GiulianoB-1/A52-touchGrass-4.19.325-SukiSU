@@ -27,14 +27,24 @@ def parse(buf):
                 value0=v0,value1=v1,sequence=seq,version=ver)
 
 def choose(a,b):
-    pa,pb=parse(a),parse(b)
-    if pa and pb:
-        r=dict(pb if pb["sequence"]>pa["sequence"] else pa)
-        r["source"]="both"; r["copies_equal"]=a==b; return r
-    r=pa or pb
-    if r:
-        r=dict(r); r["source"]="copy0" if pa else "copy1"; r["copies_equal"]=False
-    return r
+    candidates = [
+        ("or", bytes(x | y for x, y in zip(a, b))),
+        ("copy0", a),
+        ("copy1", b),
+        ("and", bytes(x & y for x, y in zip(a, b))),
+    ]
+    valid = []
+    for source, buf in candidates:
+        row = parse(buf)
+        if row is not None:
+            row = dict(row)
+            row["source"] = source
+            row["copies_equal"] = a == b
+            valid.append(row)
+    if not valid:
+        return None
+    valid.sort(key=lambda r: r["sequence"], reverse=True)
+    return valid[0]
 
 def main():
     ap=argparse.ArgumentParser()

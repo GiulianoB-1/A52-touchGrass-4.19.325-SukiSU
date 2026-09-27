@@ -341,7 +341,22 @@ jobs:
           grep -Fq 'next_dense += 250ULL;' "$REC"
           ! grep -Fq 'late_initcall(a52_p400_exec_init);' "$REC"
           ! grep -Fq 'late_initcall(a52_r393_irq_arm_init);' "$REC"
-          ! grep -Fq           Phase396 NoC IRQ evidence
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCD"
+          grep -Fq 'a52_p401_irq_witness(irq);' "$IRQH"
+          grep -Fq 'a52_p401_idle_enter();' "$IDLE"
+          grep -Fq 'a52_p401_task_exit(current);' "$EXIT"
+          grep -Fxq 'CONFIG_GENERIC_IDLE_POLL_SETUP=y' "$BUILD/.config" || {
+            echo "ERROR: nohlt A/B invalid because CONFIG_GENERIC_IDLE_POLL_SETUP is not enabled" >&2
+            exit 1
+          }
+          grep -aFq 'BOOT rs=ready phase=401 focus=apex-idle roots=%u copies=2 crc=crc32c' "$IMAGE"
+          grep -Fq ' a52_p401_irq_witness' "$BUILD/System.map"
+          grep -Fq ' a52_p401_idle_enter' "$BUILD/System.map"
+          grep -Fq ' a52_p401_task_exit' "$BUILD/System.map"
+          echo "Phase401 apexd/idle discriminator audit: PASS"
+
+          cat > "$OUT/PHASE396-NOTES.txt" <<'EOF'
+          Phase396 NoC IRQ evidence
           =========================
           - Restores CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y while preserving QCOM_WDT.
           - Verifies qcom,msm-watchdog fixed-rate bridge and WDOG_HW_RUNNING handoff.
@@ -502,7 +517,8 @@ jobs:
               path.write_bytes(data)
               return before, module.parse_boot(path.read_bytes())
 
-          base = module.parse_boot(Path("phase401-gki-out/package/boot.img").read_bytes())
+          base_path = Path("phase401-gki-out/package/boot.img")
+          base = module.parse_boot(base_path.read_bytes())
           _, n = patch_cmdline(normal, common)
           _, h = patch_cmdline(nohlt, common + treatment)
 
@@ -519,18 +535,16 @@ jobs:
           for key in immutable:
               assert n[key] == h[key], key
               assert n[key] == base[key], key
-          assert normal.stat().st_size == nohlt.stat().st_size == Path(
-              "phase401-gki-out/package/boot.img").stat().st_size
+          assert normal.stat().st_size == nohlt.stat().st_size == base_path.stat().st_size
 
-          report = {
-              "normal_cmdline": n["cmdline"],
-              "nohlt_cmdline": h["cmdline"],
-              "same_kernel_and_payload": True,
-              "treatment": "nohlt cpuidle.off=1",
-              "primary_switch": "nohlt",
-          }
           Path("phase401-gki-out/PHASE401-AB.json").write_text(
-              json.dumps(report, indent=2, sort_keys=True) + "\n")
+              json.dumps({
+                  "normal_cmdline": n["cmdline"],
+                  "nohlt_cmdline": h["cmdline"],
+                  "same_kernel_and_payload": True,
+                  "treatment": "nohlt cpuidle.off=1",
+                  "primary_switch": "nohlt",
+              }, indent=2, sort_keys=True) + "\n")
           PY
 
           cat > "$OUT/PHASE401-AB.txt" <<'EOF'
@@ -546,12 +560,6 @@ jobs:
           Run at least 5 cold boots of NORMAL and 5 cold boots of NOHLT.
           Collect the ramoops bundle after every failed boot and at least one successful
           boot in each arm. Record whether Android reaches a stable UI.
-
-          Interpretation:
-          - NOHLT strongly improves survival: arch_cpu_idle/WFI path is implicated.
-          - Both arms still cliff similarly: idle/WFI is not sufficient to explain it.
-          - NOHLT shifts the cliff but does not remove it: timing-sensitive idle or
-            adjacent power-management path remains plausible; decode P401 witnesses.
           EOF
 
       - name: Upload Phase401
@@ -577,127 +585,6 @@ jobs:
         with:
           name: A52XQ-PHASE401-NOHLT-${{ github.run_number }}
           path: phase401-gki-out/package/boot-phase401-nohlt.img
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30\t\ta52_r380_start_sampler(hba);' "$UFSCD"
-          grep -Fq 'a52_p401_irq_witness(irq);' "$IRQH"
-          grep -Fq 'a52_p401_idle_enter();' "$IDLE"
-          grep -Fq 'a52_p401_task_exit(current);' "$EXIT"
-          grep -Fxq 'CONFIG_GENERIC_IDLE_POLL_SETUP=y' "$BUILD/.config" || {
-            echo "ERROR: nohlt A/B invalid because CONFIG_GENERIC_IDLE_POLL_SETUP is not enabled" >&2
-            exit 1
-          }
-          grep -aFq 'BOOT rs=ready phase=401 focus=apex-idle roots=%u copies=2 crc=crc32c' "$IMAGE"
-          grep -Fq ' a52_p401_irq_witness' "$BUILD/System.map"
-          grep -Fq ' a52_p401_idle_enter' "$BUILD/System.map"
-          grep -Fq ' a52_p401_task_exit' "$BUILD/System.map"
-          echo "Phase401 apexd/idle discriminator audit: PASS"
-
-          cat > "$OUT/PHASE396-NOTES.txt" <<'EOF'
-          Phase396 NoC IRQ evidence
-          =========================
-          - Restores CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y while preserving QCOM_WDT.
-          - Verifies qcom,msm-watchdog fixed-rate bridge and WDOG_HW_RUNNING handoff.
-          - Frees console-ramoops from R48: R48 now mirrors to ftrace + record only.
-          - Keeps the separate 2 MiB Phase392 persistent gap triple-mirrored.
-          - Watches Samsung NOCERR identifiers 404, 226, 290, 108, 198, 186, 323.
-          - Resolves Linux IRQ, exact hwirq, and hwirq = target + 32 candidates.
-          - Samples descriptor/irqchip state densely from 17.6 s through 18.6 s.
-          - Preserves the first 12 watched IRQ hits in a two-copy raw lane at 0xB1BFF800.
-          - Includes a source/DT Gladiator ERP audit, but does not enable or port Gladiator yet.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE396-NOTES.txt"
-
-          cp "$REC" "$OUT/source/a52_ack_secure_flight_recorder.c"
-          cp "$HDR" "$OUT/source/a52_ack_secure_flight_recorder.h"
-          cp "$IRQH" "$OUT/source/irq-handle.c"
-          cp "$WDT" "$OUT/source/qcom-wdt.c"
-          cp scripts/395_apply_noc_wall_discriminator.py \
-             scripts/396_apply_noc_irq_evidence.py \
-             scripts/decode_phase396_noc_irq.py \
-             "$OUT/audit/"
-          cp phase396-gladiator-audit.txt "$OUT/audit/"
-          cp "$ROOT/drivers/scsi/ufs/ufs-qcom.c" "$OUT/source/ufs-qcom.c"
-          cp "$ROOT/drivers/usb/dwc3/dwc3-qcom.c" "$OUT/source/dwc3-qcom.c"
-          cp scripts/397_apply_downstream_bus_votes.py "$OUT/audit/"
-          cp scripts/398_apply_dense_ap_cliff.py scripts/decode_phase398_irq_cliff.py "$OUT/audit/"
-          cp scripts/399_apply_fixed_hardirq_witness.py scripts/decode_phase399_irq_witness.py "$OUT/audit/"
-          cp scripts/400_apply_irq_exec_witness.py scripts/decode_phase400_irq_exec.py "$OUT/audit/"
-          cat > "$OUT/PHASE400-NOTES.txt" <<'EOF'
-          Phase400 IRQ/execution discriminator
-          ====================================
-          - Inherits Phase399 fixed CPU0/5/7 timer witnesses.
-          - Inherits Phase397 downstream UFS/USB MAX bus-vote fixes.
-          - Adds fixed last-generic-IRQ witnesses for CPU0, CPU5 and CPU7.
-          - Adds a CPU7 busy-poll execution witness from ~16.4 through ~17.0 s.
-          - Busy witness uses direct instruction execution + CNTPCT with preemption
-            disabled and hard IRQs enabled; it does not depend on timer IRQs, R48,
-            workqueues or scheduler progress after arming.
-          - If IRQ witnesses stop but busy witness advances, interrupt delivery
-            collapsed while CPU7 remained executing.
-          - If both stop together, CPU execution itself halted/stalled or the
-            shared fabric/clock path needed for execution became unavailable.
-          - The CPU7 busy loop is intentionally interventional: if it suppresses
-            the crash, that is evidence for an idle/power-management race.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE400-NOTES.txt"
-          cat > "$OUT/PHASE399-NOTES.txt" <<'EOF'
-          Phase399 fixed hardirq witness
-          ==============================
-          - Inherits Phase398 10 ms CPU0/5/7 pinned hardirq ring and 16.0-17.2 s NoC sampling.
-          - Inherits Phase397 downstream UFS/USB MAX bus-vote fixes.
-          - Keeps Phase396 R48 two-copy policy: record + ftrace only; console bank is not an R48 mirror.
-          - Reserves the final 192 bytes of each R341 copy for fixed CPU0/5/7 last-tick witnesses.
-          - Each witness is overwritten in place from hardirq context, mirrored twice, cache-cleaned,
-            and does not call a52_ackfr_record or depend on R48/workqueues/kthreads.
-          - copy1 witness ends exactly at 0xB1BFF800; existing N396 raw lane starts there.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE399-NOTES.txt"
-          cat > "$OUT/PHASE398-NOTES.txt" <<'EOF'
-          Phase398 dense AP cliff probe
-          =============================
-          - Inherits Phase397 UFS/USB downstream MAX bus-vote fixes.
-          - Targets the now-repeatable Linux/AP cliff at ~16.6-16.8 seconds.
-          - Restores CPU0/5/7 pinned hardirq hrtimers from 250 ms to 10 ms.
-          - Extends each timer to 400 ticks; the raw two-copy ring retains the
-            most recent ~370 ms of three-CPU hardirq activity around the cliff.
-          - Moves N396 dense descriptor sampling to 16.0-17.2 s at 10 ms cadence.
-          - No functional power, clock, bus, display or storage behavior change.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE398-NOTES.txt"
-          cat > "$OUT/PHASE397-NOTES.txt" <<'EOF'
-          Phase397 downstream UFS/USB bus votes
-          =====================================
-          - Inherits Phase396 diagnostics unchanged: pstore console, two-copy R48,
-            NoC IRQ raw lane and the Phase392/393/394/395 observers.
-          - Restores the downstream qcom,msm-bus client contract for UFS.
-          - Routes qcom,dwc-usb3-msm away from missing upstream ICC DT names and
-            back to its downstream qcom,msm-bus table.
-          - A/B policy holds each device at its highest DT use-case for the full
-            device lifetime, removing under-voting as a variable.
-          - Diagnostic correctness build only; dynamic power-optimized voting can
-            be restored after the causal A/B result.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE397-NOTES.txt"
-          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
-             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
-
-          echo "Phase400 IRQ execution discriminator build: PASS"
-
-      - name: Upload Phase400
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE401-APEX-IDLE-${{ github.run_number }}
-          path: phase401-gki-out/
-          if-no-files-found: error
-          compression-level: 1
-          retention-days: 30
-
-      - name: Upload Phase400 boot.img
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE401-APEX-IDLE-${{ github.run_number }}-BOOT-IMG
-          path: phase401-gki-out/package/boot.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

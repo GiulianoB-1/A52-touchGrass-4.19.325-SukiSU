@@ -421,8 +421,9 @@ jobs:
           - Hrtimers run for 4000 ticks, about 40 seconds, so an early stop is not a budget stop.
           - N396 descriptor sampling is throttled to 250 ms to protect the R48 time horizon.
           - The workflow emits two boot images from the same kernel: NORMAL and NOHLT.
-            NOHLT also carries cpuidle.off=1, but nohlt is the relevant switch because
-            prior Phase352 evidence found fallback arch_cpu_idle/WFI rather than generic cpuidle.
+            NORMAL preserves the baseline cmdline; NOHLT only adds nohlt + cpuidle.off=1.
+            nohlt is the relevant switch because prior Phase352 evidence found fallback
+            arch_cpu_idle/WFI rather than generic cpuidle.
           EOF
           sed -i 's/^          //' "$OUT/PHASE401-NOTES.txt"
           cat > "$OUT/PHASE399-NOTES.txt" <<'EOF'
@@ -492,7 +493,7 @@ jobs:
 
           normal = Path("phase401-gki-out/package/boot-phase401-normal.img")
           nohlt = Path("phase401-gki-out/package/boot-phase401-nohlt.img")
-          common = ["loglevel=8", "ignore_loglevel", "printk.time=1", "pstore.compress=none"]
+          common = []
           treatment = ["nohlt", "cpuidle.off=1"]
 
           def patch_cmdline(path, extras):
@@ -522,9 +523,7 @@ jobs:
           _, n = patch_cmdline(normal, common)
           _, h = patch_cmdline(nohlt, common + treatment)
 
-          for tok in common:
-              assert tok in n["cmdline"].split(), (tok, n["cmdline"])
-              assert tok in h["cmdline"].split(), (tok, h["cmdline"])
+          assert n["cmdline"] == base["cmdline"]
           assert "nohlt" not in n["cmdline"].split()
           assert "cpuidle.off=1" not in n["cmdline"].split()
           assert "nohlt" in h["cmdline"].split()
@@ -554,8 +553,10 @@ jobs:
           NOHLT : boot-phase401-nohlt.img
 
           Both images contain the exact same compiled Phase401 kernel and payload.
-          Both enable loglevel=8 ignore_loglevel printk.time=1 pstore.compress=none.
-          Only NOHLT adds: nohlt cpuidle.off=1.
+          NORMAL preserves the baseline boot command line exactly.
+          NOHLT differs only by adding: nohlt cpuidle.off=1.
+          Verbose printk options are intentionally excluded from this causal A/B
+          because extra console traffic could perturb the suspected timing race.
 
           Run at least 5 cold boots of NORMAL and 5 cold boots of NOHLT.
           Collect the ramoops bundle after every failed boot and at least one successful

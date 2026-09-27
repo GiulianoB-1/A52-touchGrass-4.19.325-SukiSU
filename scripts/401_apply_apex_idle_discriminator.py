@@ -70,6 +70,10 @@ def patch_exit(text: str) -> str:
 def patch_ufs(text: str) -> str:
     if MARK in text:
         return text
+    text = one(text,
+               "static void a52_r380_start_sampler(struct ufs_hba *hba)\n",
+               "static void __maybe_unused a52_r380_start_sampler(struct ufs_hba *hba)\n",
+               "retired Phase380 function")
     anchor = "\t\ta52_r380_start_sampler(hba);\n"
     return one(text, anchor,
                f"\t\t/* {MARK}: Phase380 raw owner retired; P401 owns 0xB1BF8000..0xB1BFF7FF. */\n",

@@ -203,8 +203,10 @@ jobs:
           # remains in source for lineage but is intentionally unreachable and may
           # be dead-stripped by Clang, so inherited Image-string audits are invalid.
           for stale in (
+              "grep -aFq 'A52_PHASE379_UFS_SIDEBAND_SAMPLER_V1' \"$IMAGE\"\n",
               "grep -aFq 'UFS_SNAPSHOT' \"$IMAGE\"\n",
               "grep -aFq 'UFS_TAG' \"$IMAGE\"\n",
+              "grep -aFq 'A52_PHASE380_USB_BLOCK_LIVE_DEBUG_V1' \"$IMAGE\"\n",
               "grep -aFq 'U380 READY nutrs=%u ver=%x copies=3 crc=crc32c' \"$IMAGE\"\n",
           ):
               if stale not in script:
@@ -352,6 +354,9 @@ jobs:
           grep -Fq 'next_dense += 250ULL;' "$REC"
           ! grep -Fq 'late_initcall(a52_p400_exec_init);' "$REC"
           ! grep -Fq 'late_initcall(a52_r393_irq_arm_init);' "$REC"
+          grep -Fq 'A52_PHASE379_UFS_SIDEBAND_SAMPLER_V1' "$UFSCD"
+          grep -Fq 'A52_PHASE380_USB_BLOCK_LIVE_DEBUG_V1' "$UFSCD"
+          grep -Fq 'static void __maybe_unused a52_r380_start_sampler(struct ufs_hba *hba)' "$UFSCD"
           ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCD"
           grep -Fq 'a52_p401_irq_witness(irq);' "$IRQH"
           grep -Fq 'a52_p401_idle_enter();' "$IDLE"

@@ -396,9 +396,17 @@ def patch_rec(text: str) -> str:
         raise SystemExit("Phase401 requires Phase400")
 
     text = one(text,
+               "static int __init a52_p400_exec_init(void)\n",
+               "static int __init __maybe_unused a52_p400_exec_init(void)\n",
+               "retired Phase400 init function")
+    text = one(text,
                "late_initcall(a52_p400_exec_init);\n",
                "/* A52_PHASE401 retires the Phase400 busy worker. */\n",
                "retire Phase400 worker")
+    text = one(text,
+               "static int __init a52_r393_irq_arm_init(void)\n",
+               "static int __init __maybe_unused a52_r393_irq_arm_init(void)\n",
+               "retired Phase393 init function")
     text = one(text,
                "late_initcall(a52_r393_irq_arm_init);\n",
                "/* A52_PHASE401 retires the overlapping Phase393/R341 arm worker. */\n",

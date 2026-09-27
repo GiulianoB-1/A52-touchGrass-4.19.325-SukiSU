@@ -233,18 +233,19 @@ jobs:
           # Phase401 deliberately retires the Phase393/R341 initcall. The function
           # remains in source as __maybe_unused lineage, so it must not be required
           # in System.map.
-          old_p393_sym = '''grep -Fq ' a52_r393_irq_arm_init' "$BUILD/System.map" || {
-            echo "ERROR: Phase393 IRQ armer missing from final System.map" >&2; exit 1;
-          }
-'''
+          old_p393_sym = (
+              "grep -Fq ' a52_r393_irq_arm_init' \"$BUILD/System.map\" || {\n"
+              "  echo \"ERROR: Phase393 IRQ armer missing from final System.map\" >&2; exit 1;\n"
+              "}\n"
+          )
           if old_p393_sym not in script:
               raise SystemExit("Phase401 stale Phase393 System.map audit missing")
-          script = script.replace(
-              old_p393_sym,
-              '''grep -Fq 'static int __init __maybe_unused a52_r393_irq_arm_init(void)' "$REC" || {
-            echo "ERROR: retired Phase393 IRQ armer lineage missing from source" >&2; exit 1;
-          }
-''', 1)
+          new_p393_sym = (
+              "grep -Fq 'static int __init __maybe_unused a52_r393_irq_arm_init(void)' \"$REC\" || {\n"
+              "  echo \"ERROR: retired Phase393 IRQ armer lineage missing from source\" >&2; exit 1;\n"
+              "}\n"
+          )
+          script = script.replace(old_p393_sym, new_p393_sym, 1)
           Path("/tmp/phase401-build.sh").write_text(
               "set -Eeuo pipefail\n" + script)
           PY

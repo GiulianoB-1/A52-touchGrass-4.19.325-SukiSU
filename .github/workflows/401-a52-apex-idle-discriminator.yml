@@ -199,6 +199,17 @@ jobs:
           script = script.replace(
               "ERROR: Phase393 hardirq timer limit missing",
               "ERROR: Phase398 dense hardirq timer limit missing")
+          # Phase401 retires the Phase380 raw UFS sampler. Its static helper
+          # remains in source for lineage but is intentionally unreachable and may
+          # be dead-stripped by Clang, so inherited Image-string audits are invalid.
+          for stale in (
+              "grep -aFq 'UFS_SNAPSHOT' \"$IMAGE\"\n",
+              "grep -aFq 'UFS_TAG' \"$IMAGE\"\n",
+              "grep -aFq 'U380 READY nutrs=%u ver=%x copies=3 crc=crc32c' \"$IMAGE\"\n",
+          ):
+              if stale not in script:
+                  raise SystemExit("Phase401 stale Phase380 audit anchor missing: " + stale.strip())
+              script = script.replace(stale, "", 1)
           Path("/tmp/phase401-build.sh").write_text(
               "set -Eeuo pipefail\n" + script)
           PY

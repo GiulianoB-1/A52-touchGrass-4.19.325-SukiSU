@@ -93,7 +93,7 @@ P401_BLOCK = r'''
 #define A52_P401_RING_SLOTS        ((A52_P401_COPY_BYTES - A52_P401_RING_OFF) / A52_P401_SLOT_BYTES)
 #define A52_P401_MAGIC             0x3130345044495841ULL
 #define A52_P401_COMMIT            0x401c0de5U
-#define A52_P401_APEX_FOCUS_COUNT  64U
+#define A52_P401_IDLE_SAMPLE_HZ    100U
 #define A52_P401_TIMER_LIMIT       4000U
 #define A52_P401_TIMER_MS          10U
 #define A52_P401_IDLE_STOP_NS      25000000000ULL
@@ -133,6 +133,7 @@ static u64 a52_p401_boot_id;
 static atomic_t a52_p401_sequence = ATOMIC_INIT(0);
 static atomic_t a52_p401_ring_index = ATOMIC_INIT(0);
 static atomic_t a52_p401_apex_exits = ATOMIC_INIT(0);
+static atomic_t a52_p401_first_apex_tgid = ATOMIC_INIT(0);
 static atomic_t a52_p401_focus = ATOMIC_INIT(0);
 static DEFINE_PER_CPU(struct a52_p401_timer, a52_p401_timers);
 static DEFINE_PER_CPU(u32, a52_p401_irq_count);
@@ -248,7 +249,7 @@ void a52_p401_idle_enter(void)
 		return;
 	now = a52_p400_cntpct();
 	last = this_cpu_ptr(&a52_p401_idle_last_cntpct);
-	step = (u64)a52_p400_cntfrq() / 2000ULL;
+	step = (u64)a52_p400_cntfrq() / (u64)A52_P401_IDLE_SAMPLE_HZ;
 	if (*last && step && (s64)(now - *last) < (s64)step)
 		return;
 	*last = now;
@@ -280,12 +281,24 @@ void a52_p401_task_exit(struct task_struct *task)
 	a52_p401_ring(A52_P401_EVT_APEX_EXIT,
 			 (u32)raw_smp_processor_id(), n, (tgid << 16) ^ pid);
 
-	if (n == A52_P401_APEX_FOCUS_COUNT &&
-	    atomic_cmpxchg(&a52_p401_focus, 0, 1) == 0) {
-		a52_p401_fixed(10U, A52_P401_EVT_FOCUS,
-				  (u32)raw_smp_processor_id(), n, pid);
-		a52_p401_ring(A52_P401_EVT_FOCUS,
-				 (u32)raw_smp_processor_id(), n, pid);
+	/*
+	 * The old BOOTPOST n=102 is a global exit ordinal, not an apexd-local
+	 * count. Avoid baking that correlation into the experiment. Remember the
+	 * first apexd TGID seen after core-init; the first exit from any later
+	 * apexd TGID arms the focused idle witness.
+	 */
+	{
+		int first = atomic_cmpxchg(&a52_p401_first_apex_tgid, 0, (int)tgid);
+
+		if (!first)
+			first = (int)tgid;
+		if ((u32)first != tgid &&
+		    atomic_cmpxchg(&a52_p401_focus, 0, 1) == 0) {
+			a52_p401_fixed(10U, A52_P401_EVT_FOCUS,
+					  (u32)raw_smp_processor_id(), n, tgid);
+			a52_p401_ring(A52_P401_EVT_FOCUS,
+					 (u32)raw_smp_processor_id(), n, tgid);
+		}
 	}
 }
 EXPORT_SYMBOL_GPL(a52_p401_task_exit);
@@ -360,6 +373,7 @@ static int __init a52_p401_init(void)
 	atomic_set(&a52_p401_sequence, 0);
 	atomic_set(&a52_p401_ring_index, 0);
 	atomic_set(&a52_p401_apex_exits, 0);
+	atomic_set(&a52_p401_first_apex_tgid, 0);
 	atomic_set(&a52_p401_focus, 0);
 	a52_p401_fixed(0U, A52_P401_EVT_META,
 			  (u32)raw_smp_processor_id(), A52_P401_BYTES,
@@ -421,7 +435,7 @@ def validate(root: Path) -> None:
         MARK,
         "A52_P401_PHYS              0xB1BF8000ULL",
         "A52_P401_BYTES             0x7800U",
-        "A52_P401_APEX_FOCUS_COUNT  64U",
+        "A52_P401_IDLE_SAMPLE_HZ    100U",
         "A52_P401_TIMER_LIMIT       4000U",
         "core_initcall_sync(a52_p401_init);",
         "late_initcall(a52_p401_timer_init);",

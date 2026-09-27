@@ -286,7 +286,7 @@ jobs:
           grep -Fq 'u64 next_dense = 16000ULL;' "$REC"
           grep -Fq 'now_ms >= 16000ULL && now_ms <= 17200ULL' "$REC"
           grep -Fq 'next_dense += 10ULL;' "$REC"
-          grep -aFq 'BOOT rs=ready phase=398 focus=ap-cliff roots=%u copies=2 crc=crc32c' "$IMAGE"
+          grep -aFq 'BOOT rs=ready phase=399 focus=irq-witness roots=%u copies=2 crc=crc32c' "$IMAGE"
           echo "Phase398 dense AP-cliff source audit: PASS"
 
           echo "Phase399 fixed hardirq witness audit"

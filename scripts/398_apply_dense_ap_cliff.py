@@ -52,6 +52,11 @@ def patch(text: str) -> str:
         "\t\t\tusleep_range(1000, 2000);\n",
         "N396 dense sleep window")
 
+    text = one(text,
+        '"BOOT rs=ready phase=396 focus=noc-irq roots=%u copies=2 crc=crc32c"',
+        '"BOOT rs=ready phase=398 focus=ap-cliff roots=%u copies=2 crc=crc32c"',
+        "Phase398 boot identity")
+
     return text
 
 
@@ -66,6 +71,7 @@ def validate(root: Path) -> None:
         "next_dense += 10ULL;",
         "now_ms >= 15800ULL && now_ms <= 17400ULL",
         "usleep_range(1000, 2000);",
+        "BOOT rs=ready phase=398 focus=ap-cliff roots=%u copies=2 crc=crc32c",
     )
     for token in required:
         if token not in text:

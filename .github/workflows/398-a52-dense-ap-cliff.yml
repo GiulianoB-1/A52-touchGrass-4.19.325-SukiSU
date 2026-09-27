@@ -171,6 +171,12 @@ jobs:
           script = script.replace(
               "'392','393','394']",
               "'392','393','394','395','396','397','398']")
+          script = script.replace(
+              "grep -Fq '#define A52_R341_LIMIT 120U' \"$REC\"",
+              "grep -Fq '#define A52_R341_LIMIT 400U' \"$REC\"")
+          script = script.replace(
+              "ERROR: Phase393 hardirq timer limit missing",
+              "ERROR: Phase398 dense hardirq timer limit missing")
           Path("/tmp/phase398-build.sh").write_text(
               "set -Eeuo pipefail\n" + script)
           PY

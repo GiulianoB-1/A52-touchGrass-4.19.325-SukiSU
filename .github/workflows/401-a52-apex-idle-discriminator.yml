@@ -341,15 +341,29 @@ jobs:
           grep -Fq ' U msm_bus_scale_client_update_request' "$RUNNER_TEMP/phase397-usb.nm"
           echo "Phase397 downstream bus-vote source/link audit: PASS"
 
-          echo "Phase398 dense AP-cliff source audit"
-          grep -Fq 'A52_PHASE398_DENSE_AP_CLIFF_V1' "$REC"
-          grep -Fq '#define A52_R341_INTERVAL_MS 10U' "$REC"
-          grep -Fq '#define A52_R341_LIMIT 400U' "$REC"
-          grep -Fq 'u64 next_dense = 16000ULL;' "$REC"
-          grep -Fq 'now_ms >= 16000ULL && now_ms <= 17200ULL' "$REC"
-          grep -Fq 'next_dense += 10ULL;' "$REC"
-          grep -aFq 'BOOT rs=ready phase=401 focus=apex-idle roots=%u copies=2 crc=crc32c' "$IMAGE"
-          echo "Phase398 dense AP-cliff source audit: PASS"
+          echo "Phase398 timer lineage + Phase401 N396 throttle audit"
+          grep -Fq 'A52_PHASE398_DENSE_AP_CLIFF_V1' "$REC" || {
+            echo "ERROR: Phase398 timer lineage marker missing" >&2; exit 1;
+          }
+          grep -Fq '#define A52_R341_INTERVAL_MS 10U' "$REC" || {
+            echo "ERROR: Phase398 10 ms timer interval lineage missing" >&2; exit 1;
+          }
+          grep -Fq '#define A52_R341_LIMIT 400U' "$REC" || {
+            echo "ERROR: Phase398 400-tick timer limit lineage missing" >&2; exit 1;
+          }
+          grep -Fq 'u64 next_dense = 15000ULL;' "$REC" || {
+            echo "ERROR: Phase401 N396 15 s start missing" >&2; exit 1;
+          }
+          grep -Fq 'now_ms >= 15000ULL && now_ms <= 22000ULL' "$REC" || {
+            echo "ERROR: Phase401 N396 15-22 s window missing" >&2; exit 1;
+          }
+          grep -Fq 'next_dense += 250ULL;' "$REC" || {
+            echo "ERROR: Phase401 N396 250 ms throttle missing" >&2; exit 1;
+          }
+          grep -aFq 'BOOT rs=ready phase=401 focus=apex-idle roots=%u copies=2 crc=crc32c' "$IMAGE" || {
+            echo "ERROR: Phase401 boot marker missing from Image" >&2; exit 1;
+          }
+          echo "Phase398 timer lineage + Phase401 N396 throttle audit: PASS"
 
           echo "Phase399 fixed hardirq witness audit"
           grep -Fq 'A52_PHASE399_FIXED_HARDIRQ_WITNESS_V1' "$REC"

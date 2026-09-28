@@ -719,12 +719,17 @@ def patch_lifecycle(text: str, functions: tuple[str, ...], rel: Path) -> str:
         marker = f'a52_ackfr_record("P414 LIFE {function}");'
         if marker in text:
             continue
-        openings = definition_openings(text, function)
-        if len(openings) != 1:
+
+        # Phase174 already placed A52_ACKFR_SCOPE after each function's local
+        # declarations. Insert after that declaration-bearing macro, not at the
+        # opening brace, so GNU89 -Wdeclaration-after-statement remains clean.
+        scope = f'A52_ACKFR_SCOPE("DISP", "a52.life.{function}");'
+        if text.count(scope) != 1:
             raise SystemExit(
-                f"Phase414 lifecycle definition mismatch {rel}:{function}: {len(openings)}")
-        opening = openings[0]
-        text = text[:opening + 1] + "\n\t" + marker + text[opening + 1:]
+                f"Phase414 lifecycle scope anchor mismatch {rel}:{function}: "
+                f"{text.count(scope)}")
+        text = text.replace(scope, scope + "\n\t" + marker, 1)
+
     text += "\n/* " + MARK + ": lifecycle breadcrumbs. */\n"
     return text
 

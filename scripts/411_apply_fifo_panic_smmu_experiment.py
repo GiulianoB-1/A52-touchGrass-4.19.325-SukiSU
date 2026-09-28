@@ -152,6 +152,12 @@ def patch_ctrl(text: str) -> str:
         "retire exact-F0 observers",
     )
 
+    old_decl = "static void a52_p293_gdm_try_arm("
+    if old_decl not in text:
+        raise SystemExit("Phase411 retired exact-F0 helper missing")
+    text = text.replace(
+        old_decl, "static void __maybe_unused a52_p293_gdm_try_arm(", 1)
+
     # Functional treatment: every command that fits the 64-byte controller FIFO
     # bypasses the command-buffer IOVA. Longer commands retain original DMA.
     old = '''	/* Check to see if cmd len plus header is greater than fifo size */

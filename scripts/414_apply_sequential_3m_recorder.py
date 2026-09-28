@@ -594,6 +594,20 @@ def patch_recorder(text: str) -> str:
             text,
             'if (strncmp(fmt, "P276", 4) &&\n',
             'if (strncmp(fmt, "P414", 4) &&\n'
+            '    strncmp(fmt, "DISP PROBE", 10) &&\n'
+            '    strncmp(fmt, "DISP DEV", 8) &&\n'
+            '    strncmp(fmt, "DISP BIND", 9) &&\n'
+            '    strncmp(fmt, "DISP CTRL", 9) &&\n'
+            '    strncmp(fmt, "DISP PREP", 9) &&\n'
+            '    strncmp(fmt, "DISP PANEL_", 11) &&\n'
+            '    strncmp(fmt, "DISP ENABLE", 11) &&\n'
+            '    strncmp(fmt, "DISP POST", 9) &&\n'
+            '    strncmp(fmt, "DISP MODE", 9) &&\n'
+            '    strncmp(fmt, "DISP PIN", 8) &&\n'
+            '    strncmp(fmt, "DISP POWER", 10) &&\n'
+            '    strncmp(fmt, "DISP RESET", 10) &&\n'
+            '    strncmp(fmt, "DISP SS_", 8) &&\n'
+            '    strncmp(fmt, "DISP CMDSET", 11) &&\n'
             '    strncmp(fmt, "P276", 4) &&\n',
             "R48 format admission",
         )
@@ -606,6 +620,20 @@ def patch_recorder(text: str) -> str:
 '''
     phase414 = '''\tif (!fmt || (
 \t    strncmp(fmt, "P414", 4) &&
+\t    strncmp(fmt, "DISP PROBE", 10) &&
+\t    strncmp(fmt, "DISP DEV", 8) &&
+\t    strncmp(fmt, "DISP BIND", 9) &&
+\t    strncmp(fmt, "DISP CTRL", 9) &&
+\t    strncmp(fmt, "DISP PREP", 9) &&
+\t    strncmp(fmt, "DISP PANEL_", 11) &&
+\t    strncmp(fmt, "DISP ENABLE", 11) &&
+\t    strncmp(fmt, "DISP POST", 9) &&
+\t    strncmp(fmt, "DISP MODE", 9) &&
+\t    strncmp(fmt, "DISP PIN", 8) &&
+\t    strncmp(fmt, "DISP POWER", 10) &&
+\t    strncmp(fmt, "DISP RESET", 10) &&
+\t    strncmp(fmt, "DISP SS_", 8) &&
+\t    strncmp(fmt, "DISP CMDSET", 11) &&
 \t    strcmp(fmt, "%s enter fn=%s") &&
 \t    strcmp(fmt, "%s exit fn=%s us=%llu") &&
 \t    strncmp(fmt, "P402 ", 5) &&
@@ -767,6 +795,10 @@ def validate(root: Path) -> None:
         'strncmp(fmt, "P414", 4)',
         'strcmp(fmt, "%s enter fn=%s")',
         'strcmp(fmt, "%s exit fn=%s us=%llu")',
+        'strncmp(fmt, "DISP PROBE", 10)',
+        'strncmp(fmt, "DISP BIND", 9)',
+        'strncmp(fmt, "DISP PREP", 9)',
+        'strncmp(fmt, "DISP CMDSET", 11)',
         "SZ_1M /* Phase414 leaves B1A00000 free */",
     ):
         if token not in rec:

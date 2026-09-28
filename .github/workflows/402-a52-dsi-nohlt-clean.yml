@@ -157,7 +157,6 @@ jobs:
             echo "ERROR: CONFIG_GENERIC_IDLE_POLL_SETUP is required for nohlt" >&2; exit 1;
           }
           grep -Fq 'A52_PHASE402_DSI_NOHLT_CLEAN_V1' "$REC"
-          ! grep -Fq 'register_console(&a52_p389_console);' "$REC"
           ! grep -Fq 'a52_ackfr_noc_irq_hit(irq);' "$IRQH"
           ! grep -Fq 'a52_ackfr_irq_witness(irq);' "$IRQH"
           ! grep -Fq 'a52_p401_irq_witness(irq);' "$IRQH"
@@ -171,7 +170,6 @@ jobs:
             'P276 387D e' \
             'P276 387D w' \
             'P276 387I' \
-            'A52_PHASE389_DSI_RAM_MIRROR_V1' \
             'P276 394F result'; do
             grep -Fq "$token" "$DSI" || {
               echo "ERROR: missing DSI/DMA_DONE source token: $token" >&2; exit 1;
@@ -221,15 +219,14 @@ jobs:
           - Phase293/304 exact F0 5A 5A command-DMA tracing.
           - DSI command launch/prestate/fault-window/debugbus instrumentation.
           - Phase387 DMA_DONE wait/fallback/ISR discriminator.
-          - Phase389 reserved-RAM DSI event lane, filtered to DSI events only.
+          - Phase392 persistent-gap backend retained, with recorder admission filtered to DSI/DMA_DONE traffic.
           - Phase394 exact-F0 FIFO experiment and completion result.
           - Phase397 downstream UFS and USB MAX bus-vote contract fixes.
           - The flashable image adds: nohlt cpuidle.off=1.
 
           Retired / suppressed
           --------------------
-          - Phase389 printk console mirror.
-          - Phase392 all-message persistent recorder mirror.
+          - Phase392 broad all-message behavior; only filtered DSI/DMA_DONE records reach it.
           - numbered recorder background initcall workers unrelated to DSI.
           - generic NoC/IRQ witness hooks.
           - Phase400 CPU busy witness and Phase401 apexd/idle machinery are not

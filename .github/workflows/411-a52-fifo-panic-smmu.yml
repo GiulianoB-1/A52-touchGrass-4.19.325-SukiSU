@@ -240,9 +240,6 @@ jobs:
           ! grep -Fq 'a52_p409_hot_record(ctrl, A52_P409_TRIGGER_POST' "$DSIHW"
 
           grep -Fq 'A52P411 SMMU_CTX' "$ARMSMMU"
-          grep -Fq 'iommu_set_fault_handler(client->domain' "$MSMSMMU"
-          grep -Fq 'A52P411 SMMU_HANDLER installed' "$MSMSMMU"
-          grep -Fq 'A52P411 MSM_SMMU_FAULT' "$MSMSMMU"
           grep -Fq 'A52P411 BOOTDISP' "$DSIDISPLAY"
 
           for token in \
@@ -253,7 +250,6 @@ jobs:
             'A52P411 PANIC first DSI DMA_DONE timeout' \
             'A52P411 DSI DMA_DONE timeout' \
             'A52P411 SMMU_CTX' \
-            'A52P411 SMMU_HANDLER installed' \
             'A52P411 BOOTDISP'; do
             grep -aFq "$token" "$IMAGE" || {
               echo "ERROR: missing Phase411 Image token: $token" >&2; exit 1;

@@ -292,7 +292,7 @@ def patch_arm_smmu(text: str) -> str:
 	/* Phase411: values are already required by the real fault handler.
 	 * Do not add any extra SMMU/MDSS MMIO reads here.
 	 */
-	pr_emerg("A52P411 SMMU_CTX irq=%d cb=%d fsr=%x syn=%x iova=%lx cbfr=%x\n",
+	pr_emerg("A52P411 SMMU_CTX irq=%d cb=%d fsr=%x syn=%x iova=%lx cbfr=%x\\n",
 		irq, idx, fsr, fsynr, iova, cbfrsynra);
 
 	a52_ackfr_record("M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",
@@ -363,7 +363,7 @@ static int dsi_display_phy_power_on(struct dsi_display *display)
 '''
     new = '''	}
 
-	pr_err("A52P411 BOOTDISP p='%s' s='%s' en0=%u en1=%u name0='%s' name1='%s'\n",
+	pr_err("A52P411 BOOTDISP p='%s' s='%s' en0=%u en1=%u name0='%s' name1='%s'\\n",
 		dsi_display_primary, dsi_display_secondary,
 		boot_displays[0].boot_disp_en, boot_displays[1].boot_disp_en,
 		boot_displays[0].name, boot_displays[1].name);

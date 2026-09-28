@@ -190,6 +190,16 @@ def patch_ctrl(text: str) -> str:
         text[done:]
     )
 
+    # The retired timeout observer branch was the only consumer of these
+    # locals. Remove them rather than weakening -Werror.
+    start, end = function_bounds(text, "static void dsi_ctrl_dma_cmd_wait_for_done")
+    fn = text[start:end]
+    for decl in ("\tu32 status;\n", "\tu32 mask;\n"):
+        if decl not in fn:
+            raise SystemExit("Phase411 retired timeout local missing: " + decl.strip())
+        fn = fn.replace(decl, "", 1)
+    text = text[:start] + fn + text[end:]
+
     # Drop old RAM/sideband recorder startup for this experiment.
     text = one(
         text,
@@ -269,6 +279,16 @@ def patch_hwc(text: str) -> str:
 	DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
 '''
     text = one(text, old, new, "deferred trigger observer retirement")
+
+    # These helpers belonged exclusively to the retired trigger-time observer
+    # path. Keep the inherited code for lineage/debug reference, but explicitly
+    # mark it unused so the kernel's -Werror build remains strict.
+    for name in ("a52_p345_begin", "a52_p345_end", "a52_p307_hw_snapshot"):
+        old_decl = "static void " + name + "("
+        new_decl = "static void __maybe_unused " + name + "("
+        if old_decl not in text:
+            raise SystemExit("Phase411 retired HW helper missing: " + name)
+        text = text.replace(old_decl, new_decl, 1)
 
     text += (
         "\n/* " + MARK + ": functional FIFO/panic experiment; observer burst retired. */\n"

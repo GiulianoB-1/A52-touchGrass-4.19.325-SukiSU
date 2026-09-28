@@ -294,8 +294,8 @@ jobs:
           grep -Fq 'A52_PHASE397_USB_BUS_VOTE_V1' "$USB"
           grep -aFq 'P414 BOOT id=%llu disk=%u ram=%u' "$IMAGE"
           grep -aFq 'A52_PHASE414_SEQUENTIAL_3M_RECORDER_V1' "$IMAGE"
-          grep -aFq 'RS48' "$IMAGE"
-          grep -aFq 'R48' "$IMAGE"
+          grep -Fq 'RS48' "$REC"
+          grep -Fq 'R48' "$REC"
           echo "Phase414 sequential 3MiB recorder audit: PASS"
 
           cp scripts/397_apply_downstream_bus_votes.py \

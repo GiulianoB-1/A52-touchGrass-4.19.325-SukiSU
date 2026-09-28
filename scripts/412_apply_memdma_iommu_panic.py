@@ -87,10 +87,17 @@ static void a52_p412_iommu_timeout_check(struct dsi_ctrl *dsi_ctrl)
     text = one(text, anchor, helper, "IOMMU helper")
 
     # Run only after the real DMA wait has timed out and while the original
-    # transfer's clocks/power are still active.
-    timeout = '''		status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+    # transfer's clocks/power are still active. Scope the insertion to the
+    # existing Phase279 timeout snapshot so the separate polling helper cannot
+    # match accidentally.
+    timeout = '''\t\tif (a52_p276r_deep_active())
+\t\t\ta52_p279_display_fault_snapshot(2);
+\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
 '''
-    timeout_new = timeout + '''		a52_p412_iommu_timeout_check(dsi_ctrl);
+    timeout_new = '''\t\tif (a52_p276r_deep_active())
+\t\t\ta52_p279_display_fault_snapshot(2);
+\t\tstatus = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+\t\ta52_p412_iommu_timeout_check(dsi_ctrl);
 '''
     text = one(text, timeout, timeout_new, "timeout IOMMU check")
 

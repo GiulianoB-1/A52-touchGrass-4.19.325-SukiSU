@@ -598,6 +598,21 @@ def patch_recorder(text: str) -> str:
             "R48 format admission",
         )
 
+    # Phase402 has a second, later admission gate immediately before formatting.
+    # Phase414 records and the inherited display lifecycle scopes must pass this
+    # gate too, otherwise they never reach a52_p414_append_text().
+    phase402 = '''\tif (!fmt || (
+\t    strncmp(fmt, "P402 ", 5) &&
+'''
+    phase414 = '''\tif (!fmt || (
+\t    strncmp(fmt, "P414", 4) &&
+\t    strcmp(fmt, "%s enter fn=%s") &&
+\t    strcmp(fmt, "%s exit fn=%s us=%llu") &&
+\t    strncmp(fmt, "P402 ", 5) &&
+'''
+    if phase414 not in text:
+        text = one(text, phase402, phase414, "Phase402 Phase414 admission")
+
     return text
 
 
@@ -750,6 +765,8 @@ def validate(root: Path) -> None:
         'a52_ackfr_record("P414 BOOT id=%llu disk=%u ram=%u"',
         'return !strncmp(message, "P414 ", 5) ||',
         'strncmp(fmt, "P414", 4)',
+        'strcmp(fmt, "%s enter fn=%s")',
+        'strcmp(fmt, "%s exit fn=%s us=%llu")',
         "SZ_1M /* Phase414 leaves B1A00000 free */",
     ):
         if token not in rec:

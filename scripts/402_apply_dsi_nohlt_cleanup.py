@@ -16,6 +16,7 @@ RPMH = Path("drivers/soc/qcom/rpmh-rsc.c")
 PM = Path("drivers/base/power/runtime.c")
 CPUIDLE = Path("drivers/cpuidle/cpuidle.c")
 DSI = Path("drivers/a52_display/msm/dsi/dsi_ctrl.c")
+DSIHW = Path("drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c")
 UFS = Path("drivers/scsi/ufs/ufs-qcom.c")
 USB = Path("drivers/usb/dwc3/dwc3-qcom.c")
 
@@ -201,6 +202,7 @@ def validate(root: Path) -> None:
     rec = (root / REC).read_text(errors="replace")
     irq = (root / IRQH).read_text(errors="replace")
     dsi = (root / DSI).read_text(errors="replace")
+    dsihw = (root / DSIHW).read_text(errors="replace")
     ufs = (root / UFS).read_text(errors="replace")
     usb = (root / USB).read_text(errors="replace")
 
@@ -238,17 +240,22 @@ def validate(root: Path) -> None:
     for token in (
         "A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1",
         "P276 303 S04",
-        "P276 303 S05",
-        "P276 303 S06",
         "P276 303 S08",
         "P276 387D e",
         "P276 387D w",
         "P276 387I",
-        "A52_PHASE389_DSI_RAM_MIRROR_V1",
         "P276 394F result",
     ):
         if token not in dsi:
-            raise SystemExit("Phase402 DSI token missing: " + token)
+            raise SystemExit("Phase402 DSI controller token missing: " + token)
+
+    for token in (
+        "A52_PHASE293_GKI_DMA_DONE_HW_REFERENCE_V1",
+        "P276 303 S05",
+        "P276 303 S06",
+    ):
+        if token not in dsihw:
+            raise SystemExit("Phase402 DSI HW token missing: " + token)
 
     for token in (
         "A52_PHASE397_UFS_BUS_VOTE_V1",
@@ -273,7 +280,7 @@ def main() -> int:
     ns = ap.parse_args()
     root = ns.root
 
-    for rel in (REC, IRQH, IDLE, EXIT, RPMH, PM, CPUIDLE, DSI, UFS, USB):
+    for rel in (REC, IRQH, IDLE, EXIT, RPMH, PM, CPUIDLE, DSI, DSIHW, UFS, USB):
         if not (root / rel).is_file():
             raise SystemExit("Phase402 source missing: " + str(rel))
 

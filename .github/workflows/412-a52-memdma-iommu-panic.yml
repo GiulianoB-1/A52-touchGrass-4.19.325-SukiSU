@@ -209,6 +209,7 @@ jobs:
           REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
           DSI="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           DSIHW="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          MSMSMMU="$ROOT/drivers/a52_display/msm/msm_smmu.c"
           IRQH="$ROOT/kernel/irq/handle.c"
           UFS="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
           UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
@@ -230,8 +231,14 @@ jobs:
           grep -Fq 'A52_PHASE409_RAM1M_DEBUG2M_DSI_V1' "$DSI"
           grep -Fq 'A52_PHASE412_MEMDMA_IOMMU_PANIC_V1' "$DSI"
           grep -Fq 'A52_PHASE412_MEMDMA_IOMMU_PANIC_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
-          grep -Fq 'iommu_iova_to_phys(aspace_domain' "$DSI"
+          grep -Fq 'msm_gem_get_aspace_device(aspace)' "$DSI"
+          grep -Fq 'msm_gem_iova(dsi_ctrl->tx_cmd_buf, aspace)' "$DSI"
+          grep -Fq 'iommu_iova_to_phys(aspace_domain, gem_iova)' "$DSI"
+          grep -Fq 'iommu_iova_to_phys(aspace_domain, field_iova)' "$DSI"
           grep -Fq 'iommu_get_domain_for_dev(aspace_dev)' "$DSI"
+          grep -Fq 'iommu_get_domain_for_dev(dsi_ctrl->drm_dev->dev)' "$DSI"
+          grep -Fq 'A52P412 HANDLER installed' "$MSMSMMU"
+          grep -Fq 'A52P412 DOMAIN_FAULT' "$MSMSMMU"
           grep -Fq 'panic("A52P412 DSI MEMDMA timeout' "$DSI"
           ! grep -Fq '(cmd_len + 4) <= DSI_CTRL_MAX_CMD_FIFO_STORE_SIZE' "$DSI"
           grep -Fq '#define A52_P409_RAM_BYTES          0x00100000U' "$DSIHW"
@@ -314,7 +321,7 @@ jobs:
              scripts/decode_phase408_samsung_debug_dsi.py \
              scripts/decode_phase407_samsung_debug_dsi.py \
              scripts/decode_phase405_dma_done.py "$OUT/audit/"
-          cp "$REC" "$DSI" "$DSIHW" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$OUT/source/"
+          cp "$REC" "$DSI" "$DSIHW" "$MSMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$OUT/source/"
 
           cat > "$OUT/PHASE412-NOTES.txt" <<'EOF'
           Phase412 memory-DMA IOMMU one-shot + panic capture
@@ -337,10 +344,11 @@ jobs:
           - After the exact-F0 DMA wait finishes, one 4 KiB binary DSI record is queued to Samsung debug offset 0x9ff000.
           - Phase408 bypasses /dev and provides the direct sda8 BIO transport.
           - Original FETCH_MEMORY behavior is preserved; no short-command FIFO bypass is applied.
-          - On a DMA_DONE timeout Phase412 resolves the GEM aspace device/domain and translates cmd_buffer_iova with iommu_iova_to_phys().
+          - On a DMA_DONE timeout Phase412 resolves the real GEM aspace client device/domain, compares msm_gem_iova() with dsi_ctrl->cmd_buffer_iova, and translates both with iommu_iova_to_phys().
+          - The downstream msm_smmu probe already installs iommu_set_fault_handler(); Phase412 logs that installed handler rather than replacing it.
           - The existing Phase279 active display SMMU helper also performs its software io-pgtable translation and FSR/FSYNR/FAR snapshot at the timeout.
           - ARM-SMMU context/global faults emit pr_emerg before fault status is cleared.
-          - No iommu_set_fault_handler replacement is used because this ARM-SMMU path handles faults directly rather than via report_iommu_fault().
+          - No iommu_set_fault_handler replacement is used. The key 5.10-vs-TouchGrass gap is that the current ARM-SMMU context handler does not call report_iommu_fault()/CB_RESUME for a stalled fault.
           - After the one-shot checks, the first DMA_DONE timeout panics for a warm pstore capture.
           - After the transaction the hot buffer + Phase345 microsecond samples are packaged into one 2 MiB image at debug[0x800000..0x9fffff].
           - The 2 MiB image has one CRC32C and one commit marker; Phase409 adds no R48 mirror or duplicate partition copy.

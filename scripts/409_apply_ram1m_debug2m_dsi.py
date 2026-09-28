@@ -434,7 +434,7 @@ def patch_hwc(text: str) -> str:
 
     # There are two production SW_TRIGGER paths. Record once after each
     # Phase345 burst has completed, without adding reads inside p0..p6.
-    pat = re.compile(r"(?m)^(?P<indent>[ \\t]*)a52_p345_end\\(ctrl\\);$")
+    pat = re.compile(r"(?m)^(?P<indent>[ \t]*)a52_p345_end\(ctrl\);$")
     matches = list(pat.finditer(text))
     if len(matches) != 2:
         raise SystemExit(f"Phase409 expected two Phase345 end hooks, found {len(matches)}")

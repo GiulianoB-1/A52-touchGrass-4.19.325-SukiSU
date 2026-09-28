@@ -234,7 +234,7 @@ def validate(root: Path) -> None:
         "iommu_iova_to_phys(aspace_domain, field_iova)",
         'pr_emerg("A52P412 DOM',
         'pr_emerg("A52P412 IOVA',
-        "a52_p279_display_iova_snapshot(2, dsi_ctrl->cmd_buffer_iova, 8U)",
+        "a52_p279_display_iova_snapshot(0, cmd_mem->offset",
         'panic("A52P412 DSI MEMDMA timeout',
     ):
         if token not in d:

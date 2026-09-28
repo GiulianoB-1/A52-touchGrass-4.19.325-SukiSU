@@ -714,23 +714,16 @@ def patch_ctrl(text: str) -> str:
 
 
 def patch_lifecycle(text: str, functions: tuple[str, ...], rel: Path) -> str:
-    text = add_recorder_include(text)
+    # The inherited Phase174 lifecycle scopes already emit ACKFR entry/exit
+    # records. Phase414 mirrors ACKFR into the sequential 3 MiB recorder, so
+    # adding a second statement here is redundant and can violate GNU89 when
+    # a function has declarations following the scope macro.
     for function in functions:
-        marker = f'a52_ackfr_record("P414 LIFE {function}");'
-        if marker in text:
-            continue
-
-        # Phase174 already placed A52_ACKFR_SCOPE after each function's local
-        # declarations. Insert after that declaration-bearing macro, not at the
-        # opening brace, so GNU89 -Wdeclaration-after-statement remains clean.
         scope = f'A52_ACKFR_SCOPE("DISP", "a52.life.{function}");'
         if text.count(scope) != 1:
             raise SystemExit(
-                f"Phase414 lifecycle scope anchor mismatch {rel}:{function}: "
+                f"Phase414 inherited lifecycle scope mismatch {rel}:{function}: "
                 f"{text.count(scope)}")
-        text = text.replace(scope, scope + "\n\t" + marker, 1)
-
-    text += "\n/* " + MARK + ": lifecycle breadcrumbs. */\n"
     return text
 
 
@@ -795,9 +788,10 @@ def validate(root: Path) -> None:
     for rel, functions in DISPLAY_TARGETS.items():
         text = (root / rel).read_text(errors="replace")
         for function in functions:
-            token = f'a52_ackfr_record("P414 LIFE {function}");'
-            if token not in text:
-                raise SystemExit(f"Phase414 lifecycle token missing {rel}:{function}")
+            token = f'A52_ACKFR_SCOPE("DISP", "a52.life.{function}");'
+            if text.count(token) != 1:
+                raise SystemExit(
+                    f"Phase414 inherited lifecycle scope missing {rel}:{function}")
 
     # Preserve R48/RS48 and its three-copy transport unchanged.
     if "RS48" not in rec or "R48" not in rec:

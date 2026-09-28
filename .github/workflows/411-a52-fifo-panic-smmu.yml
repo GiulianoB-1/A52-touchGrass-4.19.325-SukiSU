@@ -311,7 +311,8 @@ jobs:
           - ignore_loglevel is retained.
           - flashable image uses panic=1 so a Phase411 timeout panics and warm-reboots promptly into ramoops/pstore.
           - nohlt and cpuidle.off=1 remain held constant from the stable bracket.
-          EOF          sed -i 's/^          //' "$OUT/PHASE411-NOTES.txt"
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE411-NOTES.txt"
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)

@@ -59,52 +59,14 @@ def patch_rec(text: str) -> str:
     if MARK in text:
         return text
 
-    if "A52_PHASE389_RESERVED_RAM_FORENSICS_V1" not in text:
-        raise SystemExit("Phase402 requires Phase389 DSI reserved trace")
+    if "A52_PHASE392_PERSISTENT_GAP_DUAL_BACKEND_V1" not in text:
+        raise SystemExit("Phase402 requires Phase392 persistent gap")
     if "A52_PHASE394_EARLY_FIXED_LANE_V1" not in text:
         raise SystemExit("Phase402 requires Phase394 lineage")
 
-    text = one(
-        text,
-        "\tregister_console(&a52_p389_console);\n",
-        "\t/* A52_PHASE402: reserved printk console retired; trace lane is DSI-only. */\n",
-        "retire Phase389 console",
-    )
-    text = text.replace(
-        "static struct console a52_p389_console = {\n",
-        "static struct console a52_p389_console __maybe_unused = {\n",
-        1,
-    )
-
-    sig = "void a52_p389_trace(u16 event, u32 arg0, u32 arg1, u32 arg2, u32 arg3)"
-    start, end = function_bounds(text, sig)
-    fn = text[start:end]
-    anchor = "\tBUILD_BUG_ON(sizeof(struct a52_p389_record) != 36U);\n"
-    filt = (
-        anchor +
-        "\n\t/* " + MARK + ": only DMA_DONE/DSI events survive. */\n"
-        "\tif (event < A52_P389_DSI_WAIT_ENTER || event > A52_P389_DSI_ISR)\n"
-        "\t\treturn;\n"
-    )
-    fn = one(fn, anchor, filt, "Phase389 DSI event filter")
-    text = text[:start] + fn + text[end:]
-
-    mirror = re.compile(
-        r'\n\t/\* A52_PHASE392_PERSISTENT_GAP_MIRROR_CALL_V1 \*/\n'
-        r'\ta52_p392_gap_write\([^;]+;\n'
-    )
-    text, n = mirror.subn(
-        "\n\t/* A52_PHASE402: Phase392 all-message persistent mirror retired. */\n",
-        text,
-        count=1,
-    )
-    if n != 1:
-        raise SystemExit(f"Phase402 Phase392 mirror anchor: expected 1, found {n}")
-    text = text.replace(
-        "static void a52_p392_gap_write(const char *message)\n",
-        "static void __maybe_unused a52_p392_gap_write(const char *message)\n",
-        1,
-    )
+    # Keep Phase392's safe B1900000..B1AFFFFF persistent backend, but
+    # filter recorder admission below so it stores only DSI/DMA_DONE traffic.
+    # Do not resurrect Phase389's older B1400000 7 MiB recorder.
 
     sig = "void a52_ackfr_record(const char *fmt, ...)"
     start, end = function_bounds(text, sig)
@@ -114,6 +76,7 @@ def patch_rec(text: str) -> str:
         "\n\t/* " + MARK + ": suppress unrelated forensic traffic. */\n"
         "\tif (!fmt || (\n"
         "\t    strncmp(fmt, \"P402 \", 5) &&\n"
+        "\t    strncmp(fmt, \"P276 280\", 9) &&\n"
         "\t    strncmp(fmt, \"P276 303\", 9) &&\n"
         "\t    strncmp(fmt, \"P276 307\", 9) &&\n"
         "\t    strncmp(fmt, \"P276 312\", 9) &&\n"
@@ -144,7 +107,7 @@ def patch_rec(text: str) -> str:
     retired = []
     def retire(m: re.Match[str]) -> str:
         fn = m.group("fn")
-        if fn == "a52_p389_reserved_init":
+        if fn == "a52_p392_init":
             return m.group(0)
         retired.append(fn)
         return f"/* {MARK}: retired {m.group('kind')}({fn}); */"
@@ -161,7 +124,7 @@ def patch_rec(text: str) -> str:
 
     text += (
         "\n/* " + MARK + "\n"
-        " * Runtime policy: retain DSI/DMA_DONE probes + Phase389 DSI trace only.\n"
+        " * Runtime policy: retain DSI/DMA_DONE probes + Phase392 filtered persistent trace.\n"
         " * Phase397 UFS/USB bus contracts are functional fixes, not probes.\n"
         " */\n"
         "static const char a52_p402_marker[] __used = \"" + MARK + "\";\n"
@@ -243,18 +206,13 @@ def validate(root: Path) -> None:
 
     for token in (
         MARK,
-        "only DMA_DONE/DSI events survive",
+        'strncmp(fmt, "P276 280", 9)',
         'strncmp(fmt, "P276 303", 9)',
-        "A52_PHASE389_RESERVED_RAM_FORENSICS_V1",
-        "core_initcall_sync(a52_p389_reserved_init);",
+        "A52_PHASE392_PERSISTENT_GAP_DUAL_BACKEND_V1",
+        "core_initcall_sync(a52_p392_init);",
     ):
         if token not in rec:
             raise SystemExit("Phase402 recorder token missing: " + token)
-
-    if "register_console(&a52_p389_console);" in rec:
-        raise SystemExit("Phase402 Phase389 printk console still active")
-    if "A52_PHASE392_PERSISTENT_GAP_MIRROR_CALL_V1 */\n\ta52_p392_gap_write(" in rec:
-        raise SystemExit("Phase402 Phase392 all-message mirror still active")
 
     active_numbered = [
         m.group(2) for m in re.finditer(
@@ -263,7 +221,7 @@ def validate(root: Path) -> None:
             rec,
             re.M,
         )
-        if m.group(2) != "a52_p389_reserved_init"
+        if m.group(2) != "a52_p392_init"
     ]
     if active_numbered:
         raise SystemExit("Phase402 unrelated recorder initcalls remain: " +

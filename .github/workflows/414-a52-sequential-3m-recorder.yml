@@ -256,7 +256,9 @@ jobs:
           grep -Fq 'system_unbound_wq' "$REC"
           grep -Fq 'P414 BOOT id=%llu disk=%u ram=%u' "$REC"
           grep -Fq 'return !strncmp(message, "P414 ", 5) ||' "$REC"
-          grep -Fq 'strncmp(fmt, "P414", 4)' "$REC"
+          test "$(grep -Fc 'strncmp(fmt, "P414", 4)' "$REC")" -ge 2
+          grep -Fq 'strcmp(fmt, "%s enter fn=%s")' "$REC"
+          grep -Fq 'strcmp(fmt, "%s exit fn=%s us=%llu")' "$REC"
 
           # B1900000 legacy backend is limited to its lower MiB; B1A is Phase414.
           grep -Fq '#define A52_P392_BYTES' "$REC"

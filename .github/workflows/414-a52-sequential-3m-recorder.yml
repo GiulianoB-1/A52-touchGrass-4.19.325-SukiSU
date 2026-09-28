@@ -277,14 +277,14 @@ jobs:
           ! grep -Fq 'static atomic_t a52_p413_mirror_gen' "$DSIHW"
 
           for token in \
-            'P414 LIFE dsi_display_register' \
-            'P414 LIFE dsi_display_dev_probe' \
-            'P414 LIFE dsi_display_init' \
-            'P414 LIFE dsi_display_bind' \
-            'P414 LIFE dsi_panel_get' \
-            'P414 LIFE dsi_panel_drv_init'; do
-            grep -aFq "$token" "$IMAGE" || {
-              echo "ERROR: missing Phase414 Image token: $token" >&2; exit 1;
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_register");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_dev_probe");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_init");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_bind");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_get");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_drv_init");'; do
+            grep -Fq "$token" "$DSIDISPLAY" "$DSIPANEL" || {
+              echo "ERROR: missing inherited lifecycle scope: $token" >&2; exit 1;
             }
           done
 

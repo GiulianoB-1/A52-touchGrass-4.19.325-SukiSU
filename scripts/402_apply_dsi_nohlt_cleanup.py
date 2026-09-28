@@ -172,10 +172,13 @@ def patch_pm(text: str) -> str:
     sig = "static bool a52_r393_pm_window(u64 *elapsed_ms)"
     if sig in text:
         start, end = function_bounds(text, sig)
-        fn = text[start:end]
-        brace = fn.find("{")
-        fn = fn[:brace + 1] + "\n\t(void)elapsed_ms;\n\treturn false;\n" + fn[brace + 1:]
-        text = text[:start] + fn + text[end:]
+        text = text[:start] + (
+            "static bool a52_r393_pm_window(u64 *elapsed_ms)\n"
+            "{\n"
+            "\t(void)elapsed_ms;\n"
+            "\treturn false;\n"
+            "}"
+        ) + text[end:]
     return text
 
 
@@ -183,10 +186,13 @@ def patch_cpuidle(text: str) -> str:
     sig = "static bool a52_r393_idle_window(u64 *elapsed_ms)"
     if sig in text:
         start, end = function_bounds(text, sig)
-        fn = text[start:end]
-        brace = fn.find("{")
-        fn = fn[:brace + 1] + "\n\t(void)elapsed_ms;\n\treturn false;\n" + fn[brace + 1:]
-        text = text[:start] + fn + text[end:]
+        text = text[:start] + (
+            "static bool a52_r393_idle_window(u64 *elapsed_ms)\n"
+            "{\n"
+            "\t(void)elapsed_ms;\n"
+            "\treturn false;\n"
+            "}"
+        ) + text[end:]
     return text
 
 

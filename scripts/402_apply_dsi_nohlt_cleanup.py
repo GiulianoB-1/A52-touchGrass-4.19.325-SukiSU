@@ -112,7 +112,25 @@ def patch_rec(text: str) -> str:
     brace = fn.find("{")
     guard = (
         "\n\t/* " + MARK + ": suppress unrelated forensic traffic. */\n"
-        "\tif (!fmt || (strncmp(fmt, \"P276 \", 5) && strncmp(fmt, \"P402 \", 5)))\n"
+        "\tif (!fmt || (\n"
+        "\t    strncmp(fmt, \"P402 \", 5) &&\n"
+        "\t    strncmp(fmt, \"P276 303\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 307\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 312\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 314\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 316\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 319\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 323\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 328\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 329\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 330\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 345\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 346\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 347\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 348\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 349\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 387\", 9) &&\n"
+        "\t    strncmp(fmt, \"P276 394\", 9)))\n"
         "\t\treturn;\n"
     )
     fn = fn[:brace + 1] + guard + fn[brace + 1:]
@@ -226,7 +244,7 @@ def validate(root: Path) -> None:
     for token in (
         MARK,
         "only DMA_DONE/DSI events survive",
-        'strncmp(fmt, "P276 ", 5)',
+        'strncmp(fmt, "P276 303", 9)',
         "A52_PHASE389_RESERVED_RAM_FORENSICS_V1",
         "core_initcall_sync(a52_p389_reserved_init);",
     ):

@@ -38,6 +38,8 @@ def function_bounds(text: str, sig: str) -> tuple[int, int]:
 
 
 HELPERS = r'''
+extern void a52_p411_persist_mode_event(u16 stage, u32 flags);
+
 /* A52_PHASE411_FIFO_PANIC_SMMU_EXPERIMENT_V1
  *
  * Functional A/B experiment, not another broad observer:
@@ -145,9 +147,13 @@ def patch_ctrl(text: str) -> str:
         "\ta52_p293_gdm_try_arm(dsi_ctrl, msg, flags);\n\n"
         "\t/* Select the tx mode to transfer the command */\n"
         "\tdsi_message_setup_tx_mode(dsi_ctrl, msg->tx_len, flags);\n",
+        "\tif (a52_p411_exact_f0(dsi_ctrl, msg))\n"
+        "\t\ta52_p411_persist_mode_event(11U, flags ? *flags : 0U);\n"
         "\ta52_p411_note_f0(dsi_ctrl, msg, flags, \"before-mode\");\n\n"
         "\t/* Select the tx mode to transfer the command */\n"
         "\tdsi_message_setup_tx_mode(dsi_ctrl, msg->tx_len, flags);\n"
+        "\tif (a52_p411_exact_f0(dsi_ctrl, msg))\n"
+        "\t\ta52_p411_persist_mode_event(12U, flags ? *flags : 0U);\n"
         "\ta52_p411_note_f0(dsi_ctrl, msg, flags, \"after-mode\");\n",
         "retire exact-F0 observers",
     )
@@ -209,12 +215,15 @@ def patch_ctrl(text: str) -> str:
         fn = fn.replace(decl, "", 1)
     text = text[:start] + fn + text[end:]
 
-    # Drop old RAM/sideband recorder startup for this experiment.
+    # Keep the Phase409 1 MiB staging + 2 MiB Samsung-partition writer.
+    # Only the old sideband recorder is retired. Phase411 must persist its
+    # focused FIFO evidence into /dev/block/by-name/debug + 0x800000.
     text = one(
         text,
         "\ta52_p409_init_buffers();\n\ta52_p346_sideband_init();\n\n",
-        "\t/* Phase411: no legacy DSI hot/sideband recorder startup. */\n\n",
-        "retire legacy buffer startup",
+        "\ta52_p409_init_buffers();\n"
+        "\t/* Phase411: legacy sideband recorder retired; debug2m writer retained. */\n\n",
+        "retain debug2m writer",
     )
 
     # Log the actual GEM mapping at buffer creation without touching DSI MMIO.
@@ -299,6 +308,86 @@ def patch_hwc(text: str) -> str:
             raise SystemExit("Phase411 retired HW helper missing: " + name)
         text = text.replace(old_decl, new_decl, 1)
 
+    # Phase411 durable evidence path. The Phase409 image format/CRC/commit
+    # machinery is retained, but the Phase411 events below are software-only
+    # and therefore do not touch DSI/MDSS MMIO outside the real transaction.
+    # A delayed flush keeps UFS I/O out of the F0 command's timing window.
+    text = one(text, "h->phase = 409U;\n", "h->phase = 411U;\n",
+               "debug2m phase identity")
+
+    text += r'''
+
+/* Phase411 durable Samsung debug2m evidence.
+ * stage 11 = exact F0 before dsi_message_setup_tx_mode()
+ * stage 12 = exact F0 after mode selection
+ * stage 13 = kernel alive 1 second later, immediately before disk flush
+ */
+static atomic_t a52_p411_persist_state = ATOMIC_INIT(0);
+
+static void a52_p411_soft_event(u16 stage, u32 flags)
+{
+	struct a52_p409_event *e;
+	int index;
+
+	if (!READ_ONCE(a52_p409_hot) || atomic_read(&a52_p409_frozen))
+		return;
+
+	index = atomic_inc_return(&a52_p409_index) - 1;
+	if (index < 0 || index >= A52_P409_EVENT_CAPACITY) {
+		atomic_inc(&a52_p409_dropped);
+		return;
+	}
+
+	e = &a52_p409_hot[index];
+	memset(e, 0, sizeof(*e));
+	e->ns = ktime_get_ns();
+	e->seq = (u32)index + 1U;
+	e->stage = stage;
+	e->cpu = (u16)raw_smp_processor_id();
+	e->aux0 = flags;
+	e->aux1 = 0x41100000U | (u32)stage;
+	wmb();
+	e->commit = A52_P409_EVENT_COMMIT;
+}
+
+static void a52_p411_delayed_persist_workfn(struct work_struct *work)
+{
+	(void)work;
+
+	if (atomic_cmpxchg(&a52_p411_persist_state, 2, 3) != 2)
+		return;
+
+	a52_p411_soft_event(13U, 0U);
+	a52_p409_wait_ret = 0x41100003U;
+	a52_p409_dma_irq_trig = 0U;
+	atomic_set(&a52_p409_frozen, 1);
+	schedule_work(&a52_p409_write_work);
+}
+
+static DECLARE_DELAYED_WORK(a52_p411_delayed_persist_work,
+			    a52_p411_delayed_persist_workfn);
+
+void a52_p411_persist_mode_event(u16 stage, u32 flags)
+{
+	if (!READ_ONCE(a52_p409_hot) || !READ_ONCE(a52_p409_disk))
+		return;
+
+	if (stage == 11U) {
+		if (atomic_cmpxchg(&a52_p411_persist_state, 0, 1) != 0)
+			return;
+		a52_p411_soft_event(stage, flags);
+		return;
+	}
+
+	if (stage == 12U) {
+		if (atomic_cmpxchg(&a52_p411_persist_state, 1, 2) != 1)
+			return;
+		a52_p411_soft_event(stage, flags);
+		schedule_delayed_work(&a52_p411_delayed_persist_work,
+				      msecs_to_jiffies(1000));
+	}
+}
+'''
     text += (
         "\n/* " + MARK + ": functional FIFO/panic experiment; observer burst retired. */\n"
         "static const char a52_p411_hw_marker[] __used = \"" + MARK + "\";\n"
@@ -424,19 +513,27 @@ def validate(root: Path) -> None:
         "iommu_iova_to_phys(aspace_domain, field_iova)",
         "A52P411 PANIC first DSI DMA_DONE timeout",
         'panic("A52P411 DSI DMA_DONE timeout")',
-        "Phase411: no legacy DSI hot/sideband recorder startup",
+        "a52_p411_persist_mode_event(11U",
+        "a52_p411_persist_mode_event(12U",
+        "debug2m writer retained",
     ):
         if token not in ctrl:
             raise SystemExit("Phase411 CTRL token missing: " + token)
 
     if "a52_p293_gdm_try_arm(dsi_ctrl, msg, flags);" in ctrl:
         raise SystemExit("Phase411 old exact-F0 arm call still active")
-    if "a52_p409_init_buffers();" in ctrl or "a52_p346_sideband_init();" in ctrl:
-        raise SystemExit("Phase411 legacy DSI recorder startup remains")
+    if "a52_p409_init_buffers();" not in ctrl:
+        raise SystemExit("Phase411 Samsung debug2m writer init missing")
+    if "a52_p346_sideband_init();" in ctrl:
+        raise SystemExit("Phase411 legacy sideband recorder startup remains")
 
     for token in (
         MARK,
         "DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);",
+        "h->phase = 411U;",
+        "a52_p411_soft_event(13U, 0U);",
+        "schedule_delayed_work(&a52_p411_delayed_persist_work",
+        "schedule_work(&a52_p409_write_work);",
     ):
         if token not in hwc:
             raise SystemExit("Phase411 HWC token missing: " + token)

@@ -27,7 +27,7 @@ def patch(text: str) -> str:
 		*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY;
 		*flags |= DSI_CTRL_CMD_FIFO_STORE;
 		DSI_CTRL_DEBUG(dsi_ctrl,
-				"override to TPG during secure session\n");
+				"override to TPG during secure session\\n");
 		return;
 	}
 

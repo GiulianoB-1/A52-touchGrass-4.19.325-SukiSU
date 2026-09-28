@@ -233,7 +233,7 @@ jobs:
           grep -Fq 'submit_bio_wait(bio)' "$DSIHW"
           ! grep -Fq 'filp_open("/dev/block/by-name/debug"' "$DSIHW"
           grep -Fq '#define A52_P407_DEBUG_OFFSET      0x009ff000ULL' "$DSIHW"
-          test "$(grep -Fc 'kernel_write(file, a52_p407_page' "$DSIHW")" -eq 1
+          test "$(grep -Fc 'submit_bio_wait(bio)' "$DSIHW")" -eq 2
           grep -Fq '__flush_dcache_area((void __force *)addr, len);' "$REC"
           grep -Fq 'A52_PHASE405_DMA_DONE_DIRECT_V1' "$DSI"
           ! grep -Fq 'P276 394F route old=%x' "$DSI"

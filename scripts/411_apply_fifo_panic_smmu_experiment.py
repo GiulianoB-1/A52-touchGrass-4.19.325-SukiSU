@@ -364,7 +364,6 @@ def validate(root: Path) -> None:
     ctrl = (root / CTRL).read_text(errors="replace")
     hwc = (root / HWC).read_text(errors="replace")
     display = (root / DISPLAY).read_text(errors="replace")
-    msmsmmu = (root / MSMSMMU).read_text(errors="replace")
     armsmmu = (root / ARMSMMU).read_text(errors="replace")
 
     for token in (
@@ -431,8 +430,6 @@ def main() -> int:
         p.write_text(patch_hwc(p.read_text(errors="replace")))
         p = ns.root / DISPLAY
         p.write_text(patch_display(p.read_text(errors="replace")))
-        p = ns.root / MSMSMMU
-        p.write_text(patch_msm_smmu(p.read_text(errors="replace")))
         p = ns.root / ARMSMMU
         p.write_text(patch_arm_smmu(p.read_text(errors="replace")))
 

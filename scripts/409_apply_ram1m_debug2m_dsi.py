@@ -439,7 +439,7 @@ def patch_hwc(text: str) -> str:
     if len(matches) != 2:
         raise SystemExit(f"Phase409 expected two Phase345 end hooks, found {len(matches)}")
     text = pat.sub(
-        lambda m: m.group(0) + "\\n" + m.group("indent") +
+        lambda m: m.group(0) + "\n" + m.group("indent") +
                   "a52_p409_hot_record(ctrl, A52_P409_TRIGGER_POST, 0, 0);",
         text,
     )

@@ -31,6 +31,7 @@ STAGE_NAMES = {
     11: "P411_BEFORE_MODE",
     12: "P411_AFTER_MODE",
     13: "P411_ALIVE_1S",
+    14: "P412_BOOTSTRAP",
 }
 
 REG_NAMES = [
@@ -146,7 +147,7 @@ def main() -> int:
     genuine = (
         magic == MAGIC and
         version == 1 and
-        phase in (409, 411) and
+        phase in (409, 411, 412) and
         ram_bytes == RAM_BYTES and
         event_bytes == EVENT_BYTES and
         commit == IMAGE_COMMIT and

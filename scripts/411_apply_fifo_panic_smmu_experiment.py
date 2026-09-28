@@ -194,7 +194,10 @@ def patch_ctrl(text: str) -> str:
     # locals. Remove them rather than weakening -Werror.
     start, end = function_bounds(text, "static void dsi_ctrl_dma_cmd_wait_for_done")
     fn = text[start:end]
-    for decl in ("\tu32 status;\n", "\tu32 mask;\n"):
+    for decl in (
+        "\tu32 status;\n",
+        "\tu32 mask = DSI_CMD_MODE_DMA_DONE;\n",
+    ):
         if decl not in fn:
             raise SystemExit("Phase411 retired timeout local missing: " + decl.strip())
         fn = fn.replace(decl, "", 1)

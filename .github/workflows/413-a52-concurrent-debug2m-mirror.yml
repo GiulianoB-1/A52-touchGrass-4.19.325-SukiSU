@@ -177,7 +177,7 @@ jobs:
 
           script = script.replace("phase394-gki-out", "phase413-gki-out")
           script = script.replace("PHASE394-SCHEMA.txt", "PHASE413-SCHEMA.txt")
-          script = script.replace("'phase':'394'", "'phase':'412'")
+          script = script.replace("'phase':'394'", "'phase':'413'")
           script = script.replace(
               "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
               "'name':'CONCURRENT-DEBUG2M-MIRROR-V1'")
@@ -322,9 +322,9 @@ jobs:
           Expected durable stages
           -----------------------
           14 = P413_BOOTSTRAP
-          13 = P411/P412_ALIVE_1S
-          11 = P411/P412_BEFORE_MODE
-          12 = P411/P412_AFTER_MODE
+          13 = P411/P413_ALIVE_1S
+          11 = P411/P413_BEFORE_MODE
+          12 = P411/P413_AFTER_MODE
           EOF
           sed -i 's/^          //' "$OUT/PHASE413-NOTES.txt"
 

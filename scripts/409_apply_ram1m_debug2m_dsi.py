@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 MARK = "A52_PHASE409_RAM1M_DEBUG2M_DSI_V1"
@@ -433,12 +434,14 @@ def patch_hwc(text: str) -> str:
 
     # There are two production SW_TRIGGER paths. Record once after each
     # Phase345 burst has completed, without adding reads inside p0..p6.
-    old = "		a52_p345_end(ctrl);\n"
-    if text.count(old) != 2:
-        raise SystemExit(f"Phase409 expected two Phase345 end hooks, found {text.count(old)}")
-    text = text.replace(
-        old,
-        old + "		a52_p409_hot_record(ctrl, A52_P409_TRIGGER_POST, 0, 0);\n",
+    pat = re.compile(r"(?m)^(?P<indent>[ \\t]*)a52_p345_end\\(ctrl\\);$")
+    matches = list(pat.finditer(text))
+    if len(matches) != 2:
+        raise SystemExit(f"Phase409 expected two Phase345 end hooks, found {len(matches)}")
+    text = pat.sub(
+        lambda m: m.group(0) + "\\n" + m.group("indent") +
+                  "a52_p409_hot_record(ctrl, A52_P409_TRIGGER_POST, 0, 0);",
+        text,
     )
     return text
 

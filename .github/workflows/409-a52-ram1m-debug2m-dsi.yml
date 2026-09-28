@@ -1,0 +1,429 @@
+name: Phase409 - 1MiB RAM + 2MiB Samsung DSI
+run-name: Phase409 - 1MiB RAM + 2MiB Samsung DSI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/409-a52-ram1m-debug2m-dsi.yml
+      - .github/workflows/408-a52-direct-bio-samsung-dsi.yml
+      - .github/workflows/407-a52-samsung-debug-dsi.yml
+      - .github/workflows/406-a52-persistent-memory-dma.yml
+      - .github/workflows/405-a52-stable-memory-dma.yml
+      - .github/workflows/403-a52-dsi-nohlt-retire-ufs-sampler.yml
+      - .github/workflows/402-a52-dsi-nohlt-clean.yml
+      - scripts/402_apply_dsi_nohlt_cleanup.py
+      - scripts/403_apply_retire_phase380_ufs_sampler.py
+      - scripts/405_apply_dma_done_direct.py
+      - scripts/406_apply_p392_cache_persist.py
+      - scripts/407_apply_samsung_debug_dsi.py
+      - scripts/408_apply_direct_bio_debug_dsi.py
+      - scripts/409_apply_ram1m_debug2m_dsi.py
+      - scripts/decode_phase409_ram1m_debug2m.py
+      - scripts/decode_phase408_samsung_debug_dsi.py
+      - scripts/decode_phase407_samsung_debug_dsi.py
+      - scripts/decode_phase405_dma_done.py
+      - scripts/397_apply_downstream_bus_votes.py
+      - scripts/38_repack_a52_p1_boot.py
+      - .github/workflows/394-a52-mode-fixup-fifo-early.yml
+
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase409-ram1m-debug2m-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase409 1MiB RAM + 2MiB Samsung DSI
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/397_apply_downstream_bus_votes.py \
+            scripts/402_apply_dsi_nohlt_cleanup.py \
+            scripts/403_apply_retire_phase380_ufs_sampler.py \
+            scripts/405_apply_dma_done_direct.py \
+            scripts/406_apply_p392_cache_persist.py \
+            scripts/407_apply_samsung_debug_dsi.py \
+            scripts/408_apply_direct_bio_debug_dsi.py \
+            scripts/409_apply_ram1m_debug2m_dsi.py \
+            scripts/decode_phase409_ram1m_debug2m.py \
+            scripts/decode_phase408_samsung_debug_dsi.py \
+            scripts/decode_phase407_samsung_debug_dsi.py \
+            scripts/decode_phase405_dma_done.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Validate Phase357 cache
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+
+      - name: Reapply Phase358 and Phase359
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Build Phase394 DSI lineage plus Phase397 contracts and Phase402 cleanup
+        run: |
+          set -Eeuo pipefail
+
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/394-a52-mode-fixup-fifo-early.yml").read_text().splitlines()
+          start = next(i for i,l in enumerate(src)
+                       if l.strip() == "- name: Apply Phase360 through Phase394 and compile")
+          runline = next(i for i in range(start + 1, len(src))
+                         if src[i].strip() == "run: |")
+          end = next(i for i in range(runline + 1, len(src))
+                     if src[i].startswith("      - name:"))
+          body = [
+              line[10:] if line.startswith("          ") else line
+              for line in src[runline + 1:end]
+          ]
+          script = "\n".join(body) + "\n"
+
+          needle = 'python3 scripts/394_apply_mode_fixup_fifo_early.py --root "$ROOT" --check-only\n'
+          insert = needle + (
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT"\n'
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT" --check-only\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT"\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT" --check-only\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT"\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT" --check-only\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT"\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT" --check-only\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT"\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT" --check-only\n'
+          )
+          if needle not in script:
+              raise SystemExit("Phase402 Phase394 insertion anchor missing")
+          script = script.replace(needle, insert, 1)
+
+          cfg = '"$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19\n'
+          if cfg not in script:
+              raise SystemExit("Phase402 config anchor missing")
+          script = script.replace(
+              cfg,
+              cfg + '"$ROOT/scripts/config" --file "$BUILD/.config" --enable GENERIC_IDLE_POLL_SETUP\n',
+              1)
+
+          script = script.replace("phase394-gki-out", "phase409-gki-out")
+          script = script.replace("PHASE394-SCHEMA.txt", "PHASE409-SCHEMA.txt")
+          script = script.replace("'phase':'394'", "'phase':'409'")
+          script = script.replace(
+              "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
+              "'name':'RAM1M-DEBUG2M-DSI-V1'")
+          script = script.replace(
+              "'392','393','394']",
+              "'392','393','394','397','402','403','405','406','407','408','409']")
+
+          # Phase394's inherited audits intentionally require every old observer
+          # to remain linked. Phase402 retires those observers. Keep only Image
+          # existence here; dedicated Phase402 audits follow after the generated
+          # build script.
+          pre_start = 'IMAGE="$BUILD/arch/arm64/boot/Image"\ntest -s "$IMAGE"\n'
+          package_start = 'rm -rf "$OUT"\n'
+          ps = script.find(pre_start)
+          pe = script.find(package_start, ps + len(pre_start))
+          if ps < 0 or pe < 0:
+              raise SystemExit("Phase402 legacy audit boundaries missing")
+          script = (
+              script[:ps + len(pre_start)] +
+              'echo "Phase402: legacy broad-probe compiled audits retired"\n' +
+              script[pe:]
+          )
+
+          Path("/tmp/phase402-build.sh").write_text("set -Eeuo pipefail\n" + script)
+          PY
+
+          bash /tmp/phase402-build.sh
+
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase409-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          DSI="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          DSIHW="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          IRQH="$ROOT/kernel/irq/handle.c"
+          UFS="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          USB="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
+
+          echo "Phase409 RAM1M + debug2M DSI audit"
+          test -s "$IMAGE"
+          grep -Fxq 'CONFIG_GENERIC_IDLE_POLL_SETUP=y' "$BUILD/.config" || {
+            echo "ERROR: CONFIG_GENERIC_IDLE_POLL_SETUP is required for nohlt" >&2; exit 1;
+          }
+          grep -Fq 'A52_PHASE402_DSI_NOHLT_CLEAN_V1' "$REC"
+          grep -Fq 'A52_PHASE403_RETIRE_PHASE380_UFS_SAMPLER_V1' "$UFSCORE"
+          grep -Fq 'A52_PHASE405_DMA_DONE_DIRECT_V1' "$REC"
+          grep -Fq 'A52_PHASE406_P392_CACHE_PERSIST_V1' "$REC"
+          grep -Fq 'A52_PHASE407_SAMSUNG_DEBUG_DSI_V1' "$DSI"
+          grep -Fq 'A52_PHASE407_SAMSUNG_DEBUG_DSI_V1' "$DSIHW"
+          grep -Fq 'A52_PHASE408_DIRECT_BIO_DEBUG_DSI_V1' "$DSIHW"
+          grep -Fq 'A52_PHASE409_RAM1M_DEBUG2M_DSI_V1' "$DSIHW"
+          grep -Fq 'A52_PHASE409_RAM1M_DEBUG2M_DSI_V1' "$DSI"
+          grep -Fq '#define A52_P409_RAM_BYTES          (1U * SZ_1M)' "$DSIHW"
+          grep -Fq '#define A52_P409_DISK_BYTES         (2U * SZ_1M)' "$DSIHW"
+          grep -Fq '#define A52_P409_DEBUG_OFFSET       0x00800000ULL' "$DSIHW"
+          grep -Fq 'a52_p409_hot = vzalloc(A52_P409_RAM_BYTES)' "$DSIHW"
+          grep -Fq 'a52_p409_disk = vzalloc(A52_P409_DISK_BYTES)' "$DSIHW"
+          ! grep -Fq 'a52_p407_capture_and_schedule(&dsi_ctrl->hw' "$DSI"
+          grep -Fq 'MKDEV(SCSI_DISK0_MAJOR, 8)' "$DSIHW"
+          grep -Fq 'submit_bio_wait(bio)' "$DSIHW"
+          ! grep -Fq 'filp_open("/dev/block/by-name/debug"' "$DSIHW"
+          grep -Fq '#define A52_P407_DEBUG_OFFSET      0x009ff000ULL' "$DSIHW"
+          test "$(grep -Fc 'kernel_write(file, a52_p407_page' "$DSIHW")" -eq 1
+          grep -Fq '__flush_dcache_area((void __force *)addr, len);' "$REC"
+          grep -Fq 'A52_PHASE405_DMA_DONE_DIRECT_V1' "$DSI"
+          ! grep -Fq 'P276 394F route old=%x' "$DSI"
+          ! grep -Fq 'P276 394F route new=%x' "$DSI"
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCORE"
+          ! grep -Fq 'a52_ackfr_noc_irq_hit(irq);' "$IRQH"
+          ! grep -Fq 'a52_ackfr_irq_witness(irq);' "$IRQH"
+          ! grep -Fq 'a52_p401_irq_witness(irq);' "$IRQH"
+
+          for token in \
+            'A52_PHASE293_GKI_DMA_DONE_REFERENCE_V1' \
+            'P276 303 S04' \
+            'P276 303 S08' \
+            'P276 387D e' \
+            'P276 387D w' \
+            'P276 387I' \
+            'P276 394F result'; do
+            grep -Fq "$token" "$DSI" || {
+              echo "ERROR: missing DSI controller token: $token" >&2; exit 1;
+            }
+          done
+          for token in \
+            'A52_PHASE293_GKI_DMA_DONE_HW_REFERENCE_V1' \
+            'P276 303 S05' \
+            'P276 303 S06'; do
+            grep -Fq "$token" "$DSIHW" || {
+              echo "ERROR: missing DSI HW-common token: $token" >&2; exit 1;
+            }
+          done
+
+          grep -Fq 'A52_PHASE397_UFS_BUS_VOTE_V1' "$UFS"
+          grep -Fq 'a52_p397_ufs_bus_register(pdev)' "$UFS"
+          grep -Fq 'A52_PHASE397_USB_BUS_VOTE_V1' "$USB"
+          grep -Fq 'a52_p397_usb_bus_register(to_platform_device(dev), qcom)' "$USB"
+
+          for token in \
+            'P276 303 S04' \
+            'P276 303 S05' \
+            'P276 303 S06' \
+            'P276 303 S08' \
+            'P276 387D e' \
+            'P276 387D w' \
+            'P276 387I' \
+            'P276 394F result'; do
+            grep -aFq "$token" "$IMAGE" || {
+              echo "ERROR: missing DSI/DMA_DONE Image token: $token" >&2; exit 1;
+            }
+          done
+
+          for sym in msm_bus_cl_get_pdata msm_bus_scale_register_client msm_bus_scale_client_update_request msm_bus_scale_unregister_client; do
+            grep -Eq " [Tt] ${sym}$" "$BUILD/System.map" || {
+              echo "ERROR: missing linked Phase397 bus symbol: $sym" >&2; exit 1;
+            }
+          done
+          echo "Phase409 RAM1M + debug2M DSI audit: PASS"
+
+          cp scripts/397_apply_downstream_bus_votes.py \
+             scripts/402_apply_dsi_nohlt_cleanup.py \
+             scripts/403_apply_retire_phase380_ufs_sampler.py \
+             scripts/405_apply_dma_done_direct.py \
+             scripts/406_apply_p392_cache_persist.py \
+             scripts/407_apply_samsung_debug_dsi.py \
+             scripts/408_apply_direct_bio_debug_dsi.py \
+             scripts/409_apply_ram1m_debug2m_dsi.py \
+             scripts/decode_phase409_ram1m_debug2m.py \
+             scripts/decode_phase408_samsung_debug_dsi.py \
+             scripts/decode_phase407_samsung_debug_dsi.py \
+             scripts/decode_phase405_dma_done.py "$OUT/audit/"
+          cp "$REC" "$DSI" "$DSIHW" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$OUT/source/"
+
+          cat > "$OUT/PHASE409-NOTES.txt" <<'EOF'
+          Phase409 1MiB RAM + 2MiB Samsung debug DSI instrumentation
+          ===================================
+          Purpose
+          -------
+          Return diagnosis to the unresolved DSI command-DMA completion path while
+          holding the unrelated AP-idle failure out of the experiment.
+
+          Kept
+          ----
+          - Phase293/304 exact F0 5A 5A command-DMA tracing.
+          - DSI command launch/prestate/fault-window/debugbus instrumentation.
+          - Phase387 DMA_DONE wait/fallback/ISR discriminator.
+          - Phase392 persistent-gap backend retained, with recorder admission filtered to DSI/DMA_DONE traffic.
+          - Phase394 DRM diagnostics remain, but its exact-F0 FIFO reroute is removed.
+          - Exact F0 5A 5A is restored to the original FETCH_MEMORY DMA path.
+          - 11 fixed DMA_DONE stages are mirrored twice into the collected Phase392 metadata page.
+          - Phase392/405 cacheable reserved-RAM writes remain explicitly dcache-cleaned.
+          - After the exact-F0 DMA wait finishes, one 4 KiB binary DSI record is queued to Samsung debug offset 0x9ff000.
+          - Phase408 bypasses /dev and provides the direct sda8 BIO transport.
+          - Phase409 allocates a 1 MiB non-wrapping binary RAM event buffer for the exact-F0 hot path.
+          - After the transaction the hot buffer + Phase345 microsecond samples are packaged into one 2 MiB image at debug[0x800000..0x9fffff].
+          - The 2 MiB image has one CRC32C and one commit marker; Phase409 adds no R48 mirror or duplicate partition copy.
+          - Phase407 uses one copy only, one CRC32C, one commit marker, and no Phase407 R48 mirror.
+          - Phase397 downstream UFS and USB MAX bus-vote contract fixes.
+          - Phase380 raw UFS sampler is explicitly retired exactly as in Phase401.
+          - The flashable image adds: nohlt cpuidle.off=1.
+
+          Retired / suppressed
+          --------------------
+          - Phase392 broad all-message behavior; only filtered DSI/DMA_DONE records reach it.
+          - numbered recorder background initcall workers unrelated to DSI.
+          - generic NoC/IRQ witness hooks.
+          - Phase400 CPU busy witness and Phase401 apexd/idle machinery are not
+            applied at all because this build branches from Phase394.
+          - unrelated formatted recorder traffic is dropped at recorder entry.
+
+          Interpretation
+          --------------
+          Phase403 stability controls are held constant. The only DSI behavior change
+          is restoring the original FETCH_MEMORY path that Phase394 had rerouted to FIFO.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE409-NOTES.txt"
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Build Phase409 NOHLT boot image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/phase409-gki-out"
+          BASE="$OUT/package/boot.img"
+          FINAL="$OUT/package/boot-phase409-ram1m-debug2m-dsi.img"
+          test -s "$BASE"
+          cp "$BASE" "$FINAL"
+
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          base_path = Path("phase409-gki-out/package/boot.img")
+          final = Path("phase409-gki-out/package/boot-phase409-ram1m-debug2m-dsi.img")
+          base = module.parse_boot(base_path.read_bytes())
+          data = bytearray(final.read_bytes())
+          tokens = base["cmdline"].split()
+          for tok in ("nohlt", "cpuidle.off=1"):
+              key = tok.split("=", 1)[0]
+              tokens = [x for x in tokens if x != tok and x.split("=", 1)[0] != key]
+              tokens.append(tok)
+          cmdline = " ".join(tokens)
+          encoded = cmdline.encode("ascii")
+          if len(encoded) > 1534:
+              raise SystemExit(f"Phase409 command line too long: {len(encoded)}")
+          data[64:576] = b"\0" * 512
+          data[608:1632] = b"\0" * 1024
+          first = encoded[:511]
+          second = encoded[511:]
+          data[64:64 + len(first)] = first
+          data[608:608 + len(second)] = second
+          final.write_bytes(data)
+
+          out = module.parse_boot(final.read_bytes())
+          assert "nohlt" in out["cmdline"].split()
+          assert "cpuidle.off=1" in out["cmdline"].split()
+          for key in ("header_version","page_size","board","kernel_addr",
+                      "ramdisk_addr","tags_addr","kernel","ramdisk","second","dtb"):
+              assert out[key] == base[key], key
+          assert final.stat().st_size == base_path.stat().st_size
+          Path("phase409-gki-out/PHASE409-BOOT.json").write_text(
+              json.dumps({
+                  "cmdline": out["cmdline"],
+                  "treatment": "nohlt cpuidle.off=1",
+                  "kernel_payload_unchanged_by_cmdline_patch": True,
+              }, indent=2, sort_keys=True) + "\n")
+          PY
+
+          sha256sum "$FINAL"
+          echo "Phase409 RAM1M-debug2M boot image: PASS"
+
+      - name: Upload Phase409
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE409-RAM1M-DEBUG2M-${{ github.run_number }}
+          path: phase409-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase409 boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE409-RAM1M-DEBUG2M-${{ github.run_number }}-BOOT-IMG
+          path: phase409-gki-out/package/boot-phase409-ram1m-debug2m-dsi.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

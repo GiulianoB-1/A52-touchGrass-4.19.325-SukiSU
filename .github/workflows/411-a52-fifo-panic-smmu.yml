@@ -232,10 +232,16 @@ jobs:
           grep -Fq 'iommu_iova_to_phys(aspace_domain, field_iova)' "$DSI"
           grep -Fq 'A52P411 BUF local_iova=' "$DSI"
           ! grep -Fq 'a52_p293_gdm_try_arm(dsi_ctrl, msg, flags);' "$DSI"
-          ! grep -Fq 'a52_p409_init_buffers();' "$DSI"
+          grep -Fq 'a52_p409_init_buffers();' "$DSI"
+          grep -Fq 'a52_p411_persist_mode_event(11U' "$DSI"
+          grep -Fq 'a52_p411_persist_mode_event(12U' "$DSI"
           ! grep -Fq 'a52_p346_sideband_init();' "$DSI"
 
           grep -Fq 'A52_PHASE411_FIFO_PANIC_SMMU_EXPERIMENT_V1' "$DSIHW"
+          grep -Fq 'h->phase = 411U;' "$DSIHW"
+          grep -Fq 'a52_p411_soft_event(13U, 0U);' "$DSIHW"
+          grep -Fq 'schedule_delayed_work(&a52_p411_delayed_persist_work' "$DSIHW"
+          grep -Fq 'schedule_work(&a52_p409_write_work);' "$DSIHW"
           ! grep -Fq 'a52_p345_store(ctrl, 1);' "$DSIHW"
           ! grep -Fq 'a52_p409_hot_record(ctrl, A52_P409_TRIGGER_POST' "$DSIHW"
 
@@ -294,7 +300,11 @@ jobs:
           - Commands with cmd_len + 4 <= 64 are forced to DSI_CTRL_CMD_FIFO_STORE.
           - Longer commands keep the original memory-DMA/non-embedded path.
           - Exact F0 5A 5A old MMIO observer arming is disabled.
-          - Phase345/409 trigger-time observer bursts are retired.
+          - Phase345/409 trigger-time MMIO observer bursts are retired.
+          - The Phase409 staging/image infrastructure is retained only as the
+            durable 2 MiB Samsung debug writer at offset 0x800000.
+          - Phase411 records software-only BEFORE_MODE and AFTER_MODE flag events,
+            then an ALIVE_1S event and asynchronously flushes the CRC32C image.
           - On the first DMA_DONE timeout, only software/IOMMU state is inspected:
               * GEM IOVA versus dsi_ctrl->cmd_buffer_iova
               * display-aspace device/domain
@@ -305,7 +315,8 @@ jobs:
           - The real arm-smmu context-fault handler logs its already-read FSR/FSYNR/FAR values with A52P411.
           - msm_smmu's already-installed fault handler is confirmed and uniquely marked.
           - boot display parsing prints raw msm_drm.dsi_display0/1 strings and boot_disp_en.
-          - No Phase411 diagnostic reads DSI/MDSS MMIO outside the real powered transaction path.
+          - The persistent Phase411 mode events are software-only and do not read DSI/MDSS MMIO.
+          - Samsung debug2m flush is delayed by 1 second so UFS I/O is outside the F0 timing window.
 
           Capture
           -------

@@ -135,8 +135,9 @@ static void a52_p412_iommu_timeout_check(struct dsi_ctrl *dsi_ctrl)
 def patch_smmu(text: str) -> str:
     if MARK in text:
         return text
-    if "A52_PHASE393_IRQ_RPMH_SMMU_CLIFF_V1" not in text:
-        raise SystemExit("Phase412 requires existing ARM-SMMU fault instrumentation")
+    if ('a52_ackfr_record("M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx"' not in text or
+        'a52_ackfr_record("M393 G irq=%d g=%x s0=%x s1=%x s2=%x"' not in text):
+        raise SystemExit("Phase412 requires existing M393 ARM-SMMU fault hooks")
 
     old = '''	fsynr = arm_smmu_cb_read(smmu, idx, ARM_SMMU_CB_FSYNR0);
 	iova = arm_smmu_cb_readq(smmu, idx, ARM_SMMU_CB_FAR);

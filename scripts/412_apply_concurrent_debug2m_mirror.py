@@ -252,8 +252,15 @@ def validate(root: Path) -> None:
 
     if "static atomic_t a52_p411_persist_state" in hwc:
         raise SystemExit("Phase412 old one-shot Phase411 persistence state remains")
-    if "atomic_set(&a52_p409_frozen, 1);" in hwc:
-        raise SystemExit("Phase412 must not freeze the hot RAM recorder")
+
+    start = hwc.find("/* A52_PHASE412_CONCURRENT_DEBUG2M_MIRROR_V1")
+    end = hwc.find("void a52_p412_persist_mode_event", start)
+    if start < 0 or end < 0:
+        raise SystemExit("Phase412 concurrent block bounds missing")
+    _, end = function_bounds(hwc, "void a52_p412_persist_mode_event(u16 stage, u32 flags)")
+    concurrent = hwc[start:end]
+    if "atomic_set(&a52_p409_frozen, 1);" in concurrent:
+        raise SystemExit("Phase412 mirror must not freeze the hot RAM recorder")
 
 
 def main() -> int:

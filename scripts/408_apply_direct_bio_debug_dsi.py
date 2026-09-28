@@ -80,7 +80,12 @@ def patch(text: str) -> str:
     start, end = function_bounds(text, "static struct file *a52_p407_open_debug_partition(void)")
     text = text[:start] + text[end:] + "\n"
 
-    start, end = function_bounds(text, "static void a52_p407_write_workfn(struct work_struct *work)")
+    sig = "static void a52_p407_write_workfn(struct work_struct *work)\n{"
+    start = text.find(sig)
+    if start < 0:
+        raise SystemExit("Phase408 work function definition missing")
+    _, end = function_bounds(text[start:], "static void a52_p407_write_workfn(struct work_struct *work)")
+    end += start
     newfn = r'''static void a52_p407_write_workfn(struct work_struct *work)
 {
 	struct block_device *bdev;
@@ -125,7 +130,7 @@ def patch(text: str) -> str:
 	rc = submit_bio_wait(bio);
 	bio_put(bio);
 	if (!rc)
-		rc = blkdev_issue_flush(bdev, GFP_KERNEL, NULL);
+		rc = blkdev_issue_flush(bdev, GFP_KERNEL);
 	blkdev_put(bdev, FMODE_WRITE);
 
 	if (!rc)
@@ -155,8 +160,9 @@ def validate(text: str) -> None:
         "A52_P407_DEBUG_OFFSET >> 9",
         "REQ_OP_WRITE, REQ_SYNC | REQ_FUA",
         "bio_add_page(bio, virt_to_page(a52_p407_page)",
+        "static DECLARE_WORK(a52_p407_write_work, a52_p407_write_workfn);",
         "submit_bio_wait(bio)",
-        "blkdev_issue_flush(bdev, GFP_KERNEL, NULL)",
+        "blkdev_issue_flush(bdev, GFP_KERNEL)",
         "blkdev_put(bdev, FMODE_WRITE)",
         "__aligned(PAGE_SIZE)",
         "payload.phase = 408U;",

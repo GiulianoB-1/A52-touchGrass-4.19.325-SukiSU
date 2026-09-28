@@ -72,9 +72,8 @@ def patch_rec(text: str) -> str:
     sig = "void a52_ackfr_record(const char *fmt, ...)"
     start, end = function_bounds(text, sig)
     fn = text[start:end]
-    brace = fn.find("{")
     guard = (
-        "\n\t/* " + MARK + ": suppress unrelated forensic traffic. */\n"
+        "\t/* " + MARK + ": suppress unrelated forensic traffic. */\n"
         "\tif (!fmt || (\n"
         "\t    strncmp(fmt, \"P402 \", 5) &&\n"
         "\t    strncmp(fmt, \"P276 280\", 9) &&\n"
@@ -97,7 +96,10 @@ def patch_rec(text: str) -> str:
         "\t    strncmp(fmt, \"P276 394\", 9)))\n"
         "\t\treturn;\n"
     )
-    fn = fn[:brace + 1] + guard + fn[brace + 1:]
+    va_pos = fn.find("\tva_start(")
+    if va_pos < 0:
+        raise SystemExit("Phase402 recorder va_start anchor missing")
+    fn = fn[:va_pos] + guard + fn[va_pos:]
     text = text[:start] + fn + text[end:]
 
     init_re = re.compile(

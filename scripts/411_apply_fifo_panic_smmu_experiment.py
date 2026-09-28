@@ -308,32 +308,47 @@ def patch_arm_smmu(text: str) -> str:
 def patch_msm_smmu(text: str) -> str:
     if MARK in text:
         return text
-    old = '''	iommu_set_fault_handler(client->domain,
-			msm_smmu_fault_handler, (void *)client);
 
-	DRM_INFO("Created domain %s, secure=%d\n",
-'''
-    new = '''	iommu_set_fault_handler(client->domain,
-			msm_smmu_fault_handler, (void *)client);
-	pr_err("A52P411 SMMU_HANDLER installed dev=%s domain=%px\n",
-		dev_name(client->dev), client->domain);
+    # Downstream trees exist in both client->domain and
+    # client->mmu_mapping->domain forms. Instrument the real registration
+    # statement instead of assuming one storage layout.
+    needle = "\tiommu_set_fault_handler("
+    pos = text.find(needle)
+    if pos < 0:
+        raise SystemExit("Phase411 existing SMMU fault-handler registration missing")
+    stmt_end = text.find(";\n", pos)
+    if stmt_end < 0:
+        raise SystemExit("Phase411 SMMU fault-handler registration terminator missing")
+    stmt_end += 2
+    stmt = text[pos:stmt_end]
+    if "msm_smmu_fault_handler" not in stmt:
+        raise SystemExit("Phase411 unexpected iommu_set_fault_handler target")
+    text = (
+        text[:stmt_end] +
+        '\tpr_err("A52P411 SMMU_HANDLER installed dev=%s\\n",\n'
+        '\t\tclient->dev ? dev_name(client->dev) : "none");\n' +
+        text[stmt_end:]
+    )
 
-	DRM_INFO("Created domain %s, secure=%d\n",
-'''
-    text = one(text, old, new, "existing handler confirmation")
+    # Instrument the already-existing display fault callback without relying
+    # on the exact debug-dump sequence used by a particular downstream drop.
+    start, end = function_bounds(text, "static int msm_smmu_fault_handler(")
+    fn = text[start:end]
+    anchor = 'DRM_ERROR("trigger dump, iova=0x%08lx, flags=0x%x\\n", iova, flags);'
+    p = fn.find(anchor)
+    if p < 0:
+        raise SystemExit("Phase411 msm_smmu fault callback anchor missing")
+    line = fn.rfind("\n", 0, p) + 1
+    inject = (
+        '\tpr_emerg("A52P411 MSM_SMMU_FAULT dev=%s domain=%px iova=%lx flags=%x\\n",\n'
+        '\t\tclient && client->dev ? dev_name(client->dev) : "none",\n'
+        '\t\tdomain, iova, flags);\n'
+    )
+    fn = fn[:line] + inject + fn[line:]
+    text = text[:start] + fn + text[end:]
 
-    old = '''	DRM_ERROR("trigger dump, iova=0x%08lx, flags=0x%x\n", iova, flags);
-	DRM_ERROR("SMMU device:%s", client->dev ? client->dev->kobj.name : "");
-'''
-    new = '''	DRM_ERROR("trigger dump, iova=0x%08lx, flags=0x%x\n", iova, flags);
-	DRM_ERROR("SMMU device:%s", client->dev ? client->dev->kobj.name : "");
-	pr_emerg("A52P411 MSM_SMMU_FAULT dev=%s domain=%px iova=%lx flags=%x\n",
-		client->dev ? dev_name(client->dev) : "none", domain, iova, flags);
-'''
-    text = one(text, old, new, "fault callback marker")
     text += "\n/* " + MARK + ": downstream display SMMU handler confirmation. */\n"
     return text
-
 
 def patch_display(text: str) -> str:
     if MARK in text:

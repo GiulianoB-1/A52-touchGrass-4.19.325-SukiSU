@@ -243,8 +243,9 @@ jobs:
           grep -Fq 'A52P411 BOOTDISP' "$DSIDISPLAY"
 
           for token in \
-            'A52P411 F0 before-mode' \
-            'A52P411 F0 after-mode' \
+            'A52P411 F0 %s flags=' \
+            'before-mode' \
+            'after-mode' \
             'A52P411 SMMU' \
             'A52P411 IOVA' \
             'A52P411 PANIC first DSI DMA_DONE timeout' \

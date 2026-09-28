@@ -438,8 +438,10 @@ static void a52_p414_append_text(const char *message)
 		       a52_p414_disk_count * A52_P414_RECORD_BYTES,
 		       &rec, sizeof(rec));
 		a52_p414_disk_count++;
-		if (a52_p414_disk_count == A52_P414_DISK_CAPACITY)
+		if (a52_p414_disk_count == A52_P414_DISK_CAPACITY) {
 			a52_p414_state = A52_P414_STATE_RAM;
+			a52_p414_update_ram_header_locked();
+		}
 		a52_p414_update_disk_header_locked();
 		queue_disk = true;
 	} else if (a52_p414_ram_count < A52_P414_RAM_CAPACITY) {

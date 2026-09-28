@@ -259,6 +259,13 @@ jobs:
           test "$(grep -Fc 'strncmp(fmt, "P414", 4)' "$REC")" -ge 2
           grep -Fq 'strcmp(fmt, "%s enter fn=%s")' "$REC"
           grep -Fq 'strcmp(fmt, "%s exit fn=%s us=%llu")' "$REC"
+          for token in             'strncmp(fmt, "DISP PROBE", 10)'             'strncmp(fmt, "DISP BIND", 9)'             'strncmp(fmt, "DISP PREP", 9)'             'strncmp(fmt, "DISP CMDSET", 11)'; do
+            test "$(grep -Fc "$token" "$REC")" -ge 2 || {
+              echo "ERROR: Phase414 focused display prefix missing from both gates: $token" >&2
+              exit 1
+            }
+          done
+          ! grep -Fq 'strncmp(fmt, "DISP DSI"' "$REC"
 
           # B1900000 legacy backend is limited to its lower MiB; B1A is Phase414.
           grep -Fq '#define A52_P392_BYTES' "$REC"

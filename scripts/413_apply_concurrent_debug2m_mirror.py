@@ -47,6 +47,7 @@ CONCURRENT_BLOCK = r'''
 static atomic_t a52_p413_mirror_gen = ATOMIC_INIT(0);
 static atomic_t a52_p413_flushed_gen = ATOMIC_INIT(0);
 static atomic_t a52_p413_retry_count = ATOMIC_INIT(0);
+static atomic_t a52_p413_bootstrap_once = ATOMIC_INIT(0);
 
 static void a52_p413_soft_event(u16 stage, u32 flags)
 {
@@ -134,6 +135,8 @@ static DECLARE_DELAYED_WORK(a52_p413_alive_work, a52_p413_alive_workfn);
 void a52_p413_persist_bootstrap(void)
 {
 	if (!READ_ONCE(a52_p409_hot) || !READ_ONCE(a52_p409_disk))
+		return;
+	if (atomic_cmpxchg(&a52_p413_bootstrap_once, 0, 1) != 0)
 		return;
 
 	/* Guarantees a current-boot disk image even if exact F0 is never reached. */
@@ -243,6 +246,7 @@ def validate(root: Path) -> None:
         "system_unbound_wq",
         "a52_p413_soft_event(14U, 0x41300001U);",
         "a52_p413_soft_event(13U, 0U);",
+        "atomic_cmpxchg(&a52_p413_bootstrap_once, 0, 1)",
         "a52_p409_write_workfn(NULL);",
         "a52_p413_queue_mirror(0);",
         "atomic_read(&a52_p413_mirror_gen) != generation",

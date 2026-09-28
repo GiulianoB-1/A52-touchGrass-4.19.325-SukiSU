@@ -199,27 +199,21 @@ def patch_ctrl(text: str) -> str:
     )
 
     # Log the actual GEM mapping at buffer creation without touching DSI MMIO.
-    old = '''	if (iova & 0x07) {
-		DSI_CTRL_ERR(dsi_ctrl, "Tx command buffer is not 8 byte aligned\n");
-		rc = -ENOTSUPP;
-		(void)dsi_ctrl_buffer_deinit(dsi_ctrl);
-		goto error;
-	}
-error:
+    # Scope this to dsi_ctrl_buffer_init() so harmless lineage changes around
+    # the alignment check cannot break the injector.
+    start, end = function_bounds(text, "int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl)")
+    fn = text[start:end]
+    anchor = "\nerror:\n\treturn rc;\n}"
+    if anchor not in fn:
+        raise SystemExit("Phase411 buffer-init error label missing")
+    insert = '''\n\tpr_emerg("A52P411 BUF local_iova=%llx field_iova=%x size=%x vaddr=%px\\n",
+\t\t(unsigned long long)iova, dsi_ctrl->cmd_buffer_iova,
+\t\tdsi_ctrl->cmd_buffer_size, dsi_ctrl->vaddr);
+\ta52_p411_dump_domains(dsi_ctrl, "buffer-init");
 '''
-    new = '''	if (iova & 0x07) {
-		DSI_CTRL_ERR(dsi_ctrl, "Tx command buffer is not 8 byte aligned\n");
-		rc = -ENOTSUPP;
-		(void)dsi_ctrl_buffer_deinit(dsi_ctrl);
-		goto error;
-	}
-	pr_emerg("A52P411 BUF local_iova=%llx field_iova=%x size=%x vaddr=%px\n",
-		(unsigned long long)iova, dsi_ctrl->cmd_buffer_iova,
-		dsi_ctrl->cmd_buffer_size, dsi_ctrl->vaddr);
-	a52_p411_dump_domains(dsi_ctrl, "buffer-init");
-error:
-'''
-    text = one(text, old, new, "buffer mapping log")
+    fn = fn.replace(anchor, insert + anchor, 1)
+    text = text[:start] + fn + text[end:]
+
 
     return text
 

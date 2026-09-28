@@ -30,8 +30,8 @@ HOT_BLOCK = r'''
  * The complete 1 MiB hot buffer is copied byte-for-byte into the cold image.
  * Phase345's microsecond samples are also copied into the cold summary area.
  */
-#define A52_P409_RAM_BYTES          (1U * SZ_1M)
-#define A52_P409_DISK_BYTES         (2U * SZ_1M)
+#define A52_P409_RAM_BYTES          0x00100000U
+#define A52_P409_DISK_BYTES         0x00200000U
 #define A52_P409_DEBUG_OFFSET       0x00800000ULL
 #define A52_P409_HEADER_BYTES       SZ_4K
 #define A52_P409_HOT_DISK_OFFSET    A52_P409_HEADER_BYTES
@@ -123,6 +123,22 @@ struct a52_p409_cold {
 	u32 reserved0;
 	struct a52_p345_sample phase345[A52_P345_MAX];
 } __packed;
+
+static u32 a52_p409_crc32c(const void *buffer, size_t len)
+{
+	const u8 *bytes = buffer;
+	u32 crc = ~0U;
+	size_t index;
+	unsigned int bit;
+
+	for (index = 0; index < len; index++) {
+		crc ^= bytes[index];
+		for (bit = 0; bit < 8; bit++)
+			crc = (crc >> 1) ^
+				((crc & 1U) ? 0x82f63b78U : 0U);
+	}
+	return ~crc;
+}
 
 static struct a52_p409_event *a52_p409_hot;
 static u8 *a52_p409_disk;
@@ -297,7 +313,7 @@ static void a52_p409_build_image(void)
 		memcpy(cold->phase345, a52_p345_samples,
 		       n * sizeof(cold->phase345[0]));
 
-	crc = a52_p407_crc32c(a52_p409_disk, A52_P409_DISK_BYTES - 8U);
+	crc = a52_p409_crc32c(a52_p409_disk, A52_P409_DISK_BYTES - 8U);
 	memcpy(a52_p409_disk + A52_P409_DISK_BYTES - 8U, &crc, sizeof(crc));
 	memcpy(a52_p409_disk + A52_P409_DISK_BYTES - 4U, &commit,
 	       sizeof(commit));
@@ -558,8 +574,8 @@ def validate(root: Path) -> None:
 
     for token in (
         MARK,
-        "#define A52_P409_RAM_BYTES          (1U * SZ_1M)",
-        "#define A52_P409_DISK_BYTES         (2U * SZ_1M)",
+        "#define A52_P409_RAM_BYTES          0x00100000U",
+        "#define A52_P409_DISK_BYTES         0x00200000U",
         "#define A52_P409_DEBUG_OFFSET       0x00800000ULL",
         "#define A52_P409_EVENT_BYTES        96U",
         "a52_p409_hot = vzalloc(A52_P409_RAM_BYTES)",
@@ -571,7 +587,7 @@ def validate(root: Path) -> None:
         "submit_bio_wait(bio)",
         "blkdev_issue_flush(bdev, GFP_KERNEL)",
         "memcpy(a52_p409_disk + A52_P409_HOT_DISK_OFFSET",
-        "a52_p407_crc32c(a52_p409_disk, A52_P409_DISK_BYTES - 8U)",
+        "a52_p409_crc32c(a52_p409_disk, A52_P409_DISK_BYTES - 8U)",
         "schedule_work(&a52_p409_write_work)",
     ):
         if token not in hwc:

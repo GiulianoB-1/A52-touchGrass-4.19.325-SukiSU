@@ -280,7 +280,7 @@ def patch_hwc(text: str) -> str:
 def patch_arm_smmu(text: str) -> str:
     if MARK in text:
         return text
-    if "A52_PHASE393_IRQ_RPMH_SMMU_CLIFF_V1" not in text:
+    if 'a52_ackfr_record("M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",' not in text:
         raise SystemExit("Phase411 expected Phase393 SMMU lineage")
 
     old = '''	cbfrsynra = arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBFRSYNRA(idx));
@@ -331,6 +331,7 @@ def patch_msm_smmu(text: str) -> str:
 		client->dev ? dev_name(client->dev) : "none", domain, iova, flags);
 '''
     text = one(text, old, new, "fault callback marker")
+    text += "\n/* " + MARK + ": downstream display SMMU handler confirmation. */\n"
     return text
 
 
@@ -364,6 +365,7 @@ def validate(root: Path) -> None:
     ctrl = (root / CTRL).read_text(errors="replace")
     hwc = (root / HWC).read_text(errors="replace")
     display = (root / DISPLAY).read_text(errors="replace")
+    msmsmmu = (root / MSMSMMU).read_text(errors="replace")
     armsmmu = (root / ARMSMMU).read_text(errors="replace")
 
     for token in (
@@ -412,6 +414,10 @@ def validate(root: Path) -> None:
         if token not in display:
             raise SystemExit("Phase411 display token missing: " + token)
 
+    for token in ("A52P411 SMMU_HANDLER", "A52P411 MSM_SMMU_FAULT", MARK):
+        if token not in msmsmmu:
+            raise SystemExit("Phase411 msm-smmu token missing: " + token)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -419,7 +425,7 @@ def main() -> int:
     ap.add_argument("--check-only", action="store_true")
     ns = ap.parse_args()
 
-    for rel in (CTRL, HWC, DISPLAY, ARMSMMU):
+    for rel in (CTRL, HWC, DISPLAY, MSMSMMU, ARMSMMU):
         if not (ns.root / rel).is_file():
             raise SystemExit("Phase411 source missing: " + str(rel))
 
@@ -430,6 +436,8 @@ def main() -> int:
         p.write_text(patch_hwc(p.read_text(errors="replace")))
         p = ns.root / DISPLAY
         p.write_text(patch_display(p.read_text(errors="replace")))
+        p = ns.root / MSMSMMU
+        p.write_text(patch_msm_smmu(p.read_text(errors="replace")))
         p = ns.root / ARMSMMU
         p.write_text(patch_arm_smmu(p.read_text(errors="replace")))
 

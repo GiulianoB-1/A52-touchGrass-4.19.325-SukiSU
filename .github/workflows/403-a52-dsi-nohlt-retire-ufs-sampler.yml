@@ -7,6 +7,7 @@ on:
     branches:
       - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
+      - .github/workflows/403-a52-dsi-nohlt-retire-ufs-sampler.yml
       - .github/workflows/402-a52-dsi-nohlt-clean.yml
       - scripts/402_apply_dsi_nohlt_cleanup.py
       - scripts/403_apply_retire_phase380_ufs_sampler.py

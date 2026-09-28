@@ -70,6 +70,11 @@ def patch_rec(text: str) -> str:
         "\t/* A52_PHASE402: reserved printk console retired; trace lane is DSI-only. */\n",
         "retire Phase389 console",
     )
+    text = text.replace(
+        "static struct console a52_p389_console = {\n",
+        "static struct console a52_p389_console __maybe_unused = {\n",
+        1,
+    )
 
     sig = "void a52_p389_trace(u16 event, u32 arg0, u32 arg1, u32 arg2, u32 arg3)"
     start, end = function_bounds(text, sig)

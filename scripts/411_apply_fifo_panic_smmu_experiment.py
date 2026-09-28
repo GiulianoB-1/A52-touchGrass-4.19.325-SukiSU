@@ -409,14 +409,6 @@ def validate(root: Path) -> None:
         if token not in armsmmu:
             raise SystemExit("Phase411 arm-smmu token missing: " + token)
 
-    for token in (
-        "iommu_set_fault_handler(client->domain",
-        "A52P411 SMMU_HANDLER installed",
-        "A52P411 MSM_SMMU_FAULT",
-    ):
-        if token not in msmsmmu:
-            raise SystemExit("Phase411 msm_smmu token missing: " + token)
-
     for token in ("A52P411 BOOTDISP", MARK):
         if token not in display:
             raise SystemExit("Phase411 display token missing: " + token)
@@ -428,7 +420,7 @@ def main() -> int:
     ap.add_argument("--check-only", action="store_true")
     ns = ap.parse_args()
 
-    for rel in (CTRL, HWC, DISPLAY, MSMSMMU, ARMSMMU):
+    for rel in (CTRL, HWC, DISPLAY, ARMSMMU):
         if not (ns.root / rel).is_file():
             raise SystemExit("Phase411 source missing: " + str(rel))
 

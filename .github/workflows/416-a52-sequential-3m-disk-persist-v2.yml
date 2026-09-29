@@ -362,7 +362,7 @@ jobs:
           assert early not in text, "Phase416 must not queue raw disk I/O from core_init"
           print("Phase416 persistence source audit: PASS")
           PY416
-          grep -aFq 'A52_PHASE416_SEQUENTIAL_3M_DISK_PERSIST_V2' "$IMAGE"
+          grep -aFq 'P416 DISKARM gen=%u count=%u' "$IMAGE"
           echo "Phase416 sequential 3 MiB disk persistence audit: PASS"
 
           cp scripts/397_apply_downstream_bus_votes.py \

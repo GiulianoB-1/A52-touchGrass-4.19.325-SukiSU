@@ -40,6 +40,7 @@ on:
       - scripts/38_repack_a52_p1_boot.py
       - .github/workflows/394-a52-mode-fixup-fifo-early.yml
 
+# Phase416 binary-audit correction rebuild
 permissions:
   contents: read
 

@@ -1,0 +1,75 @@
+name: 414B - A52 hidden DSI framework audit
+run-name: 414B - source-only hidden DSI framework audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/414b-a52-hidden-dsi-framework-audit.yml
+      - scripts/414b_compare_hidden_dsi_framework.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+jobs:
+  audit:
+    name: Compare lower display framework
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned GKI source
+        id: gki-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+          fail-on-cache-miss: true
+
+      - name: Verify GKI identity
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          test "$(make -s -C gki/common kernelversion)" = "5.10.252"
+
+      - name: Fetch pinned TouchGrass comparison files
+        run: |
+          set -Eeuo pipefail
+          TG="$PWD/touchgrass"
+          mkdir -p "$TG/drivers/clk/qcom" "$TG/drivers/base/power"
+          BASE="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/$TOUCHGRASS_COMMIT"
+          for f in             drivers/clk/qcom/clk-branch.c             drivers/clk/qcom/clk-regmap.c             drivers/clk/qcom/common.c             drivers/clk/qcom/gdsc.c             drivers/base/power/runtime.c; do
+            mkdir -p "$TG/$(dirname "$f")"
+            curl --fail --location --retry 4 --retry-all-errors --silent --show-error               "$BASE/$f" -o "$TG/$f"
+            test -s "$TG/$f"
+          done
+
+      - name: Run source comparison
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/414b_compare_hidden_dsi_framework.py
+          rm -rf phase414b-framework-audit
+          python3 scripts/414b_compare_hidden_dsi_framework.py             --gki gki/common             --tg touchgrass             --out phase414b-framework-audit
+          {
+            echo "gki_sha=$GKI_COMMON_SHA"
+            echo "touchgrass_sha=$TOUCHGRASS_COMMIT"
+            sha256sum phase414b-framework-audit/results.json
+          } > phase414b-framework-audit/IDENTITY.txt
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-PHASE414B-HIDDEN-DSI-FRAMEWORK-AUDIT
+          path: phase414b-framework-audit/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

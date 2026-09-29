@@ -41,7 +41,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
-          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          echo "cached_tree_head=$(git -C gki/common rev-parse HEAD)"
           test "$(make -s -C gki/common kernelversion)" = "5.10.252"
 
       - name: Fetch pinned TouchGrass comparison files

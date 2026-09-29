@@ -27,17 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore pinned GKI source
-        id: gki-cache
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
         uses: actions/cache/restore@v4
         with:
-          path: gki
-          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
-          fail-on-cache-miss: true
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
 
       - name: Verify GKI identity
         run: |
           set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
           test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
           test "$(make -s -C gki/common kernelversion)" = "5.10.252"
 

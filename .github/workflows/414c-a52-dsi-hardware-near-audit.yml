@@ -1,0 +1,76 @@
+name: 414C - A52 DSI hardware-near source audit
+run-name: 414C - DSI catalog/controller/PHY source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/414c-a52-dsi-hardware-near-audit.yml
+      - scripts/414c_compare_dsi_hardware_near.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Validate reconstructed source
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          test "$(make -s -C gki/common kernelversion)" = "5.10.252"
+          test -f gki/common/drivers/a52_display/msm/dsi/dsi_catalog.c
+          test -f gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_2_0.c
+          test -f gki/common/drivers/a52_display/msm/dsi/dsi_phy_hw_v3_0.c
+
+      - name: Fetch exact TouchGrass DSI files
+        run: |
+          set -Eeuo pipefail
+          TG="$PWD/touchgrass"
+          mkdir -p "$TG/techpack/display/msm/dsi"
+          BASE="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/$TOUCHGRASS_COMMIT/techpack/display/msm/dsi"
+          for f in dsi_catalog.c dsi_ctrl_hw_2_0.c dsi_ctrl_hw_2_2.c dsi_phy_hw_v3_0.c dsi_phy.c; do
+            curl --fail --location --retry 4 --retry-all-errors --silent --show-error               "$BASE/$f" -o "$TG/techpack/display/msm/dsi/$f"
+            test -s "$TG/techpack/display/msm/dsi/$f"
+          done
+
+      - name: Compare hardware-near DSI source
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/414c_compare_dsi_hardware_near.py
+          rm -rf phase414c-dsi-hardware-near
+          python3 scripts/414c_compare_dsi_hardware_near.py             --gki gki/common --tg touchgrass --out phase414c-dsi-hardware-near
+          {
+            echo "touchgrass_sha=$TOUCHGRASS_COMMIT"
+            echo "cached_tree_head=$(git -C gki/common rev-parse HEAD)"
+          } > phase414c-dsi-hardware-near/IDENTITY.txt
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-PHASE414C-DSI-HARDWARE-NEAR-AUDIT
+          path: phase414c-dsi-hardware-near/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

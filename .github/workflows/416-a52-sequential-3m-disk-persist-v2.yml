@@ -354,7 +354,17 @@ jobs:
           grep -Fq 'a52_p414_update_ram_header_locked();' "$REC"
           grep -Fq 'P416 DISKARM gen=%u count=%u' "$REC"
           test "$(grep -Fc 'strncmp(fmt, "P416", 4)' "$REC")" -ge 2
-          ! grep -Fq 
+          python3 - "$REC" <<'PY416'
+          import sys
+          from pathlib import Path
+          text = Path(sys.argv[1]).read_text()
+          early = "atomic_set(&a52_p414_ready, 1);" + chr(10) + chr(9) + "a52_p414_queue_disk();"
+          assert early not in text, "Phase416 must not queue raw disk I/O from core_init"
+          print("Phase416 persistence source audit: PASS")
+          PY416
+          grep -aFq 'A52_PHASE416_SEQUENTIAL_3M_DISK_PERSIST_V2' "$IMAGE"
+          echo "Phase416 sequential 3 MiB disk persistence audit: PASS"
+
           cp scripts/397_apply_downstream_bus_votes.py \
              scripts/402_apply_dsi_nohlt_cleanup.py \
              scripts/403_apply_retire_phase380_ufs_sampler.py \
@@ -516,158 +526,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE416-SEQUENTIAL-3M-DISK-PERSIST-V2-${{ github.run_number }}-BOOT-IMG
-          path: phase416-gki-out/package/boot-phase416-sequential-3m-disk-persist-v2.img
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-atomic_set(&a52_p414_ready, 1);\n\ta52_p414_queue_disk();' "$REC"
-          grep -aFq 'A52_PHASE416_SEQUENTIAL_3M_DISK_PERSIST_V2' "$IMAGE"
-          echo "Phase416 sequential 3 MiB disk persistence audit: PASS"
-
-          cp scripts/397_apply_downstream_bus_votes.py \
-             scripts/402_apply_dsi_nohlt_cleanup.py \
-             scripts/403_apply_retire_phase380_ufs_sampler.py \
-             scripts/405_apply_dma_done_direct.py \
-             scripts/406_apply_p392_cache_persist.py \
-             scripts/407_apply_samsung_debug_dsi.py \
-             scripts/408_apply_direct_bio_debug_dsi.py \
-             scripts/409_apply_ram1m_debug2m_dsi.py \
-             scripts/411_apply_fifo_panic_smmu_experiment.py \
-             scripts/413_apply_concurrent_debug2m_mirror.py \
-             scripts/414_apply_sequential_3m_recorder.py \
-             scripts/415_apply_mdss_gdsc_hwctrl_parity.py \
-             scripts/decode_phase414_sequential_3m.py \
-             scripts/decode_phase409_ram1m_debug2m.py \
-             scripts/decode_phase408_samsung_debug_dsi.py \
-             scripts/decode_phase407_samsung_debug_dsi.py \
-             scripts/decode_phase405_dma_done.py "$OUT/audit/"
-          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$OUT/source/"
-
-          cat > "$OUT/PHASE416-NOTES.txt" <<'EOF'
-          Phase414 sequential 3 MiB recorder
-          ==================================
-          Logical order is fixed and non-wrapping:
-
-            tier 1: Samsung debug +0x800000, 2 MiB
-            tier 2: persistent RAM 0xB1A00000, 1 MiB
-            then:   STOP
-
-          The first records therefore remain on the Samsung partition. The RAM
-          tier is used only after the Samsung 2 MiB logical capacity is full.
-
-          Hot-path behavior
-          -----------------
-          - Fixed 128-byte records with global monotonic sequence numbers.
-          - No Phase414 whole-image CRC.
-          - Samsung-bound records are copied to a vmalloc staging image only;
-            block I/O occurs on system_unbound_wq.
-          - Completed 4 KiB pages are immutable and written directly.
-          - The current partial page is copied under the recorder spinlock to a
-            bounce page, then written without holding the lock.
-          - If the debug block device is not ready, writes retry in background.
-          - Reserved-RAM continuation uses B1A00000..B1AFFFFF and explicit cache
-            cleaning so it survives the recovery reboot.
-          - Existing Phase392 is restricted to B1900000..B19FFFFF.
-
-          Identity and stale-record rejection
-          -----------------------------------
-          - Header magic + phase=414 + boot_id + global_seq + counts + commit.
-          - boot_id is incremented from the persistent B1A header every boot.
-          - P414 BOOT carries the same boot_id into R48/RS48.
-          - R48/RS48 and its three ramoops transports remain untouched.
-
-          Display frontier
-          ----------------
-          - Lifecycle entry breadcrumbs cover display registration/probe/bind,
-            panel acquisition/driver init, and Samsung early/panel init.
-          - First 128 generic DSI transfers record controller, type, length,
-            software flags, MIPI flags, and first 8 payload bytes.
-          - Exact F0 records flags before and after mode selection.
-          - Phase411 FIFO<=64 treatment, timeout panic, SMMU diagnostics, nohlt,
-            and cpuidle.off=1 remain unchanged.
-          - Phase415 changes only MDSS GDSC ownership semantics: disable preserves
-            HW_CONTROL and software enable refuses to steal an active HW-controlled
-            domain. The missing TouchGrass proxy-consumer is deliberately NOT added.
-          EOF
-          sed -i 's/^          //' "$OUT/PHASE416-NOTES.txt"
-
-          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
-            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
-
-      - name: Build Phase415 MDSS-GDSC-parity boot image
-        run: |
-          set -Eeuo pipefail
-          OUT="$PWD/phase416-gki-out"
-          BASE="$OUT/package/boot.img"
-          FINAL="$OUT/package/boot-phase416-sequential-3m-disk-persist-v2.img"
-          test -s "$BASE"
-          cp "$BASE" "$FINAL"
-
-          python3 - <<'PY'
-          import importlib.util
-          import json
-          from pathlib import Path
-
-          spec = importlib.util.spec_from_file_location(
-              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
-          module = importlib.util.module_from_spec(spec)
-          assert spec.loader is not None
-          spec.loader.exec_module(module)
-
-          base_path = Path("phase416-gki-out/package/boot.img")
-          final = Path("phase416-gki-out/package/boot-phase416-sequential-3m-disk-persist-v2.img")
-          base = module.parse_boot(base_path.read_bytes())
-          data = bytearray(final.read_bytes())
-          tokens = base["cmdline"].split()
-          for tok in ("nohlt", "cpuidle.off=1", "panic=1"):
-              key = tok.split("=", 1)[0]
-              tokens = [x for x in tokens if x != tok and x.split("=", 1)[0] != key]
-              tokens.append(tok)
-          cmdline = " ".join(tokens)
-          encoded = cmdline.encode("ascii")
-          if len(encoded) > 1534:
-              raise SystemExit(f"Phase411 command line too long: {len(encoded)}")
-          data[64:576] = b"\0" * 512
-          data[608:1632] = b"\0" * 1024
-          first = encoded[:511]
-          second = encoded[511:]
-          data[64:64 + len(first)] = first
-          data[608:608 + len(second)] = second
-          final.write_bytes(data)
-
-          out = module.parse_boot(final.read_bytes())
-          assert "nohlt" in out["cmdline"].split()
-          assert "cpuidle.off=1" in out["cmdline"].split()
-          assert "panic=1" in out["cmdline"].split()
-          assert "ignore_loglevel" in out["cmdline"].split()
-          for key in ("header_version","page_size","board","kernel_addr",
-                      "ramdisk_addr","tags_addr","kernel","ramdisk","second","dtb"):
-              assert out[key] == base[key], key
-          assert final.stat().st_size == base_path.stat().st_size
-          Path("phase416-gki-out/PHASE416-BOOT.json").write_text(
-              json.dumps({
-                  "cmdline": out["cmdline"],
-                  "treatment": "Phase414 control + MDSS GDSC preserve HW_CONTROL parity; proxy consumer intentionally unchanged; nohlt cpuidle.off=1 panic=1",
-                  "kernel_payload_unchanged_by_cmdline_patch": True,
-              }, indent=2, sort_keys=True) + "\n")
-          PY
-
-          sha256sum "$FINAL"
-          echo "Phase415 MDSS GDSC HW-control boot image: PASS"
-
-      - name: Upload Phase415
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE415-MDSS-GDSC-HWCTRL-${{ github.run_number }}
-          path: phase416-gki-out/
-          if-no-files-found: error
-          compression-level: 1
-          retention-days: 30
-
-      - name: Upload Phase415 boot.img
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE415-MDSS-GDSC-HWCTRL-${{ github.run_number }}-BOOT-IMG
           path: phase416-gki-out/package/boot-phase416-sequential-3m-disk-persist-v2.img
           if-no-files-found: error
           compression-level: 0

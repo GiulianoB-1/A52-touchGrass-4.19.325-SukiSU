@@ -1,0 +1,92 @@
+name: 414D - A52 DSI 10nm PLL parity audit
+run-name: 414D - exact DSI 10nm PLL source parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/414d-a52-dsi-pll-parity-audit.yml
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Compare exact 10nm PLL provider
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          GKI="$PWD/gki/common"
+          OUT="$PWD/phase414d-pll-audit"
+          TG="$PWD/touchgrass-pll"
+          mkdir -p "$OUT" "$TG"
+
+          GP="$GKI/drivers/a52_display/pll/dsi_pll_10nm.c"
+          GD="$GKI/drivers/a52_display/pll/pll_drv.c"
+          test -s "$GP"
+          test -s "$GD"
+
+          BASE="https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/$TOUCHGRASS_COMMIT/techpack/display/pll"
+          curl --fail --location --retry 4 --retry-all-errors --silent --show-error "$BASE/dsi_pll_10nm.c" -o "$TG/dsi_pll_10nm.c"
+          curl --fail --location --retry 4 --retry-all-errors --silent --show-error "$BASE/pll_drv.c" -o "$TG/pll_drv.c"
+
+          sha256sum "$GP" "$TG/dsi_pll_10nm.c" "$GD" "$TG/pll_drv.c" | tee "$OUT/SHA256SUMS.txt"
+
+          if cmp -s "$GP" "$TG/dsi_pll_10nm.c"; then
+            echo "dsi_pll_10nm_byte_identical=yes" | tee "$OUT/RESULT.txt"
+          else
+            echo "dsi_pll_10nm_byte_identical=no" | tee "$OUT/RESULT.txt"
+            diff -u "$TG/dsi_pll_10nm.c" "$GP" > "$OUT/dsi_pll_10nm.diff" || true
+          fi
+
+          python3 - "$GD" "$TG/pll_drv.c" "$OUT" <<'PY'
+          import re,sys,pathlib,difflib
+          gp,tp,out=map(pathlib.Path,sys.argv[1:])
+          def scrub(s):
+              s=re.sub(r'/\* A52_PHASE308.*?\*/.*?(?=static int mdss_pll_probe)', '', s, flags=re.S)
+              lines=[]
+              skip=0
+              for ln in s.splitlines():
+                  if any(x in ln for x in ('a52_p308_', 'P276 308', 'A52_PHASE308')):
+                      continue
+                  lines.append(ln)
+              return re.sub(r'\s+','', '\n'.join(lines))
+          g,t=scrub(gp.read_text(errors='replace')),scrub(tp.read_text(errors='replace'))
+          same=g==t
+          with (out/'RESULT.txt').open('a') as f: f.write('pll_drv_normalized_identical=%s\n'%('yes' if same else 'no'))
+          if not same:
+              (out/'pll_drv.diff').write_text('\n'.join(difflib.unified_diff(tp.read_text().splitlines(),gp.read_text().splitlines(),fromfile='TouchGrass',tofile='GKI',lineterm=''))+'\n')
+          PY
+
+          cat "$OUT/RESULT.txt"
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-PHASE414D-DSI-PLL-PARITY-AUDIT
+          path: phase414d-pll-audit/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30

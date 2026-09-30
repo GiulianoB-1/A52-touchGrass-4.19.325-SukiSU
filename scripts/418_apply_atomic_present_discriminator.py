@@ -291,6 +291,16 @@ def patch_atomic(text: str) -> str:
     start, end = function_bounds(text, "a52_p387_log")
     text = text[:end] + "\n" + ATOMIC_HELPER + text[end:]
 
+    entry_anchor = '''\ta52_p387_n = (unsigned int)atomic_inc_return(&a52_p387_modeset_seq);
+'''
+    entry_new = entry_anchor + '''\tif (a52_p387_n == 1U) {
+\t\tunsigned int a52_p418_ret = a52_ackfr_phase418_retained();
+\t\ta52_ackfr_record("P418 CTRL pre ret=%u", a52_p418_ret);
+\t\ta52_ackfr_record("P276 394T pre=1 ret=%u", a52_p418_ret);
+\t}
+'''
+    text = one(text, entry_anchor, entry_new, "atomic entry positive control")
+
     old = '''\tret = mode_fixup(state);
 \tif (ret && a52_p387_log(a52_p387_n))
 \t\ta52_ackfr_record("P276 387M n=%u st=11 r=%d", a52_p387_n, ret);
@@ -695,6 +705,7 @@ def validate(root: Path) -> None:
 
     for tok in (
         MARK, "P418 MS n=%u r=%d rt=%u", "a52_p418_modeset_result",
+        "P418 CTRL pre ret=%u", "P276 394T pre=1 ret=%u",
     ):
         if tok not in atomic:
             raise SystemExit("Phase418 atomic token missing: " + tok)

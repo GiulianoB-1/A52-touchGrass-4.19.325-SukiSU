@@ -422,7 +422,7 @@ jobs:
           grep -Fq 'P276 394T pre=1 ret=%u' "$DRMATOMIC"
           grep -aFq 'P418 CTRL pre ret=%u' "$IMAGE"
           grep -aFq 'P276 394T pre=1 ret=%u' "$IMAGE"
-          grep -Fq 'P276 394T boot=1 ret=%u' "$REC"
+          grep -Fq 'P276 394T boot=%llx ret=%u' "$REC"
           grep -Fq 'a52_ackfr_phase418_retained' "$REC"
           grep -Fq 'P418 E n=%u s=%u r=%d id=%u rt=%u t=%d' "$ENCODER"
           grep -Fq 'P418 ES0 n=%u' "$ENCODER"

@@ -58,6 +58,7 @@ def patch_modes(text: str) -> str:
     include_new = (
         include_anchor
         + '#include <linux/atomic.h>\n'
+        + '#include <linux/sched.h>\n'
         + '#include <linux/a52_ack_secure_flight_recorder.h>\n'
     )
     text = one(text, include_anchor, include_new, "drm_modes includes")
@@ -93,7 +94,8 @@ int drm_mode_convert_umode(struct drm_device *dev,
 		int a52_p419_calc = drm_mode_vrefresh(out);
 
 		out->vrefresh = in->vrefresh ? in->vrefresh : a52_p419_calc;
-		if (atomic_cmpxchg(&a52_p419_umode_once, 0, 1) == 0)
+		if (a52_ackfr_phase269_is_composer_tgid(current->tgid) &&
+		    atomic_cmpxchg(&a52_p419_umode_once, 0, 1) == 0)
 			a52_ackfr_record(
 				"P419 U in=%u pre=%d calc=%d out=%d",
 				in->vrefresh, a52_p419_pre,
@@ -131,11 +133,13 @@ static atomic_t a52_p419_find_once = ATOMIC_INIT(0);
 		return rc;
 '''
     replacement = '''	rc = dsi_display_find_mode(display, &dsi_mode, &panel_dsi_mode);
-	if (atomic_cmpxchg(&a52_p419_find_once, 0, 1) == 0)
+	if (a52_ackfr_phase269_is_composer_tgid(current->tgid) &&
+	    atomic_cmpxchg(&a52_p419_find_once, 0, 1) == 0)
 		a52_ackfr_record(
-			"P419 F h=%u v=%u r=%u pm=%u p=%u rc=%d",
+			"P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d",
 			dsi_mode.timing.h_active, dsi_mode.timing.v_active,
-			dsi_mode.timing.refresh_rate, dsi_mode.panel_mode,
+			dsi_mode.timing.refresh_rate, dsi_mode.timing.sot_hs_mode,
+			dsi_mode.timing.phs_mode, dsi_mode.panel_mode,
 			dsi_mode.pixel_clk_khz, rc);
 	if (rc)
 		return rc;
@@ -188,6 +192,7 @@ def validate(root: Path) -> None:
         MARK,
         'out->vrefresh = in->vrefresh ? in->vrefresh : a52_p419_calc;',
         'P419 U in=%u pre=%d calc=%d out=%d',
+        'a52_ackfr_phase269_is_composer_tgid(current->tgid)',
         'drm_mode_vrefresh(out)',
     ):
         if tok not in modes:

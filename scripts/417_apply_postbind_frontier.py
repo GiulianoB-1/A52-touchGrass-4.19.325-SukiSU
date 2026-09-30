@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, re
+import argparse, importlib.util, re
 from pathlib import Path
 
 MARK = "A52_PHASE417_POSTBIND_FRONTIER_V1"
@@ -16,22 +16,29 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def load_scope_helper():
+    path = Path(__file__).with_name("165_apply_a52_active_display_scopes.py")
+    spec = importlib.util.spec_from_file_location("a52_scope165", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"Phase417 cannot load definition parser: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def inject_scope(text: str, fn: str, scope_name: str, ret: str) -> str:
     statement = f'A52_ACKFR_SCOPE("DISP", "{scope_name}");'
     if statement in text:
         return text
 
-    # Match the definition itself, not its exact return-type formatting.
-    # The generated display tree can wrap qualifiers/signatures differently
-    # from the pinned TouchGrass source, so key on "fn(...) {" only.
-    pat = re.compile(
-        r'\\b' + re.escape(fn) + r'\\s*\\([^;{}]*\\)\\s*\\{',
-        re.S,
-    )
-    m = pat.search(text)
-    if not m:
-        raise SystemExit(f"Phase417 function not found for scope: {fn}")
-    return text[:m.end()] + "\n\t" + statement + text[m.end():]
+    helper = load_scope_helper()
+    openings = helper.definition_openings(text, fn)
+    if len(openings) != 1:
+        raise SystemExit(
+            f"Phase417 function definition count mismatch: {fn}: {len(openings)}"
+        )
+    opening = openings[0]
+    return text[:opening + 1] + "\n\t" + statement + text[opening + 1:]
 
 
 def patch_rec(text: str) -> str:

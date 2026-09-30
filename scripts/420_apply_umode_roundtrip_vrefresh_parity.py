@@ -55,12 +55,13 @@ def patch_modes(text: str) -> str:
     if "A52_PHASE419_UMODE_VREFRESH_PARITY_V1" not in text:
         raise SystemExit("Phase420 requires Phase419 drm_modes")
 
-    state_anchor = "static atomic_t a52_p419_umode_once = ATOMIC_INIT(0);\n"
-    state_new = (
-        state_anchor
-        + "static atomic_t a52_p420_to_umode_once = ATOMIC_INIT(0);\n"
+    outbound_anchor = "void drm_mode_convert_to_umode(struct drm_mode_modeinfo *out,\n"
+    outbound_new = (
+        "/* A52_PHASE420_UMODE_ROUNDTRIP_VREFRESH_PARITY_V1 */\n"
+        "static atomic_t a52_p420_to_umode_once = ATOMIC_INIT(0);\n\n"
+        + outbound_anchor
     )
-    text = one(text, state_anchor, state_new, "outbound one-shot state")
+    text = one(text, outbound_anchor, outbound_new, "outbound one-shot state")
 
     old = '''\tout->vscan = in->vscan;
 \tout->vrefresh = drm_mode_vrefresh(in);

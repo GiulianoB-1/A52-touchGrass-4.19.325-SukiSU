@@ -246,22 +246,43 @@ def patch_rec(text: str) -> str:
         return text
     if "A52_PHASE423_RPMH_SOLVER_MODE_COMPAT_V1" not in text:
         raise SystemExit("Phase424 recorder requires Phase423")
-    for old,new,label in (
-        ('\t    strncmp(fmt, "P423", 4) &&\n',
-         '\t    strncmp(fmt, "P424", 4) &&\n\t    strncmp(fmt, "P423", 4) &&\n',
-         "retained admission"),
-        ('if (strncmp(fmt, "P423", 4) &&\n',
-         'if (strncmp(fmt, "P424", 4) &&\n    strncmp(fmt, "P423", 4) &&\n',
-         "normal admission"),
-        ('\t    strncmp(fmt, "P423", 4) &&\n\t    strncmp(fmt, "P420", 4) &&\n',
-         '\t    strncmp(fmt, "P424", 4) &&\n\t    strncmp(fmt, "P423", 4) &&\n\t    strncmp(fmt, "P420", 4) &&\n',
-         "phase402 admission"),
-    ):
-        if old in text:
-            text=one(text,old,new,label)
-        elif 'strncmp(fmt, "P424", 4)' not in text:
-            raise SystemExit("Phase424 recorder anchor missing: "+label)
-    text += "\n/* "+MARK+": P424 post-timeout dump admitted to sequential recorder. */\n"
+
+    retained = """\tif (unlikely(atomic_read(&a52_r280_retained)) &&
+\t    strncmp(fmt, "P423", 4) &&
+\t    strncmp(fmt, "P420", 4) &&
+"""
+    retained_new = """\tif (unlikely(atomic_read(&a52_r280_retained)) &&
+\t    strncmp(fmt, "P424", 4) &&
+\t    strncmp(fmt, "P423", 4) &&
+\t    strncmp(fmt, "P420", 4) &&
+"""
+    text = one(text, retained, retained_new, "retention admission")
+
+    normal = """if (strncmp(fmt, "P423", 4) &&
+    strncmp(fmt, "P420", 4) &&
+    strncmp(fmt, "P419", 4) &&
+"""
+    normal_new = """if (strncmp(fmt, "P424", 4) &&
+    strncmp(fmt, "P423", 4) &&
+    strncmp(fmt, "P420", 4) &&
+    strncmp(fmt, "P419", 4) &&
+"""
+    text = one(text, normal, normal_new, "normal admission")
+
+    clean = """\tif (!fmt || (
+\t    strncmp(fmt, "P423", 4) &&
+\t    strncmp(fmt, "P420", 4) &&
+\t    strncmp(fmt, "P419", 4) &&
+"""
+    clean_new = """\tif (!fmt || (
+\t    strncmp(fmt, "P424", 4) &&
+\t    strncmp(fmt, "P423", 4) &&
+\t    strncmp(fmt, "P420", 4) &&
+\t    strncmp(fmt, "P419", 4) &&
+"""
+    text = one(text, clean, clean_new, "Phase402 admission")
+
+    text += "\n/* " + MARK + ": P424 post-timeout dump admitted to sequential recorder. */\n"
     return text
 
 

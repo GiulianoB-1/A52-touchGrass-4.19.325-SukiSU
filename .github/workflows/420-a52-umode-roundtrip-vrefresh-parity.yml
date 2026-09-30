@@ -1,0 +1,713 @@
+name: Phase420 - vrefresh round-trip parity
+run-name: Phase420 - vrefresh round-trip parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/414-a52-sequential-3m-recorder.yml
+      - .github/workflows/415-a52-mdss-gdsc-hwctrl-parity.yml
+      - .github/workflows/416-a52-sequential-3m-disk-persist-v2.yml
+      - .github/workflows/417-a52-postbind-frontier.yml
+      - .github/workflows/418-a52-atomic-present-discriminator.yml
+      - .github/workflows/419-a52-umode-vrefresh-parity.yml
+      - .github/workflows/420-a52-umode-roundtrip-vrefresh-parity.yml
+      - .github/workflows/411-a52-fifo-panic-smmu.yml
+      - .github/workflows/409-a52-ram1m-debug2m-dsi.yml
+      - .github/workflows/408-a52-direct-bio-samsung-dsi.yml
+      - .github/workflows/407-a52-samsung-debug-dsi.yml
+      - .github/workflows/406-a52-persistent-memory-dma.yml
+      - .github/workflows/405-a52-stable-memory-dma.yml
+      - .github/workflows/403-a52-dsi-nohlt-retire-ufs-sampler.yml
+      - .github/workflows/402-a52-dsi-nohlt-clean.yml
+      - scripts/402_apply_dsi_nohlt_cleanup.py
+      - scripts/403_apply_retire_phase380_ufs_sampler.py
+      - scripts/405_apply_dma_done_direct.py
+      - scripts/406_apply_p392_cache_persist.py
+      - scripts/407_apply_samsung_debug_dsi.py
+      - scripts/408_apply_direct_bio_debug_dsi.py
+      - scripts/409_apply_ram1m_debug2m_dsi.py
+      - scripts/411_apply_fifo_panic_smmu_experiment.py
+      - scripts/413_apply_concurrent_debug2m_mirror.py
+      - scripts/414_apply_sequential_3m_recorder.py
+      - scripts/415_apply_mdss_gdsc_hwctrl_parity.py
+      - scripts/416_apply_sequential_3m_disk_persistence_v2.py
+      - scripts/417_apply_postbind_frontier.py
+      - scripts/418_apply_atomic_present_discriminator.py
+      - scripts/419_apply_umode_vrefresh_parity.py
+      - scripts/420_apply_umode_roundtrip_vrefresh_parity.py
+      - scripts/decode_phase414_sequential_3m.py
+      - scripts/decode_phase416_sequential_3m.py
+      - scripts/decode_phase409_ram1m_debug2m.py
+      - scripts/decode_phase408_samsung_debug_dsi.py
+      - scripts/decode_phase407_samsung_debug_dsi.py
+      - scripts/decode_phase405_dma_done.py
+      - scripts/397_apply_downstream_bus_votes.py
+      - scripts/38_repack_a52_p1_boot.py
+      - .github/workflows/394-a52-mode-fixup-fifo-early.yml
+
+# Phase416 binary-audit correction rebuild
+permissions:
+  contents: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase420-umode-roundtrip-vrefresh-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase420 vrefresh round-trip parity
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/397_apply_downstream_bus_votes.py \
+            scripts/402_apply_dsi_nohlt_cleanup.py \
+            scripts/403_apply_retire_phase380_ufs_sampler.py \
+            scripts/405_apply_dma_done_direct.py \
+            scripts/406_apply_p392_cache_persist.py \
+            scripts/407_apply_samsung_debug_dsi.py \
+            scripts/408_apply_direct_bio_debug_dsi.py \
+            scripts/409_apply_ram1m_debug2m_dsi.py \
+            scripts/411_apply_fifo_panic_smmu_experiment.py \
+            scripts/413_apply_concurrent_debug2m_mirror.py \
+            scripts/414_apply_sequential_3m_recorder.py \
+            scripts/415_apply_mdss_gdsc_hwctrl_parity.py \
+            scripts/416_apply_sequential_3m_disk_persistence_v2.py \
+            scripts/417_apply_postbind_frontier.py \
+            scripts/418_apply_atomic_present_discriminator.py \
+            scripts/419_apply_umode_vrefresh_parity.py \
+            scripts/420_apply_umode_roundtrip_vrefresh_parity.py \
+            scripts/decode_phase414_sequential_3m.py \
+            scripts/decode_phase416_sequential_3m.py \
+            scripts/decode_phase409_ram1m_debug2m.py \
+            scripts/decode_phase408_samsung_debug_dsi.py \
+            scripts/decode_phase407_samsung_debug_dsi.py \
+            scripts/decode_phase405_dma_done.py \
+            scripts/38_repack_a52_p1_boot.py
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Validate Phase357 cache
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+
+      - name: Reapply Phase358 and Phase359
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Build Phase394 DSI lineage plus Phase397 contracts and Phase402 cleanup
+        run: |
+          set -Eeuo pipefail
+
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/394-a52-mode-fixup-fifo-early.yml").read_text().splitlines()
+          start = next(i for i,l in enumerate(src)
+                       if l.strip() == "- name: Apply Phase360 through Phase394 and compile")
+          runline = next(i for i in range(start + 1, len(src))
+                         if src[i].strip() == "run: |")
+          end = next(i for i in range(runline + 1, len(src))
+                     if src[i].startswith("      - name:"))
+          body = [
+              line[10:] if line.startswith("          ") else line
+              for line in src[runline + 1:end]
+          ]
+          script = "\n".join(body) + "\n"
+
+          needle = 'python3 scripts/394_apply_mode_fixup_fifo_early.py --root "$ROOT" --check-only\n'
+          insert = needle + (
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT"\n'
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT" --check-only\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT"\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT" --check-only\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT"\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT" --check-only\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT"\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT" --check-only\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT"\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/411_apply_fifo_panic_smmu_experiment.py --root "$ROOT"\n'
+              'python3 scripts/411_apply_fifo_panic_smmu_experiment.py --root "$ROOT" --check-only\n'
+              'python3 scripts/413_apply_concurrent_debug2m_mirror.py --root "$ROOT"\n'
+              'python3 scripts/413_apply_concurrent_debug2m_mirror.py --root "$ROOT" --check-only\n'
+              'python3 scripts/414_apply_sequential_3m_recorder.py --root "$ROOT"\n'
+              'python3 scripts/414_apply_sequential_3m_recorder.py --root "$ROOT" --check-only\n'
+              'python3 scripts/415_apply_mdss_gdsc_hwctrl_parity.py --root "$ROOT"\n'
+              'python3 scripts/415_apply_mdss_gdsc_hwctrl_parity.py --root "$ROOT" --check-only\n'
+              'python3 scripts/416_apply_sequential_3m_disk_persistence_v2.py --root "$ROOT"\n'
+              'python3 scripts/416_apply_sequential_3m_disk_persistence_v2.py --root "$ROOT" --check-only\n'
+              'python3 scripts/417_apply_postbind_frontier.py --root "$ROOT"\n'
+              'python3 scripts/417_apply_postbind_frontier.py --root "$ROOT" --check-only\n'
+              'python3 scripts/418_apply_atomic_present_discriminator.py --root "$ROOT"\n'
+              'python3 scripts/418_apply_atomic_present_discriminator.py --root "$ROOT" --check-only\n'
+              'python3 scripts/419_apply_umode_vrefresh_parity.py --root "$ROOT"\n'
+              'python3 scripts/419_apply_umode_vrefresh_parity.py --root "$ROOT" --check-only\n'
+              'python3 scripts/420_apply_umode_roundtrip_vrefresh_parity.py --root "$ROOT"\n'
+              'python3 scripts/420_apply_umode_roundtrip_vrefresh_parity.py --root "$ROOT" --check-only\n'
+          )
+          if needle not in script:
+              raise SystemExit("Phase402 Phase394 insertion anchor missing")
+          script = script.replace(needle, insert, 1)
+
+          cfg = '"$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19\n'
+          if cfg not in script:
+              raise SystemExit("Phase402 config anchor missing")
+          script = script.replace(
+              cfg,
+              cfg + '"$ROOT/scripts/config" --file "$BUILD/.config" --enable GENERIC_IDLE_POLL_SETUP\n',
+              1)
+
+          script = script.replace("phase394-gki-out", "phase420-gki-out")
+          script = script.replace("PHASE394-SCHEMA.txt", "PHASE420-SCHEMA.txt")
+          script = script.replace("'phase':'394'", "'phase':'420'")
+          script = script.replace(
+              "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
+              "'name':'UMODE-ROUNDTRIP-VREFRESH-PARITY-V1'")
+          script = script.replace(
+              "'392','393','394']",
+              "'392','393','394','397','402','403','405','406','407','408','409','411','413','414','415','416','417','418','419','420']")
+
+          # Phase394's inherited audits intentionally require every old observer
+          # to remain linked. Phase402 retires those observers. Keep only Image
+          # existence here; dedicated Phase402 audits follow after the generated
+          # build script.
+          pre_start = 'IMAGE="$BUILD/arch/arm64/boot/Image"\ntest -s "$IMAGE"\n'
+          package_start = 'rm -rf "$OUT"\n'
+          ps = script.find(pre_start)
+          pe = script.find(package_start, ps + len(pre_start))
+          if ps < 0 or pe < 0:
+              raise SystemExit("Phase402 legacy audit boundaries missing")
+          script = (
+              script[:ps + len(pre_start)] +
+              'echo "Phase402: legacy broad-probe compiled audits retired"\n' +
+              script[pe:]
+          )
+
+          Path("/tmp/phase402-build.sh").write_text("set -Eeuo pipefail\n" + script)
+          PY
+
+          bash /tmp/phase402-build.sh
+
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase420-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          DSI="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          DSIHW="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          DSIDISPLAY="$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          DSIPANEL="$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c"
+          SSPANEL="$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c"
+          MSMSMMU="$ROOT/drivers/a52_display/msm/msm_smmu.c"
+          ARMSMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          IRQH="$ROOT/kernel/irq/handle.c"
+          UFS="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          USB="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
+          GDSC="$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c"
+          MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
+          ENCODER="$ROOT/drivers/a52_display/msm/sde/sde_encoder.c"
+          DRMMODES="$ROOT/drivers/gpu/drm/drm_modes.c"
+
+          echo "Phase415 MDSS GDSC HW-control parity audit"
+          test -s "$IMAGE"
+          grep -Fxq 'CONFIG_GENERIC_IDLE_POLL_SETUP=y' "$BUILD/.config"
+          grep -Fq 'A52_PHASE403_RETIRE_PHASE380_UFS_SAMPLER_V1' "$UFSCORE"
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCORE"
+
+          # Functional treatment remains Phase411 FIFO<=64.
+          grep -Fq 'A52_PHASE411_FIFO_PANIC_SMMU_EXPERIMENT_V1' "$DSI"
+          grep -Fq '(cmd_len + 4) <= DSI_CTRL_MAX_CMD_FIFO_STORE_SIZE' "$DSI"
+          grep -Fq '*flags |= DSI_CTRL_CMD_FIFO_STORE' "$DSI"
+          grep -Fq 'a52_p411_timeout_panic(dsi_ctrl);' "$DSI"
+
+          # Phase415 single-variable treatment: preserve MDSS HW ownership.
+          grep -Fq 'A52_PHASE415_MDSS_GDSC_HWCTRL_PARITY_V1' "$GDSC"
+          grep -Fq 'P415 GDSC disable-pre' "$GDSC"
+          grep -Fq 'P415 GDSC disable-post' "$GDSC"
+          grep -Fq 'P415 GDSC enable-block' "$GDSC"
+          python3 - "$GDSC" <<'PY415'
+          import sys
+          from pathlib import Path
+          s = Path(sys.argv[1]).read_text()
+          a = s.index("static int a52_legacy_gdsc_disable_mdss(")
+          b = s.index("static unsigned int a52_legacy_gdsc_get_mode(", a)
+          fn = s[a:b]
+          assert "val |= A52_GDSC_SW_COLLAPSE;" in fn
+          assert "val &= ~A52_GDSC_HW_CONTROL" not in fn
+          rec = Path("gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c").read_text()
+          assert 'strncmp(fmt, "P415", 4)' in rec
+          print("Phase415 MDSS GDSC source parity audit: PASS")
+          PY415
+
+          # Phase414 owns the Samsung +0x800000 region. Old Phase413 mirror is dead.
+          grep -Fq 'A52_PHASE414_SEQUENTIAL_3M_RECORDER_V1' "$REC"
+          grep -Fq 'A52_P414_DEBUG_OFFSET        0x00800000ULL' "$REC"
+          grep -Fq 'A52_P414_DISK_BYTES          (2U * SZ_1M)' "$REC"
+          grep -Fq 'A52_P414_RAM_PHYS            0xB1A00000ULL' "$REC"
+          grep -Fq 'A52_P414_RAM_BYTES           SZ_1M' "$REC"
+          grep -Fq 'A52_P414_RECORD_BYTES        128U' "$REC"
+          grep -Fq 'a52_p414_disk_count < A52_P414_DISK_CAPACITY' "$REC"
+          grep -Fq 'a52_p414_ram_count < A52_P414_RAM_CAPACITY' "$REC"
+          grep -Fq 'A52_P414_STATE_FULL' "$REC"
+          grep -Fq 'a52_p414_submit_page' "$REC"
+          grep -Fq 'system_unbound_wq' "$REC"
+          grep -Fq 'P414 BOOT id=%llu disk=%u ram=%u' "$REC"
+          grep -Fq 'return !strncmp(message, "P414 ", 5) ||' "$REC"
+          test "$(grep -Fc 'strncmp(fmt, "P414", 4)' "$REC")" -ge 2
+          grep -Fq 'strcmp(fmt, "%s enter fn=%s")' "$REC"
+          grep -Fq 'strcmp(fmt, "%s exit fn=%s us=%llu")' "$REC"
+          for token in             'strncmp(fmt, "DISP PROBE", 10)'             'strncmp(fmt, "DISP BIND", 9)'             'strncmp(fmt, "DISP PREP", 9)'             'strncmp(fmt, "DISP CMDSET", 11)'; do
+            test "$(grep -Fc "$token" "$REC")" -ge 2 || {
+              echo "ERROR: Phase414 focused display prefix missing from both gates: $token" >&2
+              exit 1
+            }
+          done
+          ! grep -Fq 'strncmp(fmt, "DISP DSI"' "$REC"
+
+          # B1900000 legacy backend is limited to its lower MiB; B1A is Phase414.
+          grep -Fq '#define A52_P392_BYTES' "$REC"
+          grep -Fq 'SZ_1M /* Phase414 leaves B1A00000 free */' "$REC"
+
+          # No whole-image CRC was added to the new recorder.
+          ! grep -Fq 'a52_p414_crc' "$REC"
+
+          # Generic pre-F0 command chronology plus explicit exact-F0 flags.
+          grep -Fq 'static atomic_t a52_p414_host_seq' "$DSI"
+          grep -Fq 'if (n > 128U)' "$DSI"
+          grep -Fq 'P414 H n=%u c=%d t=%x l=%u f=%x m=%x p=%llx' "$DSI"
+          grep -Fq 'P414 F0 pre f=%x' "$DSI"
+          grep -Fq 'P414 F0 post f=%x' "$DSI"
+          ! grep -Fq 'a52_p413_persist_bootstrap();' "$DSI"
+          ! grep -Fq 'a52_p413_persist_mode_event(11U' "$DSI"
+          ! grep -Fq 'a52_p409_init_buffers();' "$DSI"
+          ! grep -Fq 'static atomic_t a52_p413_mirror_gen' "$DSIHW"
+
+          for token in \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_register");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_dev_probe");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_init");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_display_bind");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_get");' \
+            'A52_ACKFR_SCOPE("DISP", "a52.life.dsi_panel_drv_init");'; do
+            grep -Fq "$token" "$DSIDISPLAY" "$DSIPANEL" || {
+              echo "ERROR: missing inherited lifecycle scope: $token" >&2; exit 1;
+            }
+          done
+
+          # Existing SMMU/bus contracts and R48 lineage remain.
+          grep -Fq 'A52P411 SMMU_CTX' "$ARMSMMU"
+          grep -Fq 'A52_PHASE397_UFS_BUS_VOTE_V1' "$UFS"
+          grep -Fq 'A52_PHASE397_USB_BUS_VOTE_V1' "$USB"
+          grep -aFq 'P414 BOOT id=%llu disk=%u ram=%u' "$IMAGE"
+          grep -aFq 'A52_PHASE414_SEQUENTIAL_3M_RECORDER_V1' "$IMAGE"
+          grep -Fq 'RS48' "$REC"
+          grep -Fq 'R48' "$REC"
+          echo "Phase415 MDSS GDSC HW-control parity audit: PASS"
+
+          # Phase416 hardens only the Phase414 disk transport. Phase415 GDSC treatment stays intact.
+          grep -Fq 'A52_PHASE416_SEQUENTIAL_3M_DISK_PERSIST_V2' "$REC"
+          grep -Fq '#define A52_P416_STATUS_OFFSET0       0x00000100U' "$REC"
+          grep -Fq '#define A52_P416_STATUS_OFFSET1       0x00000180U' "$REC"
+          grep -Fq '#define A52_P416_STATUS_OFFSET2       0x00000200U' "$REC"
+          grep -Fq 'BUILD_BUG_ON(sizeof(struct a52_p416_status) != 128U);' "$REC"
+          grep -Fq 'if (READ_ONCE(a52_p416_disk_armed))' "$REC"
+          grep -Fq 'WRITE_ONCE(a52_p416_disk_armed, 1U);' "$REC"
+          grep -Fq 'late_initcall_sync(a52_p416_disk_late_arm);' "$REC"
+          grep -Fq 'a52_p416_open_rc = open_rc;' "$REC"
+          grep -Fq 'a52_p416_submit_rc = rc;' "$REC"
+          grep -Fq 'a52_p416_flush_rc = rc;' "$REC"
+          grep -Fq 'a52_p414_update_ram_header_locked();' "$REC"
+          grep -Fq 'P416 DISKARM gen=%u count=%u' "$REC"
+          test "$(grep -Fc 'strncmp(fmt, "P416", 4)' "$REC")" -ge 2
+          python3 - "$REC" <<'PY416'
+          import sys
+          from pathlib import Path
+          text = Path(sys.argv[1]).read_text()
+          early = "atomic_set(&a52_p414_ready, 1);" + chr(10) + chr(9) + "a52_p414_queue_disk();"
+          assert early not in text, "Phase416 must not queue raw disk I/O from core_init"
+          print("Phase416 persistence source audit: PASS")
+          PY416
+          grep -aFq 'P416 DISKARM gen=%u count=%u' "$IMAGE"
+          echo "Phase416 sequential 3 MiB disk persistence audit: PASS"
+
+          # Phase417 diagnostic-only post-bind frontier.
+          DRM="$ROOT/drivers/a52_display/msm/dsi/dsi_drm.c"
+          DRMATOMIC="$ROOT/drivers/gpu/drm/drm_atomic_helper.c"
+          grep -Fq 'A52_PHASE417_POSTBIND_FRONTIER_V1' "$REC" "$DRM" "$DSIDISPLAY" "$DRMATOMIC"
+          test "$(grep -Fc 'strncmp(fmt, "P417", 4)' "$REC")" -ge 2
+          grep -Fq 'late_initcall_sync(a52_p417_frontier_init);' "$REC"
+          grep -Fq 'P417 FRONTIER arm delay=250' "$REC"
+          grep -Fq 'strncmp(fmt, "P273", 4)' "$REC"
+          grep -Fq 'strncmp(fmt, "DRMPOST 212", 11)' "$REC"
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_bridge_mode_set");' "$DRM"
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_bridge_pre_enable");' "$DRM"
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_bridge_enable");' "$DRM"
+          grep -Fq 'P417 BR set rc=%d fl=%x' "$DRM"
+          grep -Fq 'P417 BR early fl=%x' "$DRM"
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_display_set_mode");' "$DSIDISPLAY"
+          grep -aFq 'P417 FRONTIER arm delay=250' "$IMAGE"
+          grep -aFq 'P417 BR set rc=%d fl=%x' "$IMAGE"
+          echo "Phase417 post-bind frontier audit: PASS"
+
+          # Phase418: sparse discriminator for TEST_ONLY validation versus real present.
+          grep -Fq 'A52_PHASE418_ATOMIC_PRESENT_DISCRIMINATOR_V1' "$REC" "$DRMATOMIC" "$DRM" "$MSM"
+          test "$(grep -Fc 'strncmp(fmt, "P418", 4)' "$REC")" -ge 2
+          ! grep -Fq 'strncmp(fmt, "P269", 4)' "$REC"
+          ! grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.drm_atomic_helper_check_modeset");' "$DRMATOMIC"
+          ! grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_bridge_mode_fixup");' "$DRM"
+          grep -Fq 'P418 MS n=%u r=%d' "$DRMATOMIC"
+          grep -Fq 'P418 AT in n=%u' "$MSM"
+          grep -Fq 'P418 AT out n=%u' "$MSM"
+          grep -Fq 'DRM_MODE_ATOMIC_TEST_ONLY' "$MSM"
+          grep -Fq 'DRM_MODE_ATOMIC_ALLOW_MODESET' "$MSM"
+          grep -Fq 'P418 APX t=%lu' "$REC"
+          grep -Fq 'P418 GATE n=%u ret=1' "$REC"
+          grep -Fq 'P418 CTRL boot ret=%u' "$REC"
+          grep -Fq 'P418 CTRL pre ret=%u' "$DRMATOMIC"
+          grep -Fq 'P276 394T pre=1 ret=%u' "$DRMATOMIC"
+          grep -aFq 'P418 CTRL pre ret=%u' "$IMAGE"
+          grep -aFq 'P276 394T pre=1 ret=%u' "$IMAGE"
+          grep -Fq 'P276 394T boot=1 ret=%u' "$REC"
+          grep -Fq 'a52_ackfr_phase418_retained' "$REC"
+          grep -Fq 'P418 E n=%u s=%u r=%d id=%u rt=%u t=%d' "$ENCODER"
+          grep -Fq 'P418 ES0 n=%u' "$ENCODER"
+          grep -Fq '_sde_encoder_atomic_check_phys_enc' "$ENCODER"
+          grep -Fq '_sde_encoder_atomic_check_pu_roi' "$ENCODER"
+          grep -Fq 'sde_connector_get_mode_info' "$ENCODER"
+          grep -Fq 'sde_rm_reserve' "$ENCODER"
+          grep -Fq 'sde_rm_update_topology' "$ENCODER"
+          grep -Fq 'sde_connector_roi_v1_check_roi' "$ENCODER"
+          grep -aFq 'P418 E n=%u s=%u r=%d id=%u rt=%u t=%d' "$IMAGE"
+          grep -aFq 'P418 GATE n=%u ret=1' "$IMAGE"
+          grep -aFq 'P418 MS n=%u r=%d' "$IMAGE"
+          grep -aFq 'P418 AT in n=%u' "$IMAGE"
+          grep -aFq 'P418 APX t=%lu' "$IMAGE"
+          grep -Fq 'A52_PHASE403_RETIRE_PHASE380_UFS_SAMPLER_V1' "$UFSCORE"
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCORE"
+          echo "Phase418 atomic present discriminator audit: PASS"
+
+          # Phase419: one functional delta, restore UAPI vrefresh into drm_display_mode.
+          grep -Fq 'A52_PHASE419_UMODE_VREFRESH_PARITY_V1' "$REC" "$DRMMODES" "$DRM" "$ENCODER"
+          test "$(grep -Fc 'strncmp(fmt, "P419", 4)' "$REC")" -ge 3
+          grep -Fq 'out->vrefresh = in->vrefresh ? in->vrefresh : a52_p419_calc;' "$DRMMODES"
+          grep -Fq 'P419 U in=%u pre=%d calc=%d out=%d' "$DRMMODES"
+          grep -Fq 'dsi_mode->timing.refresh_rate = drm_mode->vrefresh;' "$DRM"
+          grep -Fq 'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d' "$DRM"
+          grep -Fq 'P419 E3 r=%d vr=%d pv=%u' "$ENCODER"
+          grep -aFq 'P419 U in=%u pre=%d calc=%d out=%d' "$IMAGE"
+          grep -aFq 'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d' "$IMAGE"
+          grep -aFq 'P419 E3 r=%d vr=%d pv=%u' "$IMAGE"
+          # Phase418 correlation counters must remain present and unchanged.
+          grep -aFq 'P418 AT in n=%u' "$IMAGE"
+          grep -aFq 'P418 AT out n=%u' "$IMAGE"
+          grep -aFq 'P418 MS n=%u r=%d' "$IMAGE"
+          grep -aFq 'P418 E n=%u s=%u r=%d id=%u rt=%u t=%d' "$IMAGE"
+          grep -Fq 'A52_PHASE403_RETIRE_PHASE380_UFS_SAMPLER_V1' "$UFSCORE"
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCORE"
+          echo "Phase419 UAPI vrefresh parity audit: PASS"
+
+          # Phase420: restore the other half of the 4.19 vrefresh round trip.
+          grep -Fq 'A52_PHASE420_UMODE_ROUNDTRIP_VREFRESH_PARITY_V1' "$REC" "$DRMMODES" "$DSIDISPLAY"
+          test "$(grep -Fc 'strncmp(fmt, "P420", 4)' "$REC")" -ge 3
+          grep -Fq 'P420 TO st=%d calc=%d out=%u p=%d' "$DRMMODES"
+          grep -Fq 'out->vrefresh = a52_p420_stored ?' "$DRMMODES"
+          grep -Fq 'P420 Q h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u n=%u' "$DSIDISPLAY"
+          grep -Fq 'P420 C i=%u h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u' "$DSIDISPLAY"
+          grep -aFq 'P420 TO st=%d calc=%d out=%u p=%d' "$IMAGE"
+          grep -aFq 'P420 Q h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u n=%u' "$IMAGE"
+          grep -aFq 'P420 C i=%u h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u' "$IMAGE"
+          grep -aFq 'P419 U in=%u pre=%d calc=%d out=%d' "$IMAGE"
+          grep -aFq 'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d' "$IMAGE"
+          grep -aFq 'P419 E3 r=%d vr=%d pv=%u' "$IMAGE"
+          grep -aFq 'P418 AT in n=%u' "$IMAGE"
+          grep -aFq 'P418 MS n=%u r=%d' "$IMAGE"
+          grep -aFq 'P418 E n=%u s=%u r=%d id=%u rt=%u t=%d' "$IMAGE"
+          grep -Fq 'A52_PHASE403_RETIRE_PHASE380_UFS_SAMPLER_V1' "$UFSCORE"
+          ! grep -Fq 'a52_r380_start_sampler(hba);' "$UFSCORE"
+          echo "Phase420 vrefresh round-trip parity audit: PASS"
+
+          cp scripts/397_apply_downstream_bus_votes.py \
+             scripts/402_apply_dsi_nohlt_cleanup.py \
+             scripts/403_apply_retire_phase380_ufs_sampler.py \
+             scripts/405_apply_dma_done_direct.py \
+             scripts/406_apply_p392_cache_persist.py \
+             scripts/407_apply_samsung_debug_dsi.py \
+             scripts/408_apply_direct_bio_debug_dsi.py \
+             scripts/409_apply_ram1m_debug2m_dsi.py \
+             scripts/411_apply_fifo_panic_smmu_experiment.py \
+             scripts/413_apply_concurrent_debug2m_mirror.py \
+             scripts/414_apply_sequential_3m_recorder.py \
+             scripts/415_apply_mdss_gdsc_hwctrl_parity.py \
+             scripts/416_apply_sequential_3m_disk_persistence_v2.py \
+             scripts/417_apply_postbind_frontier.py \
+             scripts/418_apply_atomic_present_discriminator.py \
+             scripts/419_apply_umode_vrefresh_parity.py \
+             scripts/420_apply_umode_roundtrip_vrefresh_parity.py \
+             scripts/decode_phase414_sequential_3m.py \
+             scripts/decode_phase416_sequential_3m.py \
+             scripts/decode_phase409_ram1m_debug2m.py \
+             scripts/decode_phase408_samsung_debug_dsi.py \
+             scripts/decode_phase407_samsung_debug_dsi.py \
+             scripts/decode_phase405_dma_done.py "$OUT/audit/"
+          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$DRMMODES" "$MSM" "$ENCODER" "$OUT/source/"
+
+          cat > "$OUT/PHASE420-NOTES.txt" <<'EOF'
+          Phase414 sequential 3 MiB recorder
+          ==================================
+          Logical order is fixed and non-wrapping:
+
+            tier 1: Samsung debug +0x800000, 2 MiB
+            tier 2: persistent RAM 0xB1A00000, 1 MiB
+            then:   STOP
+
+          The first records therefore remain on the Samsung partition. The RAM
+          tier is used only after the Samsung 2 MiB logical capacity is full.
+
+          Hot-path behavior
+          -----------------
+          - Fixed 128-byte records with global monotonic sequence numbers.
+          - No Phase414 whole-image CRC.
+          - Samsung-bound records are copied to a vmalloc staging image only;
+            block I/O occurs on system_unbound_wq.
+          - Completed 4 KiB pages are immutable and written directly.
+          - The current partial page is copied under the recorder spinlock to a
+            bounce page, then written without holding the lock.
+          - If the debug block device is not ready, writes retry in background.
+          - Reserved-RAM continuation uses B1A00000..B1AFFFFF and explicit cache
+            cleaning so it survives the recovery reboot.
+          - Existing Phase392 is restricted to B1900000..B19FFFFF.
+
+          Identity and stale-record rejection
+          -----------------------------------
+          - Header magic + phase=414 + boot_id + global_seq + counts + commit.
+          - boot_id is incremented from the persistent B1A header every boot.
+          - P414 BOOT carries the same boot_id into R48/RS48.
+          - R48/RS48 and its three ramoops transports remain untouched.
+
+          Display frontier
+          ----------------
+          - Lifecycle entry breadcrumbs cover display registration/probe/bind,
+            panel acquisition/driver init, and Samsung early/panel init.
+          - First 128 generic DSI transfers record controller, type, length,
+            software flags, MIPI flags, and first 8 payload bytes.
+          - Exact F0 records flags before and after mode selection.
+          - Phase411 FIFO<=64 treatment, timeout panic, SMMU diagnostics, nohlt,
+            and cpuidle.off=1 remain unchanged.
+          - Phase415 changes only MDSS GDSC ownership semantics: disable preserves
+            HW_CONTROL and software enable refuses to steal an active HW-controlled
+            domain. The missing TouchGrass proxy-consumer is deliberately NOT added.
+
+          Phase416 Samsung persistence hardening
+          --------------------------------------
+          Phase415 recovery showed a valid current B1A Phase414 header and current
+          recorder traffic in B190, while Samsung debug +0x800000 still contained
+          a CRC-valid stale Phase413 image. Phase416 therefore keeps Phase415's
+          functional GDSC treatment unchanged and changes only recorder transport.
+
+          - Earliest events are still staged from core_init into the 2 MiB image.
+          - Raw sda8 writes are armed from late_initcall, after device init.
+          - Failed opens/BIOs/flushes still retry for up to 60 seconds.
+          - B1A now mirrors disk_count/global_seq during the Samsung tier.
+          - Three 128-byte B1A status copies preserve armed/worker/open/BIO/flush
+            results, retry count, generation counters, last page, and recorder state.
+          - decode_phase416_sequential_3m.py majority-fuses those status copies.
+          Phase417 post-bind frontier
+          ---------------------------
+          - Phase416 Samsung persistence is unchanged.
+          - Re-arms only the low-rate P273 userspace task frontier.
+          - Adds lifecycle scopes to DRM atomic modeset checking, DSI bridge
+            mode_fixup/mode_set/pre_enable/enable, plus dsi_display_set_mode.
+          - Records pre_enable set-mode rc/flags and seamless early-return flags.
+          - Re-admits only selected post-bind markers (P267/P268/P269/P273,
+            DRMPOST 212, KMSPOST) through the Phase402 second gate.
+          - Does not re-enable the retired UFS sampler, NoC observers, generic
+            IRQ witnesses, or cpuidle probes.
+
+          Phase418 atomic present discriminator
+          -------------------------------------
+          - Removes the high-rate per-check DRM atomic and bridge-mode-fixup scopes.
+          - Retires broad P269 property/UAPI admission after Phase417 proved resource
+            enumeration and mode visibility are healthy.
+          - Logs exact Composer DRM_MODE_ATOMIC ioctl flags, distinguishing TEST_ONLY
+            and real presents, and always preserves non-test atomics and errors.
+          - Samples successful modeset checks sparsely while retaining all failures.
+          - Samples apexd task presence every 10 seconds through the pre-zygote gap.
+          - Adds P276 positive controls plus explicit Phase280 retention-latch diagnostics.
+          - Instruments sde_encoder_virt_atomic_check sub-steps, with full detail for
+            the first 16 calls and sparse failure counters thereafter.
+          - Functional DSI, SMMU, GDSC, UFS and DRM behavior is unchanged.
+
+          Phase419 UAPI vrefresh parity
+          -----------------------------
+          Phase418 hardware showed every sampled TEST_ONLY atomic check failing at
+          encoder step 3, sde_connector_get_mode_info(), before RM reservation.
+
+          - Confirms A52 convert_to_dsi_mode consumes drm_mode->vrefresh directly.
+          - Restores vrefresh lost by Android 5.10 drm_mode_convert_umode using:
+              out->vrefresh = in->vrefresh ? in->vrefresh : drm_mode_vrefresh(out)
+          - This is the only functional Phase419 change.
+          - P419 U records input, pre-fix output, timing-derived fallback and final value once.
+          - P419 F records the first dsi_display_find_mode compare tuple and rc once.
+          - P419 E3 records the first encoder step-3 rc, adjusted vrefresh and private-info presence once.
+          - P419 is admitted through the Samsung sequential recorder even after the old retention latch.
+          - Phase418 AT/E/MS counters remain unchanged to reveal whether validation now advances,
+            and if it does not, which later encoder step becomes the new failure frontier.
+
+          Phase420 vrefresh round-trip parity
+          -----------------------------------
+          Phase419 proved the inbound copy executes but Composer sends 57 Hz back.
+          The compiled 5.10 kernel exports vrefresh with drm_mode_vrefresh(in),
+          while TouchGrass 4.19 preserves the DSI driver's stored in->vrefresh.
+
+          - Functional change: drm_mode_convert_to_umode now preserves stored
+            in->vrefresh when nonzero, with drm_mode_vrefresh(in) only as fallback.
+          - P420 TO records stored refresh, timing-derived refresh, exported refresh
+            and pixel clock for the first 1080x2400 mode.
+          - P420 Q/C record the first Composer lookup and up to eight cached panel
+            candidates, including Samsung HS/PHS fields.
+          - Phase419 inbound parity, Phase418 AT/E/MS, GDSC, DSI, SMMU and UFS
+            behavior are otherwise unchanged.
+          - The legacy bool return-rc masking path is deliberately not fixed.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE420-NOTES.txt"
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Build Phase420 vrefresh-roundtrip-parity boot image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/phase420-gki-out"
+          BASE="$OUT/package/boot.img"
+          FINAL="$OUT/package/boot-phase420-umode-roundtrip-vrefresh-parity-v1.img"
+          test -s "$BASE"
+          cp "$BASE" "$FINAL"
+
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          base_path = Path("phase420-gki-out/package/boot.img")
+          final = Path("phase420-gki-out/package/boot-phase420-umode-roundtrip-vrefresh-parity-v1.img")
+          base = module.parse_boot(base_path.read_bytes())
+          data = bytearray(final.read_bytes())
+          tokens = base["cmdline"].split()
+          for tok in ("nohlt", "cpuidle.off=1", "panic=1"):
+              key = tok.split("=", 1)[0]
+              tokens = [x for x in tokens if x != tok and x.split("=", 1)[0] != key]
+              tokens.append(tok)
+          cmdline = " ".join(tokens)
+          encoded = cmdline.encode("ascii")
+          if len(encoded) > 1534:
+              raise SystemExit(f"Phase411 command line too long: {len(encoded)}")
+          data[64:576] = b"\0" * 512
+          data[608:1632] = b"\0" * 1024
+          first = encoded[:511]
+          second = encoded[511:]
+          data[64:64 + len(first)] = first
+          data[608:608 + len(second)] = second
+          final.write_bytes(data)
+
+          out = module.parse_boot(final.read_bytes())
+          assert "nohlt" in out["cmdline"].split()
+          assert "cpuidle.off=1" in out["cmdline"].split()
+          assert "panic=1" in out["cmdline"].split()
+          assert "ignore_loglevel" in out["cmdline"].split()
+          for key in ("header_version","page_size","board","kernel_addr",
+                      "ramdisk_addr","tags_addr","kernel","ramdisk","second","dtb"):
+              assert out[key] == base[key], key
+          assert final.stat().st_size == base_path.stat().st_size
+          Path("phase420-gki-out/PHASE420-BOOT.json").write_text(
+              json.dumps({
+                  "cmdline": out["cmdline"],
+                  "treatment": "Phase419 inbound parity retained + Phase420 restores drm_mode_convert_to_umode stored-vrefresh parity with timing-derived fallback; P420 outbound/candidate breadcrumbs; no other functional DRM/DSI/SMMU/GDSC/UFS changes; no UFS sampler or NoC probes; nohlt cpuidle.off=1 panic=1",
+                  "kernel_payload_unchanged_by_cmdline_patch": True,
+              }, indent=2, sort_keys=True) + "\n")
+          PY
+
+          sha256sum "$FINAL"
+          echo "Phase420 vrefresh round-trip parity boot image: PASS"
+
+      - name: Upload Phase420
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE420-VREFRESH-ROUNDTRIP-${{ github.run_number }}
+          path: phase420-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase420 boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE420-VREFRESH-ROUNDTRIP-${{ github.run_number }}-BOOT-IMG
+          path: phase420-gki-out/package/boot-phase420-umode-roundtrip-vrefresh-parity-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

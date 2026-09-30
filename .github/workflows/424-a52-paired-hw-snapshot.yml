@@ -59,6 +59,7 @@ on:
       - .github/workflows/394-a52-mode-fixup-fifo-early.yml
 
 # Phase416 binary-audit correction rebuild
+# Phase424 runner restart after hosted-runner package stall
 permissions:
   contents: read
 

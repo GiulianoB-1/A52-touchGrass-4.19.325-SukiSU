@@ -349,37 +349,35 @@ def patch_rpmh(text: str) -> str:
     text = one(text, getter, getter + "\n" + P423_RPMH_CHECK,
                "RPMh solver-state checker")
 
-    async_anchor = """\tstruct rpmh_request *rpm_msg;
-\tint ret;
+    def add_public_check(src: str, signature: str, export: str, label: str) -> str:
+        start = src.find(signature)
+        end = src.find(export, start + len(signature))
+        if start < 0 or end < 0:
+            raise SystemExit("Phase423 RPMh function boundary missing: " + label)
+        fn = src[start:end]
+        anchor = "\tint ret;\n"
+        if fn.count(anchor) != 1:
+            raise SystemExit(
+                f"Phase423 {label}: expected one int ret anchor, found {fn.count(anchor)}"
+            )
+        fn = fn.replace(
+            anchor,
+            anchor
+            + "\n\tret = a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);\n"
+            + "\tif (ret)\n"
+            + "\t\treturn ret;\n",
+            1,
+        )
+        return src[:start] + fn + src[end:]
 
-\trpm_msg = kzalloc(sizeof(*rpm_msg), GFP_ATOMIC);
-"""
-    async_new = """\tstruct rpmh_request *rpm_msg;
-\tint ret;
-
-\tret = a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);
-\tif (ret)
-\t\treturn ret;
-
-\trpm_msg = kzalloc(sizeof(*rpm_msg), GFP_ATOMIC);
-"""
-    text = one(text, async_anchor, async_new, "rpmh_write_async refusal")
-
-    sync_anchor = """\tDEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
-\tint ret;
-
-\tret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
-"""
-    sync_new = """\tDEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
-\tint ret;
-
-\tret = a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);
-\tif (ret)
-\t\treturn ret;
-
-\tret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
-"""
-    text = one(text, sync_anchor, sync_new, "rpmh_write refusal")
+    text = add_public_check(
+        text, "int rpmh_write_async(", "EXPORT_SYMBOL(rpmh_write_async);",
+        "rpmh_write_async refusal",
+    )
+    text = add_public_check(
+        text, "int rpmh_write(", "EXPORT_SYMBOL(rpmh_write);",
+        "rpmh_write refusal",
+    )
 
     batch = """\tif (!cmd || !n)
 \t\treturn -EINVAL;

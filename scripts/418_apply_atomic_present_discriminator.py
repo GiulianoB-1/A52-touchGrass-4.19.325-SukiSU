@@ -135,8 +135,11 @@ def patch_rec(text: str) -> str:
 
     # Phase417 proved connector/mode enumeration is healthy. Retire the very
     # high-volume Phase269 property/UAPI dump from both admission gates.
-    text = one(text, '    strncmp(fmt, "P269", 4) &&\n', '', "first P269 retirement")
-    text = one(text, '\t    strncmp(fmt, "P269", 4) &&\n', '', "second P269 retirement")
+    p269 = re.compile(r'(?m)^[ \\t]+strncmp\\(fmt, "P269", 4\\) &&\\n')
+    text, removed = p269.subn('', text)
+    if removed != 2:
+        raise SystemExit(
+            f"Phase418 P269 retirement: expected 2 admission lines, found {removed}")
 
     decl = "static void a52_r273_frontier_fn(struct work_struct *work);\n"
     text = one(text, decl, APEX_HELPER + "\n" + decl, "APEX helper insertion")

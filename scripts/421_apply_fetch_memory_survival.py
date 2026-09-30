@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 MARK = "A52_PHASE421_FETCH_MEMORY_SURVIVAL_V1"
@@ -237,15 +238,16 @@ def patch_rec(text: str) -> str:
     # Phase405 occupies the same B190 slots. Its exact-F0 producer has been
     # retired since Phase411, but remove the formatter hook completely so no
     # stale legacy P276 record can collide with Phase421.
-    call = "a52_p405_dsi_mirror(dst); /* A52_PHASE405_DMA_DONE_DIRECT_V1 */"
-    if call in text:
-        text = text.replace(call,
-            "/* Phase421 owns the Phase405 fixed slots; legacy mirror retired. */",
-            1)
-    else:
-        # The generated variable name is stable in current lineage, but fail
-        # loudly rather than silently sharing slots if it changed.
+    pat = re.compile(
+        r"\n\s*a52_p405_dsi_mirror\([^;]+\);\s*"
+        r"/\* A52_PHASE405_DMA_DONE_DIRECT_V1 \*/"
+    )
+    m = pat.search(text)
+    if not m:
         raise SystemExit("Phase421 Phase405 mirror call missing")
+    text = text[:m.start()] + (
+        "\n\t/* Phase421 owns the Phase405 fixed slots; legacy mirror retired. */"
+    ) + text[m.end():]
 
     old_decl = "static void a52_p405_dsi_mirror(const char *message)"
     if old_decl in text:
@@ -556,7 +558,10 @@ def validate(root: Path) -> None:
         if token not in rec:
             raise SystemExit("Phase421 recorder token missing: " + token)
 
-    if "a52_p405_dsi_mirror(dst); /* A52_PHASE405_DMA_DONE_DIRECT_V1 */" in rec:
+    active_calls = re.findall(
+        r"(?m)^\s*a52_p405_dsi_mirror\([^;]+\);", rec
+    )
+    if active_calls:
         raise SystemExit("Phase421 legacy Phase405 slot writer still active")
 
     for token in (

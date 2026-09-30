@@ -373,7 +373,8 @@ jobs:
 
           # Phase417 diagnostic-only post-bind frontier.
           DRM="$ROOT/drivers/a52_display/msm/dsi/dsi_drm.c"
-          grep -Fq 'A52_PHASE417_POSTBIND_FRONTIER_V1' "$REC" "$DRM" "$DSIDISPLAY"
+          DRMATOMIC="$ROOT/drivers/gpu/drm/drm_atomic_helper.c"
+          grep -Fq 'A52_PHASE417_POSTBIND_FRONTIER_V1' "$REC" "$DRM" "$DSIDISPLAY" "$DRMATOMIC"
           test "$(grep -Fc 'strncmp(fmt, "P417", 4)' "$REC")" -ge 2
           grep -Fq 'late_initcall_sync(a52_p417_frontier_init);' "$REC"
           grep -Fq 'P417 FRONTIER arm delay=250' "$REC"
@@ -386,6 +387,7 @@ jobs:
           grep -Fq 'P417 BR set rc=%d fl=%x' "$DRM"
           grep -Fq 'P417 BR early fl=%x' "$DRM"
           grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.dsi_display_set_mode");' "$DSIDISPLAY"
+          grep -Fq 'A52_ACKFR_SCOPE("DISP", "a52.drm_atomic_helper_check_modeset");' "$DRMATOMIC"
           grep -aFq 'P417 FRONTIER arm delay=250' "$IMAGE"
           grep -aFq 'P417 BR set rc=%d fl=%x' "$IMAGE"
           echo "Phase417 post-bind frontier audit: PASS"
@@ -410,7 +412,7 @@ jobs:
              scripts/decode_phase408_samsung_debug_dsi.py \
              scripts/decode_phase407_samsung_debug_dsi.py \
              scripts/decode_phase405_dma_done.py "$OUT/audit/"
-          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$OUT/source/"
+          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$OUT/source/"
 
           cat > "$OUT/PHASE417-NOTES.txt" <<'EOF'
           Phase414 sequential 3 MiB recorder
@@ -476,8 +478,8 @@ jobs:
           ---------------------------
           - Phase416 Samsung persistence is unchanged.
           - Re-arms only the low-rate P273 userspace task frontier.
-          - Adds lifecycle scopes to DSI bridge mode_fixup/mode_set/pre_enable/enable
-            plus dsi_display_set_mode.
+          - Adds lifecycle scopes to DRM atomic modeset checking, DSI bridge
+            mode_fixup/mode_set/pre_enable/enable, plus dsi_display_set_mode.
           - Records pre_enable set-mode rc/flags and seamless early-return flags.
           - Re-admits only selected post-bind markers (P267/P268/P269/P273,
             DRMPOST 212, KMSPOST) through the Phase402 second gate.

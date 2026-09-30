@@ -455,9 +455,9 @@ static void a52_p418_enc_note(unsigned int n, unsigned int step, int rc,
 
 	if (n <= 16U || !(n & 127U))
 		a52_ackfr_record(
-			"P418 E n=%u s=%u r=%d id=%u rt=%u m=%u a=%u c=%u lm=%u ce=%u in=%u",
+			"P418 E n=%u s=%u r=%d id=%u rt=%u t=%d m=%u a=%u c=%u lm=%u ce=%u in=%u",
 			n, step, rc, drm_enc ? drm_enc->base.id : 0U,
-			a52_ackfr_phase418_retained(),
+			a52_ackfr_phase418_retained(), current->tgid,
 			crtc_state ? crtc_state->mode_changed : 9U,
 			crtc_state ? crtc_state->active_changed : 9U,
 			crtc_state ? crtc_state->connectors_changed : 9U,
@@ -726,7 +726,7 @@ def validate(root: Path) -> None:
             raise SystemExit("Phase418 MSM token missing: " + tok)
 
     for tok in (
-        MARK, "P418 E n=%u s=%u r=%d", "P418 ES0 n=%u",
+        MARK, "P418 E n=%u s=%u r=%d id=%u rt=%u t=%d", "P418 ES0 n=%u",
         "_sde_encoder_atomic_check_phys_enc", "_sde_encoder_atomic_check_pu_roi",
         "sde_connector_set_old_topology_name", "sde_connector_get_mode_info",
         "sde_rm_reserve", "sde_rm_update_topology",

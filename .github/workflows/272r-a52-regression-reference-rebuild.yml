@@ -43,7 +43,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
+            repo git curl ca-certificates unzip make gcc g++ python3 bc bison flex \
             clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
 

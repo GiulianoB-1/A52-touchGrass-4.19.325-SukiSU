@@ -555,7 +555,9 @@ jobs:
           grep -Fq 'spin_lock_irqsave(&drv->lock, flags);' "$RPMHRSC"
           grep -Fq 'spin_lock(&drv->client.cache_lock);' "$RPMHRSC"
           grep -Fq 'drv->client.in_solver_mode = enable;' "$RPMHRSC"
-          grep -Fq 'P423 SOL n=%d en=%u old=%u new=%u loops=%u ref=%d bor=%d' "$RPMHRSC"
+          grep -Fq 'drv->in_solver_mode = enable;' "$RPMHRSC"
+          grep -Fq 'READ_ONCE(drv->in_solver_mode)' "$RPMHRSC"
+          grep -Fq 'P423 SOL n=%d en=%u up=%u/%u low=%u/%u loops=%u ref=%d bor=%d' "$RPMHRSC"
           grep -Fq 'P423 REF n=%d flag=%u st=%u' "$RPMHRSC"
           grep -Fq 'P423 BORROW n=%d flag=1 ty=%d off=%d use=%u' "$RPMHRSC"
           grep -Fq '#define rpmh_mode_solver_set(d,e) a52_rpmh_mode_solver_set_compat((d), (e))' "$COMPAT"
@@ -772,15 +774,16 @@ jobs:
             compatibility bridge for Display RSC software state.
           - On enable, wait until the ACTIVE group (borrowed WAKE on disp_rsc)
             is no longer in use, restoring TouchGrass's pre-solver exclusion.
-          - Track solver mode in rpmh_ctrlr under cache_lock, nested after
-            drv->lock as required by pinned 5.10 lock ordering.
-          - ACTIVE_ONLY requests are refused at the RPMh layer with exactly
-            -EBUSY in both __rpmh_write() and rpmh_write_batch().
+          - Track solver mode in both rpmh_ctrlr and rsc_drv. The setter nests
+            cache_lock after drv->lock as required by pinned 5.10 lock ordering.
+          - ACTIVE_ONLY requests are refused with exactly -EBUSY in both upper
+            RPMh paths (__rpmh_write and rpmh_write_batch), plus a DRV-level
+            race guard before TCS claim.
           - Disable/CLK_STATE clears the flag through the same bridge.
 
           Diagnostic-only records:
-          - P423 SOL: every solver true/false transition, old/new flag, wait-loop
-            count, cumulative refused count and cumulative borrow-violation count.
+          - P423 SOL: every solver true/false transition, upper and lower old/new
+            flags, wait-loop count, cumulative refused and borrow-violation counts.
           - P423 REF: Display-RSC ACTIVE_ONLY requests refused with -EBUSY.
           - P423 BORROW: invariant violation if a borrowed-WAKE ACTIVE trigger
             reaches rpmh-rsc while the solver flag is still set. Expected zero.
@@ -850,7 +853,7 @@ jobs:
           Path("phase423-gki-out/PHASE423-BOOT.json").write_text(
               json.dumps({
                   "cmdline": out["cmdline"],
-                  "treatment": "Phase422 diagnostics retained; Phase423 restores only Display-RSC RPMh solver-mode software state, waits borrowed WAKE drain on enable, returns -EBUSY for ACTIVE_ONLY at ordinary+batch RPMh paths, and records SOL/REF/BORROW; no invalidate-before-borrow, no HF0 work; nohlt cpuidle.off=1 panic=1",
+                  "treatment": "Phase422 diagnostics retained; Phase423 restores Display-RSC upper+DRV solver-mode software state, waits borrowed WAKE drain on enable, returns -EBUSY for ACTIVE_ONLY at ordinary+batch RPMh paths plus a DRV race guard, and records SOL/REF/BORROW; no invalidate-before-borrow, no HF0 work; nohlt cpuidle.off=1 panic=1",
                   "kernel_payload_unchanged_by_cmdline_patch": True,
               }, indent=2, sort_keys=True) + "\n")
           PY

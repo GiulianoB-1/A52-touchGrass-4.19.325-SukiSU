@@ -320,6 +320,21 @@ def patch_ctrl(text: str) -> str:
         raise SystemExit("Phase421 dsi_message_tx declaration anchor missing")
     fn = fn.replace(decl, decl + "	bool a52_p421_f0 = false;\n", 1)
 
+    entry = '''	if (a52_p276r_deep_active())
+		a52_ackfr_record("P276 D M s=0 f=%x mt=%u l=%u", flags ? *flags : 0, (unsigned int)msg->type, (unsigned int)msg->tx_len);
+'''
+    if entry not in fn:
+        raise SystemExit("Phase421 message entry anchor missing")
+    fn = fn.replace(entry, '''	a52_p421_f0 = a52_p411_exact_f0(dsi_ctrl, msg);
+	if (a52_p421_f0) {
+		atomic_set(&a52_p421_target, 1);
+		a52_p421_survival_record(0U, A52_P421_V_FLAGS,
+			flags ? *flags : 0U, 0, 0U, 0);
+	}
+	if (a52_p276r_deep_active())
+		a52_ackfr_record("P276 D M s=0 f=%x mt=%u l=%u", flags ? *flags : 0, (unsigned int)msg->type, (unsigned int)msg->tx_len);
+''', 1)
+
     old = '''	a52_p414_host_note(dsi_ctrl, msg, flags);
 	if (a52_p411_exact_f0(dsi_ctrl, msg))
 		a52_ackfr_record("P414 F0 pre f=%x", flags ? *flags : 0U);
@@ -332,13 +347,8 @@ def patch_ctrl(text: str) -> str:
 	a52_p411_note_f0(dsi_ctrl, msg, flags, "after-mode");
 '''
     new = '''	a52_p414_host_note(dsi_ctrl, msg, flags);
-	a52_p421_f0 = a52_p411_exact_f0(dsi_ctrl, msg);
-	if (a52_p421_f0) {
-		atomic_set(&a52_p421_target, 1);
-		a52_p421_survival_record(0U, A52_P421_V_FLAGS,
-			flags ? *flags : 0U, 0, 0U, 0);
+	if (a52_p421_f0)
 		a52_ackfr_record("P414 F0 pre f=%x", flags ? *flags : 0U);
-	}
 	a52_p411_note_f0(dsi_ctrl, msg, flags, "before-mode");
 
 	/* Select the tx mode to transfer the command */
@@ -354,26 +364,18 @@ def patch_ctrl(text: str) -> str:
         raise SystemExit("Phase421 Phase414 F0 chronology anchor missing")
     fn = fn.replace(old, new, 1)
 
-    old = '''	rc = dsi_message_validate_tx_mode(dsi_ctrl, msg->tx_len, flags);
-	if (rc) {
-'''
-    new = '''	rc = dsi_message_validate_tx_mode(dsi_ctrl, msg->tx_len, flags);
-	if (a52_p421_f0)
+    old = "	rc = dsi_message_validate_tx_mode(dsi_ctrl, msg->tx_len, flags);\n"
+    new = old + '''	if (a52_p421_f0)
 		a52_p421_survival_record(2U, A52_P421_V_FLAGS | A52_P421_V_RC,
 			*flags, rc, 0U, 0);
-	if (rc) {
 '''
     if old not in fn:
         raise SystemExit("Phase421 validation anchor missing")
     fn = fn.replace(old, new, 1)
 
-    old = '''	rc = mipi_dsi_create_packet(&packet, msg);
-	if (rc) {
-'''
-    new = '''	rc = mipi_dsi_create_packet(&packet, msg);
-	if (a52_p421_f0)
+    old = "	rc = mipi_dsi_create_packet(&packet, msg);\n"
+    new = old + '''	if (a52_p421_f0)
 		a52_p421_survival_record(3U, A52_P421_V_RC, 0U, rc, 0U, 0);
-	if (rc) {
 '''
     if old not in fn:
         raise SystemExit("Phase421 packet anchor missing")
@@ -383,15 +385,9 @@ def patch_ctrl(text: str) -> str:
 			&packet,
 			&buffer,
 			&length);
-	if (rc) {
 '''
-    new = '''	rc = dsi_ctrl_copy_and_pad_cmd(dsi_ctrl,
-			&packet,
-			&buffer,
-			&length);
-	if (a52_p421_f0)
+    new = old + '''	if (a52_p421_f0)
 		a52_p421_survival_record(4U, A52_P421_V_RC, 0U, rc, 0U, 0);
-	if (rc) {
 '''
     if old not in fn:
         raise SystemExit("Phase421 copy-and-pad anchor missing")
@@ -413,6 +409,12 @@ def patch_ctrl(text: str) -> str:
     if old not in fn:
         raise SystemExit("Phase421 message exit anchor missing")
     fn = fn.replace(old, new, 1)
+
+    # The target is armed before the first legacy deep-recorder call. Suppress
+    # the entire inherited P276 deep path for this exact message, not just the
+    # later SMMU/IOVA observers.
+    fn = fn.replace("a52_p276r_deep_active()",
+        "(a52_p276r_deep_active() && !a52_p421_target_active())")
     text = text[:start] + fn + text[end:]
 
     # Suppress every legacy deep-active observer inside the actual kickoff and

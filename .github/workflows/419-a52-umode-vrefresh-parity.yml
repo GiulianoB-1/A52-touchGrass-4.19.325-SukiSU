@@ -446,10 +446,10 @@ jobs:
           grep -Fq 'out->vrefresh = in->vrefresh ? in->vrefresh : a52_p419_calc;' "$DRMMODES"
           grep -Fq 'P419 U in=%u pre=%d calc=%d out=%d' "$DRMMODES"
           grep -Fq 'dsi_mode->timing.refresh_rate = drm_mode->vrefresh;' "$DRM"
-          grep -Fq 'P419 F h=%u v=%u r=%u pm=%u p=%u rc=%d' "$DRM"
+          grep -Fq 'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d' "$DRM"
           grep -Fq 'P419 E3 r=%d vr=%d pv=%u' "$ENCODER"
           grep -aFq 'P419 U in=%u pre=%d calc=%d out=%d' "$IMAGE"
-          grep -aFq 'P419 F h=%u v=%u r=%u pm=%u p=%u rc=%d' "$IMAGE"
+          grep -aFq 'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d' "$IMAGE"
           grep -aFq 'P419 E3 r=%d vr=%d pv=%u' "$IMAGE"
           # Phase418 correlation counters must remain present and unchanged.
           grep -aFq 'P418 AT in n=%u' "$IMAGE"

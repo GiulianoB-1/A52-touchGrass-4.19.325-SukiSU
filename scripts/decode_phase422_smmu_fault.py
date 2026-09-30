@@ -18,6 +18,7 @@ MAGIC = 0xA52F4220A52F4220
 COMMIT = 0x422C0DE5
 FSR_SS = 1 << 30
 SCTLR_CFCFG = 1 << 7
+FSR_FAULT_MASK = 0xC00001FE
 
 STAGE_NAMES = [
     "M00 IRQ registration + cmd_buffer_iova",
@@ -234,10 +235,10 @@ def main() -> int:
     elif isinstance(m00, dict) and isinstance(m02, dict):
         if m02["rpm_get_ret"] < 0:
             verdict = "no handler fault recorded and timeout SMMU snapshot could not power/read the SMMU"
-        elif m02["fsr"] != 0:
-            verdict = "fault pending at timeout but handler did not record it: investigate context IRQ delivery"
+        elif m02["fsr"] & FSR_FAULT_MASK:
+            verdict = "fault bits pending at timeout but handler did not record it: investigate context IRQ delivery"
         else:
-            verdict = "no context fault recorded and timeout FSR is clean: SMMU fault theory is downgraded"
+            verdict = "no context fault recorded and timeout FSR has no fault bits: SMMU fault theory is downgraded"
 
     summary = {
         "records_present": sorted(records),

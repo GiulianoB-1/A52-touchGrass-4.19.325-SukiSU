@@ -20,9 +20,14 @@ def inject_scope(text: str, fn: str, scope_name: str, ret: str) -> str:
     statement = f'A52_ACKFR_SCOPE("DISP", "{scope_name}");'
     if statement in text:
         return text
+
+    # Match the definition itself, not its exact return-type formatting.
+    # The generated display tree can wrap qualifiers/signatures differently
+    # from the pinned TouchGrass source, so key on "fn(...) {" only.
     pat = re.compile(
-        r'((?:static\\s+)?' + re.escape(ret) + r'\\s+' + re.escape(fn) +
-        r'\\s*\\([^;]*?\\)\\s*\\n\\{)', re.S)
+        r'\\b' + re.escape(fn) + r'\\s*\\([^;{}]*\\)\\s*\\{',
+        re.S,
+    )
     m = pat.search(text)
     if not m:
         raise SystemExit(f"Phase417 function not found for scope: {fn}")

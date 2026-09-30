@@ -196,7 +196,7 @@ def validate(root: Path) -> None:
     for tok in (
         MARK,
         'dsi_mode->timing.refresh_rate = drm_mode->vrefresh;',
-        'P419 F h=%u v=%u r=%u pm=%u p=%u rc=%d',
+        'P419 F h=%u v=%u r=%u hs=%u ph=%u pm=%u p=%u rc=%d',
         'dsi_display_find_mode(display, &dsi_mode, &panel_dsi_mode);',
     ):
         if tok not in drm:

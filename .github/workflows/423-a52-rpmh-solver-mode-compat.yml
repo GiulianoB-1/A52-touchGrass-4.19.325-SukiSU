@@ -549,7 +549,8 @@ jobs:
           grep -Fq 'A52_PHASE423_RPMH_SOLVER_MODE_COMPAT_V1' "$RPMHRSC" "$RPMH" "$RPMHINT" "$COMPAT" "$REC"
           grep -Fq 'bool in_solver_mode;' "$RPMHINT"
           grep -Fq 'a52_p423_check_ctrlr_state' "$RPMH"
-          test "$(grep -Fc 'a52_p423_check_ctrlr_state(ctrlr, state);' "$RPMH")" -eq 2
+          test "$(grep -Fc 'a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);' "$RPMH")" -eq 2
+          test "$(grep -Fc 'a52_p423_check_ctrlr_state(ctrlr, state);' "$RPMH")" -eq 1
           grep -Fq 'return -EBUSY;' "$RPMH"
           grep -Fq 'a52_rpmh_mode_solver_set_compat' "$RPMHRSC" "$COMPAT"
           grep -Fq 'spin_lock_irqsave(&drv->lock, flags);' "$RPMHRSC"
@@ -776,9 +777,9 @@ jobs:
             is no longer in use, restoring TouchGrass's pre-solver exclusion.
           - Track solver mode in both rpmh_ctrlr and rsc_drv. The setter nests
             cache_lock after drv->lock as required by pinned 5.10 lock ordering.
-          - ACTIVE_ONLY requests are refused with exactly -EBUSY in both upper
-            RPMh paths (__rpmh_write and rpmh_write_batch), plus a DRV-level
-            race guard before TCS claim.
+          - ACTIVE_ONLY requests are refused with exactly -EBUSY in all three
+            public RPMh write APIs (async, sync, batch) before allocation/cache
+            work, plus a DRV-level race guard before TCS claim.
           - Disable/CLK_STATE clears the flag through the same bridge.
 
           Diagnostic-only records:

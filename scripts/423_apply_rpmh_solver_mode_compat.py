@@ -349,23 +349,37 @@ def patch_rpmh(text: str) -> str:
     text = one(text, getter, getter + "\n" + P423_RPMH_CHECK,
                "RPMh solver-state checker")
 
-    wr = """\tint ret = -EINVAL;
-\tstruct cache_req *req;
-\tint i;
+    async_anchor = """\tstruct rpmh_request *rpm_msg;
+\tint ret;
 
-\t/* Cache the request in our store and link the payload */
+\trpm_msg = kzalloc(sizeof(*rpm_msg), GFP_ATOMIC);
 """
-    wr_new = """\tint ret = -EINVAL;
-\tstruct cache_req *req;
-\tint i;
+    async_new = """\tstruct rpmh_request *rpm_msg;
+\tint ret;
 
-\tret = a52_p423_check_ctrlr_state(ctrlr, state);
+\tret = a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);
 \tif (ret)
 \t\treturn ret;
 
-\t/* Cache the request in our store and link the payload */
+\trpm_msg = kzalloc(sizeof(*rpm_msg), GFP_ATOMIC);
 """
-    text = one(text, wr, wr_new, "__rpmh_write refusal")
+    text = one(text, async_anchor, async_new, "rpmh_write_async refusal")
+
+    sync_anchor = """\tDEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
+\tint ret;
+
+\tret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
+"""
+    sync_new = """\tDEFINE_RPMH_MSG_ONSTACK(dev, state, &compl, rpm_msg);
+\tint ret;
+
+\tret = a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);
+\tif (ret)
+\t\treturn ret;
+
+\tret = __fill_rpmh_msg(&rpm_msg, state, cmd, n);
+"""
+    text = one(text, sync_anchor, sync_new, "rpmh_write refusal")
 
     batch = """\tif (!cmd || !n)
 \t\treturn -EINVAL;
@@ -457,10 +471,13 @@ def validate(root: Path) -> None:
     if "#define rpmh_mode_solver_set(d,e) do{}while(0)" in compat:
         raise SystemExit("Phase423 solver stub still present")
 
-    # The actual display bus path uses rpmh_write_batch(), so both paths must
-    # enforce the upper-layer -EBUSY contract.
-    if rpmh.count("a52_p423_check_ctrlr_state(ctrlr, state);") != 2:
-        raise SystemExit("Phase423 expected solver check in exactly two RPMh paths")
+    # TouchGrass checks all public write APIs before allocations/cache work.
+    if rpmh.count("a52_p423_check_ctrlr_state(") != 4:
+        raise SystemExit("Phase423 expected one checker definition + three RPMh call sites")
+    if rpmh.count("a52_p423_check_ctrlr_state(get_rpmh_ctrlr(dev), state);") != 2:
+        raise SystemExit("Phase423 async/sync upper solver checks missing")
+    if rpmh.count("a52_p423_check_ctrlr_state(ctrlr, state);") != 1:
+        raise SystemExit("Phase423 batch upper solver check missing")
 
     setter = function_slice(
         rsc,

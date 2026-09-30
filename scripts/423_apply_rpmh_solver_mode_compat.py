@@ -48,6 +48,16 @@ def patch_internal(text: str) -> str:
 """
     text = one(text, old, new, "rpmh_ctrlr solver flag")
 
+    drv_old = """	int id;
+	int num_tcs;
+"""
+    drv_new = """	int id;
+	/* A52_PHASE423_RPMH_SOLVER_MODE_COMPAT_V1 */
+	bool in_solver_mode;
+	int num_tcs;
+"""
+    text = one(text, drv_old, drv_new, "rsc_drv solver flag")
+
     anchor = """void rpmh_rsc_invalidate(struct rsc_drv *drv);
 
 void rpmh_tx_done"""
@@ -120,7 +130,7 @@ static void a52_p423_note_borrow_solver(struct rsc_drv *drv,
 	int n;
 
 	if (!a52_p301_disp_rsc(drv) || !tcs ||
-	    tcs->type == ACTIVE_TCS || !a52_p423_solver_mode(drv))
+	    tcs->type == ACTIVE_TCS || !READ_ONCE(drv->in_solver_mode))
 		return;
 
 	n = atomic_inc_return(&a52_p423_borrow_solver);
@@ -137,7 +147,7 @@ int a52_rpmh_mode_solver_set_compat(const struct device *dev, bool enable)
 	struct rsc_drv *drv;
 	struct tcs_group *tcs;
 	unsigned long flags;
-	bool busy, old;
+	bool busy, old, old_drv;
 	unsigned int loops = 0;
 	int m, n;
 
@@ -183,6 +193,8 @@ int a52_rpmh_mode_solver_set_compat(const struct device *dev, bool enable)
 	 * Pinned 5.10 documents this lock order explicitly:
 	 * drv->lock, then rpmh_ctrlr.cache_lock.
 	 */
+	old_drv = drv->in_solver_mode;
+	drv->in_solver_mode = enable;
 	spin_lock(&drv->client.cache_lock);
 	old = drv->client.in_solver_mode;
 	drv->client.in_solver_mode = enable;
@@ -192,10 +204,12 @@ int a52_rpmh_mode_solver_set_compat(const struct device *dev, bool enable)
 	n = atomic_inc_return(&a52_p423_mode_changes);
 	if (a52_p301_disp_rsc(drv))
 		a52_ackfr_record(
-			"P423 SOL n=%d en=%u old=%u new=%u loops=%u ref=%d bor=%d",
+			"P423 SOL n=%d en=%u up=%u/%u low=%u/%u loops=%u ref=%d bor=%d",
 			n, enable ? 1U : 0U, old ? 1U : 0U,
-			a52_p423_solver_mode(drv) ? 1U : 0U, loops,
-			atomic_read(&a52_p423_refused),
+			a52_p423_solver_mode(drv) ? 1U : 0U,
+			old_drv ? 1U : 0U,
+			READ_ONCE(drv->in_solver_mode) ? 1U : 0U,
+			loops, atomic_read(&a52_p423_refused),
 			atomic_read(&a52_p423_borrow_solver));
 
 	return 0;
@@ -225,25 +239,37 @@ def patch_rsc(text: str) -> str:
 """
     text = one(text, anchor, anchor + P423_RSC_TOP, "RSC diagnostics")
 
-    send_anchor = """\ttcs = get_tcs_for_msg(drv, msg);
-\tif (IS_ERR(tcs))
-\t\treturn PTR_ERR(tcs);
+    lock_anchor = """\tspin_lock_irq(&drv->lock);
 
-\tif (a52_p301_disp_rsc(drv))
+\t/* Wait forever for a free tcs. It better be there eventually! */
 """
-    send_new = """\ttcs = get_tcs_for_msg(drv, msg);
-\tif (IS_ERR(tcs))
-\t\treturn PTR_ERR(tcs);
+    lock_new = """\tspin_lock_irq(&drv->lock);
 
-\t/* Diagnostic invariant: upper RPMh must reject before a borrowed WAKE
-\t * trigger can happen while solver mode is set.
+\t/* Close the upper-layer check-to-send race. TouchGrass also keeps a
+\t * DRV-local solver flag; return the same -EBUSY expected by msm_bus.
 \t */
+\tif (msg->state == RPMH_ACTIVE_ONLY_STATE &&
+\t    READ_ONCE(drv->in_solver_mode)) {
+\t\tspin_unlock_irq(&drv->lock);
+\t\ta52_p423_solver_refused(drv, msg->state);
+\t\treturn -EBUSY;
+\t}
+
+\t/* Wait forever for a free tcs. It better be there eventually! */
+"""
+    text = one(text, lock_anchor, lock_new, "lower solver race guard")
+
+    trigger_anchor = """\t__tcs_buffer_write(drv, tcs_id, 0, msg);
+\t__tcs_set_trigger(drv, tcs_id, true);
+"""
+    trigger_new = """\t__tcs_buffer_write(drv, tcs_id, 0, msg);
+\t/* Count actual borrowed-WAKE triggers while solver is set. Expected 0. */
 \tif (msg->state == RPMH_ACTIVE_ONLY_STATE)
 \t\ta52_p423_note_borrow_solver(drv, tcs);
-
-\tif (a52_p301_disp_rsc(drv))
+\t__tcs_set_trigger(drv, tcs_id, true);
 """
-    text = one(text, send_anchor, send_new, "borrowed WAKE invariant")
+    text = one(text, trigger_anchor, trigger_new,
+               "borrowed WAKE trigger invariant")
 
     busy_anchor = """static bool rpmh_rsc_ctrlr_is_busy(struct rsc_drv *drv)
 {
@@ -411,6 +437,7 @@ def validate(root: Path) -> None:
     for token in (
         MARK,
         "bool in_solver_mode;",
+        "drv->in_solver_mode = enable;",
         "a52_p423_check_ctrlr_state",
         "return -EBUSY;",
         "a52_p423_solver_refused",
@@ -418,7 +445,7 @@ def validate(root: Path) -> None:
         "spin_lock_irqsave(&drv->lock, flags);",
         "spin_lock(&drv->client.cache_lock);",
         "drv->client.in_solver_mode = enable;",
-        "P423 SOL n=%d en=%u old=%u new=%u loops=%u ref=%d bor=%d",
+        "P423 SOL n=%d en=%u up=%u/%u low=%u/%u loops=%u ref=%d bor=%d",
         "P423 REF n=%d flag=%u st=%u",
         "P423 BORROW n=%d flag=1 ty=%d off=%d use=%u",
         '#define rpmh_mode_solver_set(d,e) a52_rpmh_mode_solver_set_compat((d), (e))',
@@ -442,16 +469,19 @@ def validate(root: Path) -> None:
     )
     if "if (enable)" not in setter or "tcs_is_free(drv, m)" not in setter:
         raise SystemExit("Phase423 enable path does not wait for borrowed TCS")
-    if "drv->client.in_solver_mode = enable;" not in setter:
-        raise SystemExit("Phase423 true/false solver assignment missing")
+    if ("drv->client.in_solver_mode = enable;" not in setter or
+            "drv->in_solver_mode = enable;" not in setter):
+        raise SystemExit("Phase423 true/false upper+lower solver assignment missing")
 
     send = function_slice(
         rsc,
         "int rpmh_rsc_send_data(struct rsc_drv *drv, const struct tcs_request *msg)",
         "static int find_slots(",
     )
+    if "READ_ONCE(drv->in_solver_mode)" not in send or "return -EBUSY;" not in send:
+        raise SystemExit("Phase423 lower solver race guard missing")
     if "a52_p423_note_borrow_solver(drv, tcs);" not in send:
-        raise SystemExit("Phase423 borrowed-WAKE diagnostic missing")
+        raise SystemExit("Phase423 borrowed-WAKE trigger diagnostic missing")
 
     # Deliberately leave TouchGrass's invalidate-before-borrow out of Phase423.
     get_tcs = function_slice(

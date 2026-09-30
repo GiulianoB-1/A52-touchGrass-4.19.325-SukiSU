@@ -281,7 +281,6 @@ def patch_ctrl(text: str) -> str:
     for token in (
         "A52_PHASE411_FIFO_PANIC_SMMU_EXPERIMENT_V1",
         "A52_PHASE414_SEQUENTIAL_3M_RECORDER_V1",
-        "A52_PHASE420_UMODE_ROUNDTRIP_VREFRESH_PARITY_V1",
         "static bool a52_p411_exact_f0(",
     ):
         if token not in text:

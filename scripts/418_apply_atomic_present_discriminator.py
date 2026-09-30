@@ -230,7 +230,8 @@ extern unsigned int a52_ackfr_phase418_retained(void);
 
 static bool a52_p418_modeset_log(unsigned int n, int ret)
 {
-	return ret || n <= 16U || !(n & 127U);
+	(void)ret;
+	return n <= 16U || !(n & 127U);
 }
 
 static void a52_p418_modeset_result(struct drm_atomic_state *state,
@@ -379,9 +380,11 @@ static bool a52_p418_atomic_pre(unsigned int cmd, unsigned long arg,
 static void a52_p418_atomic_post(unsigned int seq, unsigned int flags,
 				bool log, long rc)
 {
+	bool test = !!(flags & DRM_MODE_ATOMIC_TEST_ONLY);
+
 	if (rc < 0)
 		atomic_inc(&a52_p418_atomic_err);
-	if (log || rc < 0)
+	if (log || !test)
 		a52_ackfr_record(
 			"P418 AT out n=%u rc=%ld fl=%x tc=%d real=%d err=%d",
 			seq, rc, flags,
@@ -450,7 +453,7 @@ static void a52_p418_enc_note(unsigned int n, unsigned int step, int rc,
 	if (sde_conn_state)
 		t = &sde_conn_state->mode_info.topology;
 
-	if (n <= 16U || rc || !(n & 127U))
+	if (n <= 16U || !(n & 127U))
 		a52_ackfr_record(
 			"P418 E n=%u s=%u r=%d id=%u rt=%u m=%u a=%u c=%u lm=%u ce=%u in=%u",
 			n, step, rc, drm_enc ? drm_enc->base.id : 0U,

@@ -10,6 +10,7 @@ on:
       - .github/workflows/414-a52-sequential-3m-recorder.yml
       - .github/workflows/415-a52-mdss-gdsc-hwctrl-parity.yml
       - .github/workflows/416-a52-sequential-3m-disk-persist-v2.yml
+      - .github/workflows/417-a52-postbind-frontier.yml
       - .github/workflows/411-a52-fifo-panic-smmu.yml
       - .github/workflows/409-a52-ram1m-debug2m-dsi.yml
       - .github/workflows/408-a52-direct-bio-samsung-dsi.yml

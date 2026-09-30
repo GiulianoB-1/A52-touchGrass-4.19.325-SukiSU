@@ -7,6 +7,7 @@ MARK = "A52_PHASE417_POSTBIND_FRONTIER_V1"
 REC = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 DRM = Path("drivers/a52_display/msm/dsi/dsi_drm.c")
 DISPLAY = Path("drivers/a52_display/msm/dsi/dsi_display.c")
+ATOMIC = Path("drivers/gpu/drm/drm_atomic_helper.c")
 
 
 def one(text: str, old: str, new: str, label: str) -> str:
@@ -152,6 +153,22 @@ def patch_drm(text: str) -> str:
     return text
 
 
+
+def patch_atomic(text: str) -> str:
+    if MARK in text:
+        return text
+    helper = load_scope_helper()
+    text, _ = helper.add_include(text)
+    text = inject_scope(
+        text,
+        "drm_atomic_helper_check_modeset",
+        "a52.drm_atomic_helper_check_modeset",
+        "int",
+    )
+    text += f'\n/* {MARK}: atomic modeset entry/exit scope. */\n'
+    return text
+
+
 def patch_display(text: str) -> str:
     if MARK in text:
         return text
@@ -165,6 +182,7 @@ def validate(root: Path) -> None:
     rec = (root / REC).read_text(errors="replace")
     drm = (root / DRM).read_text(errors="replace")
     disp = (root / DISPLAY).read_text(errors="replace")
+    atomic = (root / ATOMIC).read_text(errors="replace")
     for tok in (
         MARK,
         'strncmp(fmt, "P417", 4)',
@@ -190,6 +208,8 @@ def validate(root: Path) -> None:
             raise SystemExit("Phase417 DRM token missing: " + tok)
     if 'A52_ACKFR_SCOPE("DISP", "a52.dsi_display_set_mode");' not in disp:
         raise SystemExit("Phase417 display set-mode scope missing")
+    if 'A52_ACKFR_SCOPE("DISP", "a52.drm_atomic_helper_check_modeset");' not in atomic:
+        raise SystemExit("Phase417 DRM atomic modeset scope missing")
 
 
 def main() -> int:
@@ -197,13 +217,14 @@ def main() -> int:
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("--check-only", action="store_true")
     ns = ap.parse_args()
-    for rel in (REC, DRM, DISPLAY):
+    for rel in (REC, DRM, DISPLAY, ATOMIC):
         if not (ns.root / rel).is_file():
             raise SystemExit("Phase417 source missing: " + str(rel))
     if not ns.check_only:
         p = ns.root / REC; p.write_text(patch_rec(p.read_text(errors="replace")))
         p = ns.root / DRM; p.write_text(patch_drm(p.read_text(errors="replace")))
         p = ns.root / DISPLAY; p.write_text(patch_display(p.read_text(errors="replace")))
+        p = ns.root / ATOMIC; p.write_text(patch_atomic(p.read_text(errors="replace")))
     validate(ns.root)
     print("Phase417 post-bind frontier: PASS")
     return 0

@@ -306,7 +306,7 @@ def patch_ctrl(text: str) -> str:
 
     # Global target state is visible to dsi_ctrl_hw_cmn.c so S07/S08 bracket
     # only this exact transaction.
-    anchor = "static void a52_p411_note_f0(struct dsi_ctrl *dsi_ctrl,"
+    anchor = "static void a52_p411_note_f0(const struct dsi_ctrl *dsi_ctrl,"
     text = one(text, anchor, P421_CTRL_HELPER + "\n" + anchor,
                "target helper")
 

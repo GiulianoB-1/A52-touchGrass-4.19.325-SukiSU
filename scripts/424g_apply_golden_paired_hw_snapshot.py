@@ -138,6 +138,66 @@ void a52_g424_snapshot(struct dsi_ctrl_hw *ctrl)
 	s->rsc1[5]=a52_g424_r(a52_g424_rsc_wrp,0x0048);
 }
 
+static void a52_g424_seq_dump(struct seq_file *m)
+{
+	const struct a52_g424_snapshot *s=&a52_g424_snap;
+
+	if (!atomic_read(&a52_g424_taken)) {
+		seq_puts(m, "TG424 empty\n");
+		return;
+	}
+
+	seq_printf(m, "TG424 T ns=%llu\n",(unsigned long long)s->ns);
+	seq_printf(m, "TG424 D %x %x %x %x %x %x %x %x\n",
+		s->dsi[0],s->dsi[1],s->dsi[2],s->dsi[3],
+		s->dsi[4],s->dsi[5],s->dsi[6],s->dsi[7]);
+	seq_printf(m, "TG424 C0 %x %x %x %x %x %x %x %x\n",
+		s->clk0[0],s->clk0[1],s->clk0[2],s->clk0[3],
+		s->clk0[4],s->clk0[5],s->clk0[6],s->clk0[7]);
+	seq_printf(m, "TG424 C1 %x %x %x %x %x %x %x %x\n",
+		s->clk1[0],s->clk1[1],s->clk1[2],s->clk1[3],
+		s->clk1[4],s->clk1[5],s->clk1[6],s->clk1[7]);
+	seq_printf(m, "TG424 P %x %x %x %x\n",
+		s->pwr[0],s->pwr[1],s->pwr[2],s->pwr[3]);
+	seq_printf(m, "TG424 V0 %x %x %x %x %x %x %x %x\n",
+		s->vbif0[0],s->vbif0[1],s->vbif0[2],s->vbif0[3],
+		s->vbif0[4],s->vbif0[5],s->vbif0[6],s->vbif0[7]);
+	seq_printf(m, "TG424 V1 %x %x %x %x\n",
+		s->vbif1[0],s->vbif1[1],s->vbif1[2],s->vbif1[3]);
+	seq_printf(m, "TG424 R0 %x %x %x %x %x %x %x %x\n",
+		s->rsc0[0],s->rsc0[1],s->rsc0[2],s->rsc0[3],
+		s->rsc0[4],s->rsc0[5],s->rsc0[6],s->rsc0[7]);
+	seq_printf(m, "TG424 R1 %x %x %x %x %x %x\n",
+		s->rsc1[0],s->rsc1[1],s->rsc1[2],
+		s->rsc1[3],s->rsc1[4],s->rsc1[5]);
+}
+
+static int a52_g424_proc_show(struct seq_file *m, void *unused)
+{
+	a52_g424_seq_dump(m);
+	return 0;
+}
+
+static int a52_g424_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, a52_g424_proc_show, NULL);
+}
+
+static const struct file_operations a52_g424_proc_fops = {
+	.open = a52_g424_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int __init a52_g424_proc_init(void)
+{
+	if (!proc_create("a52_phase424g", 0444, NULL, &a52_g424_proc_fops))
+		return -ENOMEM;
+	return 0;
+}
+late_initcall(a52_g424_proc_init);
+
 void a52_g424_dump_snapshot(void)
 {
 	const struct a52_g424_snapshot *s=&a52_g424_snap;
@@ -223,6 +283,7 @@ def validate(ctrl:str,hwc:str)->None:
         "TG424 C0 %x %x %x %x %x %x %x %x",
         "TG424 V0 %x %x %x %x %x %x %x %x",
         "TG424 R0 %x %x %x %x %x %x %x %x",
+        'proc_create("a52_phase424g", 0444, NULL, &a52_g424_proc_fops)',
     ):
         if token not in alltxt:
             raise SystemExit("Phase424G validation missing: "+token)

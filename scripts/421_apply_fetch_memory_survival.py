@@ -482,19 +482,17 @@ def patch_ctrl(text: str) -> str:
     # but before disable/complete.
     start, end = function_bounds(text, "static irqreturn_t dsi_ctrl_isr(")
     fn = text[start:end]
-    old = '''	if (status & DSI_CMD_MODE_DMA_DONE) {
-		atomic_set(&dsi_ctrl->dma_irq_trig, 1);
+    old = '''		atomic_set(&dsi_ctrl->dma_irq_trig, 1);
 		dsi_ctrl_disable_status_interrupt(dsi_ctrl,
 '''
-    new = '''	if (status & DSI_CMD_MODE_DMA_DONE) {
-		atomic_set(&dsi_ctrl->dma_irq_trig, 1);
+    new = '''		atomic_set(&dsi_ctrl->dma_irq_trig, 1);
 		if (a52_p421_target_active())
 			a52_p421_survival_record(9U, A52_P421_V_IRQ, 0U, 0,
 				(unsigned int)atomic_read(&dsi_ctrl->dma_irq_trig), 0);
 		dsi_ctrl_disable_status_interrupt(dsi_ctrl,
 '''
     if old not in fn:
-        raise SystemExit("Phase421 ISR anchor missing")
+        raise SystemExit("Phase421 ISR atomic anchor missing")
     fn = fn.replace(old, new, 1)
     text = text[:start] + fn + text[end:]
 

@@ -434,7 +434,6 @@ static void a52_p418_enc_note(unsigned int n, unsigned int step, int rc,
 		struct sde_connector_state *sde_conn_state)
 {
 	struct msm_display_topology *t = NULL;
-	unsigned int i;
 
 	if (step < ARRAY_SIZE(a52_p418_enc_fail) && rc)
 		atomic_inc(&a52_p418_enc_fail[step]);

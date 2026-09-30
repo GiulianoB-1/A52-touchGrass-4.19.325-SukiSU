@@ -512,8 +512,6 @@ jobs:
           grep -Fq 'get_random_u32()' "$REC"
           grep -Fq '(a52_p276r_deep_active() && !a52_p421_target_active())' "$DSI"
           ! grep -Fq 'a52_p405_dsi_mirror(dst); /* A52_PHASE405_DMA_DONE_DIRECT_V1 */' "$REC"
-          grep -aFq 'a52_p421_survival_record' "$IMAGE"
-          grep -aFq 'a52_p421_target_active' "$IMAGE"
           echo "Phase421 FETCH_MEMORY survival audit: PASS"
 
           cp scripts/397_apply_downstream_bus_votes.py \

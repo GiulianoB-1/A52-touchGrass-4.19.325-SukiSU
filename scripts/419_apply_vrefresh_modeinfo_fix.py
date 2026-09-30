@@ -19,99 +19,59 @@ def one(text: str, old: str, new: str, label: str) -> str:
 
 
 def function_bounds(text: str, name: str) -> tuple[int, int]:
-    # Good enough for kernel C definitions in the targeted files.
+    masked = list(text)
+    state = "normal"
+    esc = False
+    i = 0
+    while i < len(text):
+        c = text[i]; n = text[i+1] if i+1 < len(text) else ""
+        if state == "normal":
+            if c == "/" and n == "/":
+                masked[i] = masked[i+1] = " "; state = "line"; i += 2; continue
+            if c == "/" and n == "*":
+                masked[i] = masked[i+1] = " "; state = "block"; i += 2; continue
+            if c == '"':
+                masked[i] = " "; state = "string"; esc = False
+            elif c == "'":
+                masked[i] = " "; state = "char"; esc = False
+        elif state == "line":
+            if c == "\n": state = "normal"
+            else: masked[i] = " "
+        elif state == "block":
+            if c == "*" and n == "/":
+                masked[i] = masked[i+1] = " "; state = "normal"; i += 2; continue
+            if c != "\n": masked[i] = " "
+        else:
+            quote = '"' if state == "string" else "'"
+            if c != "\n":
+                masked[i] = " "
+                if esc: esc = False
+                elif c == "\\": esc = True
+                elif c == quote: state = "normal"
+        i += 1
+    mtext = "".join(masked)
     hits = []
-    for m in re.finditer(r"\\b" + re.escape(name) + r"\\s*\\(", text):
-        p = m.end() - 1
+    for m in re.finditer(r"\b" + re.escape(name) + r"\s*\(", mtext):
+        p = m.end()-1; depth = 0; close = -1
+        for j in range(p, len(mtext)):
+            if mtext[j] == "(": depth += 1
+            elif mtext[j] == ")":
+                depth -= 1
+                if depth == 0: close = j; break
+        if close < 0: continue
+        tail = mtext[close+1:close+4097]
+        br = tail.find("{"); semi = tail.find(";")
+        if br < 0 or (semi >= 0 and semi < br): continue
+        opening = close + 1 + br
         depth = 0
-        close = -1
-        state = "normal"
-        i = p
-        while i < len(text):
-            c = text[i]
-            n = text[i + 1] if i + 1 < len(text) else ""
-            if state == "normal":
-                if c == "/" and n == "/":
-                    state = "line"; i += 2; continue
-                if c == "/" and n == "*":
-                    state = "block"; i += 2; continue
-                if c == '"':
-                    state = "string"
-                elif c == "'":
-                    state = "char"
-                elif c == "(":
-                    depth += 1
-                elif c == ")":
-                    depth -= 1
-                    if depth == 0:
-                        close = i
-                        break
-            elif state == "line":
-                if c == "\\n":
-                    state = "normal"
-            elif state == "block":
-                if c == "*" and n == "/":
-                    state = "normal"; i += 2; continue
-            elif state == "string":
-                if c == "\\":
-                    i += 2; continue
-                if c == '"':
-                    state = "normal"
-            elif state == "char":
-                if c == "\\":
-                    i += 2; continue
-                if c == "'":
-                    state = "normal"
-            i += 1
-        if close < 0:
-            continue
-        j = close + 1
-        while j < len(text) and text[j].isspace():
-            j += 1
-        if j >= len(text) or text[j] != "{":
-            continue
-        opening = j
-        depth = 0
-        state = "normal"
-        i = opening
-        while i < len(text):
-            c = text[i]
-            n = text[i + 1] if i + 1 < len(text) else ""
-            if state == "normal":
-                if c == "/" and n == "/":
-                    state = "line"; i += 2; continue
-                if c == "/" and n == "*":
-                    state = "block"; i += 2; continue
-                if c == '"':
-                    state = "string"
-                elif c == "'":
-                    state = "char"
-                elif c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        hits.append((m.start(), i + 1))
-                        break
-            elif state == "line":
-                if c == "\\n":
-                    state = "normal"
-            elif state == "block":
-                if c == "*" and n == "/":
-                    state = "normal"; i += 2; continue
-            elif state == "string":
-                if c == "\\":
-                    i += 2; continue
-                if c == '"':
-                    state = "normal"
-            elif state == "char":
-                if c == "\\":
-                    i += 2; continue
-                if c == "'":
-                    state = "normal"
-            i += 1
+        for j in range(opening, len(mtext)):
+            if mtext[j] == "{": depth += 1
+            elif mtext[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    hits.append((m.start(), j+1)); break
     if len(hits) != 1:
-        raise SystemExit(f"Phase419 definition count mismatch {name}: {len(hits)}")
+        raise SystemExit(f"Phase418 definition count mismatch {name}: {len(hits)}")
     return hits[0]
 
 
@@ -333,14 +293,19 @@ def patch_rec(text: str) -> str:
     text = one(text, old_boot, new_boot, "unique boot id")
 
     # Phase402's second gate used 9 for an 8-byte 'P276 NNN' prefix.
-    # Fix every such exact three-digit prefix, including the 387/394 controls.
-    text, gate_fixes = re.subn(
-        r'strncmp\\(fmt, "(P276 [0-9]{3})", 9\\)',
-        r'strncmp(fmt, "\\1", 8)',
-        text,
-    )
+    # Repair those exact three-digit prefix checks without regex ambiguity.
+    lines = text.splitlines(keepends=True)
+    fixed = []
+    gate_fixes = 0
+    for line in lines:
+        if 'strncmp(fmt, "P276 ' in line and '", 9)' in line:
+            line = line.replace('", 9)', '", 8)')
+            gate_fixes += 1
+        fixed.append(line)
+    text = ''.join(fixed)
     if gate_fixes < 2:
-        raise SystemExit(f"Phase419 P276 gate repair unexpectedly small: {gate_fixes}")
+        raise SystemExit(
+            f"Phase419 P276 gate repair unexpectedly small: {gate_fixes}")
 
     # Make the control itself carry the real boot id instead of a hard-coded 1.
     text = one(text,

@@ -445,10 +445,12 @@ def patch_ctrl(text: str) -> str:
     fn = fn.replace(old, new, 1)
 
     old = '''		reinit_completion(&dsi_ctrl->irq_info.cmd_dma_done);
+		a52_p293_gdm_arm_snapshot(dsi_ctrl, 1);
 
 		if (flags & DSI_CTRL_CMD_FETCH_MEMORY) {
 '''
     new = '''		reinit_completion(&dsi_ctrl->irq_info.cmd_dma_done);
+		a52_p293_gdm_arm_snapshot(dsi_ctrl, 1);
 		if (a52_p421_target_active())
 			a52_p421_survival_record(6U, A52_P421_V_IRQ, 0U, 0,
 				(unsigned int)atomic_read(&dsi_ctrl->dma_irq_trig), 0);

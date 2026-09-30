@@ -47,12 +47,22 @@ jobs:
             clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio gzip lz4 file dwarves
 
-      - name: Restore pinned GKI source
-        uses: actions/cache/restore@v4
-        with:
-          path: gki
-          key: android12-5.10-gki-source-v1-${{ runner.os }}-android12-5.10-2026-04_r1-${{ env.GKI_COMMON_SHA }}
-          fail-on-cache-miss: true
+      - name: Sync pinned GKI source
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b common-android12-5.10-2026-04 \
+            --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 \
+            https://android.googlesource.com/kernel/common \
+            refs/tags/android12-5.10-2026-04_r1
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "${GKI_COMMON_SHA}"
 
       - name: Restore exact TouchGrass source
         id: touchgrass-cache

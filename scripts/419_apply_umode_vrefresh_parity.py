@@ -72,6 +72,7 @@ def patch_modes(text: str) -> str:
  * Record the old value once, then restore it with a timing-derived fallback.
  */
 static atomic_t a52_p419_umode_once = ATOMIC_INIT(0);
+extern bool a52_ackfr_phase269_is_composer_tgid(pid_t tgid);
 
 int drm_mode_convert_umode(struct drm_device *dev,
 			   struct drm_display_mode *out,

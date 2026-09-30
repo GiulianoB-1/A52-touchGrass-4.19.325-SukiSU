@@ -135,8 +135,15 @@ def patch_rec(text: str) -> str:
 
     # Phase417 proved connector/mode enumeration is healthy. Retire the very
     # high-volume Phase269 property/UAPI dump from both admission gates.
-    p269 = re.compile(r'(?m)^[ \\t]+strncmp\\(fmt, "P269", 4\\) &&\\n')
-    text, removed = p269.subn('', text)
+    lines = text.splitlines(keepends=True)
+    kept = []
+    removed = 0
+    for line in lines:
+        if (line.lstrip().startswith('strncmp(fmt, "P269", 4) &&')):
+            removed += 1
+            continue
+        kept.append(line)
+    text = ''.join(kept)
     if removed != 2:
         raise SystemExit(
             f"Phase418 P269 retirement: expected 2 admission lines, found {removed}")

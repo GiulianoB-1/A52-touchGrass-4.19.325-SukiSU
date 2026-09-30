@@ -14,6 +14,7 @@ on:
       - .github/workflows/418-a52-atomic-present-discriminator.yml
       - .github/workflows/419-a52-umode-vrefresh-parity.yml
       - .github/workflows/420-a52-umode-roundtrip-vrefresh-parity.yml
+      - .github/workflows/421-a52-fetch-memory-survival.yml
       - .github/workflows/411-a52-fifo-panic-smmu.yml
       - .github/workflows/409-a52-ram1m-debug2m-dsi.yml
       - .github/workflows/408-a52-direct-bio-samsung-dsi.yml

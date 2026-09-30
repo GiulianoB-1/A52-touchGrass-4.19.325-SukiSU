@@ -254,6 +254,7 @@ jobs:
           USB="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
           GDSC="$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c"
           MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
+          ENCODER="$ROOT/drivers/a52_display/msm/sde/sde_encoder.c"
 
           echo "Phase415 MDSS GDSC HW-control parity audit"
           test -s "$IMAGE"
@@ -408,6 +409,20 @@ jobs:
           grep -Fq 'DRM_MODE_ATOMIC_TEST_ONLY' "$MSM"
           grep -Fq 'DRM_MODE_ATOMIC_ALLOW_MODESET' "$MSM"
           grep -Fq 'P418 APX t=%lu' "$REC"
+          grep -Fq 'P418 GATE n=%u ret=1' "$REC"
+          grep -Fq 'P418 CTRL boot ret=%u' "$REC"
+          grep -Fq 'P276 394T boot=1 ret=%u' "$REC"
+          grep -Fq 'a52_ackfr_phase418_retained' "$REC"
+          grep -Fq 'P418 E n=%u s=%u r=%d' "$ENCODER"
+          grep -Fq 'P418 ES0 n=%u' "$ENCODER"
+          grep -Fq '_sde_encoder_atomic_check_phys_enc' "$ENCODER"
+          grep -Fq '_sde_encoder_atomic_check_pu_roi' "$ENCODER"
+          grep -Fq 'sde_connector_get_mode_info' "$ENCODER"
+          grep -Fq 'sde_rm_reserve' "$ENCODER"
+          grep -Fq 'sde_rm_update_topology' "$ENCODER"
+          grep -Fq 'sde_connector_roi_v1_check_roi' "$ENCODER"
+          grep -aFq 'P418 E n=%u s=%u r=%d' "$IMAGE"
+          grep -aFq 'P418 GATE n=%u ret=1' "$IMAGE"
           grep -aFq 'P418 MS n=%u r=%d' "$IMAGE"
           grep -aFq 'P418 AT in n=%u' "$IMAGE"
           grep -aFq 'P418 APX t=%lu' "$IMAGE"
@@ -436,7 +451,7 @@ jobs:
              scripts/decode_phase408_samsung_debug_dsi.py \
              scripts/decode_phase407_samsung_debug_dsi.py \
              scripts/decode_phase405_dma_done.py "$OUT/audit/"
-          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$MSM" "$OUT/source/"
+          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$MSM" "$ENCODER" "$OUT/source/"
 
           cat > "$OUT/PHASE418-NOTES.txt" <<'EOF'
           Phase414 sequential 3 MiB recorder
@@ -519,6 +534,9 @@ jobs:
             and real presents, and always preserves non-test atomics and errors.
           - Samples successful modeset checks sparsely while retaining all failures.
           - Samples apexd task presence every 10 seconds through the pre-zygote gap.
+          - Adds P276 positive controls plus explicit Phase280 retention-latch diagnostics.
+          - Instruments sde_encoder_virt_atomic_check sub-steps, with full detail for
+            the first 16 calls and sparse failure counters thereafter.
           - Functional DSI, SMMU, GDSC, UFS and DRM behavior is unchanged.
           EOF
           sed -i 's/^          //' "$OUT/PHASE418-NOTES.txt"

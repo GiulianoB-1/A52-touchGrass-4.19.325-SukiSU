@@ -226,8 +226,11 @@ def patch_connector(text: str) -> str:
         "\nextern bool a52_ackfr_phase269_is_composer_tgid(pid_t tgid);\n"
         "static atomic_t a52_p419_gmi_once = ATOMIC_INIT(0);\n\n"
     )
-    start, _ = function_bounds(text, "sde_connector_get_mode_info")
-    text = text[:start] + helper + text[start:]
+    sig = "int sde_connector_get_mode_info("
+    pos = text.find(sig)
+    if pos < 0:
+        raise SystemExit("Phase419 sde_connector_get_mode_info signature missing")
+    text = text[:pos] + helper + text[pos:]
     start, end = function_bounds(text, "sde_connector_get_mode_info")
     fn = text[start:end]
 

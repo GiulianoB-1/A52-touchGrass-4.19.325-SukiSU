@@ -6,6 +6,7 @@ MARK = "A52_PHASE383_16K_DUAL_ELF_CENSUS_V1"
 
 RECORDER_C = r'''// SPDX-License-Identifier: GPL-2.0-only
 /*
+ * A52_PHASE383_16K_DUAL_ELF_CENSUS_V1
  * A52 Phase383 native-16K dual persistent recorder
  *
  * Channel 1: normal printk -> ramoops/pstore.

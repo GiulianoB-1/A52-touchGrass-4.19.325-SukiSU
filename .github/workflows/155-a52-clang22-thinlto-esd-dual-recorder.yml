@@ -398,10 +398,10 @@ jobs:
           KERNEL=workspace/touchgrass-a52xq
 
           curl -fsSL \
-            "https://raw.githubusercontent.com/\${{ github.repository }}/\${{ github.sha }}/scripts/155_apply_thinlto_esd_dual_recorder.py" \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/155_apply_thinlto_esd_dual_recorder.py" \
             -o /tmp/155_apply_thinlto_esd_dual_recorder.py
           curl -fsSL \
-            "https://raw.githubusercontent.com/\${{ github.repository }}/\${{ github.sha }}/scripts/decode_p155_thinlto_esd_dual.py" \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/decode_p155_thinlto_esd_dual.py" \
             -o /tmp/decode_p155_thinlto_esd_dual.py
 
           # Fail here, before toolchain setup/build time, for Python or patch-anchor errors.

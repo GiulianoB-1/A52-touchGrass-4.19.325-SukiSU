@@ -246,23 +246,54 @@ if old in s:
 elif "zram_comp_for_index(zram, index)" not in s:
     raise SystemExit("read decompressor anchor missing")
 
-# Clear secondary-only flags when an object is really freed/replaced.
-if "zram_test_flag(zram, index, ZRAM_RECOMP)" not in s[s.index("static void zram_free_page"):s.index("static int __zram_bvec_read")]:
-    anchor = '''\tif (zram_test_flag(zram, index, ZRAM_HUGE)) {
-\t\tzram_clear_flag(zram, index, ZRAM_HUGE);
-\t\tatomic64_dec(&zram->stats.huge_pages);
-\t}
-
-'''
-    block = '''#ifdef CONFIG_ZRAM_MULTI_COMP
+# Clear secondary-only flags at the final common free path.
+# IMPORTANT: locate the real function definition, not the forward declaration.
+free_sig = "static void zram_free_page(struct zram *zram, size_t index)\n{"
+free_start = s.index(free_sig)
+free_end = s.index("static int __zram_bvec_read", free_start)
+free_body = s[free_start:free_end]
+cleanup = '''#ifdef CONFIG_ZRAM_MULTI_COMP
 \tif (zram_test_flag(zram, index, ZRAM_RECOMP))
 \t\tzram_clear_flag(zram, index, ZRAM_RECOMP);
 \tif (zram_test_flag(zram, index, ZRAM_INCOMPRESSIBLE))
 \t\tzram_clear_flag(zram, index, ZRAM_INCOMPRESSIBLE);
 #endif
-
 '''
-    s = replace_once(s, anchor, anchor + block, "free secondary flags")
+if cleanup not in free_body:
+    anchor = '''#endif
+\tWARN_ON_ONCE(zram->table[index].flags &
+\t\t~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB));
+}
+'''
+    replacement = '''#endif
+#ifdef CONFIG_ZRAM_MULTI_COMP
+\tif (zram_test_flag(zram, index, ZRAM_RECOMP))
+\t\tzram_clear_flag(zram, index, ZRAM_RECOMP);
+\tif (zram_test_flag(zram, index, ZRAM_INCOMPRESSIBLE))
+\t\tzram_clear_flag(zram, index, ZRAM_INCOMPRESSIBLE);
+#endif
+\tWARN_ON_ONCE(zram->table[index].flags &
+\t\t~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB));
+}
+'''
+    # Restrict the replacement to the actual zram_free_page body.
+    body = s[free_start:free_end]
+    if body.count(anchor) != 1:
+        raise SystemExit(f"zram_free_page final-cleanup anchor count: {body.count(anchor)}")
+    body = body.replace(anchor, replacement, 1)
+    s = s[:free_start] + body + s[free_end:]
+
+# Hard proof that the real function body owns both clears before WARN_ON_ONCE.
+free_start = s.index(free_sig)
+free_end = s.index("static int __zram_bvec_read", free_start)
+free_body = s[free_start:free_end]
+for needle in (
+    "zram_clear_flag(zram, index, ZRAM_RECOMP);",
+    "zram_clear_flag(zram, index, ZRAM_INCOMPRESSIBLE);",
+    "WARN_ON_ONCE(zram->table[index].flags &",
+):
+    if needle not in free_body:
+        raise SystemExit(f"zram_free_page lifecycle cleanup missing: {needle}")
 
 # Recompression engine. It preserves Samsung LRU state and never calls
 # zram_free_page() during an in-RAM replacement.
@@ -743,6 +774,8 @@ checks = {
         "zram_recompress_page",
         'strlcpy(zram->recompressor, "zstd"',
         "zram_comp_for_index",
+        "zram_clear_flag(zram, index, ZRAM_RECOMP);",
+        "zram_clear_flag(zram, index, ZRAM_INCOMPRESSIBLE);",
     ],
 }
 for p, needles in checks.items():

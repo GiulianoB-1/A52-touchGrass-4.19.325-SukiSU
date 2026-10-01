@@ -342,6 +342,17 @@ static void a52_p383_disk_workfn(struct work_struct *work)
 		a52_p383_sync_status_locked();
 		spin_unlock_irqrestore(&a52_p383_lock, flags);
 
+		/*
+		 * Persist the final transport status/header page after written_gen
+		 * and final rc fields change.
+		 */
+		bdev = blkdev_get_by_dev(A52_P383_DEBUG_DEVT, FMODE_WRITE, NULL);
+		if (!IS_ERR(bdev)) {
+			if (!a52_p383_submit_page(bdev, 0U))
+				blkdev_issue_flush(bdev, GFP_KERNEL, NULL);
+			blkdev_put(bdev, FMODE_WRITE);
+		}
+
 		if ((u32)atomic_read(&a52_p383_disk_gen) != generation)
 			mod_delayed_work(system_unbound_wq,
 				&a52_p383_disk_work, 0);
@@ -382,7 +393,7 @@ static void __a52_p383_append(const char *message)
 
 	memset(&rec, 0, sizeof(rec));
 	rec.seq = ++a52_p383_seq;
-	rec.ts_ns = ktime_get_boottime_ns();
+	rec.ts_ns = ktime_get_boot_ns();
 	rec.boot_id = a52_p383_boot_id;
 	rec.phase = A52_P383_PHASE;
 	rec.cpu = (u16)raw_smp_processor_id();

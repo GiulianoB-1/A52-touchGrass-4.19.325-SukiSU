@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 MARK = "A52_PHASE426_SMMU_STREAM_HANDOFF_PROBE_V1"
@@ -15,6 +16,36 @@ def one(text: str, old: str, new: str, label: str) -> str:
     if n != 1:
         raise SystemExit(f"Phase426 {label}: expected 1 anchor, found {n}")
     return text.replace(old, new, 1)
+
+
+def require_tokens(text: str, tokens: tuple[str, ...], scope: str) -> None:
+    missing = [token for token in tokens if token not in text]
+    if missing:
+        raise SystemExit(
+            f"Phase426 {scope} prerequisites missing ({len(missing)}):\n" +
+            "\n".join(f" - {token}" for token in missing)
+        )
+
+
+def require_unique_anchors(
+    text: str, anchors: tuple[tuple[str, str], ...], scope: str
+) -> None:
+    bad = []
+    for label, anchor in anchors:
+        n = text.count(anchor)
+        if n != 1:
+            bad.append(f"{label}: expected 1, found {n}")
+    if bad:
+        raise SystemExit(
+            f"Phase426 {scope} anchor preflight failed ({len(bad)}):\n" +
+            "\n".join(f" - {item}" for item in bad)
+        )
+
+
+def strip_c_comments(text: str) -> str:
+    # Validation is interested in executable calls, not words inside comments.
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
 
 
 BLOCK = r'''
@@ -95,6 +126,19 @@ static bool a52_p426_hw_valid(struct arm_smmu_device *smmu, u32 smr, u32 s2cr)
 	return !!(smr & ARM_SMMU_SMR_VALID);
 }
 
+static u16 a52_p426_decode_mask(struct arm_smmu_device *smmu, u32 smr)
+{
+	u16 mask = (u16)FIELD_GET(ARM_SMMU_SMR_MASK, smr);
+
+	/* In non-EXIDS mode SMR bit31 is VALID, although the generic 5.10
+	 * ARM_SMMU_SMR_MASK macro spans bits31:16. With EXIDS, validity moves
+	 * to S2CR.EXIDVALID and bit31 is a real mask bit.
+	 */
+	if (!(smmu->features & ARM_SMMU_FEAT_EXIDS))
+		mask &= 0x7fffU;
+	return mask;
+}
+
 static bool a52_p426_sid_match_raw(struct arm_smmu_device *smmu,
 				    u32 smr, u32 s2cr, u16 sid)
 {
@@ -105,11 +149,7 @@ static bool a52_p426_sid_match_raw(struct arm_smmu_device *smmu,
 		return false;
 
 	id = (u16)FIELD_GET(ARM_SMMU_SMR_ID, smr);
-	/* ARM_SMMU_SMR_MASK includes bit31 in this 5.10 header even though
-	 * non-EXIDS validity also lives there. Strip that validity bit from
-	 * the decoded mask before doing the architectural stream match.
-	 */
-	mask = (u16)FIELD_GET(ARM_SMMU_SMR_MASK, smr) & 0x7fffU;
+	mask = a52_p426_decode_mask(smmu, smr);
 	return !((sid ^ id) & (u16)~mask);
 }
 
@@ -196,7 +236,7 @@ void a52_p426_capture_f0(void)
 		return;
 
 	/* Exact S00 observer: reads + normal-RAM stores only. No printk,
-	 * a52_ackfr_record(), persistence, delays, votes, or SMMU writes.
+	 * recorder I/O, persistence, delays, votes, or SMMU writes.
 	 */
 	a52_p426_take_snapshot(smmu, &a52_p426_f0, true);
 	smp_wmb();
@@ -232,7 +272,7 @@ static void a52_p426_dump_hw_matches(const char *tag,
 		a52_ackfr_record("P426 %s i=%u smr=%x s2=%x id=%x m=%x cb=%u ty=%u",
 			tag, i, smr, s2cr,
 			(u32)(u16)FIELD_GET(ARM_SMMU_SMR_ID, smr),
-			(u32)((u16)FIELD_GET(ARM_SMMU_SMR_MASK, smr) & 0x7fffU),
+			(u32)a52_p426_decode_mask(smmu, smr),
 			(u32)FIELD_GET(ARM_SMMU_S2CR_CBNDX, s2cr),
 			(u32)FIELD_GET(ARM_SMMU_S2CR_TYPE, s2cr));
 	}
@@ -315,7 +355,7 @@ def patch_smmu(text: str) -> str:
     if MARK in text:
         return text
 
-    for token in (
+    require_tokens(text, (
         "A52_PHASE422_DISPLAY_SMMU_FAULT_PROBE_V1",
         "M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",
         "M393 G irq=%d g=%x s0=%x s1=%x s2=%x",
@@ -325,42 +365,46 @@ def patch_smmu(text: str) -> str:
         "static void arm_smmu_test_smr_masks(struct arm_smmu_device *smmu)",
         "static irqreturn_t arm_smmu_global_fault(int irq, void *dev)",
         "err = arm_smmu_device_cfg_probe(smmu);",
-    ):
-        if token not in text:
-            raise SystemExit("Phase426 SMMU prerequisite missing: " + token)
+    ), "SMMU")
 
-    anchor = "static irqreturn_t arm_smmu_context_fault(int irq, void *dev)\n"
-    text = one(text, anchor, BLOCK + "\n" + anchor, "probe block insertion")
-
-    # Cache firmware routes after cfg_probe has allocated Linux SW tables, but
-    # before the probe-time reset/mask test can touch retained HW state.
-    # arm_smmu_device_reset() also exists in runtime_resume(), so use the
-    # probe-only platform_set_drvdata/reset/test sequence as the anchor.
+    block_anchor = "static irqreturn_t arm_smmu_context_fault(int irq, void *dev)\n"
     probe_reset = (
         "\tplatform_set_drvdata(pdev, smmu);\n"
         "\tarm_smmu_device_reset(smmu);\n"
         "\tarm_smmu_test_smr_masks(smmu);\n"
     )
+    mask_pre = """smr_ok:
+	/*
+	 * SMR.ID bits may not be preserved if the corresponding MASK
+"""
+    mask_post = """	smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
+	smmu->smr_mask_mask = FIELD_GET(ARM_SMMU_SMR_MASK, smr);
+}
+"""
+    global_old = """	gfsynr2 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR2);
+
+	if (!gfsr)
+"""
+    require_unique_anchors(text, (
+        ("probe block insertion", block_anchor),
+        ("probe-time reset sequence", probe_reset),
+        ("mask-test pre-read", mask_pre),
+        ("mask-test post-read", mask_post),
+        ("global-fault latch", global_old),
+    ), "SMMU")
+
+    text = one(text, block_anchor, BLOCK + "\n" + block_anchor,
+               "probe block insertion")
+
     probe_reset_new = (
         "\tplatform_set_drvdata(pdev, smmu);\n"
         "\ta52_p426_cache_boot_routes(smmu);\n"
         "\tarm_smmu_device_reset(smmu);\n"
         "\tarm_smmu_test_smr_masks(smmu);\n"
     )
-    text = one(
-        text,
-        probe_reset,
-        probe_reset_new,
-        "pre-write boot route cache",
-    )
+    text = one(text, probe_reset, probe_reset_new, "pre-write boot route cache")
 
-    # Observe the exact physically chosen mask-test entry before the existing
-    # writes. This intentionally does NOT alter/restore the legacy behavior.
-    old = """smr_ok:
-	/*
-	 * SMR.ID bits may not be preserved if the corresponding MASK
-"""
-    new = """smr_ok:
+    mask_pre_new = """smr_ok:
 	if (a52_p426_is_target(smmu)) {
 		a52_p426_mask_test_idx = i;
 		a52_p426_mask_test_before =
@@ -369,49 +413,50 @@ def patch_smmu(text: str) -> str:
 	/*
 	 * SMR.ID bits may not be preserved if the corresponding MASK
 """
-    text = one(text, old, new, "mask test pre-read")
+    text = one(text, mask_pre, mask_pre_new, "mask test pre-read")
 
-    old = """	smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
-	smmu->smr_mask_mask = FIELD_GET(ARM_SMMU_SMR_MASK, smr);
-}
-"""
-    new = """	smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
+    mask_post_new = """	smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
 	smmu->smr_mask_mask = FIELD_GET(ARM_SMMU_SMR_MASK, smr);
 	if (a52_p426_is_target(smmu))
 		a52_p426_mask_test_after =
 			arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
 }
 """
-    text = one(text, old, new, "mask test post-read")
+    text = one(text, mask_post, mask_post_new, "mask test post-read")
 
-    # Latch global-fault evidence before the existing handler clears sGFSR.
-    old = """	gfsynr2 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR2);
-
-	if (!gfsr)
-"""
-    new = """	gfsynr2 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR2);
+    global_new = """	gfsynr2 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR2);
 
 	a52_p426_latch_global_fault(smmu, gfsr, gfsynr0, gfsynr1, gfsynr2);
 
 	if (!gfsr)
 """
-    text = one(text, old, new, "global fault latch")
-
+    text = one(text, global_old, global_new, "global fault latch")
     return text
 
 
 def patch_dsi(text: str) -> str:
     if MARK in text:
         return text
-    for token in (
+
+    require_tokens(text, (
         "a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);",
         "extern void a52_p424_dump_snapshot(void);",
         "a52_p424_dump_snapshot();",
-    ):
-        if token not in text:
-            raise SystemExit("Phase426 DSI prerequisite missing: " + token)
+    ), "DSI")
 
     decl = "extern void a52_p424_dump_snapshot(void);\n"
+    s00 = """		a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);
+	}
+"""
+    post = """	if (a52_p421_target_active())
+		a52_p424_dump_snapshot();
+"""
+    require_unique_anchors(text, (
+        ("declarations", decl),
+        ("S00 read-only stream snapshot", s00),
+        ("post-timeout stream dump", post),
+    ), "DSI")
+
     text = one(
         text, decl,
         decl +
@@ -420,22 +465,16 @@ def patch_dsi(text: str) -> str:
         "DSI declarations",
     )
 
-    old = """		a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);
-	}
-"""
-    new = """		a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);
+    s00_new = """		a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);
 		a52_p426_capture_f0();
 	}
 """
-    text = one(text, old, new, "S00 read-only stream snapshot")
+    text = one(text, s00, s00_new, "S00 read-only stream snapshot")
 
-    old = """	if (a52_p421_target_active())
-		a52_p424_dump_snapshot();
-"""
-    new = old + """	if (a52_p421_target_active())
+    post_new = post + """	if (a52_p421_target_active())
 		a52_p426_timeout_dump();
 """
-    text = one(text, old, new, "post-timeout stream dump")
+    text = one(text, post, post_new, "post-timeout stream dump")
     return text
 
 
@@ -449,6 +488,25 @@ def patch_rec(text: str) -> str:
 	    strncmp(fmt, "P425", 4) &&
 	    strncmp(fmt, "P424", 4) &&
 """
+    normal = """if (strncmp(fmt, "P425", 4) &&
+    strncmp(fmt, "P424", 4) &&
+"""
+    clean = """	if (!fmt || (
+	    strncmp(fmt, "P425", 4) &&
+	    strncmp(fmt, "P424", 4) &&
+"""
+    anchors = [
+        ("retention admission", retained),
+        ("normal admission", normal),
+        ("Phase402 admission", clean),
+    ]
+    if '!strncmp(message, "P426 ", 5)' not in text:
+        anchors.append(
+            ("critical persistent admission",
+             'return !strncmp(message, "P425 ", 5) ||')
+        )
+    require_unique_anchors(text, tuple(anchors), "recorder")
+
     retained_new = """	if (unlikely(atomic_read(&a52_r280_retained)) &&
 	    strncmp(fmt, "P426", 4) &&
 	    strncmp(fmt, "P425", 4) &&
@@ -456,19 +514,12 @@ def patch_rec(text: str) -> str:
 """
     text = one(text, retained, retained_new, "retention admission")
 
-    normal = """if (strncmp(fmt, "P425", 4) &&
-    strncmp(fmt, "P424", 4) &&
-"""
     normal_new = """if (strncmp(fmt, "P426", 4) &&
     strncmp(fmt, "P425", 4) &&
     strncmp(fmt, "P424", 4) &&
 """
     text = one(text, normal, normal_new, "normal admission")
 
-    clean = """	if (!fmt || (
-	    strncmp(fmt, "P425", 4) &&
-	    strncmp(fmt, "P424", 4) &&
-"""
     clean_new = """	if (!fmt || (
 	    strncmp(fmt, "P426", 4) &&
 	    strncmp(fmt, "P425", 4) &&
@@ -476,9 +527,6 @@ def patch_rec(text: str) -> str:
 """
     text = one(text, clean, clean_new, "Phase402 admission")
 
-    # Keep P426 in the immediate persistent lane. Anchor only on P425's
-    # predicate; Phase425 itself intentionally stopped assuming which predicate
-    # follows it because later lineage can reorder/extend this chain.
     if '!strncmp(message, "P426 ", 5)' not in text:
         critical = 'return !strncmp(message, "P425 ", 5) ||'
         critical_new = ('return !strncmp(message, "P426 ", 5) ||\n'
@@ -494,16 +542,25 @@ def validate(root: Path) -> None:
     dsi = (root / DSI).read_text(errors="replace")
     rec = (root / REC).read_text(errors="replace")
     alltxt = smmu + dsi + rec
+    errors: list[str] = []
 
     required = (
         MARK,
+        "a52_p426_decode_mask",
+        "if (!(smmu->features & ARM_SMMU_FEAT_EXIDS))",
+        "d->pinned = s2cr->pinned ? 1U : 0U;",
         "a52_p426_cache_boot_routes(smmu);",
         "a52_p426_mask_test_before",
         "a52_p426_mask_test_after",
         "a52_p426_latch_global_fault(smmu, gfsr, gfsynr0, gfsynr1, gfsynr2);",
         "void a52_p426_capture_f0(void)",
         "void a52_p426_timeout_dump(void)",
+        'P426 B g=%u hv=%u hm=%u sv=%u sm=%u',
+        'P426 MT i=%d pre=%x post=%x',
+        'P426 F g=%u hv=%u hm=%u sv=%u sm=%u',
+        'P426 T g=%u hv=%u hm=%u sv=%u sm=%u',
         'P426 GF n=%u g=%x s0=%x s1=%x s2=%x',
+        'P426 TG g=%x s0=%x s1=%x s2=%x',
         'P426 %s i=%u smr=%x s2=%x id=%x m=%x cb=%u ty=%u',
         'a52_p426_dump_hw_matches("BM", &a52_p426_boot, smmu);',
         'a52_p426_dump_hw_matches("FM", &a52_p426_f0, smmu);',
@@ -517,36 +574,80 @@ def validate(root: Path) -> None:
     )
     for token in required:
         if token not in alltxt:
-            raise SystemExit("Phase426 validation missing: " + token)
+            errors.append("missing token: " + token)
 
-    # F0 observer must remain read-only and recorder-free.
-    a = smmu.index("void a52_p426_capture_f0(void)")
-    b = smmu.index("EXPORT_SYMBOL_GPL(a52_p426_capture_f0);", a)
-    f0 = smmu[a:b]
-    for forbidden in (
-        "a52_ackfr_record(",
-        "arm_smmu_gr0_write(",
-        "arm_smmu_cb_write(",
-        "writel",
-        "msleep",
-        "udelay",
-    ):
-        if forbidden in f0:
-            raise SystemExit("Phase426 F0 observer contains forbidden operation: " + forbidden)
+    # F0 observer must remain read-only and recorder-free. Strip comments so
+    # documentation such as "no recorder I/O" cannot trip the audit.
+    a = smmu.find("void a52_p426_capture_f0(void)")
+    b = smmu.find("EXPORT_SYMBOL_GPL(a52_p426_capture_f0);", a if a >= 0 else 0)
+    if a < 0 or b < 0 or b <= a:
+        errors.append("cannot isolate F0 observer")
+    else:
+        f0 = strip_c_comments(smmu[a:b])
+        forbidden = (
+            ("recorder write", r"\ba52_ackfr_record\s*\("),
+            ("GR0 write", r"\barm_smmu_gr0_write\s*\("),
+            ("CB write", r"\barm_smmu_cb_write\s*\("),
+            ("raw writel", r"\bwritel(?:_relaxed)?\s*\("),
+            ("msleep", r"\bmsleep\s*\("),
+            ("udelay", r"\budelay\s*\("),
+        )
+        for label, pattern in forbidden:
+            if re.search(pattern, f0):
+                errors.append("F0 observer contains forbidden " + label)
 
-    # Boot cache must precede the inherited reset/mask test at probe time.
-    cache = smmu.index("a52_p426_cache_boot_routes(smmu);")
-    reset = smmu.index("arm_smmu_device_reset(smmu);", cache)
-    test = smmu.index("arm_smmu_test_smr_masks(smmu);", reset)
-    if not cache < reset < test:
-        raise SystemExit("Phase426 boot-cache ordering must be cache < reset < mask-test")
+    # Boot cache must be at the probe-time reset site, before reset and mask test.
+    cache = smmu.find("a52_p426_cache_boot_routes(smmu);")
+    reset = smmu.find("arm_smmu_device_reset(smmu);", cache + 1 if cache >= 0 else 0)
+    test = smmu.find("arm_smmu_test_smr_masks(smmu);", reset + 1 if reset >= 0 else 0)
+    if not (0 <= cache < reset < test):
+        errors.append("boot-cache ordering is not cache < reset < mask-test")
 
-    # Global fault latch must precede existing sGFSR clear.
-    handler = smmu.index("static irqreturn_t arm_smmu_global_fault(int irq, void *dev)")
-    latch = smmu.index("a52_p426_latch_global_fault(smmu, gfsr", handler)
-    clear = smmu.index("arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sGFSR, gfsr);", handler)
-    if latch > clear:
-        raise SystemExit("Phase426 global fault latch occurs after clear")
+    # Global fault evidence must be latched before the inherited sGFSR clear.
+    handler = smmu.find("static irqreturn_t arm_smmu_global_fault(int irq, void *dev)")
+    latch = smmu.find("a52_p426_latch_global_fault(smmu, gfsr", handler if handler >= 0 else 0)
+    clear = smmu.find(
+        "arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sGFSR, gfsr);",
+        handler if handler >= 0 else 0,
+    )
+    if not (0 <= handler < latch < clear):
+        errors.append("global-fault ordering is not handler < latch < clear")
+
+    # DSI correlation must preserve the intended ordering at S00 and S10.
+    publish = dsi.find("a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);")
+    capture = dsi.find("a52_p426_capture_f0();", publish + 1 if publish >= 0 else 0)
+    if not (0 <= publish < capture):
+        errors.append("DSI S00 ordering is not M00 publish < P426 capture")
+
+    dump424 = dsi.find("a52_p424_dump_snapshot();")
+    dump426 = dsi.find("a52_p426_timeout_dump();", dump424 + 1 if dump424 >= 0 else 0)
+    if not (0 <= dump424 < dump426):
+        errors.append("DSI S10 ordering is not P424 dump < P426 dump")
+
+    if dsi.count("a52_p426_capture_f0();") != 1:
+        errors.append(
+            f"expected one DSI P426 capture call, found {dsi.count('a52_p426_capture_f0();')}"
+        )
+    if dsi.count("a52_p426_timeout_dump();") != 1:
+        errors.append(
+            f"expected one DSI P426 timeout call, found {dsi.count('a52_p426_timeout_dump();')}"
+        )
+    if rec.count('!strncmp(message, "P426 ", 5)') != 1:
+        errors.append(
+            "critical P426 admission count is " +
+            str(rec.count('!strncmp(message, "P426 ", 5)'))
+        )
+    if rec.count('strncmp(fmt, "P426", 4)') < 3:
+        errors.append(
+            "expected P426 admission in retained/normal/clean paths; found " +
+            str(rec.count('strncmp(fmt, "P426", 4)'))
+        )
+
+    if errors:
+        raise SystemExit(
+            f"Phase426 validation failed ({len(errors)} issue(s)):\n" +
+            "\n".join(f" - {item}" for item in errors)
+        )
 
 
 def main() -> int:

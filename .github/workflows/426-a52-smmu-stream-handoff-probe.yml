@@ -394,10 +394,10 @@ jobs:
               script[pe:]
           )
 
-          Path("/tmp/phase402-build.sh").write_text("set -Eeuo pipefail\n" + script)
+          Path("phase426-generated-build.sh").write_text("set -Eeuo pipefail\n" + script)
           PY
 
-          bash /tmp/phase402-build.sh
+          bash phase426-generated-build.sh
 
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
@@ -411,6 +411,7 @@ jobs:
           SSPANEL="$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c"
           MSMSMMU="$ROOT/drivers/a52_display/msm/msm_smmu.c"
           ARMSMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          ARMSMMUH="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.h"
           IRQH="$ROOT/kernel/irq/handle.c"
           UFS="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
           UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
@@ -749,6 +750,8 @@ jobs:
              scripts/422_apply_display_smmu_fault_probe.py \
              scripts/423_apply_rpmh_solver_mode_compat.py \
              scripts/424_apply_gki_paired_hw_snapshot.py \
+             scripts/425_apply_reboot_origin_recorder.py \
+             scripts/426_apply_smmu_stream_handoff_probe.py \
              scripts/decode_phase421_survival.py \
              scripts/decode_phase422_smmu_fault.py \
              scripts/decode_phase414_sequential_3m.py \
@@ -757,7 +760,8 @@ jobs:
              scripts/decode_phase408_samsung_debug_dsi.py \
              scripts/decode_phase407_samsung_debug_dsi.py \
              scripts/decode_phase405_dma_done.py "$OUT/audit/"
-          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$DRMMODES" "$MSM" "$ENCODER" "$RPMHRSC" "$RPMH" "$RPMHINT" "$COMPAT" "$OUT/source/"
+          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$ARMSMMUH" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$DRMMODES" "$MSM" "$ENCODER" "$RPMHRSC" "$RPMH" "$RPMHINT" "$COMPAT" "$REBOOT" "$OUT/source/"
+          cp phase426-generated-build.sh "$OUT/audit/phase426-generated-build.sh"
 
           cat > "$OUT/PHASE421-NOTES.txt" <<'EOF'
           Phase414 sequential 3 MiB recorder
@@ -961,33 +965,10 @@ jobs:
           grep -Fq 'strncmp(fmt, "P425", 4)' "$REC"
           grep -Fq '!strncmp(message, "P425 ", 5)' "$REC"
 
-          echo "Phase426 SMMU stream-handoff probe audit"
-          grep -Fq 'A52_PHASE426_SMMU_STREAM_HANDOFF_PROBE_V1' "$ARMSMMU"
-          grep -Fq 'a52_p426_cache_boot_routes(smmu);' "$ARMSMMU"
-          grep -Fq 'a52_p426_mask_test_before' "$ARMSMMU"
-          grep -Fq 'a52_p426_mask_test_after' "$ARMSMMU"
-          grep -Fq 'a52_p426_latch_global_fault(smmu, gfsr' "$ARMSMMU"
-          grep -Fq 'P426 GF n=%u g=%x s0=%x s1=%x s2=%x' "$ARMSMMU"
-          grep -Fq 'P426 BT i=%u smr=%x s2=%x' "$ARMSMMU"
-          grep -Fq 'a52_p426_capture_f0();' "$DSI"
-          grep -Fq 'a52_p426_timeout_dump();' "$DSI"
-          grep -Fq 'strncmp(fmt, "P426", 4)' "$REC"
-          grep -Fq '!strncmp(message, "P426 ", 5)' "$REC"
-          python3 - "$ARMSMMU" <<'PY426'
-          import sys
-          from pathlib import Path
-          s=Path(sys.argv[1]).read_text()
-          a=s.index("void a52_p426_capture_f0(void)")
-          b=s.index("EXPORT_SYMBOL_GPL(a52_p426_capture_f0);", a)
-          hot=s[a:b]
-          for bad in ("a52_ackfr_record(", "arm_smmu_gr0_write(", "arm_smmu_cb_write(", "writel", "msleep", "udelay"):
-              assert bad not in hot, bad
-          cache=s.index("a52_p426_cache_boot_routes(smmu);")
-          reset=s.index("arm_smmu_device_reset(smmu);", cache)
-          test=s.index("arm_smmu_test_smr_masks(smmu);", reset)
-          assert cache < reset < test
-          print("Phase426 read-only hot-path/order audit: PASS")
-          PY426
+          echo "Phase426 authoritative source audit"
+          python3 scripts/426_apply_smmu_stream_handoff_probe.py \
+            --root "$ROOT" --check-only
+          echo "Phase426 authoritative source audit: PASS"
 
           cat > "$OUT/PHASE424-NOTES.txt" <<'EOF'
           Phase424 paired pre-trigger hardware snapshot
@@ -1051,6 +1032,23 @@ jobs:
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase426 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE426-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.h
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/kernel/reboot.c
+            phase426-generated-build.sh
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
 
       - name: Build Phase426 SMMU handoff-probe boot image
         run: |

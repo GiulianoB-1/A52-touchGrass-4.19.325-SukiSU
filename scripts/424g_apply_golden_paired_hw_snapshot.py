@@ -251,9 +251,9 @@ def patch_hwc(text:str)->str:
 		a52_g424_snapshot(ctrl);
 		DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
 '''
-    if text.count(old)!=2:
-        raise SystemExit(f"Phase424G expected 2 trigger paths, found {text.count(old)}")
-    text=text.replace(old,new)
+    if text.count(old)!=1:
+        raise SystemExit(f"Phase424G expected 1 exact Golden trigger path, found {text.count(old)}")
+    text=text.replace(old,new,1)
     return text
 
 
@@ -287,8 +287,8 @@ def validate(ctrl:str,hwc:str)->None:
     ):
         if token not in alltxt:
             raise SystemExit("Phase424G validation missing: "+token)
-    if hwc.count("a52_g424_snapshot(ctrl);") != 2:
-        raise SystemExit("Phase424G snapshot not present on both trigger paths")
+    if hwc.count("a52_g424_snapshot(ctrl);") != 1:
+        raise SystemExit("Phase424G exact Golden trigger snapshot missing/not unique")
     if "writel_relaxed(" in HELPER or "DSI_W32(" in HELPER:
         raise SystemExit("Phase424G helper must remain read-only")
 

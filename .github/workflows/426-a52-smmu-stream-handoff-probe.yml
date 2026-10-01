@@ -233,16 +233,43 @@ jobs:
           PHASE357_PREWARMED_PHASE346: '1'
         run: bash scripts/357_ci_build_gki.sh
 
+      - name: Repair GKI git metadata after Phase357 cache restore
+        if: steps.phase357-cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          # repo-managed checkouts keep common/.git metadata under gki/.repo.
+          # The Phase357 cache intentionally contains the working tree/build
+          # outputs, so reconstruct only Git metadata and leave all Phase357
+          # source modifications and compiled objects untouched.
+          if ! git -C gki/common rev-parse HEAD >/dev/null 2>&1; then
+            echo "Phase357 cache has source/build state but no usable repo metadata; repairing"
+            rm -rf gki/common/.git
+            git -C gki/common init
+            git -C gki/common remote add origin https://android.googlesource.com/kernel/common
+            git -C gki/common fetch --depth=1 origin "refs/tags/$GKI_COMMON_TAG"
+            test "$(git -C gki/common rev-parse FETCH_HEAD)" = "$GKI_COMMON_SHA"
+            git -C gki/common reset --mixed "$GKI_COMMON_SHA"
+          fi
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
       - name: Validate Phase357 baseline
         run: |
           set -Eeuo pipefail
-          test -d gki/common
-          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
-          test -s phase357-gki-out/package/boot.img
-          test -s phase357-gki-out/config/final.config
-          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
-          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
-          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          echo "Phase357 cache hit: ${{ steps.phase357-cache.outputs.cache-hit }}"
+          test -d gki/common || { echo "missing gki/common"; exit 1; }
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image || { echo "missing cached Image"; exit 1; }
+          test -s phase357-gki-out/package/boot.img || { echo "missing cached Phase357 boot.img"; exit 1; }
+          test -s phase357-gki-out/config/final.config || { echo "missing cached Phase357 final.config"; exit 1; }
+          bytes="$(stat -c '%s' phase357-gki-out/package/boot.img)"
+          echo "Phase357 boot.img bytes=$bytes"
+          test "$bytes" -eq 100663296
+          head_sha="$(git -C gki/common rev-parse HEAD)"
+          echo "GKI reconstructed HEAD=$head_sha"
+          test "$head_sha" = "$GKI_COMMON_SHA"
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c || {
+            echo "missing Phase357 source marker"; exit 1;
+          }
+          echo "Phase357 cached baseline validation: PASS"
 
       - name: Save exact Phase357 baseline
         if: steps.phase357-cache.outputs.cache-hit != 'true'

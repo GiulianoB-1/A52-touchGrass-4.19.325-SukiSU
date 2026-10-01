@@ -29,12 +29,12 @@ GROUPS = {
     "C1": [
         ("DISP_CC_PCLK0_CMD_RCGR", "0xaf01064"),
         ("DISP_CC_PCLK0_CFG_RCGR", "0xaf01068"),
-        ("DISP_CC_BYTE0_CMD_RCGR", "0xaf0107c"),
-        ("DISP_CC_BYTE0_CFG_RCGR", "0xaf01080"),
-        ("DISP_CC_ESC0_CMD_RCGR", "0xaf010c4"),
-        ("DISP_CC_ESC0_CFG_RCGR", "0xaf010c8"),
-        ("DISP_CC_MDP_CMD_RCGR", "0xaf010e0"),
-        ("DISP_CC_MDP_CFG_RCGR", "0xaf010e4"),
+        ("DISP_CC_MDP_CMD_RCGR", "0xaf0107c"),
+        ("DISP_CC_MDP_CFG_RCGR", "0xaf01080"),
+        ("DISP_CC_BYTE0_CMD_RCGR", "0xaf010c4"),
+        ("DISP_CC_BYTE0_CFG_RCGR", "0xaf010c8"),
+        ("DISP_CC_ESC0_CMD_RCGR", "0xaf010e0"),
+        ("DISP_CC_ESC0_CFG_RCGR", "0xaf010e4"),
     ],
     "P": [
         ("MDSS_CORE_GDSC", "0xaf01004"),
@@ -145,6 +145,22 @@ def main() -> int:
         print(f"Golden snapshot ns: {golden['T'][0]}")
     if "T" in gki:
         print(f"GKI snapshot ns:    {gki['T'][0]}")
+
+    # Phase415/Golden watch item: decode MDSS_CORE_GDSC first.
+    # Qualcomm GDSCR bits: PWR_ON=31, HW_CONTROL=1, SW_COLLAPSE=0.
+    gp = golden.get("P", [])
+    kp = gki.get("P", [])
+    if gp and kp:
+        def gdsc_bits(v: int) -> str:
+            return (
+                f"PWR_ON={(v >> 31) & 1} "
+                f"HW_CTRL={(v >> 1) & 1} "
+                f"SW_COLLAPSE={v & 1}"
+            )
+        print("\nMDSS_CORE_GDSC PRIORITY CHECK")
+        print(f"TG ={fmt(gp[0])} {gdsc_bits(gp[0])}")
+        print(f"GKI={fmt(kp[0])} {gdsc_bits(kp[0])}")
+        print(f"XOR={fmt(gp[0] ^ kp[0])}")
 
     print("\nDIFFERENCES")
     if not changed:

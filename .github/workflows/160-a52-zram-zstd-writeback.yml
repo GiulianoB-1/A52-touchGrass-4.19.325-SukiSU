@@ -658,6 +658,7 @@ jobs:
             workspace/touchgrass-a52xq/out/System.map
             workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             artifacts/boot-async-p152-build.log
           key: ${{ env.P159_BUILD_CACHE_KEY }}
 
@@ -702,6 +703,11 @@ jobs:
           test -s "$KERNEL/out/.config"
           test -s "$KERNEL/out/arch/arm64/boot/Image"
           test -s "$IMAGE"
+          CONFIG_ARTIFACT="${IMAGE/Image-/config-}"
+          if [ ! -s "$CONFIG_ARTIFACT" ]; then
+            cp "$KERNEL/out/.config" "$CONFIG_ARTIFACT"
+          fi
+          test -s "$CONFIG_ARTIFACT"
           test -s artifacts/boot-async-p152-build.log
           grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
           grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
@@ -718,6 +724,7 @@ jobs:
             workspace/touchgrass-a52xq/out/System.map
             workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             artifacts/boot-async-p152-build.log
           key: ${{ env.P159_BUILD_CACHE_KEY }}
 
@@ -954,6 +961,13 @@ jobs:
       - name: Package P160 flashable ZIP
         run: |
           set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CONFIG_ARTIFACT="${IMAGE/Image-/config-}"
+          if [ ! -s "$CONFIG_ARTIFACT" ]; then
+            cp "$KERNEL/out/.config" "$CONFIG_ARTIFACT"
+          fi
+          test -s "$CONFIG_ARTIFACT"
+
           cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p152.sh
           sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p152.sh
           sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p152.sh

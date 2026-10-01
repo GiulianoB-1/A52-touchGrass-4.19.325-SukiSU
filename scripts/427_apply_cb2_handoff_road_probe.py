@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-EXPECTED_SHA256 = "3ae4a80af8fa63004892e37120df3cfb6eda232ac98ff61370f030b9982e35c4"
+EXPECTED_SHA256 = "20527493ccaa0616fe5911b5d6843ddde5bd6dbfcce993c94a9eb5bbf285c943"
 PART_DIR = Path(__file__).with_name("427_parts")
 PARTS = tuple(PART_DIR / f"part{i}.inc" for i in range(1, 5))
 

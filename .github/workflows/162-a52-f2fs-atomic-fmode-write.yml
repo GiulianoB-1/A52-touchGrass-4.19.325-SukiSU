@@ -8,7 +8,6 @@ on:
       - .github/workflows/162-a52-f2fs-atomic-fmode-write.yml
       - scripts/162_apply_f2fs_atomic_fmode_write_fix.py
       - scripts/161_apply_zram_multicomp_zstd.py
-      - scripts/161_apply_zram_multicomp_zstd.py
       - scripts/160_enable_zram_zstd_writeback.py
       - scripts/159_teardown_recorders_and_markers.py
       - scripts/156_apply_clang22_initcall_order_fix.py
@@ -857,7 +856,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .thinlto-link-cache
-          key: a52xq-thinlto-link-r596125-p161-zram-multicomp-zstd-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-thinlto-link-r596125-p162-f2fs-atomic-fmode-${{ runner.os }}-${{ github.sha }}
 
       - name: Audit retained production functionality after teardown
         run: |

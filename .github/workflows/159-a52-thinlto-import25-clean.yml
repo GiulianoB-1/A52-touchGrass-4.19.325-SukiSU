@@ -1001,6 +1001,7 @@ jobs:
 # - P156 repairs the legacy 4.19 initcall-order generator for modern llvm-nm.
 
 # P159: clean O2 + Clang22 + LLD22 + ThinLTO production candidate.
+# - Superseded import50 workflow removed; this is the only active P159 path.
 # - P158 import limit 20 is boot-proven.
 # - ThinLTO cross-TU import-instr-limit is 25.
 # - P156 initcall-order repair and hard linker audits remain mandatory.

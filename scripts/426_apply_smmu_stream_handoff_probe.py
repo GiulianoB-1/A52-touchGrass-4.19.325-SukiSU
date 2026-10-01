@@ -333,14 +333,24 @@ def patch_smmu(text: str) -> str:
     text = one(text, anchor, BLOCK + "\n" + anchor, "probe block insertion")
 
     # Cache firmware routes after cfg_probe has allocated Linux SW tables, but
-    # before reset/mask-test code can touch the retained HW table. Anchor on
-    # the reset call itself instead of cfg_probe's error-handling shape, which
-    # varies across the Android 5.10 lineage.
-    reset_call = "\tarm_smmu_device_reset(smmu);\n"
+    # before the probe-time reset/mask test can touch retained HW state.
+    # arm_smmu_device_reset() also exists in runtime_resume(), so use the
+    # probe-only platform_set_drvdata/reset/test sequence as the anchor.
+    probe_reset = (
+        "\tplatform_set_drvdata(pdev, smmu);\n"
+        "\tarm_smmu_device_reset(smmu);\n"
+        "\tarm_smmu_test_smr_masks(smmu);\n"
+    )
+    probe_reset_new = (
+        "\tplatform_set_drvdata(pdev, smmu);\n"
+        "\ta52_p426_cache_boot_routes(smmu);\n"
+        "\tarm_smmu_device_reset(smmu);\n"
+        "\tarm_smmu_test_smr_masks(smmu);\n"
+    )
     text = one(
         text,
-        reset_call,
-        "\ta52_p426_cache_boot_routes(smmu);\n\n" + reset_call,
+        probe_reset,
+        probe_reset_new,
         "pre-write boot route cache",
     )
 

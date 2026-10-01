@@ -31,8 +31,8 @@ RECORDER_C = r'''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/mm.h>
 #include <linux/sizes.h>
 #include <linux/spinlock.h>
-#include <linux/stdarg.h>
 #include <linux/string.h>
+#include <linux/timekeeping.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 

@@ -1,0 +1,905 @@
+name: Phase427 - CB2 handoff + road-to-memory probe
+run-name: Phase427 - CB2 handoff + road-to-memory probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/414-a52-sequential-3m-recorder.yml
+      - .github/workflows/415-a52-mdss-gdsc-hwctrl-parity.yml
+      - .github/workflows/416-a52-sequential-3m-disk-persist-v2.yml
+      - .github/workflows/417-a52-postbind-frontier.yml
+      - .github/workflows/418-a52-atomic-present-discriminator.yml
+      - .github/workflows/419-a52-umode-vrefresh-parity.yml
+      - .github/workflows/420-a52-umode-roundtrip-vrefresh-parity.yml
+      - .github/workflows/421-a52-fetch-memory-survival.yml
+      - .github/workflows/422-a52-display-smmu-fault-probe.yml
+      - .github/workflows/423-a52-rpmh-solver-mode-compat.yml
+      - .github/workflows/424-a52-paired-hw-snapshot.yml
+      - .github/workflows/425-a52-reboot-origin-recorder.yml
+      - .github/workflows/426-a52-smmu-stream-handoff-probe.yml
+      - .github/workflows/427-a52-cb2-handoff-road-probe.yml
+      - .github/workflows/411-a52-fifo-panic-smmu.yml
+      - .github/workflows/409-a52-ram1m-debug2m-dsi.yml
+      - .github/workflows/408-a52-direct-bio-samsung-dsi.yml
+      - .github/workflows/407-a52-samsung-debug-dsi.yml
+      - .github/workflows/406-a52-persistent-memory-dma.yml
+      - .github/workflows/405-a52-stable-memory-dma.yml
+      - .github/workflows/403-a52-dsi-nohlt-retire-ufs-sampler.yml
+      - .github/workflows/402-a52-dsi-nohlt-clean.yml
+      - scripts/402_apply_dsi_nohlt_cleanup.py
+      - scripts/403_apply_retire_phase380_ufs_sampler.py
+      - scripts/405_apply_dma_done_direct.py
+      - scripts/406_apply_p392_cache_persist.py
+      - scripts/407_apply_samsung_debug_dsi.py
+      - scripts/408_apply_direct_bio_debug_dsi.py
+      - scripts/409_apply_ram1m_debug2m_dsi.py
+      - scripts/411_apply_fifo_panic_smmu_experiment.py
+      - scripts/413_apply_concurrent_debug2m_mirror.py
+      - scripts/414_apply_sequential_3m_recorder.py
+      - scripts/415_apply_mdss_gdsc_hwctrl_parity.py
+      - scripts/416_apply_sequential_3m_disk_persistence_v2.py
+      - scripts/417_apply_postbind_frontier.py
+      - scripts/418_apply_atomic_present_discriminator.py
+      - scripts/419_apply_umode_vrefresh_parity.py
+      - scripts/420_apply_umode_roundtrip_vrefresh_parity.py
+      - scripts/421_apply_fetch_memory_survival.py
+      - scripts/422_apply_display_smmu_fault_probe.py
+      - scripts/423_apply_rpmh_solver_mode_compat.py
+      - scripts/424_apply_gki_paired_hw_snapshot.py
+      - scripts/425_apply_reboot_origin_recorder.py
+      - scripts/426_apply_smmu_stream_handoff_probe.py
+      - scripts/427_apply_cb2_handoff_road_probe.py
+      - scripts/427_parts/**
+      - scripts/decode_phase422_smmu_fault.py
+      - scripts/decode_phase421_survival.py
+      - scripts/decode_phase414_sequential_3m.py
+      - scripts/decode_phase416_sequential_3m.py
+      - scripts/decode_phase409_ram1m_debug2m.py
+      - scripts/decode_phase408_samsung_debug_dsi.py
+      - scripts/decode_phase407_samsung_debug_dsi.py
+      - scripts/decode_phase405_dma_done.py
+      - scripts/397_apply_downstream_bus_votes.py
+      - scripts/38_repack_a52_p1_boot.py
+      - .github/workflows/394-a52-mode-fixup-fifo-early.yml
+
+# Phase416 binary-audit correction rebuild
+# Phase424 runner restart after hosted-runner package stall
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+
+concurrency:
+  group: a52-phase427-cb2-handoff-road-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase427 CB2 handoff + road-to-memory probe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/397_apply_downstream_bus_votes.py \
+            scripts/402_apply_dsi_nohlt_cleanup.py \
+            scripts/403_apply_retire_phase380_ufs_sampler.py \
+            scripts/405_apply_dma_done_direct.py \
+            scripts/406_apply_p392_cache_persist.py \
+            scripts/407_apply_samsung_debug_dsi.py \
+            scripts/408_apply_direct_bio_debug_dsi.py \
+            scripts/409_apply_ram1m_debug2m_dsi.py \
+            scripts/411_apply_fifo_panic_smmu_experiment.py \
+            scripts/413_apply_concurrent_debug2m_mirror.py \
+            scripts/414_apply_sequential_3m_recorder.py \
+            scripts/415_apply_mdss_gdsc_hwctrl_parity.py \
+            scripts/416_apply_sequential_3m_disk_persistence_v2.py \
+            scripts/417_apply_postbind_frontier.py \
+            scripts/418_apply_atomic_present_discriminator.py \
+            scripts/419_apply_umode_vrefresh_parity.py \
+            scripts/420_apply_umode_roundtrip_vrefresh_parity.py \
+            scripts/421_apply_fetch_memory_survival.py \
+            scripts/422_apply_display_smmu_fault_probe.py \
+            scripts/423_apply_rpmh_solver_mode_compat.py \
+            scripts/424_apply_gki_paired_hw_snapshot.py \
+            scripts/425_apply_reboot_origin_recorder.py \
+            scripts/426_apply_smmu_stream_handoff_probe.py \
+            scripts/427_apply_cb2_handoff_road_probe.py \
+            scripts/decode_phase421_survival.py \
+            scripts/decode_phase422_smmu_fault.py \
+            scripts/decode_phase414_sequential_3m.py \
+            scripts/decode_phase416_sequential_3m.py \
+            scripts/decode_phase409_ram1m_debug2m.py \
+            scripts/decode_phase408_samsung_debug_dsi.py \
+            scripts/decode_phase407_samsung_debug_dsi.py \
+            scripts/decode_phase405_dma_done.py \
+            scripts/38_repack_a52_p1_boot.py
+          python3 scripts/427_apply_cb2_handoff_road_probe.py --help >/dev/null
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Restore Phase346 baseline cache v2 on Phase357 miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1 on Phase357 miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache on Phase357 miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source on baseline-cache miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on complete cache miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Restore exact TouchGrass source on baseline-cache miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on complete baseline-cache miss
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase345 fallback
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Build Phase346 fallback
+        if: steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Build Phase357 fallback
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 baseline
+        run: |
+          set -Eeuo pipefail
+          echo "Phase357 cache hit: ${{ steps.phase357-cache.outputs.cache-hit }}"
+          test -d gki/common || { echo "missing gki/common"; exit 1; }
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image || { echo "missing cached Image"; exit 1; }
+          test -s phase357-gki-out/package/boot.img || { echo "missing cached Phase357 boot.img"; exit 1; }
+          test -s phase357-gki-out/config/final.config || { echo "missing cached Phase357 final.config"; exit 1; }
+          bytes="$(stat -c '%s' phase357-gki-out/package/boot.img)"
+          echo "Phase357 boot.img bytes=$bytes"
+          test "$bytes" -eq 100663296
+          test "$(make -s -C gki/common kernelversion)" = "5.10.252" || {
+            echo "unexpected cached kernel version"; exit 1;
+          }
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c || {
+            echo "missing Phase357 source marker"; exit 1;
+          }
+          echo "Phase357 cached baseline validation: PASS"
+
+      - name: Save exact Phase357 baseline
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Reapply Phase358 and Phase359
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT"
+          python3 scripts/358_apply_pid1_syscall_trace.py --root "$ROOT" --check-only
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT"
+          python3 scripts/359_apply_pid1_writev_payload.py --root "$ROOT" --check-only
+
+      - name: Build Phase427 lineage plus contracts
+        run: |
+          set -Eeuo pipefail
+
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== inherited UFS compatibility audit ==="
+            for spec in \
+              "PINCTRL_BYPASS|$ROOT/drivers/base/dd.c|A52_UFS_PINCTRL_DEFER_BYPASS" \
+              "RPMH_MODE_ABI|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|A52RPMHABI copy=1" \
+              "RPMH_DOWNSTREAM_PROVIDER|$ROOT/drivers/regulator/a52-rpmh-regulator-downstream.c|qcom,rpmh-vrm-regulator" \
+              "UFS_ICE_SAFE|$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c|A52_UFS_ICE_SAFE_BRINGUP" \
+              "LEGACY_UFS_GDSC|$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c|gcc_ufs_phy_gdsc"; do
+              IFS='|' read -r name file marker <<< "$spec"
+              if [ -f "$file" ] && grep -Fq "$marker" "$file"; then
+                echo "$name=present"
+              else
+                echo "$name=absent"
+              fi
+            done
+          } | tee phase377-inherited-ufs-audit.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/394-a52-mode-fixup-fifo-early.yml").read_text().splitlines()
+          start = next(i for i,l in enumerate(src)
+                       if l.strip() == "- name: Apply Phase360 through Phase394 and compile")
+          runline = next(i for i in range(start + 1, len(src))
+                         if src[i].strip() == "run: |")
+          end = next(i for i in range(runline + 1, len(src))
+                     if src[i].startswith("      - name:"))
+          body = [
+              line[10:] if line.startswith("          ") else line
+              for line in src[runline + 1:end]
+          ]
+          script = "\n".join(body) + "\n"
+
+          needle = 'python3 scripts/394_apply_mode_fixup_fifo_early.py --root "$ROOT" --check-only\n'
+          insert = needle + (
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT"\n'
+              'python3 scripts/402_apply_dsi_nohlt_cleanup.py --root "$ROOT" --check-only\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT"\n'
+              'python3 scripts/403_apply_retire_phase380_ufs_sampler.py --root "$ROOT" --check-only\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT"\n'
+              'python3 scripts/405_apply_dma_done_direct.py --root "$ROOT" --check-only\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT"\n'
+              'python3 scripts/406_apply_p392_cache_persist.py --root "$ROOT" --check-only\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/407_apply_samsung_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT"\n'
+              'python3 scripts/408_apply_direct_bio_debug_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT"\n'
+              'python3 scripts/409_apply_ram1m_debug2m_dsi.py --root "$ROOT" --check-only\n'
+              'python3 scripts/411_apply_fifo_panic_smmu_experiment.py --root "$ROOT"\n'
+              'python3 scripts/411_apply_fifo_panic_smmu_experiment.py --root "$ROOT" --check-only\n'
+              'python3 scripts/413_apply_concurrent_debug2m_mirror.py --root "$ROOT"\n'
+              'python3 scripts/413_apply_concurrent_debug2m_mirror.py --root "$ROOT" --check-only\n'
+              'python3 scripts/414_apply_sequential_3m_recorder.py --root "$ROOT"\n'
+              'python3 scripts/414_apply_sequential_3m_recorder.py --root "$ROOT" --check-only\n'
+              'python3 scripts/415_apply_mdss_gdsc_hwctrl_parity.py --root "$ROOT"\n'
+              'python3 scripts/415_apply_mdss_gdsc_hwctrl_parity.py --root "$ROOT" --check-only\n'
+              'python3 scripts/416_apply_sequential_3m_disk_persistence_v2.py --root "$ROOT"\n'
+              'python3 scripts/416_apply_sequential_3m_disk_persistence_v2.py --root "$ROOT" --check-only\n'
+              'python3 scripts/417_apply_postbind_frontier.py --root "$ROOT"\n'
+              'python3 scripts/417_apply_postbind_frontier.py --root "$ROOT" --check-only\n'
+              'python3 scripts/418_apply_atomic_present_discriminator.py --root "$ROOT"\n'
+              'python3 scripts/418_apply_atomic_present_discriminator.py --root "$ROOT" --check-only\n'
+              'python3 scripts/419_apply_umode_vrefresh_parity.py --root "$ROOT"\n'
+              'python3 scripts/419_apply_umode_vrefresh_parity.py --root "$ROOT" --check-only\n'
+              'python3 scripts/420_apply_umode_roundtrip_vrefresh_parity.py --root "$ROOT"\n'
+              'python3 scripts/420_apply_umode_roundtrip_vrefresh_parity.py --root "$ROOT" --check-only\n'
+              'python3 scripts/421_apply_fetch_memory_survival.py --root "$ROOT"\n'
+              'python3 scripts/421_apply_fetch_memory_survival.py --root "$ROOT" --check-only\n'
+              'python3 scripts/422_apply_display_smmu_fault_probe.py --root "$ROOT"\n'
+              'python3 scripts/422_apply_display_smmu_fault_probe.py --root "$ROOT" --check-only\n'
+              'python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT"\n'
+              'python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only\n'
+              'python3 scripts/424_apply_gki_paired_hw_snapshot.py --root "$ROOT"\n'
+              'python3 scripts/424_apply_gki_paired_hw_snapshot.py --root "$ROOT" --check-only\n'
+              'python3 scripts/425_apply_reboot_origin_recorder.py --root "$ROOT"\n'
+              'python3 scripts/425_apply_reboot_origin_recorder.py --root "$ROOT" --check-only\n'
+              'python3 scripts/426_apply_smmu_stream_handoff_probe.py --root "$ROOT"\n'
+              'python3 scripts/426_apply_smmu_stream_handoff_probe.py --root "$ROOT" --check-only\n'
+              'python3 scripts/427_apply_cb2_handoff_road_probe.py --root "$ROOT"\n'
+              'python3 scripts/427_apply_cb2_handoff_road_probe.py --root "$ROOT" --check-only\n'
+          )
+          if needle not in script:
+              raise SystemExit("Phase402 Phase394 insertion anchor missing")
+          script = script.replace(needle, insert, 1)
+
+          cfg = '"$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 19\n'
+          if cfg not in script:
+              raise SystemExit("Phase402 config anchor missing")
+          script = script.replace(
+              cfg,
+              cfg + '"$ROOT/scripts/config" --file "$BUILD/.config" --enable GENERIC_IDLE_POLL_SETUP\n',
+              1)
+
+          script = script.replace("phase394-gki-out", "phase427-gki-out")
+          script = script.replace("PHASE394-SCHEMA.txt", "PHASE427-SCHEMA.txt")
+          script = script.replace("'phase':'394'", "'phase':'427'")
+          script = script.replace(
+              "'name':'MODE-FIXUP-FIFO-EARLY-V1'",
+              "'name':'CB2-HANDOFF-ROAD-PROBE-V1'")
+          script = script.replace(
+              "'392','393','394']",
+              "'392','393','394','397','402','403','405','406','407','408','409','411','413','414','415','416','417','418','419','420','421','422','423','424','425','426','427']")
+
+          # Phase394's inherited audits intentionally require every old observer
+          # to remain linked. Phase402 retires those observers. Keep only Image
+          # existence here; dedicated Phase402 audits follow after the generated
+          # build script.
+          pre_start = 'IMAGE="$BUILD/arch/arm64/boot/Image"\ntest -s "$IMAGE"\n'
+          package_start = 'rm -rf "$OUT"\n'
+          ps = script.find(pre_start)
+          pe = script.find(package_start, ps + len(pre_start))
+          if ps < 0 or pe < 0:
+              raise SystemExit("Phase402 legacy audit boundaries missing")
+          script = (
+              script[:ps + len(pre_start)] +
+              'echo "Phase402: legacy broad-probe compiled audits retired"\n' +
+              script[pe:]
+          )
+
+          Path("phase427-generated-build.sh").write_text("set -Eeuo pipefail\n" + script)
+          PY
+
+          bash phase427-generated-build.sh
+
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase427-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          DSI="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          DSIHW="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          DSIDISPLAY="$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          DSIPANEL="$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c"
+          SSPANEL="$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c"
+          MSMSMMU="$ROOT/drivers/a52_display/msm/msm_smmu.c"
+          ARMSMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          ARMSMMUH="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.h"
+          IRQH="$ROOT/kernel/irq/handle.c"
+          UFS="$ROOT/drivers/scsi/ufs/ufs-qcom.c"
+          UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
+          USB="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
+          GDSC="$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c"
+          DRM="$ROOT/drivers/a52_display/msm/dsi/dsi_drm.c"
+          DRMATOMIC="$ROOT/drivers/gpu/drm/drm_atomic_helper.c"
+          MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
+          ENCODER="$ROOT/drivers/a52_display/msm/sde/sde_encoder.c"
+          DRMMODES="$ROOT/drivers/gpu/drm/drm_modes.c"
+          RPMHRSC="$ROOT/drivers/soc/qcom/rpmh-rsc.c"
+          RPMH="$ROOT/drivers/soc/qcom/rpmh.c"
+          RPMHINT="$ROOT/drivers/soc/qcom/rpmh-internal.h"
+          COMPAT="$ROOT/a52-port-compat.h"
+          REBOOT="$ROOT/kernel/reboot.c"
+          BUSARB="$ROOT/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c"
+          BUSFAB="$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c"
+
+          echo "Phase427 consolidated post-build contract audit"
+          test -s "$IMAGE"
+          test -s "$OUT/compile/System.map"
+          grep -Fxq 'CONFIG_GENERIC_IDLE_POLL_SETUP=y' "$BUILD/.config"
+
+          # Each inherited phase already ran its own apply + check-only validator
+          # before compilation. Re-run only the display/SMMU chain Phase426 can
+          # affect; avoid a second hand-maintained copy of hundreds of old greps.
+          python3 scripts/421_apply_fetch_memory_survival.py --root "$ROOT" --check-only
+          python3 scripts/422_apply_display_smmu_fault_probe.py --root "$ROOT" --check-only
+          python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
+          python3 scripts/424_apply_gki_paired_hw_snapshot.py --root "$ROOT" --check-only
+          python3 scripts/425_apply_reboot_origin_recorder.py --root "$ROOT" --check-only
+          python3 scripts/426_apply_smmu_stream_handoff_probe.py --root "$ROOT" --check-only
+          python3 scripts/427_apply_cb2_handoff_road_probe.py --root "$ROOT" --check-only
+
+          # Confirm the new treatment made it into the compiled kernel.
+          grep -aFq 'P424 C0 %x %x %x %x %x %x %x %x' "$IMAGE"
+          grep -aFq 'P425 KR c=%s p=%d s=%.40s' "$IMAGE"
+          grep -aFq 'P426 X pv=%u sid=%x same=%u cb=%u' "$IMAGE"
+          grep -aFq 'P426 B g=%u hv=%u hm=%u sv=%u sm=%u' "$IMAGE"
+          grep -Fq ' a52_p426_capture_f0' "$OUT/compile/System.map"
+          grep -Fq ' a52_p426_timeout_dump' "$OUT/compile/System.map"
+          grep -aFq 'P427 H v=%u sid=%x e=%d old=%u cb=%u p=%u c=%u r=%u' "$IMAGE"
+          grep -aFq 'P427 G p=%u g0=%x g1=%x tv=%u ts=%x' "$IMAGE"
+          grep -aFq 'P427 I v=%u gi=%llx fi=%llx' "$IMAGE"
+          grep -Fq ' a52_p427_smmu_dump' "$OUT/compile/System.map"
+          grep -Fq ' a52_p427_road_snapshot' "$OUT/compile/System.map"
+          grep -Fq ' a52_p427_bus_get' "$OUT/compile/System.map"
+          grep -Fq ' a52_p427_bcm_get' "$OUT/compile/System.map"
+          echo "Phase427 consolidated post-build contract audit: PASS"
+
+          cp scripts/397_apply_downstream_bus_votes.py \
+             scripts/402_apply_dsi_nohlt_cleanup.py \
+             scripts/403_apply_retire_phase380_ufs_sampler.py \
+             scripts/405_apply_dma_done_direct.py \
+             scripts/406_apply_p392_cache_persist.py \
+             scripts/407_apply_samsung_debug_dsi.py \
+             scripts/408_apply_direct_bio_debug_dsi.py \
+             scripts/409_apply_ram1m_debug2m_dsi.py \
+             scripts/411_apply_fifo_panic_smmu_experiment.py \
+             scripts/413_apply_concurrent_debug2m_mirror.py \
+             scripts/414_apply_sequential_3m_recorder.py \
+             scripts/415_apply_mdss_gdsc_hwctrl_parity.py \
+             scripts/416_apply_sequential_3m_disk_persistence_v2.py \
+             scripts/417_apply_postbind_frontier.py \
+             scripts/418_apply_atomic_present_discriminator.py \
+             scripts/419_apply_umode_vrefresh_parity.py \
+             scripts/420_apply_umode_roundtrip_vrefresh_parity.py \
+             scripts/421_apply_fetch_memory_survival.py \
+             scripts/422_apply_display_smmu_fault_probe.py \
+             scripts/423_apply_rpmh_solver_mode_compat.py \
+             scripts/424_apply_gki_paired_hw_snapshot.py \
+             scripts/425_apply_reboot_origin_recorder.py \
+             scripts/426_apply_smmu_stream_handoff_probe.py \
+             scripts/427_apply_cb2_handoff_road_probe.py \
+             scripts/decode_phase421_survival.py \
+             scripts/decode_phase422_smmu_fault.py \
+             scripts/decode_phase414_sequential_3m.py \
+             scripts/decode_phase416_sequential_3m.py \
+             scripts/decode_phase409_ram1m_debug2m.py \
+             scripts/decode_phase408_samsung_debug_dsi.py \
+             scripts/decode_phase407_samsung_debug_dsi.py \
+             scripts/decode_phase405_dma_done.py "$OUT/audit/"
+          cp -r scripts/427_parts "$OUT/audit/"
+          cp "$REC" "$DSI" "$DSIHW" "$DSIDISPLAY" "$DSIPANEL" "$SSPANEL" "$MSMSMMU" "$ARMSMMU" "$ARMSMMUH" "$IRQH" "$UFS" "$UFSCORE" "$USB" "$DRM" "$DRMATOMIC" "$DRMMODES" "$MSM" "$ENCODER" "$RPMHRSC" "$RPMH" "$RPMHINT" "$COMPAT" "$REBOOT" "$BUSARB" "$BUSFAB" "$OUT/source/"
+          cp phase427-generated-build.sh "$OUT/audit/phase427-generated-build.sh"
+
+          cat > "$OUT/PHASE421-NOTES.txt" <<'EOF'
+          Phase414 sequential 3 MiB recorder
+          ==================================
+          Logical order is fixed and non-wrapping:
+
+            tier 1: Samsung debug +0x800000, 2 MiB
+            tier 2: persistent RAM 0xB1A00000, 1 MiB
+            then:   STOP
+
+          The first records therefore remain on the Samsung partition. The RAM
+          tier is used only after the Samsung 2 MiB logical capacity is full.
+
+          Hot-path behavior
+          -----------------
+          - Fixed 128-byte records with global monotonic sequence numbers.
+          - No Phase414 whole-image CRC.
+          - Samsung-bound records are copied to a vmalloc staging image only;
+            block I/O occurs on system_unbound_wq.
+          - Completed 4 KiB pages are immutable and written directly.
+          - The current partial page is copied under the recorder spinlock to a
+            bounce page, then written without holding the lock.
+          - If the debug block device is not ready, writes retry in background.
+          - Reserved-RAM continuation uses B1A00000..B1AFFFFF and explicit cache
+            cleaning so it survives the recovery reboot.
+          - Existing Phase392 is restricted to B1900000..B19FFFFF.
+
+          Identity and stale-record rejection
+          -----------------------------------
+          - Header magic + phase=414 + boot_id + global_seq + counts + commit.
+          - boot_id is incremented from the persistent B1A header every boot.
+          - P414 BOOT carries the same boot_id into R48/RS48.
+          - R48/RS48 and its three ramoops transports remain untouched.
+
+          Display frontier
+          ----------------
+          - Lifecycle entry breadcrumbs cover display registration/probe/bind,
+            panel acquisition/driver init, and Samsung early/panel init.
+          - First 128 generic DSI transfers record controller, type, length,
+            software flags, MIPI flags, and first 8 payload bytes.
+          - Exact F0 records flags before and after mode selection.
+          - Phase411 FIFO<=64 treatment, timeout panic, SMMU diagnostics, nohlt,
+            and cpuidle.off=1 remain unchanged.
+          - Phase415 changes only MDSS GDSC ownership semantics: disable preserves
+            HW_CONTROL and software enable refuses to steal an active HW-controlled
+            domain. The missing TouchGrass proxy-consumer is deliberately NOT added.
+
+          Phase416 Samsung persistence hardening
+          --------------------------------------
+          Phase415 recovery showed a valid current B1A Phase414 header and current
+          recorder traffic in B190, while Samsung debug +0x800000 still contained
+          a CRC-valid stale Phase413 image. Phase416 therefore keeps Phase415's
+          functional GDSC treatment unchanged and changes only recorder transport.
+
+          - Earliest events are still staged from core_init into the 2 MiB image.
+          - Raw sda8 writes are armed from late_initcall, after device init.
+          - Failed opens/BIOs/flushes still retry for up to 60 seconds.
+          - B1A now mirrors disk_count/global_seq during the Samsung tier.
+          - Three 128-byte B1A status copies preserve armed/worker/open/BIO/flush
+            results, retry count, generation counters, last page, and recorder state.
+          - decode_phase416_sequential_3m.py majority-fuses those status copies.
+          Phase417 post-bind frontier
+          ---------------------------
+          - Phase416 Samsung persistence is unchanged.
+          - Re-arms only the low-rate P273 userspace task frontier.
+          - Adds lifecycle scopes to DRM atomic modeset checking, DSI bridge
+            mode_fixup/mode_set/pre_enable/enable, plus dsi_display_set_mode.
+          - Records pre_enable set-mode rc/flags and seamless early-return flags.
+          - Re-admits only selected post-bind markers (P267/P268/P269/P273,
+            DRMPOST 212, KMSPOST) through the Phase402 second gate.
+          - Does not re-enable the retired UFS sampler, NoC observers, generic
+            IRQ witnesses, or cpuidle probes.
+
+          Phase418 atomic present discriminator
+          -------------------------------------
+          - Removes the high-rate per-check DRM atomic and bridge-mode-fixup scopes.
+          - Retires broad P269 property/UAPI admission after Phase417 proved resource
+            enumeration and mode visibility are healthy.
+          - Logs exact Composer DRM_MODE_ATOMIC ioctl flags, distinguishing TEST_ONLY
+            and real presents, and always preserves non-test atomics and errors.
+          - Samples successful modeset checks sparsely while retaining all failures.
+          - Samples apexd task presence every 10 seconds through the pre-zygote gap.
+          - Adds P276 positive controls plus explicit Phase280 retention-latch diagnostics.
+          - Instruments sde_encoder_virt_atomic_check sub-steps, with full detail for
+            the first 16 calls and sparse failure counters thereafter.
+          - Functional DSI, SMMU, GDSC, UFS and DRM behavior is unchanged.
+
+          Phase419 UAPI vrefresh parity
+          -----------------------------
+          Phase418 hardware showed every sampled TEST_ONLY atomic check failing at
+          encoder step 3, sde_connector_get_mode_info(), before RM reservation.
+
+          - Confirms A52 convert_to_dsi_mode consumes drm_mode->vrefresh directly.
+          - Restores vrefresh lost by Android 5.10 drm_mode_convert_umode using:
+              out->vrefresh = in->vrefresh ? in->vrefresh : drm_mode_vrefresh(out)
+          - This is the only functional Phase419 change.
+          - P419 U records input, pre-fix output, timing-derived fallback and final value once.
+          - P419 F records the first dsi_display_find_mode compare tuple and rc once.
+          - P419 E3 records the first encoder step-3 rc, adjusted vrefresh and private-info presence once.
+          - P419 is admitted through the Samsung sequential recorder even after the old retention latch.
+          - Phase418 AT/E/MS counters remain unchanged to reveal whether validation now advances,
+            and if it does not, which later encoder step becomes the new failure frontier.
+
+          Phase420 vrefresh round-trip parity
+          -----------------------------------
+          Phase419 proved the inbound copy executes but Composer sends 57 Hz back.
+          The compiled 5.10 kernel exports vrefresh with drm_mode_vrefresh(in),
+          while TouchGrass 4.19 preserves the DSI driver's stored in->vrefresh.
+
+          - Functional change: drm_mode_convert_to_umode now preserves stored
+            in->vrefresh when nonzero, with drm_mode_vrefresh(in) only as fallback.
+          - P420 TO records stored refresh, timing-derived refresh, exported refresh
+            and pixel clock for the first 1080x2400 mode.
+          - P420 Q/C record the first Composer lookup and up to eight cached panel
+            candidates, including Samsung HS/PHS fields.
+          - Phase419 inbound parity, Phase418 AT/E/MS, GDSC, DSI, SMMU and UFS
+            behavior are otherwise unchanged.
+          - The legacy bool return-rc masking path is deliberately not fixed.
+
+          Phase421 FETCH_MEMORY survival A/B
+          ==================================
+          - Removes only Phase411's <=64-byte FIFO reroute from DSI mode selection.
+          - Exact F0 5A 5A therefore remains on the stock FETCH_MEMORY path.
+          - Legacy deep-active P276/278/279 observers are suppressed only while
+            this exact target transaction is active.
+          - Eleven S00..S10 fixed slots are written to B190+0x500, B190+0xA80,
+            and B1A+0x800. The third copy is exactly 1 MiB away and remains in
+            Phase414's excluded 4 KiB header page.
+          - Each slot contains 64 repeated encoded stage bytes, 5x flags/rc/irq/ret,
+            and a 5x per-boot random nonce. CRC/commit are optional evidence only.
+          - Each physical copy is memcpy_toio + wmb + dcache clean + dsb(sy) before
+            execution advances to the next critical DSI operation.
+          - Watchdog behavior is intentionally unchanged and deferred to Phase422.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE421-NOTES.txt"
+
+
+          cat > "$OUT/PHASE422-NOTES.txt" <<'EOF'
+          Phase422 display SMMU fault probe
+          =================================
+          Phase421 behavior is retained. Phase422 changes diagnostics only.
+
+          - M00 caches the SID 0x800 context-bank IRQ registration at SMMU setup,
+            then publishes it at the exact F0 S00 together with cmd_buffer_iova.
+          - M01 is written inside arm_smmu_context_fault before the existing FSR
+            clear, filtered by exact SID 0x800 domain + context bank and by the
+            Phase421 target-active window. It records FSR, FSYNR0, FAR, SCTLR,
+            cbndx, IRQ, CBFRSYNRA, fault count and boottime timestamp.
+          - M02 performs one powered post-timeout read of FSR, FAR and SCTLR at
+            S10. No SMMU state is changed.
+          - M03 timestamps the accepted Phase421 S08 immediately after SW_TRIGGER
+            returned, before the S08 survival-copy latency.
+          - M00..M03 are 64-byte records with three physical copies at
+            B190+0x200, B190+0x300 and B1A+0xD80.
+          - No RESUME/TERMINATE, ATOS, iova_to_phys, page-table walk, or legacy
+            P278/P279 target observer is added.
+          - Decoder classifies command-buffer faults and the 0xA0000000..A2300000
+            splash/logo range separately, and reports M01 timestamp minus S08.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE422-NOTES.txt"
+
+
+          cat > "$OUT/PHASE423-NOTES.txt" <<'EOF'
+          Phase423 RPMh solver-mode compatibility
+          ========================================
+          Functional delta relative to Phase422:
+          - Replace the legacy no-op rpmh_mode_solver_set() shim with one narrow
+            compatibility bridge for Display RSC software state.
+          - On enable, wait until the ACTIVE group (borrowed WAKE on disp_rsc)
+            is no longer in use, restoring TouchGrass's pre-solver exclusion.
+          - Track solver mode in both rpmh_ctrlr and rsc_drv. The setter nests
+            cache_lock after drv->lock as required by pinned 5.10 lock ordering.
+          - ACTIVE_ONLY requests are refused with exactly -EBUSY in all three
+            public RPMh write APIs (async, sync, batch) before allocation/cache
+            work, plus a DRV-level race guard before TCS claim.
+          - Disable/CLK_STATE clears the flag through the same bridge.
+
+          Diagnostic-only records:
+          - P423 SOL: every solver true/false transition, upper and lower old/new
+            flags, wait-loop count, cumulative refused and borrow-violation counts.
+          - P423 REF: Display-RSC ACTIVE_ONLY requests refused with -EBUSY.
+          - P423 BORROW: invariant violation if a borrowed-WAKE ACTIVE trigger
+            reaches rpmh-rsc while the solver flag is still set. Expected zero.
+          - P423 is admitted to the existing sequential recorder only.
+          - Phase421 S00-S10 and Phase422 M00-M03 are unchanged.
+
+          Deliberately NOT changed:
+          - no invalidate-before-borrow port in get_tcs_for_msg()
+          - no HF0 TBU/GDSC/provider work
+          - no DSI, SMMU, bus-vote, clock or GDSC behavior
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE423-NOTES.txt"
+
+
+          echo "Phase426 authoritative source audit"
+          python3 scripts/425_apply_reboot_origin_recorder.py --root "$ROOT" --check-only
+          python3 scripts/426_apply_smmu_stream_handoff_probe.py --root "$ROOT" --check-only
+          echo "Phase426 authoritative source audit: PASS"
+
+          cat > "$OUT/PHASE424-NOTES.txt" <<'EOF'
+          Phase424 paired pre-trigger hardware snapshot
+          =============================================
+          Phase423 behavior is retained. The exact F0 snapshot is taken after
+          S07 and immediately before SW_TRIGGER. Reads are buffered in normal RAM
+          and emitted to the sequential recorder only after S10.
+
+          Paired Golden/GKI register list:
+          - compact DSI alignment anchor
+          - DISP_CC branches + active RCG command/config
+          - GCC DISP AHB/AXI branch registers
+          - mdss_core_gdsc + RSCC branch clocks
+          - VBIF status/config reference
+          - Display RSC sequencer/solver/wrapper/power status
+
+          No functional MMIO writes, no delays, no retries, no new clock/bus/
+          regulator/RSC behavior, and no HF0 fix.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE424-NOTES.txt"
+
+          cat > "$OUT/PHASE425-NOTES.txt" <<'EOF'
+          Phase425 reboot-origin recorder
+          ===============================
+          Phase424 display instrumentation is unchanged.
+
+          P425 SR: validated sys_reboot request (comm/pid/numeric command).
+          P425 S2: sys_reboot RESTART2 command string after safe user copy.
+          P425 KR: kernel_restart caller + command string, including direct
+                   in-kernel restarts that bypass sys_reboot.
+          P425 PO: kernel_power_off caller.
+
+          P425 is admitted to the sequential Samsung tier and the immediate
+          persistent critical lane. No reboot command, shutdown sequencing,
+          display state, clock, power, bus, SMMU or DSI behavior is changed.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE425-NOTES.txt"
+
+          cat > "$OUT/PHASE426-NOTES.txt" <<'EOF'
+          Phase426 read-only SMMU stream handoff probe
+          ============================================
+          Phase424/425 behavior is retained.
+
+          Motivation:
+          qcom,skip-init preserves the bootloader SMR/S2CR/CB hardware. The
+          Qualcomm 5.10 importer also caches/pins that firmware route, but normal
+          display attach allocates CB4 and rewrites SID 0x800 from CB2 to CB4.
+          TouchGrass instead hands the inherited translating CB back to the master.
+
+          Evidence captured without applying the fix:
+          - all firmware-valid SMR/S2CR entries cached before reset/test writes;
+          - the SMR chosen by arm_smmu_test_smr_masks(), raw before/after;
+          - exact-F0 S00 HW + Linux SW route snapshot, reads/stores only;
+          - target pinned to the preserved DTB's /soc/apps-smmu@15000000 node;
+          - exact-F0 pointer cross-check against Phase422's SID 0x800 SMMU cache;
+          - every global-fault IRQ latched before sGFSR clear;
+          - timeout HW table, SID 0x800 matches, GFSR/GFSYNR and SW route;
+          - full cached bootloader-valid table emitted only after timeout.
+
+          No SMR, S2CR, context-bank, SMMU global-status, DSI, clock, bus, power
+          or RSC behavior is changed by Phase426.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE426-NOTES.txt"
+
+          cat > "$OUT/PHASE427-NOTES.txt" <<'EOF'
+          Phase427 CB2 handoff + road-to-memory A/B
+          =========================================
+          One functional change only:
+          - for qcom,smmu_sde_unsec with exact SID 0x800, if the Phase426
+            imported/pinned translating SME still points at firmware CB2,
+            reuse CB2 instead of allocating CB4;
+          - preserve the existing qcom,iommu-earlymap sequence, program the
+            complete Linux CB2 context with translation disabled, context-TLBI,
+            then let the existing earlymap enable turn SCTLR.M on;
+          - SID 0x801 and every other firmware handoff entry are untouched;
+          - Phase422 follows cfg->cbndx/irptndx, so its context-fault watcher
+            automatically moves to CB2 and records CB2 FSR/FAR/SCTLR.
+
+          Read-only diagnostics in the same flash:
+          - S07 and post-wait Display RSC TCS0/TCS1 control/enable/wait/status
+            plus ADDR/DATA/STATUS for commands up to ncpt;
+          - GCC 0x1b7040/0x1b7044 and HF0 TBU status 0x15182210;
+          - sde_rsc current_state;
+          - msm_bus display-client handle/current usecase AB/IB shadows;
+          - selected committed BCM vectors for MM0/MM1/MM0_DISPLAY/MM1_DISPLAY,
+            SH0/MC0/ACV;
+          - cmd-buffer GEM IOVA, DSI field IOVA, iommu_iova_to_phys(),
+            backing page physical address and first 8 command bytes;
+          - SID 0x800 S2CR/CB2 SCTLR/FSR/TCR/TTBR0/MAIR0 after wait.
+
+          The road diagnostics perform no vote, regulator, RSC, clock, SMMU or
+          DSI functional write. They are normal-RAM snapshots plus MMIO reads.
+          EOF
+          sed -i 's/^          //' "$OUT/PHASE427-NOTES.txt"
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Build Phase427 CB2 handoff + road-probe boot image
+        run: |
+          set -Eeuo pipefail
+          OUT="$PWD/phase427-gki-out"
+          BASE="$OUT/package/boot.img"
+          FINAL="$OUT/package/boot-phase427-cb2-handoff-road-probe-v1.img"
+          test -s "$BASE"
+          cp "$BASE" "$FINAL"
+
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          base_path = Path("phase427-gki-out/package/boot.img")
+          final = Path("phase427-gki-out/package/boot-phase427-cb2-handoff-road-probe-v1.img")
+          base = module.parse_boot(base_path.read_bytes())
+          data = bytearray(final.read_bytes())
+          tokens = base["cmdline"].split()
+          for tok in ("nohlt", "cpuidle.off=1", "panic=1"):
+              key = tok.split("=", 1)[0]
+              tokens = [x for x in tokens if x != tok and x.split("=", 1)[0] != key]
+              tokens.append(tok)
+          cmdline = " ".join(tokens)
+          encoded = cmdline.encode("ascii")
+          if len(encoded) > 1534:
+              raise SystemExit(f"Phase411 command line too long: {len(encoded)}")
+          data[64:576] = b"\0" * 512
+          data[608:1632] = b"\0" * 1024
+          first = encoded[:511]
+          second = encoded[511:]
+          data[64:64 + len(first)] = first
+          data[608:608 + len(second)] = second
+          final.write_bytes(data)
+
+          out = module.parse_boot(final.read_bytes())
+          assert "nohlt" in out["cmdline"].split()
+          assert "cpuidle.off=1" in out["cmdline"].split()
+          assert "panic=1" in out["cmdline"].split()
+          assert "ignore_loglevel" in out["cmdline"].split()
+          for key in ("header_version","page_size","board","kernel_addr",
+                      "ramdisk_addr","tags_addr","kernel","ramdisk","second","dtb"):
+              assert out[key] == base[key], key
+          assert final.stat().st_size == base_path.stat().st_size
+          Path("phase427-gki-out/PHASE427-BOOT.json").write_text(
+              json.dumps({
+                  "cmdline": out["cmdline"],
+                  "treatment": "Phase427 reuses the exact firmware CB2 for non-secure display SID 0x800 using the existing earlymap context programming path; Phase422 follows CB2; added bus/TCS/HF0/IOVA diagnostics are read-only; nohlt cpuidle.off=1 panic=1",
+                  "kernel_payload_unchanged_by_cmdline_patch": True,
+              }, indent=2, sort_keys=True) + "\n")
+          PY
+
+          sha256sum "$FINAL"
+          echo "Phase427 CB2 handoff + road-probe boot image: PASS"
+
+      - name: Upload Phase427 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE427-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.h
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c
+            gki/common/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c
+            gki/common/kernel/reboot.c
+            workspace/gki-phase199-out/.config
+            phase427-gki-out/compile/System.map
+            scripts/425_apply_reboot_origin_recorder.py
+            scripts/426_apply_smmu_stream_handoff_probe.py
+            scripts/427_apply_cb2_handoff_road_probe.py
+            scripts/427_parts
+            phase427-generated-build.sh
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase427
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE427-CB2-HANDOFF-ROAD-PROBE-${{ github.run_number }}
+          path: phase427-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase427 boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE427-CB2-HANDOFF-ROAD-PROBE-${{ github.run_number }}-BOOT-IMG
+          path: phase427-gki-out/package/boot-phase427-cb2-handoff-road-probe-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

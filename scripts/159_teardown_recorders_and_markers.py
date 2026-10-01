@@ -148,6 +148,23 @@ def main() -> int:
             misc_mk.write_text(new)
             changed_files += 1
 
+    # P150 has one marker log guarded by an unbraced 'if (enable)'.
+    # Remove the guard and log together so cleanup cannot leave a dangling if.
+    panel = root / "techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+    if panel.is_file():
+        old = panel.read_text()
+        new = re.sub(
+            r'(?ms)^[ \t]*if \(enable\)\n'
+            r'[ \t]*LCD_INFO\(vdd, "\[AOD P150\] entry requested=.*?\);\n',
+            "",
+            old,
+            count=1,
+        )
+        if new != old:
+            panel.write_text(new)
+            changed_files += 1
+            logs_removed += 1
+
     # Remove only log calls carrying our diagnostic/phase marker strings.
     # Functional code around those calls is preserved.
     for p in root.rglob("*"):

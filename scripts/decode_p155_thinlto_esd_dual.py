@@ -79,6 +79,20 @@ def load_debug(path: Path) -> bytes:
         raise SystemExit(f"debug.bin too small: {len(b)} bytes")
     return b[DEBUG_OFFSET:DEBUG_OFFSET + REGION_BYTES]
 
+def load_b1a(path: Path) -> bytes:
+    b = path.read_bytes()
+    if len(b) == REGION_BYTES:
+        return b
+    # Recovery collector full Samsung-reserved window:
+    # 0xB1000000..0xB1AFFFFF (11 MiB), B1A is its final MiB.
+    if len(b) == 11 * 1024 * 1024:
+        return b[10 * 1024 * 1024:11 * 1024 * 1024]
+    # phase389 window: 0xB1400000..0xB1AFFFFF (7 MiB), again final MiB.
+    if len(b) == 7 * 1024 * 1024:
+        return b[6 * 1024 * 1024:7 * 1024 * 1024]
+    raise SystemExit(
+        f"unsupported B1A source size: {len(b)} bytes; expected 1, 7, or 11 MiB")
+
 def fuse(decoded: list[dict]) -> tuple[list[dict], list[dict]]:
     by_seq: dict[int, list[dict]] = {}
     for d in decoded:
@@ -120,7 +134,7 @@ def main() -> int:
     if ns.debug_bin:
         decoded.append(decode_region(load_debug(ns.debug_bin), "samsung-debug"))
     if ns.ram_bin:
-        decoded.append(decode_region(ns.ram_bin.read_bytes(), "reserved-b1a"))
+        decoded.append(decode_region(load_b1a(ns.ram_bin), "reserved-b1a"))
 
     fused, mismatches = fuse(decoded)
     ns.out.mkdir(parents=True, exist_ok=True)

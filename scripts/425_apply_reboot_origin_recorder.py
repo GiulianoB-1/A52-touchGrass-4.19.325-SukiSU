@@ -63,15 +63,18 @@ def patch_reboot(text: str) -> str:
     )
 
     # For RESTART2 the command string is only valid after copy_from_user.
-    old = """		buffer[sizeof(buffer) - 1] = '\\0';
-		kernel_restart(buffer);
-"""
-    new = """		buffer[sizeof(buffer) - 1] = '\\0';
-		a52_ackfr_record("P425 S2 c=%s p=%d s=%.40s",
-			current->comm, current->pid, buffer);
-		kernel_restart(buffer);
-"""
-    text = one(text, old, new, "sys_reboot restart2 string")
+    # Anchor on the unique kernel_restart(buffer) call instead of requiring
+    # exact whitespace before it. The pinned 5.10 source carries a blank line
+    # between the explicit NUL terminator and kernel_restart().
+    anchor = "\t\tkernel_restart(buffer);\n"
+    text = one(
+        text,
+        anchor,
+        '\t\ta52_ackfr_record("P425 S2 c=%s p=%d s=%.40s",\n'
+        '\t\t\tcurrent->comm, current->pid, buffer);\n'
+        + anchor,
+        "sys_reboot restart2 string",
+    )
 
     return text
 

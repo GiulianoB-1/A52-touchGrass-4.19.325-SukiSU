@@ -64,6 +64,7 @@ on:
 # Phase424 runner restart after hosted-runner package stall
 permissions:
   contents: read
+  actions: read
 
 env:
   GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
@@ -81,6 +82,8 @@ jobs:
     name: Build Phase425 Phase424 plus reboot-origin recorder
     runs-on: ubuntu-22.04
     timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 

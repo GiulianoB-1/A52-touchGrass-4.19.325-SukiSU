@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: a52-clang22-thinlto-${{ github.ref }}
+  group: a52-clang22-thinlto-p156-${{ github.ref }}
   cancel-in-progress: true
 
 env:

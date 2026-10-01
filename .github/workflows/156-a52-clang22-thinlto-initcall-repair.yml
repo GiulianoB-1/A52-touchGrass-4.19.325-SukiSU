@@ -8,7 +8,6 @@ on:
       - .github/workflows/156-a52-clang22-thinlto-initcall-repair.yml
       - scripts/155_apply_thinlto_esd_dual_recorder.py
       - scripts/156_apply_clang22_initcall_order_fix.py
-      - scripts/decode_p155_thinlto_esd_dual.py
   workflow_dispatch:
 
 permissions:
@@ -615,6 +614,41 @@ jobs:
           grep -Fq 'no initcalls found while CONFIG_LTO_CLANG is active' "$F"
           git -C "$KERNEL" diff --check
 
+      - name: Compute P156 built-output cache key
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          # Key the final-output cache to the actual patched kernel tree,
+          # final defconfig, build wrapper and pinned toolchain identity.
+          # Workflow-only audit/package edits therefore reuse the same build.
+          {
+            git -C "$KERNEL" diff --binary
+            sha256sum "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+            sha256sum scripts/common.sh
+            printf '%s\n' "$AOSP_CLANG_COMMIT"
+            printf '%s\n' 'P156_INITCALL_FIX_CACHE_V1'
+          } > /tmp/p156-build-inputs.txt
+
+          SIG="$(sha256sum /tmp/p156-build-inputs.txt | awk '{print $1}')"
+          KEY="a52xq-p156-built-r596125-${SIG}"
+          echo "P156_BUILD_CACHE_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "p156_build_cache_key=$KEY" | tee artifacts/p156-build-cache-key.txt
+
+      - name: Restore P156 built outputs
+        id: p156_built_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq/out/vmlinux
+            workspace/touchgrass-a52xq/out/.tmp_lto.lds
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/System.map
+            workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/boot-async-p152-build.log
+          key: ${{ env.P156_BUILD_CACHE_KEY }}
+
       - name: Restore ThinLTO link cache
         id: thinlto_cache_restore
         uses: actions/cache/restore@v4
@@ -624,6 +658,7 @@ jobs:
           restore-keys: |
             a52xq-thinlto-link-r596125-p156-${{ runner.os }}-
       - name: Build integrated kernel
+        if: steps.p156_built_cache.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           echo '=== COMPILER USED ==='
@@ -645,6 +680,35 @@ jobs:
           fi
           exit "$RC"
 
+      - name: Validate restored P156 built outputs
+        if: steps.p156_built_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$KERNEL/out/.tmp_lto.lds"
+          test -s "$KERNEL/out/.config"
+          test -s "$KERNEL/out/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          test -s artifacts/boot-async-p152-build.log
+          grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
+          echo "P156 final build outputs restored from cache"
+
+      - name: Save P156 built outputs
+        if: steps.p156_built_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq/out/vmlinux
+            workspace/touchgrass-a52xq/out/.tmp_lto.lds
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/System.map
+            workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/boot-async-p152-build.log
+          key: ${{ env.P156_BUILD_CACHE_KEY }}
+
       - name: Prove P156 initcall table is populated
         run: |
           set -Eeuo pipefail
@@ -661,13 +725,15 @@ jobs:
           echo "lto_initcall_entries=$COUNT"
           test "$COUNT" -ge 500
 
-          START="$("$LLVM_NM" -n "$VMLINUX" | awk '$3=="__initcall_start"{print $1; exit}')"
-          END="$("$LLVM_NM" -n "$VMLINUX" | awk '$3=="__initcall_end"{print $1; exit}')"
+          "$LLVM_NM" -n "$VMLINUX" > artifacts/p156-vmlinux-nm.txt
+          START="$(awk '$3=="__initcall_start"{print $1; exit}' artifacts/p156-vmlinux-nm.txt)"
+          END="$(awk '$3=="__initcall_end"{print $1; exit}' artifacts/p156-vmlinux-nm.txt)"
           test -n "$START"
           test -n "$END"
           test "$START" != "$END"
 
-          LEFT="$("$LLVM_READELF" -S "$VMLINUX" | grep -Ec '\.initcall[^ ]*\.init\.\.' || true)"
+          "$LLVM_READELF" -S "$VMLINUX" > artifacts/p156-vmlinux-sections.txt
+          LEFT="$(grep -Ec '\.initcall[^ ]*\.init\.\.' artifacts/p156-vmlinux-sections.txt || true)"
           test "$LEFT" -eq 0
 
           {
@@ -914,6 +980,9 @@ jobs:
             artifacts/p156-initcall-fix.txt
             artifacts/p156-initcall-audit.txt
             artifacts/p156-tmp_lto.lds
+            artifacts/p156-build-cache-key.txt
+            artifacts/p156-vmlinux-nm.txt
+            artifacts/p156-vmlinux-sections.txt
           if-no-files-found: error
           retention-days: 14
 

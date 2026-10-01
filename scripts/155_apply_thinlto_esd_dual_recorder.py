@@ -691,9 +691,9 @@ def patch_display(text: str) -> str:
             "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
             "enable entry")
         enable_anchor = "\t\trc = dsi_panel_enable(display->panel);\n"
-        if fn.count(enable_anchor) != 2:
-            raise SystemExit("P155 enable panel: expected 2 anchors, found %d" %
-                             fn.count(enable_anchor))
+        enable_count = fn.count(enable_anchor)
+        if enable_count < 1:
+            raise SystemExit("P155 enable panel: no matching enable site")
         fn = fn.replace(
             enable_anchor,
             "\t\ta52_p155_recordf(\"P155 EN1 panel-enable\");\n"

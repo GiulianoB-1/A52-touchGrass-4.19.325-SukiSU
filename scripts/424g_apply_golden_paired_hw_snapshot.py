@@ -136,14 +136,11 @@ static int __init a52_g424_map_init(void)
 	a52_g424_rsc_drv=ioremap(A52_G424_RSC_DRV_PHYS,0x2000);
 	a52_g424_rsc_wrp=ioremap(A52_G424_RSC_WRP_PHYS,0x100);
 	a52_g424_ram=ioremap_cache(A52_G424_RAM_PHYS,A52_G424_RAM_BYTES);
-	if (a52_g424_ram) {
-		u64 zero=0;
-		memcpy_toio((u8 __iomem *)a52_g424_ram+A52_G424_RAM_COPY0,
-			    &zero,sizeof(zero));
-		memcpy_toio((u8 __iomem *)a52_g424_ram+A52_G424_RAM_COPY1,
-			    &zero,sizeof(zero));
-		wmb();
-	}
+	/* Deliberately do not clear an older valid copy here. The current ROM can
+	 * reboot this 4.19.200 Golden later with "bpfloader-failed"; preserving the
+	 * last committed copy lets recovery collect it even after another boot.
+	 * A successful exact-F0 DMA completion atomically replaces both copies.
+	 */
 	return 0;
 }
 subsys_initcall(a52_g424_map_init);

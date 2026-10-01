@@ -144,8 +144,12 @@ static int a52_p427_try_handoff_cb(struct arm_smmu_device *smmu,
 	 * handoff contract is present.  This prevents Phase427 from commandeering
 	 * an arbitrary CB on a different boot/DT/SMMU configuration.
 	 */
+	/* TouchGrass handoff deliberately overrides the normal stage allocator
+	 * start index. The firmware-selected CB is the contract being tested.
+	 */
+	(void)start;
 	if (!s2cr->pinned || s2cr->type != S2CR_TYPE_TRANS ||
-	    cb != 2U || cb < start || cb >= smmu->num_context_banks ||
+	    cb != 2U || cb >= smmu->num_context_banks ||
 	    !test_bit(cb, smmu->context_map))
 		return -ENOENT;
 

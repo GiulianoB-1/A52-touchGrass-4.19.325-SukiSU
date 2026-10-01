@@ -51,7 +51,6 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/sched.h>
 #include <linux/sizes.h>
 #include <linux/spinlock.h>
-#include <linux/stdarg.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>

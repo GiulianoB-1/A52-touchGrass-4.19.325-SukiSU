@@ -244,6 +244,16 @@ jobs:
           test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
           grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
 
+      - name: Save exact Phase357 baseline
+        if: steps.phase357-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
       - name: Reapply Phase358 and Phase359
         run: |
           set -Eeuo pipefail

@@ -181,6 +181,9 @@ def main() -> int:
         new, n = strip_phase_comments(new)
         comments_removed += n
         if new != old:
+            # Marker/comment removal can leave indentation at end-of-line.
+            # Normalize only trailing horizontal whitespace; do not reformat code.
+            new = re.sub(r"[ \t]+(?=\n)", "", new)
             p.write_text(new)
             changed_files += 1
 

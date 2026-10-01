@@ -417,6 +417,8 @@ jobs:
           UFSCORE="$ROOT/drivers/scsi/ufs/ufshcd.c"
           USB="$ROOT/drivers/usb/dwc3/dwc3-qcom.c"
           GDSC="$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c"
+          DRM="$ROOT/drivers/a52_display/msm/dsi/dsi_drm.c"
+          DRMATOMIC="$ROOT/drivers/gpu/drm/drm_atomic_helper.c"
           MSM="$ROOT/drivers/a52_display/msm/msm_drv.c"
           ENCODER="$ROOT/drivers/a52_display/msm/sde/sde_encoder.c"
           DRMMODES="$ROOT/drivers/gpu/drm/drm_modes.c"

@@ -317,7 +317,8 @@ def patch_smmu(text: str) -> str:
 
     for token in (
         "A52_PHASE422_DISPLAY_SMMU_FAULT_PROBE_V1",
-        "A52_PHASE393_IRQ_RPMH_SMMU_CLIFF_V1",
+        "M393 C irq=%d cb=%d fsr=%x syn=%x iova=%lx",
+        "M393 G irq=%d g=%x s0=%x s1=%x s2=%x",
         "bool\t\t\t\tskip_init;",
         "static void arm_smmu_test_smr_masks(struct arm_smmu_device *smmu)",
         "static irqreturn_t arm_smmu_global_fault(int irq, void *dev)",

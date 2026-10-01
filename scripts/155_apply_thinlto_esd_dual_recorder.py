@@ -32,7 +32,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
  * A52 P155 ThinLTO ESD dual persistent recorder.
  *
  * Every focused record is mirrored:
- *   1. synchronously to persistent RAM 0xB1B00000..0xB1BFFFFF
+ *   1. synchronously to persistent reserved RAM 0xB1A00000..0xB1AFFFFF
  *   2. asynchronously to Samsung /dev/block/by-name/debug + 0x800000
  *
  * Real A52 debug.bin captures show MiB 8 and 9 are empty. P155 uses only
@@ -61,7 +61,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 
 #define A52_P155_DEBUG_OFFSET       0x00800000ULL
 #define A52_P155_DEBUG_FREE_BYTES   (2U * SZ_1M)
-#define A52_P155_RAM_PHYS           0xB1B00000ULL
+#define A52_P155_RAM_PHYS           0xB1A00000ULL
 #define A52_P155_RAM_BYTES          SZ_1M
 #define A52_P155_HEADER_BYTES       SZ_4K
 #define A52_P155_RECORD_BYTES       128U
@@ -105,7 +105,7 @@ struct a52_p155_record {
 } __packed;
 
 static DEFINE_SPINLOCK(a52_p155_lock);
-static void *a52_p155_ram;
+static void __iomem *a52_p155_ram;
 static u8 *a52_p155_disk_stage;
 static u64 a52_p155_boot_id;
 static u64 a52_p155_seq;
@@ -119,11 +119,11 @@ static atomic_t a52_p155_disk_written_gen = ATOMIC_INIT(0);
 static atomic_t a52_p155_disk_retry = ATOMIC_INIT(0);
 static atomic_t a52_p155_hb_count = ATOMIC_INIT(0);
 
-static void a52_p155_persist(void *addr, size_t len)
+static void a52_p155_persist(void __iomem *addr, size_t len)
 {
 	if (!addr || !len)
 		return;
-	__flush_dcache_area(addr, len);
+	__flush_dcache_area((void *)addr, len);
 	wmb();
 	dsb(sy);
 }
@@ -156,7 +156,7 @@ static void a52_p155_sync_header_locked(void)
 	if (a52_p155_disk_stage)
 		memcpy(a52_p155_disk_stage, &h, sizeof(h));
 	if (a52_p155_ram) {
-		memcpy(a52_p155_ram, &h, sizeof(h));
+		memcpy_toio(a52_p155_ram, &h, sizeof(h));
 		a52_p155_persist(a52_p155_ram, sizeof(h));
 	}
 }
@@ -210,9 +210,9 @@ void a52_p155_recordf(const char *fmt, ...)
 		       (size_t)index * A52_P155_RECORD_BYTES, &r, sizeof(r));
 
 	if (a52_p155_ram) {
-		void *dst = (u8 *)a52_p155_ram + A52_P155_HEADER_BYTES +
+		void __iomem *dst = (u8 __iomem *)a52_p155_ram + A52_P155_HEADER_BYTES +
 			    (size_t)index * A52_P155_RECORD_BYTES;
-		memcpy(dst, &r, sizeof(r));
+		memcpy_toio(dst, &r, sizeof(r));
 		a52_p155_persist(dst, sizeof(r));
 	}
 
@@ -326,12 +326,11 @@ static int __init a52_p155_init(void)
 
 	BUILD_BUG_ON(sizeof(struct a52_p155_record) != A52_P155_RECORD_BYTES);
 	a52_p155_disk_stage = vzalloc(A52_P155_RAM_BYTES);
-	a52_p155_ram = memremap(A52_P155_RAM_PHYS, A52_P155_RAM_BYTES,
-				MEMREMAP_WB);
+	a52_p155_ram = ioremap_cache(A52_P155_RAM_PHYS, A52_P155_RAM_BYTES);
 
 	memset(&old, 0, sizeof(old));
 	if (a52_p155_ram)
-		memcpy(&old, a52_p155_ram, sizeof(old));
+		memcpy_fromio(&old, a52_p155_ram, sizeof(old));
 	if (old.magic == A52_P155_MAGIC &&
 	    old.version == A52_P155_VERSION &&
 	    old.phase == 155U &&
@@ -341,7 +340,7 @@ static int __init a52_p155_init(void)
 		a52_p155_boot_id = 1U;
 
 	if (a52_p155_ram) {
-		memset(a52_p155_ram, 0, A52_P155_RAM_BYTES);
+		memset_io(a52_p155_ram, 0, A52_P155_RAM_BYTES);
 		a52_p155_persist(a52_p155_ram, A52_P155_RAM_BYTES);
 	}
 
@@ -804,9 +803,9 @@ def validate(root: Path) -> None:
     required = (
         MARK,
         "A52_P155_DEBUG_OFFSET       0x00800000ULL",
-        "A52_P155_RAM_PHYS           0xB1B00000ULL",
+        "A52_P155_RAM_PHYS           0xB1A00000ULL",
         "A52_P155_RECORD_BYTES       128U",
-        "memremap(A52_P155_RAM_PHYS",
+        "ioremap_cache(A52_P155_RAM_PHYS",
         'filp_open("/dev/block/by-name/debug"',
         'filp_open("/dev/block/sda8"',
         "system_unbound_wq",
@@ -829,7 +828,7 @@ def validate(root: Path) -> None:
         raise SystemExit("P155 recorder Makefile entry count wrong")
     if "kernel_write(file, a52_p155_disk_stage" not in combined:
         raise SystemExit("P155 Samsung transport missing")
-    if "memcpy(dst, &r, sizeof(r));" not in combined:
+    if "memcpy_toio(dst, &r, sizeof(r));" not in combined:
         raise SystemExit("P155 RAM mirror missing")
 
 def main() -> int:

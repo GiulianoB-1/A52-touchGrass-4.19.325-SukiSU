@@ -447,7 +447,35 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
 
+      - name: Restore prepared Phase382 native-16K source cache
+        id: phase382_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
+
+      - name: Validate prepared Phase382 source cache
+        if: steps.phase382_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52 P379 EXEC_REQ:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_UNMAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
+          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE)' "$KERNEL/arch/arm64/Kconfig"
+
+          {
+            echo "phase382_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a"
+          } | tee artifacts/phase382-source-cache.txt
+
       - name: Apply retained Phase379 early 16K boot census diagnostics
+        if: steps.phase382_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -472,6 +500,7 @@ jobs:
             > artifacts/phase379-boot-census.diff
 
       - name: Apply retained Phase380 16K CMA pageblock compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -510,6 +539,7 @@ jobs:
             > artifacts/phase380-cma-pageblock.diff
 
       - name: Apply retained Phase381 16K fast-SMMU compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -535,6 +565,7 @@ jobs:
             > artifacts/phase381-fast-smmu.diff
 
       - name: Apply retained Phase382 16K fast io-pgtable stride compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -553,6 +584,23 @@ jobs:
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- drivers/iommu/io-pgtable-fast.c \
             > artifacts/phase382-fast-pgtable.diff
+
+      - name: Save prepared Phase382 native-16K source cache
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
+
+      - name: Record Phase382 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase382_prepared_source_cache_hit=${{ steps.phase382_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a"
+            echo "future_16k_phases_should_reuse_branch=agent/a52-phase383-16k-dual-elf-census-v1"
+          } > artifacts/phase382-source-cache.txt
 
       - name: Apply Phase383 16K-safe Samsung-debug + ramoops ELF census
         run: |
@@ -882,6 +930,8 @@ jobs:
             echo "phase383_disk_io_page_size=16384"
             echo "phase383_pid1_elf_load_census=yes"
             echo "phase383_critical_sync_flush=yes"
+            echo "phase382_prepared_source_cache_hit=${{ steps.phase382_source.outputs.cache-hit }}"
+            echo "phase383_lineage_branch_cache=yes"
             echo "prepared_16k_cache_hit=${{ steps.p152_16k_source.outputs.cache-hit }}"
             echo "compiler_cache_hit=${{ steps.ccache_restore.outputs.cache-hit }}"
           } > artifacts/phase383-metadata.txt
@@ -905,6 +955,7 @@ jobs:
             artifacts/phase383-metadata.txt
             artifacts/phase383-dual-elf-apply.txt
             artifacts/phase383-dual-elf.diff
+            artifacts/phase382-source-cache.txt
             artifacts/decode_phase383_16k_dual.py
             artifacts/phase382-fast-pgtable-apply.txt
             artifacts/phase382-fast-pgtable.diff
@@ -951,3 +1002,9 @@ jobs:
 # - retains Phase379/380/381/382 fixes and diagnostics
 #
 # Userspace/UN1CA remains unchanged.
+
+# Cache policy:
+# GitHub Actions caches are branch-scoped. Future native-16K phases should
+# remain on agent/a52-phase383-16k-dual-elf-census-v1 (same pattern as the
+# long-lived GKI phase lineage) so prepared-source and ccache entries remain
+# visible across phase workflows.

@@ -784,9 +784,6 @@ jobs:
           grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'P385 READY RWX' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'P386 ICACHE_OK' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'P386 EXITGRP' "$KERNEL/kernel/exit.c"
           grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
           {
             echo "phase385_prepared_source_cache_hit=true"

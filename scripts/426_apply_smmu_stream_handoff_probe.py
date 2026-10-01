@@ -476,14 +476,14 @@ def patch_rec(text: str) -> str:
 """
     text = one(text, clean, clean_new, "Phase402 admission")
 
-    critical = """	return !strncmp(message, "P425 ", 5) ||
-	       !strncmp(message, "P414 ", 5) ||
-"""
-    critical_new = """	return !strncmp(message, "P426 ", 5) ||
-	       !strncmp(message, "P425 ", 5) ||
-	       !strncmp(message, "P414 ", 5) ||
-"""
-    text = one(text, critical, critical_new, "critical persistent admission")
+    # Keep P426 in the immediate persistent lane. Anchor only on P425's
+    # predicate; Phase425 itself intentionally stopped assuming which predicate
+    # follows it because later lineage can reorder/extend this chain.
+    if '!strncmp(message, "P426 ", 5)' not in text:
+        critical = 'return !strncmp(message, "P425 ", 5) ||'
+        critical_new = ('return !strncmp(message, "P426 ", 5) ||\n'
+                        '\t       !strncmp(message, "P425 ", 5) ||')
+        text = one(text, critical, critical_new, "critical persistent admission")
 
     text += "\n/* " + MARK + ": P426 deferred SMMU stream-map evidence admitted. */\n"
     return text

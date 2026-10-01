@@ -120,7 +120,7 @@ def main() -> int:
     if ns.debug_bin:
         decoded.append(decode_region(load_debug(ns.debug_bin), "samsung-debug"))
     if ns.ram_bin:
-        decoded.append(decode_region(ns.ram_bin.read_bytes(), "ramoops-b1b"))
+        decoded.append(decode_region(ns.ram_bin.read_bytes(), "reserved-b1a"))
 
     fused, mismatches = fuse(decoded)
     ns.out.mkdir(parents=True, exist_ok=True)

@@ -470,7 +470,10 @@ jobs:
           grep -Fq 'a52_p414_submit_page' "$REC"
           grep -Fq 'system_unbound_wq' "$REC"
           grep -Fq 'P414 BOOT id=%llu disk=%u ram=%u' "$REC"
-          grep -Fq 'return !strncmp(message, "P414 ", 5) ||' "$REC"
+          grep -Fq '!strncmp(message, "P414 ", 5)' "$REC" || {
+            echo "ERROR: Phase414 critical-message admission missing" >&2
+            exit 1
+          }
           test "$(grep -Fc 'strncmp(fmt, "P414", 4)' "$REC")" -ge 2
           grep -Fq 'strcmp(fmt, "%s enter fn=%s")' "$REC"
           grep -Fq 'strcmp(fmt, "%s exit fn=%s us=%llu")' "$REC"

@@ -93,6 +93,9 @@ for token in (
     'TG424 P %x %x %x %x',
     'TG424 V0 %x %x %x %x %x %x %x %x',
     'TG424 R0 %x %x %x %x %x %x %x %x',
+    'A52_G424_RAM_PHYS      0xB1400000ULL',
+    'A52_G424_RAM_MAGIC     0x3432344750414E53ULL',
+    'a52_g424_persist_snapshot();',
     'TG344 S i=%u p=%u t=%llu st=%x fs=%x cc=%x ck=%x in=%x ln=%x',
     'TG344 D i=%u dc=%x o=%x l=%x sw=%x tg=%x ae=%x to=%x pe=%x ax=%x',
     'TG344 DONE n=%u ret=%d irq=%d',
@@ -101,6 +104,28 @@ for token in (
         raise SystemExit('Phase424G recorder marker missing: ' + token)
 print('Phase424G observation-only scope audit: PASS')
 PY
+
+stage "reserved-RAM persistence scope audit"
+python3 - <<'PYRAM'
+from pathlib import Path
+s=Path('workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c').read_text()
+snap=s.index('void a52_g424_snapshot(struct dsi_ctrl_hw *ctrl)')
+dump=s.index('void a52_g424_dump_snapshot(void)')
+hot=s[snap:dump]
+if 'memcpy_toio(' in hot or 'a52_g424_persist_snapshot();' in hot:
+    raise SystemExit('Phase424G reserved-RAM write leaked into F0 hot path')
+if 'A52_G424_RAM_PHYS      0xB1400000ULL' not in s:
+    raise SystemExit('Phase424G reserved-RAM physical base mismatch')
+if s.count('a52_g424_persist_snapshot();') != 1:
+    raise SystemExit('Phase424G expected one post-completion persist call')
+if s.index('a52_g424_persist_snapshot();') < dump:
+    raise SystemExit('Phase424G persistence occurs before completion dump')
+if 'ioremap_cache(A52_G424_RAM_PHYS,A52_G424_RAM_BYTES)' not in s:
+    raise SystemExit('Phase424G reserved-RAM mapping missing')
+if 'A52_G424_RAM_COPY0' not in s or 'A52_G424_RAM_COPY1' not in s:
+    raise SystemExit('Phase424G dual-copy persistence missing')
+print('Phase424G post-completion reserved-RAM persistence audit: PASS')
+PYRAM
 
 stage "rebuild TouchGrass Golden Image"
 set -o pipefail
@@ -143,6 +168,9 @@ sample_registers=STATUS,FIFO,CLK_CTRL,CLK_STATUS,INT_CTRL,LANE_STATUS,DMA_CTRL,D
 inherits=Phase315G-full-q0-prestate,Phase319-six-debugbus-q0-q1-q2,Phase344G-DMA-transition
 paired_snapshot=DSI-anchor,DISP_CC,GCC-DISP,MDSS-GDSC,VBIF,Display-RSC
 paired_snapshot_timing=single-read-only-sample-immediately-before-SW_TRIGGER
+snapshot_persistence=dual-copy-CRC32C-at-0xB1400000-after-normal-DMA-completion
+snapshot_recovery_source=phase389-B1400000-B1AFFFFF-7MiB.bin
+hot_path_persistence_writes=none
 functional_register_writes_added=none
 clock_phy_reset_regulator_delay_retry_changes=none
 trigger_behavior_changed=no

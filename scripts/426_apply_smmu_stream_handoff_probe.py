@@ -112,11 +112,49 @@ static u32 a52_p426_last_gfsr;
 static u32 a52_p426_last_gfsynr0;
 static u32 a52_p426_last_gfsynr1;
 static u32 a52_p426_last_gfsynr2;
+static u32 a52_p426_p422_valid;
+static u32 a52_p426_p422_sid;
+static u32 a52_p426_p422_same;
+static u32 a52_p426_p422_cbndx;
 
 static bool a52_p426_is_target(struct arm_smmu_device *smmu)
 {
+	/* The preserved A52 Phase424 DTB has exactly one qcom,qsmmu-v500 +
+	 * qcom,skip-init instance: /soc/apps-smmu@15000000. Keep the probe
+	 * explicitly scoped to that node rather than relying on compatibility
+	 * alone.
+	 */
 	return smmu && smmu->skip_init && smmu->dev && smmu->dev->of_node &&
-	       of_device_is_compatible(smmu->dev->of_node, "qcom,qsmmu-v500");
+	       of_device_is_compatible(smmu->dev->of_node, "qcom,qsmmu-v500") &&
+	       of_node_name_eq(smmu->dev->of_node, "apps-smmu");
+}
+
+static bool a52_p426_check_p422(struct arm_smmu_device *smmu)
+{
+	struct arm_smmu_device *p422_smmu;
+	u16 sid;
+	u8 cbndx;
+	bool valid;
+	bool same;
+
+	valid = READ_ONCE(a52_p422_irq_cache.valid);
+	if (!valid) {
+		WRITE_ONCE(a52_p426_p422_valid, 0U);
+		return true;
+	}
+
+	p422_smmu = READ_ONCE(a52_p422_irq_cache.smmu);
+	sid = READ_ONCE(a52_p422_irq_cache.sid);
+	cbndx = READ_ONCE(a52_p422_irq_cache.cbndx);
+	same = p422_smmu == smmu;
+
+	WRITE_ONCE(a52_p426_p422_valid, 1U);
+	WRITE_ONCE(a52_p426_p422_sid, (u32)sid);
+	WRITE_ONCE(a52_p426_p422_cbndx, (u32)cbndx);
+	WRITE_ONCE(a52_p426_p422_same, same ? 1U : 0U);
+	smp_wmb();
+
+	return sid == A52_P426_SID && same;
 }
 
 static bool a52_p426_hw_valid(struct arm_smmu_device *smmu, u32 smr, u32 s2cr)
@@ -217,9 +255,10 @@ static void a52_p426_cache_boot_routes(struct arm_smmu_device *smmu)
 		return;
 
 	WRITE_ONCE(a52_p426_apps_smmu, smmu);
-	/* arm_smmu_device_cfg_probe() has allocated/zeroed Linux's software
+	/* arm_smmu_device_cfg_probe() has allocated/initialized Linux's software
 	 * tables, while qcom,skip-init hardware still contains firmware state.
-	 * This is before arm_smmu_device_reset() and arm_smmu_test_smr_masks().
+	 * Capture immediately after cfg_probe succeeds, before iommu_device_register()
+	 * can expose the provider to client probes, and before reset/mask-test.
 	 */
 	a52_p426_take_snapshot(smmu, &a52_p426_boot, true);
 	smp_wmb();
@@ -233,6 +272,8 @@ void a52_p426_capture_f0(void)
 	if (!smmu || !atomic_read(&a52_p426_boot_ready))
 		return;
 	if (atomic_cmpxchg(&a52_p426_f0_taken, 0, 1) != 0)
+		return;
+	if (!a52_p426_check_p422(smmu))
 		return;
 
 	/* Exact S00 observer: reads + normal-RAM stores only. No printk,
@@ -303,9 +344,15 @@ void a52_p426_timeout_dump(void)
 	if (!smmu || !atomic_read(&a52_p426_boot_ready))
 		return;
 
+	(void)a52_p426_check_p422(smmu);
 	a52_p426_take_snapshot(smmu, &a52_p426_timeout, true);
 	gf = (u32)atomic_read(&a52_p426_global_faults);
 
+	a52_ackfr_record("P426 X pv=%u sid=%x same=%u cb=%u",
+		READ_ONCE(a52_p426_p422_valid),
+		READ_ONCE(a52_p426_p422_sid),
+		READ_ONCE(a52_p426_p422_same),
+		READ_ONCE(a52_p426_p422_cbndx));
 	a52_ackfr_record("P426 B g=%u hv=%u hm=%u sv=%u sm=%u",
 		a52_p426_boot.groups, a52_p426_boot.hw_valid,
 		a52_p426_boot.hw_match, a52_p426_boot.sw_valid,
@@ -368,11 +415,6 @@ def patch_smmu(text: str) -> str:
     ), "SMMU")
 
     block_anchor = "static irqreturn_t arm_smmu_context_fault(int irq, void *dev)\n"
-    probe_reset = (
-        "\tplatform_set_drvdata(pdev, smmu);\n"
-        "\tarm_smmu_device_reset(smmu);\n"
-        "\tarm_smmu_test_smr_masks(smmu);\n"
-    )
     mask_pre = """smr_ok:
 	/*
 	 * SMR.ID bits may not be preserved if the corresponding MASK
@@ -387,7 +429,6 @@ def patch_smmu(text: str) -> str:
 """
     require_unique_anchors(text, (
         ("probe block insertion", block_anchor),
-        ("probe-time reset sequence", probe_reset),
         ("mask-test pre-read", mask_pre),
         ("mask-test post-read", mask_post),
         ("global-fault latch", global_old),
@@ -396,13 +437,26 @@ def patch_smmu(text: str) -> str:
     text = one(text, block_anchor, BLOCK + "\n" + block_anchor,
                "probe block insertion")
 
-    probe_reset_new = (
-        "\tplatform_set_drvdata(pdev, smmu);\n"
-        "\ta52_p426_cache_boot_routes(smmu);\n"
-        "\tarm_smmu_device_reset(smmu);\n"
-        "\tarm_smmu_test_smr_masks(smmu);\n"
+    # Snapshot at the earliest safe point: cfg_probe has created the Linux SW
+    # tables, clocks/GDSCs are still on, and the provider has not yet been
+    # registered. Locate this semantically inside arm_smmu_device_probe rather
+    # than matching an instrumented multi-line block.
+    probe_sig = "static int arm_smmu_device_probe(struct platform_device *pdev)"
+    probe = text.find(probe_sig)
+    cfg = text.find("\terr = arm_smmu_device_cfg_probe(smmu);\n", probe)
+    errcheck = text.find("\tif (err)\n\t\treturn err;\n", cfg)
+    next_stage = text.find("\n\tif (smmu->version == ARM_SMMU_V2)", cfg)
+    if not (0 <= probe < cfg < errcheck < next_stage):
+        raise SystemExit(
+            "Phase426 cfg-probe insertion preflight failed: " +
+            f"probe={probe} cfg={cfg} err={errcheck} next={next_stage}"
+        )
+    insert_at = errcheck + len("\tif (err)\n\t\treturn err;\n")
+    text = (
+        text[:insert_at] +
+        "\n\ta52_p426_cache_boot_routes(smmu);\n" +
+        text[insert_at:]
     )
-    text = one(text, probe_reset, probe_reset_new, "pre-write boot route cache")
 
     mask_pre_new = """smr_ok:
 	if (a52_p426_is_target(smmu)) {
@@ -548,6 +602,9 @@ def validate(root: Path) -> None:
         MARK,
         "a52_p426_decode_mask",
         "if (!(smmu->features & ARM_SMMU_FEAT_EXIDS))",
+        'of_node_name_eq(smmu->dev->of_node, "apps-smmu")',
+        "a52_p426_check_p422",
+        'P426 X pv=%u sid=%x same=%u cb=%u',
         "d->pinned = s2cr->pinned ? 1U : 0U;",
         "a52_p426_cache_boot_routes(smmu);",
         "a52_p426_mask_test_before",
@@ -596,12 +653,19 @@ def validate(root: Path) -> None:
             if re.search(pattern, f0):
                 errors.append("F0 observer contains forbidden " + label)
 
-    # Boot cache must be at the probe-time reset site, before reset and mask test.
-    cache = smmu.find("a52_p426_cache_boot_routes(smmu);")
-    reset = smmu.find("arm_smmu_device_reset(smmu);", cache + 1 if cache >= 0 else 0)
-    test = smmu.find("arm_smmu_test_smr_masks(smmu);", reset + 1 if reset >= 0 else 0)
-    if not (0 <= cache < reset < test):
-        errors.append("boot-cache ordering is not cache < reset < mask-test")
+    # Boot cache must happen after cfg_probe and before provider registration,
+    # eliminating any client-probe race before the firmware-state snapshot.
+    probe = smmu.find("static int arm_smmu_device_probe(struct platform_device *pdev)")
+    cfg = smmu.find("err = arm_smmu_device_cfg_probe(smmu);", probe if probe >= 0 else 0)
+    cache = smmu.find("a52_p426_cache_boot_routes(smmu);", cfg if cfg >= 0 else 0)
+    register = smmu.find("err = iommu_device_register(&smmu->iommu);",
+                         cache if cache >= 0 else 0)
+    reset = smmu.find("arm_smmu_device_reset(smmu);", register if register >= 0 else 0)
+    test = smmu.find("arm_smmu_test_smr_masks(smmu);", reset if reset >= 0 else 0)
+    if not (0 <= probe < cfg < cache < register < reset < test):
+        errors.append(
+            "boot-cache ordering is not probe < cfg < cache < register < reset < mask-test"
+        )
 
     # Global fault evidence must be latched before the inherited sGFSR clear.
     handler = smmu.find("static irqreturn_t arm_smmu_global_fault(int irq, void *dev)")
@@ -614,6 +678,12 @@ def validate(root: Path) -> None:
         errors.append("global-fault ordering is not handler < latch < clear")
 
     # DSI correlation must preserve the intended ordering at S00 and S10.
+    p422check = smmu.find("if (!a52_p426_check_p422(smmu))")
+    f0snap = smmu.find("a52_p426_take_snapshot(smmu, &a52_p426_f0, true);",
+                       p422check if p422check >= 0 else 0)
+    if not (0 <= p422check < f0snap):
+        errors.append("P422 SMMU cross-check does not precede F0 snapshot")
+
     publish = dsi.find("a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);")
     capture = dsi.find("a52_p426_capture_f0();", publish + 1 if publish >= 0 else 0)
     if not (0 <= publish < capture):

@@ -29,6 +29,17 @@ HELPER=r'''
 #define A52_G424_RSC_DRV_PHYS 0x0af20000ULL
 #define A52_G424_RSC_WRP_PHYS 0x0af30000ULL
 
+/* Recovery-persistent transport only. The hot F0 path still performs only
+ * register reads + normal-RAM stores. Persistence happens after DMA_DONE.
+ * The existing collector exports this physical range from recovery.
+ */
+#define A52_G424_RAM_PHYS      0xB1400000ULL
+#define A52_G424_RAM_BYTES     SZ_8K
+#define A52_G424_RAM_COPY0     0x0000U
+#define A52_G424_RAM_COPY1     0x1000U
+#define A52_G424_RAM_MAGIC     0x3432344750414E53ULL /* "SNAPG424" */
+#define A52_G424_RAM_VERSION   1U
+
 struct a52_g424_snapshot {
 	u64 ns;
 	u32 dsi[8];
@@ -39,15 +50,83 @@ struct a52_g424_snapshot {
 	u32 vbif1[4];
 	u32 rsc0[8];
 	u32 rsc1[6];
-};
+} __packed;
+
+struct a52_g424_persist {
+	u64 magic;
+	u32 version;
+	u32 bytes;
+	struct a52_g424_snapshot snap;
+	u32 crc32c;
+	u32 crc32c_inv;
+} __packed;
 
 static struct a52_g424_snapshot a52_g424_snap;
 static atomic_t a52_g424_taken=ATOMIC_INIT(0);
+static atomic_t a52_g424_persisted=ATOMIC_INIT(0);
 static void __iomem *a52_g424_dispcc;
 static void __iomem *a52_g424_gcc;
 static void __iomem *a52_g424_vbif;
 static void __iomem *a52_g424_rsc_drv;
 static void __iomem *a52_g424_rsc_wrp;
+static void __iomem *a52_g424_ram;
+
+static u32 a52_g424_crc32c(const void *buffer, size_t len)
+{
+	const u8 *bytes=buffer;
+	u32 crc=~0U;
+	size_t i;
+	unsigned int bit;
+
+	for (i=0; i<len; i++) {
+		crc ^= bytes[i];
+		for (bit=0; bit<8; bit++)
+			crc=(crc>>1)^((crc&1U)?0x82f63b78U:0U);
+	}
+	return ~crc;
+}
+
+static void a52_g424_ram_write_copy(u32 off,
+				    const struct a52_g424_persist *src)
+{
+	struct a52_g424_persist p=*src;
+	u64 magic=A52_G424_RAM_MAGIC;
+
+	if (!a52_g424_ram)
+		return;
+
+	/* Commit marker last so recovery never accepts a torn copy. */
+	p.magic=0;
+	memcpy_toio((u8 __iomem *)a52_g424_ram+off,&p,sizeof(p));
+	wmb();
+	memcpy_toio((u8 __iomem *)a52_g424_ram+off+
+		    offsetof(struct a52_g424_persist,magic),
+		    &magic,sizeof(magic));
+	wmb();
+}
+
+static void a52_g424_persist_snapshot(void)
+{
+	struct a52_g424_persist p;
+
+	if (!atomic_read(&a52_g424_taken) || !a52_g424_ram)
+		return;
+	if (atomic_cmpxchg(&a52_g424_persisted,0,1)!=0)
+		return;
+
+	memset(&p,0,sizeof(p));
+	p.version=A52_G424_RAM_VERSION;
+	p.bytes=sizeof(p);
+	p.snap=a52_g424_snap;
+	p.crc32c=a52_g424_crc32c(
+		(u8 *)&p+offsetof(struct a52_g424_persist,version),
+		offsetof(struct a52_g424_persist,crc32c)-
+		offsetof(struct a52_g424_persist,version));
+	p.crc32c_inv=~p.crc32c;
+
+	a52_g424_ram_write_copy(A52_G424_RAM_COPY0,&p);
+	a52_g424_ram_write_copy(A52_G424_RAM_COPY1,&p);
+}
 
 static int __init a52_g424_map_init(void)
 {
@@ -56,6 +135,15 @@ static int __init a52_g424_map_init(void)
 	a52_g424_vbif=ioremap(A52_G424_VBIF_PHYS,0x1000);
 	a52_g424_rsc_drv=ioremap(A52_G424_RSC_DRV_PHYS,0x2000);
 	a52_g424_rsc_wrp=ioremap(A52_G424_RSC_WRP_PHYS,0x100);
+	a52_g424_ram=ioremap_cache(A52_G424_RAM_PHYS,A52_G424_RAM_BYTES);
+	if (a52_g424_ram) {
+		u64 zero=0;
+		memcpy_toio((u8 __iomem *)a52_g424_ram+A52_G424_RAM_COPY0,
+			    &zero,sizeof(zero));
+		memcpy_toio((u8 __iomem *)a52_g424_ram+A52_G424_RAM_COPY1,
+			    &zero,sizeof(zero));
+		wmb();
+	}
 	return 0;
 }
 subsys_initcall(a52_g424_map_init);
@@ -204,6 +292,11 @@ void a52_g424_dump_snapshot(void)
 	if (!atomic_read(&a52_g424_taken))
 		return;
 
+	/* Normal Golden DMA completion has already happened. Persisting here
+	 * cannot perturb SW_TRIGGER -> DMA_DONE timing.
+	 */
+	a52_g424_persist_snapshot();
+
 	pr_info("TG424 T ns=%llu\n",(unsigned long long)s->ns);
 	pr_info("TG424 D %x %x %x %x %x %x %x %x\n",
 		s->dsi[0],s->dsi[1],s->dsi[2],s->dsi[3],
@@ -241,6 +334,8 @@ def patch_hwc(text:str)->str:
             include_anchor,
             include_anchor
             + "#include <linux/init.h>\n"
+            + "#include <linux/io.h>\n"
+            + "#include <linux/sizes.h>\n"
             + "#include <linux/ktime.h>\n"
             + "#include <linux/timekeeping.h>\n"
             + "#include <linux/proc_fs.h>\n"
@@ -291,6 +386,9 @@ def validate(ctrl:str,hwc:str)->None:
         MARK,
         "A52_G424_DISPCC_PHYS  0x0af00000ULL",
         "A52_G424_VBIF_PHYS    0x0aeb0000ULL",
+        "A52_G424_RAM_PHYS      0xB1400000ULL",
+        'A52_G424_RAM_MAGIC     0x3432344750414E53ULL',
+        "a52_g424_persist_snapshot();",
         "a52_g424_snapshot(ctrl);",
         "a52_g424_dump_snapshot();",
         "TG424 C0 %x %x %x %x %x %x %x %x",
@@ -303,7 +401,12 @@ def validate(ctrl:str,hwc:str)->None:
     if hwc.count("a52_g424_snapshot(ctrl);") != 1:
         raise SystemExit("Phase424G exact Golden trigger snapshot missing/not unique")
     if "writel_relaxed(" in HELPER or "DSI_W32(" in HELPER:
-        raise SystemExit("Phase424G helper must remain read-only")
+        raise SystemExit("Phase424G helper must not add functional MMIO writes")
+    snap_pos=HELPER.index("void a52_g424_snapshot(struct dsi_ctrl_hw *ctrl)")
+    dump_pos=HELPER.index("void a52_g424_dump_snapshot(void)")
+    hot=HELPER[snap_pos:dump_pos]
+    if "memcpy_toio(" in hot or "a52_g424_persist_snapshot();" in hot:
+        raise SystemExit("Phase424G F0 hot path must not persist/log")
 
 
 def main()->int:

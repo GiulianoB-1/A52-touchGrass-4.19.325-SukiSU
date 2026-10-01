@@ -404,8 +404,8 @@ def patch_dsi(text: str) -> str:
     if MARK in text:
         return text
     for token in (
-        "A52_PHASE424_PAIRED_HW_SNAPSHOT_V1",
         "a52_p422_publish_m00((u64)dsi_ctrl->cmd_buffer_iova);",
+        "extern void a52_p424_dump_snapshot(void);",
         "a52_p424_dump_snapshot();",
     ):
         if token not in text:

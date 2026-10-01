@@ -18,6 +18,7 @@ on:
       - scripts/384_apply_pid1_full_elf_overlap_census.py
       - scripts/385_apply_pid1_16k_compat_loader.py
       - scripts/386_apply_pid1_icache_exit_trace.py
+      - scripts/decode_phase383_16k_dual.py
   workflow_dispatch:
 
 permissions:
@@ -129,6 +130,16 @@ jobs:
           set -Eeuo pipefail
           mkdir -p artifacts release workspace
           chmod +x scripts/*.sh scripts/*.py
+
+      - name: Fetch persistent Phase383 dual-recorder decoder
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/decode_phase383_16k_dual.py" \
+            -o artifacts/decode_phase383_16k_dual.py
+          python3 -m py_compile artifacts/decode_phase383_16k_dual.py
+          test -s artifacts/decode_phase383_16k_dual.py
 
       - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
         if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
@@ -672,7 +683,7 @@ jobs:
             fs/binfmt_elf.c kernel/Makefile \
             > artifacts/phase383-dual-elf.diff
 
-          cp scripts/decode_phase383_16k_dual.py artifacts/decode_phase383_16k_dual.py
+          # Decoder is fetched independently so prepared-source cache hits are safe.
 
       - name: Save prepared Phase383 dual-recorder source cache
         if: steps.phase383_source.outputs.cache-hit != 'true'
@@ -699,6 +710,8 @@ jobs:
             echo "phase386_icache_helper=__flush_cache_user_range"
             echo "phase386_pid1_exit_group_trace=yes"
             echo "phase386_pid1_do_exit_trace=yes"
+            echo "phase386_built_kernel_cache_hit=${{ steps.phase386_build.outputs.cache-hit }}"
+            echo "phase386_decoder_fetch_independent=yes"
             echo "cache_key=a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449"
           } > artifacts/phase383-source-cache.txt
 
@@ -898,7 +911,31 @@ jobs:
           wc -l "$OUT"
           head -200 "$OUT" || true
 
+      - name: Restore Phase386 built kernel cache
+        id: phase386_build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            workspace/touchgrass-a52xq/out/.config
+          key: a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54
+
+      - name: Validate restored Phase386 built kernel
+        if: steps.phase386_build.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          test -s "$IMAGE"
+          test -s workspace/touchgrass-a52xq/out/.config
+          grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' workspace/touchgrass-a52xq/out/.config
+          grep -Fxq 'CONFIG_ARM64_PAGE_SHIFT=14' workspace/touchgrass-a52xq/out/.config
+          gzip -t "$IMAGE" 2>/dev/null || true
+          {
+            echo "phase386_built_kernel_cache_hit=true"
+            echo "cache_key=a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54"
+          } > artifacts/phase386-build-cache.txt
+
       - name: Build integrated kernel
+        if: steps.phase386_build.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           echo '=== CCACHE BEFORE ==='
@@ -912,6 +949,24 @@ jobs:
           echo '=== CCACHE AFTER ==='
           ccache --show-stats || true
           exit "$RC"
+
+      - name: Save Phase386 built kernel cache
+        if: steps.phase386_build.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            workspace/touchgrass-a52xq/out/.config
+          key: a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54
+
+      - name: Record Phase386 build cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase386_built_kernel_cache_hit=${{ steps.phase386_build.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54"
+          } > artifacts/phase386-build-cache.txt
 
       - name: Audit P152 retained stack and final 16K geometry
         run: |
@@ -1091,7 +1146,7 @@ jobs:
           package available for rollback.
           EOF
 
-          cp scripts/decode_phase383_16k_dual.py release/decode_phase383_16k_dual.py
+          cp artifacts/decode_phase383_16k_dual.py release/decode_phase383_16k_dual.py
 
       - name: Verify Phase386 package and 16K invariants
         run: |
@@ -1214,6 +1269,7 @@ jobs:
             artifacts/phase385-source-cache.txt
             artifacts/phase386-pid1-icache-exit-apply.txt
             artifacts/phase386-pid1-icache-exit.diff
+            artifacts/phase386-build-cache.txt
             artifacts/decode_phase383_16k_dual.py
             artifacts/phase382-fast-pgtable-apply.txt
             artifacts/phase382-fast-pgtable.diff

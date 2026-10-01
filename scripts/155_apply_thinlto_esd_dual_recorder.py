@@ -790,8 +790,9 @@ def stage(root: Path) -> None:
     mk = (root / MAKE).read_text()
     marker = "# A52 P155 ThinLTO ESD dual recorder"
     if marker not in mk:
-        mk = mk.rstrip() + "\n\n" + marker + "\nobj-y += a52_p155_esd_recorder.o\n"
-        (root / MAKE).write_text(mk + "\n")
+        mk = (mk.rstrip("\n") + "\n\n" + marker +
+              "\nobj-y += a52_p155_esd_recorder.o\n")
+        (root / MAKE).write_text(mk)
 
     for rel, fn in ((SS, patch_ss), (SDE, patch_sde),
                     (DISPLAY, patch_display), (PANEL, patch_panel)):

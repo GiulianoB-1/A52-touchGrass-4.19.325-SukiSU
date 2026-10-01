@@ -183,7 +183,7 @@ void a52_p155_recordf(const char *fmt, ...)
 		return;
 
 	memset(&r, 0, sizeof(r));
-	r.ts_ns = ktime_get_boottime_ns();
+	r.ts_ns = ktime_get_boot_ns();
 	r.phase = 155U;
 	r.cpu = (u16)raw_smp_processor_id();
 	r.pid = (u32)task_pid_nr(current);

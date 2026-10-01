@@ -35,10 +35,9 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
  *   1. synchronously to persistent RAM 0xB1B00000..0xB1BFFFFF
  *   2. asynchronously to Samsung /dev/block/by-name/debug + 0x800000
  *
- * The Samsung A52 debug partition is 10 MiB. Real-device capture showed its
- * final 2 MiB are unused by the native Samsung RWC/crash stream. P155 uses
- * only the first 1 MiB of that empty tail so the same record set fits both
- * transports. No block I/O happens in display/IRQ hot paths.
+ * Real A52 debug.bin captures show MiB 8 and 9 are empty. P155 uses only
+ * the first 1 MiB of that empty tail, preserving Samsung's native RWC/crash
+ * stream in the first 8 MiB. No block I/O occurs in display/IRQ hot paths.
  */
 #include <linux/atomic.h>
 #include <linux/delay.h>
@@ -48,6 +47,7 @@ SOURCE = r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/sizes.h>
 #include <linux/spinlock.h>
@@ -301,6 +301,9 @@ retry:
 				 msecs_to_jiffies(250));
 }
 
+static void a52_p155_heartbeat_workfn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(a52_p155_heartbeat_work, a52_p155_heartbeat_workfn);
+
 static void a52_p155_heartbeat_workfn(struct work_struct *work)
 {
 	unsigned int n;
@@ -316,7 +319,6 @@ static void a52_p155_heartbeat_workfn(struct work_struct *work)
 		mod_delayed_work(system_unbound_wq, &a52_p155_heartbeat_work,
 				 msecs_to_jiffies(2000));
 }
-static DECLARE_DELAYED_WORK(a52_p155_heartbeat_work, a52_p155_heartbeat_workfn);
 
 static int __init a52_p155_init(void)
 {
@@ -441,7 +443,7 @@ def patch_fn(text: str, signature: str, transform) -> str:
 
 SNAPSHOT = r'''
 /* A52_P155_THINLTO_ESD_DUAL_RECORDER_V1: read-only DSI snapshot.
- * Called only while the display is expected to be powered.
+ * Call only while the display is expected to be powered.
  */
 void a52_p155_snapshot_display(struct dsi_display *display, u32 tag)
 {
@@ -485,41 +487,41 @@ def patch_ss(text: str) -> str:
     text = add_include(text, "#include <linux/a52_p155_esd_recorder.h>\n")
 
     def f(fn: str) -> str:
-        anchor = '''	int i;
-	int rc = 0;
+        anchor = '''\tint i;
+\tint rc = 0;
 
-	if (!vdd->esd_recovery.is_enabled_esd_recovery) {'''
-        repl = '''	int i;
-	int rc = 0;
+\tif (!vdd->esd_recovery.is_enabled_esd_recovery) {'''
+        repl = '''\tint i;
+\tint rc = 0;
 
-	a52_p155_recordf("P155 E0 irq=%d st=%d cnt=%d en=%d g0=%d g1=%d",
-		irq, vdd->panel_state, vdd->panel_recovery_cnt,
-		vdd->display_enabled,
-		gpio_is_valid(vdd->esd_recovery.esd_gpio[0]) ?
-			gpio_get_value(vdd->esd_recovery.esd_gpio[0]) : -1,
-		gpio_is_valid(vdd->esd_recovery.esd_gpio[1]) ?
-			gpio_get_value(vdd->esd_recovery.esd_gpio[1]) : -1);
-	a52_p155_snapshot_display(GET_DSI_DISPLAY(vdd), 0xE0);
+\ta52_p155_recordf("P155 E0 irq=%d st=%d cnt=%d en=%d g0=%d g1=%d",
+\t\tirq, vdd->panel_state, vdd->panel_recovery_cnt,
+\t\tvdd->display_enabled,
+\t\tgpio_is_valid(vdd->esd_recovery.esd_gpio[0]) ?
+\t\t\tgpio_get_value(vdd->esd_recovery.esd_gpio[0]) : -1,
+\t\tgpio_is_valid(vdd->esd_recovery.esd_gpio[1]) ?
+\t\t\tgpio_get_value(vdd->esd_recovery.esd_gpio[1]) : -1);
+\ta52_p155_snapshot_display(GET_DSI_DISPLAY(vdd), 0xE0);
 
-	if (!vdd->esd_recovery.is_enabled_esd_recovery) {'''
+\tif (!vdd->esd_recovery.is_enabled_esd_recovery) {'''
         fn = one(fn, anchor, repl, "ESD entry")
         fn = one(fn,
-            "	esd_irq_enable(false, true, (void *)vdd);\n",
-            "	esd_irq_enable(false, true, (void *)vdd);\n"
-            "	a52_p155_recordf(\"P155 E1 irqoff cnt=%d\", vdd->panel_recovery_cnt);\n",
+            "\tesd_irq_enable(false, true, (void *)vdd);\n",
+            "\tesd_irq_enable(false, true, (void *)vdd);\n"
+            "\ta52_p155_recordf(\"P155 E1 irqoff cnt=%d\", vdd->panel_recovery_cnt);\n",
             "ESD irq off")
         fn = one(fn,
-            "	schedule_work(&conn->status_work.work);\n",
-            "	schedule_work(&conn->status_work.work);\n"
-            "	a52_p155_recordf(\"P155 E2 sched pend=%d dead=%d\",\n"
-            "		atomic_read(&GET_DSI_PANEL(vdd)->esd_recovery_pending),\n"
-            "		vdd->panel_dead);\n",
+            "\tschedule_work(&conn->status_work.work);\n",
+            "\tschedule_work(&conn->status_work.work);\n"
+            "\ta52_p155_recordf(\"P155 E2 sched pend=%d dead=%d\",\n"
+            "\t\tatomic_read(&GET_DSI_PANEL(vdd)->esd_recovery_pending),\n"
+            "\t\tvdd->panel_dead);\n",
             "ESD schedule")
         fn = one(fn,
             "end:\n\treturn IRQ_HANDLED;\n",
             "end:\n\ta52_p155_recordf(\"P155 E3 exit irq=%d dead=%d cnt=%d\",\n"
-            "		irq, vdd->panel_dead, vdd->panel_recovery_cnt);\n"
-            "	return IRQ_HANDLED;\n",
+            "\t\tirq, vdd->panel_dead, vdd->panel_recovery_cnt);\n"
+            "\treturn IRQ_HANDLED;\n",
             "ESD exit")
         return fn
 
@@ -533,42 +535,42 @@ def patch_sde(text: str) -> str:
 
     def dead(fn: str) -> str:
         fn = one(fn,
-            "	if (!conn)\n\t\treturn;\n",
-            "	if (!conn)\n\t\treturn;\n\n"
-            "	a52_p155_recordf(\"P155 PD0 dead=%d skip=%d cid=%d eid=%d\",\n"
-            "		conn->panel_dead, skip_pre_kickoff, conn->base.base.id,\n"
-            "		conn->encoder ? conn->encoder->base.id : -1);\n"
-            "	if (conn->display)\n"
-            "		a52_p155_snapshot_display(conn->display, 0xD0);\n",
+            "\tif (!conn)\n\t\treturn;\n",
+            "\tif (!conn)\n\t\treturn;\n\n"
+            "\ta52_p155_recordf(\"P155 PD0 dead=%d skip=%d cid=%d eid=%d\",\n"
+            "\t\tconn->panel_dead, skip_pre_kickoff, conn->base.base.id,\n"
+            "\t\tconn->encoder ? conn->encoder->base.id : -1);\n"
+            "\tif (conn->display)\n"
+            "\t\ta52_p155_snapshot_display(conn->display, 0xD0);\n",
             "panel-dead entry")
         fn = one(fn,
-            "	conn->panel_dead = true;\n",
-            "	conn->panel_dead = true;\n"
-            "	a52_p155_recordf(\"P155 PD1 setdead cid=%d\", conn->base.base.id);\n",
+            "\tconn->panel_dead = true;\n",
+            "\tconn->panel_dead = true;\n"
+            "\ta52_p155_recordf(\"P155 PD1 setdead cid=%d\", conn->base.base.id);\n",
             "panel-dead set")
         return fn
 
     def esd(fn: str) -> str:
         fn = one(fn,
-            "	display = sde_conn->display;\n",
-            "	display = sde_conn->display;\n"
-            "	a52_p155_recordf(\"P155 ES0 pend=%d dead=%d\",\n"
-            "		atomic_read(&display->panel->esd_recovery_pending),\n"
-            "		sde_conn->panel_dead);\n",
+            "\tdisplay = sde_conn->display;\n",
+            "\tdisplay = sde_conn->display;\n"
+            "\ta52_p155_recordf(\"P155 ES0 pend=%d dead=%d\",\n"
+            "\t\tatomic_read(&display->panel->esd_recovery_pending),\n"
+            "\t\tsde_conn->panel_dead);\n",
             "ESD status entry")
         needle = "#endif\n\tmutex_unlock(&sde_conn->lock);\n"
         fn = one(fn, needle,
             "#endif\n"
-            "	a52_p155_recordf(\"P155 ES1 chk=%d pend=%d dead=%d\", ret,\n"
-            "		atomic_read(&display->panel->esd_recovery_pending),\n"
-            "		sde_conn->panel_dead);\n"
-            "	mutex_unlock(&sde_conn->lock);\n",
+            "\ta52_p155_recordf(\"P155 ES1 chk=%d pend=%d dead=%d\", ret,\n"
+            "\t\tatomic_read(&display->panel->esd_recovery_pending),\n"
+            "\t\tsde_conn->panel_dead);\n"
+            "\tmutex_unlock(&sde_conn->lock);\n",
             "ESD status result")
         fn = one(fn,
-            "	SDE_EVT32(ret);\n\n\treturn ret;\n",
-            "	SDE_EVT32(ret);\n"
-            "	a52_p155_recordf(\"P155 ES2 ret=%d dead=%d\", ret, sde_conn->panel_dead);\n\n"
-            "	return ret;\n",
+            "\tSDE_EVT32(ret);\n\n\treturn ret;\n",
+            "\tSDE_EVT32(ret);\n"
+            "\ta52_p155_recordf(\"P155 ES2 ret=%d dead=%d\", ret, sde_conn->panel_dead);\n\n"
+            "\treturn ret;\n",
             "ESD status exit")
         return fn
 
@@ -589,113 +591,120 @@ def patch_display(text: str) -> str:
 
     def prep(fn: str) -> str:
         fn = one(fn,
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
-            "	a52_p155_recordf(\"P155 PR0 prep splash=%d poms=%d mode=%x\",\n"
-            "		display->is_cont_splash_enabled, display->poms_pending,\n"
-            "		display->config.panel_mode);\n"
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\ta52_p155_recordf(\"P155 PR0 prep splash=%d poms=%d mode=%x\",\n"
+            "\t\tdisplay->is_cont_splash_enabled, display->poms_pending,\n"
+            "\t\tdisplay->config.panel_mode);\n"
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
             "prepare entry")
-        for old, new, label in [
-            ("	dsi_display_ctrl_isr_configure(display, true);\n",
-             "	dsi_display_ctrl_isr_configure(display, true);\n"
-             "	a52_p155_recordf(\"P155 PR1 isr-on\");\n", "prepare isr"),
-            ("	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_CORE_CLK, DSI_CLK_ON);\n",
-             "	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_CORE_CLK, DSI_CLK_ON);\n"
-             "	a52_p155_recordf(\"P155 PR2 coreclk rc=%d\", rc);\n", "prepare core"),
-            ("		rc = dsi_display_phy_enable(display);\n",
-             "		rc = dsi_display_phy_enable(display);\n"
-             "		a52_p155_recordf(\"P155 PR3 phy rc=%d\", rc);\n", "prepare phy"),
-            ("	rc = dsi_display_ctrl_init(display);\n",
-             "	rc = dsi_display_ctrl_init(display);\n"
-             "	a52_p155_recordf(\"P155 PR4 ctrl rc=%d\", rc);\n", "prepare ctrl"),
-            ("	rc = dsi_display_ctrl_host_enable(display);\n",
-             "	rc = dsi_display_ctrl_host_enable(display);\n"
-             "	a52_p155_recordf(\"P155 PR5 host rc=%d\", rc);\n", "prepare host"),
-            ("	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_LINK_CLK, DSI_CLK_ON);\n",
-             "	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_LINK_CLK, DSI_CLK_ON);\n"
-             "	a52_p155_recordf(\"P155 PR6 link rc=%d\", rc);\n"
-             "	if (!rc) a52_p155_snapshot_display(display, 0xA6);\n", "prepare link"),
-            ("			rc = dsi_panel_prepare(display->panel);\n",
-             "			a52_p155_recordf(\"P155 PR7 panel-pre\");\n"
-             "			rc = dsi_panel_prepare(display->panel);\n"
-             "			a52_p155_recordf(\"P155 PR8 panel rc=%d\", rc);\n", "prepare panel"),
-            ("	return rc;\n",
-             "	a52_p155_recordf(\"P155 PR9 exit rc=%d\", rc);\n"
-             "	return rc;\n", "prepare exit"),
-        ]:
+        replacements = [
+            ("\tdsi_display_ctrl_isr_configure(display, true);\n",
+             "\tdsi_display_ctrl_isr_configure(display, true);\n"
+             "\ta52_p155_recordf(\"P155 PR1 isr-on\");\n", "prepare isr"),
+            ("\trc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_CORE_CLK, DSI_CLK_ON);\n",
+             "\trc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_CORE_CLK, DSI_CLK_ON);\n"
+             "\ta52_p155_recordf(\"P155 PR2 coreclk rc=%d\", rc);\n", "prepare core"),
+            ("\t\trc = dsi_display_phy_enable(display);\n",
+             "\t\trc = dsi_display_phy_enable(display);\n"
+             "\t\ta52_p155_recordf(\"P155 PR3 phy rc=%d\", rc);\n", "prepare phy"),
+            ("\trc = dsi_display_ctrl_init(display);\n",
+             "\trc = dsi_display_ctrl_init(display);\n"
+             "\ta52_p155_recordf(\"P155 PR4 ctrl rc=%d\", rc);\n", "prepare ctrl"),
+            ("\trc = dsi_display_ctrl_host_enable(display);\n",
+             "\trc = dsi_display_ctrl_host_enable(display);\n"
+             "\ta52_p155_recordf(\"P155 PR5 host rc=%d\", rc);\n", "prepare host"),
+            ("\trc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_LINK_CLK, DSI_CLK_ON);\n",
+             "\trc = dsi_display_clk_ctrl(display->dsi_clk_handle,\n\t\t\tDSI_LINK_CLK, DSI_CLK_ON);\n"
+             "\ta52_p155_recordf(\"P155 PR6 link rc=%d\", rc);\n"
+             "\tif (!rc)\n\t\ta52_p155_snapshot_display(display, 0xA6);\n", "prepare link"),
+            ("\t\t\trc = dsi_panel_prepare(display->panel);\n",
+             "\t\t\ta52_p155_recordf(\"P155 PR7 panel-pre\");\n"
+             "\t\t\trc = dsi_panel_prepare(display->panel);\n"
+             "\t\t\ta52_p155_recordf(\"P155 PR8 panel rc=%d\", rc);\n", "prepare panel"),
+            ("\treturn rc;\n",
+             "\ta52_p155_recordf(\"P155 PR9 exit rc=%d\", rc);\n"
+             "\treturn rc;\n", "prepare exit"),
+        ]
+        for old, new, label in replacements:
             fn = one(fn, old, new, label)
         return fn
 
     def disable(fn: str) -> str:
         fn = one(fn,
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
-            "	a52_p155_recordf(\"P155 DS0 disable mode=%x poms=%d\",\n"
-            "		display->config.panel_mode, display->poms_pending);\n"
-            "	a52_p155_snapshot_display(display, 0xB0);\n"
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\ta52_p155_recordf(\"P155 DS0 disable mode=%x poms=%d\",\n"
+            "\t\tdisplay->config.panel_mode, display->poms_pending);\n"
+            "\ta52_p155_snapshot_display(display, 0xB0);\n"
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
             "disable entry")
         fn = one(fn,
-            "	if (!display->poms_pending) {\n\t\trc = dsi_panel_disable(display->panel);\n",
-            "	if (!display->poms_pending) {\n"
-            "		a52_p155_recordf(\"P155 DS1 panel-disable\");\n"
-            "		rc = dsi_panel_disable(display->panel);\n"
-            "		a52_p155_recordf(\"P155 DS2 panel rc=%d\", rc);\n",
+            "\tif (!display->poms_pending) {\n\t\trc = dsi_panel_disable(display->panel);\n",
+            "\tif (!display->poms_pending) {\n"
+            "\t\ta52_p155_recordf(\"P155 DS1 panel-disable\");\n"
+            "\t\trc = dsi_panel_disable(display->panel);\n"
+            "\t\ta52_p155_recordf(\"P155 DS2 panel rc=%d\", rc);\n",
             "disable panel")
-        fn = one(fn, "	return rc;\n",
-            "	a52_p155_recordf(\"P155 DS3 exit rc=%d\", rc);\n"
-            "	return rc;\n", "disable exit")
+        fn = one(fn,
+            "\treturn rc;\n",
+            "\ta52_p155_recordf(\"P155 DS3 exit rc=%d\", rc);\n"
+            "\treturn rc;\n",
+            "disable exit")
         return fn
 
     def unprep(fn: str) -> str:
         fn = one(fn,
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
-            "	a52_p155_recordf(\"P155 UP0 unprep poms=%d ulps=%d\",\n"
-            "		display->poms_pending, display->panel->ulps_suspend_enabled);\n"
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\ta52_p155_recordf(\"P155 UP0 unprep poms=%d ulps=%d\",\n"
+            "\t\tdisplay->poms_pending, display->panel->ulps_suspend_enabled);\n"
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
             "unprepare entry")
         replacements = [
-            ("		rc = dsi_panel_unprepare(display->panel);\n",
-             "		a52_p155_recordf(\"P155 UP1 panel-unprep\");\n"
-             "		rc = dsi_panel_unprepare(display->panel);\n"
-             "		a52_p155_recordf(\"P155 UP2 panel rc=%d\", rc);\n", "unprepare panel"),
-            ("	rc = dsi_display_ctrl_host_disable(display);\n",
-             "	rc = dsi_display_ctrl_host_disable(display);\n"
-             "	a52_p155_recordf(\"P155 UP3 hostoff rc=%d\", rc);\n", "unprepare host"),
-            ("	rc = dsi_display_ctrl_deinit(display);\n",
-             "	rc = dsi_display_ctrl_deinit(display);\n"
-             "	a52_p155_recordf(\"P155 UP4 ctrloff rc=%d\", rc);\n", "unprepare ctrl"),
-            ("		rc = dsi_display_phy_disable(display);\n",
-             "		rc = dsi_display_phy_disable(display);\n"
-             "		a52_p155_recordf(\"P155 UP5 phyoff rc=%d\", rc);\n", "unprepare phy"),
-            ("	dsi_display_ctrl_isr_configure(display, false);\n",
-             "	dsi_display_ctrl_isr_configure(display, false);\n"
-             "	a52_p155_recordf(\"P155 UP6 isr-off\");\n", "unprepare isr"),
-            ("	return rc;\n",
-             "	a52_p155_recordf(\"P155 UP7 exit rc=%d\", rc);\n"
-             "	return rc;\n", "unprepare exit"),
+            ("\t\trc = dsi_panel_unprepare(display->panel);\n",
+             "\t\ta52_p155_recordf(\"P155 UP1 panel-unprep\");\n"
+             "\t\trc = dsi_panel_unprepare(display->panel);\n"
+             "\t\ta52_p155_recordf(\"P155 UP2 panel rc=%d\", rc);\n", "unprepare panel"),
+            ("\trc = dsi_display_ctrl_host_disable(display);\n",
+             "\trc = dsi_display_ctrl_host_disable(display);\n"
+             "\ta52_p155_recordf(\"P155 UP3 hostoff rc=%d\", rc);\n", "unprepare host"),
+            ("\trc = dsi_display_ctrl_deinit(display);\n",
+             "\trc = dsi_display_ctrl_deinit(display);\n"
+             "\ta52_p155_recordf(\"P155 UP4 ctrloff rc=%d\", rc);\n", "unprepare ctrl"),
+            ("\t\trc = dsi_display_phy_disable(display);\n",
+             "\t\trc = dsi_display_phy_disable(display);\n"
+             "\t\ta52_p155_recordf(\"P155 UP5 phyoff rc=%d\", rc);\n", "unprepare phy"),
+            ("\tdsi_display_ctrl_isr_configure(display, false);\n",
+             "\tdsi_display_ctrl_isr_configure(display, false);\n"
+             "\ta52_p155_recordf(\"P155 UP6 isr-off\");\n", "unprepare isr"),
+            ("\treturn rc;\n",
+             "\ta52_p155_recordf(\"P155 UP7 exit rc=%d\", rc);\n"
+             "\treturn rc;\n", "unprepare exit"),
         ]
-        for old,new,label in replacements:
-            fn=one(fn,old,new,label)
+        for old, new, label in replacements:
+            fn = one(fn, old, new, label)
         return fn
 
     def enable(fn: str) -> str:
         fn = one(fn,
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
-            "	a52_p155_recordf(\"P155 EN0 enable splash=%d mode=%x\",\n"
-            "		display->is_cont_splash_enabled, display->config.panel_mode);\n"
-            "	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
+            "\ta52_p155_recordf(\"P155 EN0 enable splash=%d mode=%x\",\n"
+            "\t\tdisplay->is_cont_splash_enabled, display->config.panel_mode);\n"
+            "\tSDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);\n",
             "enable entry")
-        fn = one(fn,
-            "		rc = dsi_panel_enable(display->panel);\n",
-            "		a52_p155_recordf(\"P155 EN1 panel-enable\");\n"
-            "		rc = dsi_panel_enable(display->panel);\n"
-            "		a52_p155_recordf(\"P155 EN2 panel rc=%d\", rc);\n",
-            "enable panel")
-        # There are early returns in splash path; the normal recovery path uses final return.
-        fn = fn.replace("
-	return rc;
-}", "
-	a52_p155_recordf(\"P155 EN3 exit rc=%d\", rc);\n	return rc;\n}", 1)
+        enable_anchor = "\t\trc = dsi_panel_enable(display->panel);\n"
+        if fn.count(enable_anchor) != 2:
+            raise SystemExit("P155 enable panel: expected 2 anchors, found %d" %
+                             fn.count(enable_anchor))
+        fn = fn.replace(
+            enable_anchor,
+            "\t\ta52_p155_recordf(\"P155 EN1 panel-enable\");\n"
+            "\t\trc = dsi_panel_enable(display->panel);\n"
+            "\t\ta52_p155_recordf(\"P155 EN2 panel rc=%d\", rc);\n")
+        final = "\n\treturn rc;\n}"
+        if final not in fn:
+            raise SystemExit("P155 enable final return missing")
+        fn = fn.replace(final,
+            "\n\ta52_p155_recordf(\"P155 EN3 exit rc=%d\", rc);\n"
+            "\treturn rc;\n}", 1)
         return fn
 
     text = patch_fn(text, "int dsi_display_prepare(", prep)
@@ -711,56 +720,56 @@ def patch_panel(text: str) -> str:
 
     def on(fn: str) -> str:
         fn = one(fn,
-            "	struct samsung_display_driver_data *vdd = panel->panel_private;\n",
-            "	struct samsung_display_driver_data *vdd = panel->panel_private;\n"
-            "	a52_p155_recordf(\"P155 PO0 on st=%d dead=%d aot=%d regs=%d\",\n"
-            "		vdd->panel_state, vdd->panel_dead, vdd->aot_enable,\n"
-            "		panel->power_info.count);\n",
+            "\tstruct samsung_display_driver_data *vdd = panel->panel_private;\n",
+            "\tstruct samsung_display_driver_data *vdd = panel->panel_private;\n"
+            "\ta52_p155_recordf(\"P155 PO0 on st=%d dead=%d aot=%d regs=%d\",\n"
+            "\t\tvdd->panel_state, vdd->panel_dead, vdd->aot_enable,\n"
+            "\t\tpanel->power_info.count);\n",
             "power-on entry")
         fn = one(fn,
-            '		DSI_INFO("timing_check: panel power on\\n");\n'
-            '		rc = dsi_pwr_enable_regulator(&panel->power_info, true);\n',
-            '		DSI_INFO("timing_check: panel power on\\n");\n'
-            '		a52_p155_recordf("P155 PO1 vreg-on begin");\n'
-            '		rc = dsi_pwr_enable_regulator(&panel->power_info, true);\n'
-            '		a52_p155_recordf("P155 PO2 vreg-on rc=%d", rc);\n',
+            '\t\tDSI_INFO("timing_check: panel power on\\n");\n'
+            '\t\trc = dsi_pwr_enable_regulator(&panel->power_info, true);\n',
+            '\t\tDSI_INFO("timing_check: panel power on\\n");\n'
+            '\t\ta52_p155_recordf("P155 PO1 vreg-on begin");\n'
+            '\t\trc = dsi_pwr_enable_regulator(&panel->power_info, true);\n'
+            '\t\ta52_p155_recordf("P155 PO2 vreg-on rc=%d", rc);\n',
             "power-on regulator")
         fn = one(fn,
-            "	ss_panel_power_ctrl(vdd, true);\n",
-            "	a52_p155_recordf(\"P155 PO3 ss-power begin\");\n"
-            "	ss_panel_power_ctrl(vdd, true);\n"
-            "	a52_p155_recordf(\"P155 PO4 ss-power done\");\n",
+            "\tss_panel_power_ctrl(vdd, true);\n",
+            "\ta52_p155_recordf(\"P155 PO3 ss-power begin\");\n"
+            "\tss_panel_power_ctrl(vdd, true);\n"
+            "\ta52_p155_recordf(\"P155 PO4 ss-power done\");\n",
             "power-on samsung power")
         fn = one(fn,
-            "	rc = dsi_panel_set_pinctrl_state(panel, true);\n",
-            "	a52_p155_recordf(\"P155 PO5 pinctrl begin\");\n"
-            "	rc = dsi_panel_set_pinctrl_state(panel, true);\n"
-            "	a52_p155_recordf(\"P155 PO6 pinctrl rc=%d\", rc);\n",
+            "\trc = dsi_panel_set_pinctrl_state(panel, true);\n",
+            "\ta52_p155_recordf(\"P155 PO5 pinctrl begin\");\n"
+            "\trc = dsi_panel_set_pinctrl_state(panel, true);\n"
+            "\ta52_p155_recordf(\"P155 PO6 pinctrl rc=%d\", rc);\n",
             "power-on pinctrl")
         fn = one(fn,
-            "		rc = dsi_panel_reset(panel);\n",
-            "		a52_p155_recordf(\"P155 PO7 reset begin\");\n"
-            "		rc = dsi_panel_reset(panel);\n"
-            "		a52_p155_recordf(\"P155 PO8 reset rc=%d\", rc);\n",
+            "\t\trc = dsi_panel_reset(panel);\n",
+            "\t\ta52_p155_recordf(\"P155 PO7 reset begin\");\n"
+            "\t\trc = dsi_panel_reset(panel);\n"
+            "\t\ta52_p155_recordf(\"P155 PO8 reset rc=%d\", rc);\n",
             "power-on reset")
         fn = one(fn,
             "exit:\n\treturn rc;\n",
             "exit:\n\ta52_p155_recordf(\"P155 PO9 exit rc=%d\", rc);\n"
-            "	return rc;\n",
+            "\treturn rc;\n",
             "power-on exit")
         return fn
 
     def off(fn: str) -> str:
         fn = one(fn,
-            "	struct samsung_display_driver_data *vdd = panel->panel_private;\n",
-            "	struct samsung_display_driver_data *vdd = panel->panel_private;\n"
-            "	a52_p155_recordf(\"P155 PF0 off st=%d dead=%d\",\n"
-            "		vdd->panel_state, vdd->panel_dead);\n",
+            "\tstruct samsung_display_driver_data *vdd = panel->panel_private;\n",
+            "\tstruct samsung_display_driver_data *vdd = panel->panel_private;\n"
+            "\ta52_p155_recordf(\"P155 PF0 off st=%d dead=%d\",\n"
+            "\t\tvdd->panel_state, vdd->panel_dead);\n",
             "power-off entry")
         fn = one(fn,
             "exit:\n\treturn rc;\n",
             "exit:\n\ta52_p155_recordf(\"P155 PF1 exit rc=%d\", rc);\n"
-            "	return rc;\n",
+            "\treturn rc;\n",
             "power-off exit")
         return fn
 

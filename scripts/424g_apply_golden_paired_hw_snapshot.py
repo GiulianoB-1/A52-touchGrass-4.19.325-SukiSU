@@ -234,6 +234,18 @@ void a52_g424_dump_snapshot(void)
 def patch_hwc(text:str)->str:
     if MARK in text:
         return text
+    include_anchor = "#include <linux/iopoll.h>\n"
+    if include_anchor in text:
+        text = one(
+            text,
+            include_anchor,
+            include_anchor
+            + "#include <linux/init.h>\n"
+            + "#include <linux/ktime.h>\n"
+            + "#include <linux/proc_fs.h>\n"
+            + "#include <linux/seq_file.h>\n",
+            "Golden proc/snapshot includes",
+        )
     for token in (
         "A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1",
         "void a52_g344_snapshot(struct dsi_ctrl_hw *ctrl, unsigned int point)",

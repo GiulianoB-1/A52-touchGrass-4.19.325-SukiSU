@@ -39,7 +39,7 @@ def main():
     one(
         sysc,
         "#include <linux/syscalls.h>\n",
-        "#include <linux/syscalls.h>\n#include <linux/atomic.h>\n#include <linux/sched.h>\n#include <linux/a52_p383_dual_recorder.h>\n#include <linux/a52_p387_syscall_ring.h>\n",
+        "#include <linux/syscalls.h>\n#include <linux/atomic.h>\n#include <linux/export.h>\n#include <linux/sched.h>\n#include <linux/a52_p383_dual_recorder.h>\n#include <linux/a52_p387_syscall_ring.h>\n",
         "syscall ring includes",
     )
 

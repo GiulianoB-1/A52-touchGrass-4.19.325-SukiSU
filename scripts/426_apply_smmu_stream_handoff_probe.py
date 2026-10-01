@@ -156,7 +156,7 @@ static void a52_p426_take_snapshot(struct arm_smmu_device *smmu,
 			d->cbndx = s2cr->cbndx;
 			d->type = (u8)s2cr->type;
 			d->valid = smr->valid ? 1U : 0U;
-			d->pinned = smr->pinned ? 1U : 0U;
+			d->pinned = s2cr->pinned ? 1U : 0U;
 			d->count = s2cr->count;
 			if (smr->valid)
 				snap->sw_valid++;

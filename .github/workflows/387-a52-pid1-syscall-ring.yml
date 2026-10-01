@@ -872,12 +872,6 @@ jobs:
           grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'P386 ICACHE_OK' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'P386 EXITGRP' "$KERNEL/kernel/exit.c"
-          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
-          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
           {
             echo "phase386_prepared_source_cache_hit=true"
             echo "cache_key=a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54"
@@ -1000,7 +994,7 @@ jobs:
             workspace/touchgrass-a52xq/out/vmlinux
           key: a52xq-p387-built-v1-${{ runner.os }}-7c7bd4c8b799
 
-      - name: Validate restored Phase386 built kernel
+      - name: Validate restored Phase387 built kernel
         if: steps.phase387_build.outputs.cache-hit == 'true'
         run: |
           set -Eeuo pipefail
@@ -1273,6 +1267,9 @@ jobs:
           grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'P386 ICACHE_OK' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'P386 EXITGRP' "$KERNEL/kernel/exit.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'

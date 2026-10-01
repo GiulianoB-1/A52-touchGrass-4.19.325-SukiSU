@@ -205,3 +205,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+# Phase425 workflow trigger after workflow registration.

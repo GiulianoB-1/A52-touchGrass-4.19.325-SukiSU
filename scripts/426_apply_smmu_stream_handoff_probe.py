@@ -333,34 +333,16 @@ def patch_smmu(text: str) -> str:
     text = one(text, anchor, BLOCK + "\n" + anchor, "probe block insertion")
 
     # Cache firmware routes after cfg_probe has allocated Linux SW tables, but
-    # before reset/mask-test code is allowed to touch the retained HW table.
-    old = """	err = arm_smmu_device_cfg_probe(smmu);
-	if (err)
-		return err;
-
-"""
-    if old not in text:
-        old = """	err = arm_smmu_device_cfg_probe(smmu);
-	if (err)
-		goto out_power_off;
-
-"""
-        new = """	err = arm_smmu_device_cfg_probe(smmu);
-	if (err)
-		goto out_power_off;
-
-	a52_p426_cache_boot_routes(smmu);
-
-"""
-    else:
-        new = """	err = arm_smmu_device_cfg_probe(smmu);
-	if (err)
-		return err;
-
-	a52_p426_cache_boot_routes(smmu);
-
-"""
-    text = one(text, old, new, "pre-write boot route cache")
+    # before reset/mask-test code can touch the retained HW table. Anchor on
+    # the reset call itself instead of cfg_probe's error-handling shape, which
+    # varies across the Android 5.10 lineage.
+    reset_call = "\tarm_smmu_device_reset(smmu);\n"
+    text = one(
+        text,
+        reset_call,
+        "\ta52_p426_cache_boot_routes(smmu);\n\n" + reset_call,
+        "pre-write boot route cache",
+    )
 
     # Observe the exact physically chosen mask-test entry before the existing
     # writes. This intentionally does NOT alter/restore the legacy behavior.

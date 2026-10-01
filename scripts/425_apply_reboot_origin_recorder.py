@@ -120,16 +120,15 @@ def patch_rec(text: str) -> str:
 """
     text = one(text, clean, clean_new, "Phase402 admission")
 
-    # Also retain P425 in the immediate persistent critical lane. This is cheap
-    # and makes the last reboot breadcrumb more likely to survive a fast reset.
-    msg = """\treturn !strncmp(message, "P414 ", 5) ||
-\t       !strncmp(message, "P276 ", 5) ||
-"""
-    msg_new = """\treturn !strncmp(message, "P425 ", 5) ||
-\t       !strncmp(message, "P414 ", 5) ||
-\t       !strncmp(message, "P276 ", 5) ||
-"""
-    text = one(text, msg, msg_new, "critical message admission")
+    # Also retain P425 in the immediate persistent critical lane. Anchor only
+    # on Phase414's stable first predicate; later phases may insert/remove
+    # neighboring predicates, so matching the whole block is unnecessarily
+    # brittle.
+    if '!strncmp(message, "P425 ", 5)' not in text:
+        msg = 'return !strncmp(message, "P414 ", 5) ||'
+        msg_new = ('return !strncmp(message, "P425 ", 5) ||\n'
+                   '\t       !strncmp(message, "P414 ", 5) ||')
+        text = one(text, msg, msg_new, "critical message admission")
 
     text += "\n/* " + MARK + ": P425 reboot-origin records admitted. */\n"
     return text

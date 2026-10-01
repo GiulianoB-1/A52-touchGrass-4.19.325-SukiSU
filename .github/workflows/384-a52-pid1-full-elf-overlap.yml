@@ -619,9 +619,6 @@ jobs:
           test -d "$KERNEL/.git"
           grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
           grep -Fq 'a52_p383_record_critical("MAPF2' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
-          grep -Fq 'P384 DONE loads=%d ov=%d wx=%d page=%lu' "$KERNEL/fs/binfmt_elf.c"
           grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
           {
             echo "phase383_prepared_source_cache_hit=true"
@@ -961,6 +958,8 @@ jobs:
           grep -Fq '#define FAST_PAGE_MASK (~(FAST_PAGE_SIZE - 1))' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
           grep -Fq 'size_t count = PAGE_ALIGN(size) >> PAGE_SHIFT' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
           grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
+          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P384 DONE loads=%d ov=%d wx=%d page=%lu' "$KERNEL/fs/binfmt_elf.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'

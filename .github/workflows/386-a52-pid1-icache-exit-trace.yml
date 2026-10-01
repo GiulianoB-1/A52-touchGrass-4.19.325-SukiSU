@@ -918,6 +918,7 @@ jobs:
           path: |
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/vmlinux
           key: a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54
 
       - name: Validate restored Phase386 built kernel
@@ -926,6 +927,7 @@ jobs:
           set -Eeuo pipefail
           test -s "$IMAGE"
           test -s workspace/touchgrass-a52xq/out/.config
+          test -s workspace/touchgrass-a52xq/out/vmlinux
           grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' workspace/touchgrass-a52xq/out/.config
           grep -Fxq 'CONFIG_ARM64_PAGE_SHIFT=14' workspace/touchgrass-a52xq/out/.config
           gzip -t "$IMAGE" 2>/dev/null || true
@@ -958,6 +960,7 @@ jobs:
           path: |
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/vmlinux
           key: a52xq-p386-built-v1-${{ runner.os }}-50c1888b7c54
 
       - name: Record Phase386 build cache status

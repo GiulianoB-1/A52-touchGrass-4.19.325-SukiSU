@@ -75,7 +75,7 @@ void a52_g424_snapshot(struct dsi_ctrl_hw *ctrl)
 		return;
 
 	memset(s,0,sizeof(*s));
-	s->ns=ktime_get_boottime_ns();
+	s->ns=ktime_get_boot_ns();
 
 	s->dsi[0]=DSI_R32(ctrl,DSI_STATUS);
 	s->dsi[1]=DSI_R32(ctrl,DSI_LANE_STATUS);
@@ -242,6 +242,7 @@ def patch_hwc(text:str)->str:
             include_anchor
             + "#include <linux/init.h>\n"
             + "#include <linux/ktime.h>\n"
+            + "#include <linux/timekeeping.h>\n"
             + "#include <linux/proc_fs.h>\n"
             + "#include <linux/seq_file.h>\n",
             "Golden proc/snapshot includes",

@@ -766,11 +766,13 @@ def patch_panel(text: str) -> str:
             "\ta52_p155_recordf(\"P155 PF0 off st=%d dead=%d\",\n"
             "\t\tvdd->panel_state, vdd->panel_dead);\n",
             "power-off entry")
-        fn = one(fn,
-            "exit:\n\treturn rc;\n",
-            "exit:\n\ta52_p155_recordf(\"P155 PF1 exit rc=%d\", rc);\n"
-            "\treturn rc;\n",
-            "power-off exit")
+        tail = "\treturn rc;\n"
+        if fn.count(tail) < 1:
+            raise SystemExit("P155 power-off: final return rc missing")
+        pos = fn.rfind(tail)
+        fn = (fn[:pos] +
+              "\ta52_p155_recordf(\"P155 PF1 exit rc=%d\", rc);\n" +
+              fn[pos:])
         return fn
 
     text = patch_fn(text, "int dsi_panel_power_on(", on)

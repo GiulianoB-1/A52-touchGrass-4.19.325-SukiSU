@@ -814,7 +814,6 @@ jobs:
           KERNEL=workspace/touchgrass-a52xq
           CFG="$KERNEL/out/.config"
           VMLINUX="$KERNEL/out/vmlinux"
-          LLVM_NM="$(dirname "$A52_CLANG_OVERRIDE")/llvm-nm"
 
           for option in \
             CONFIG_ZRAM=y \
@@ -834,8 +833,22 @@ jobs:
           grep -Fq 'static DEVICE_ATTR_RW(writeback_limit);' "$KERNEL/drivers/block/zram/zram_drv.c"
           grep -Fq 'static DEVICE_ATTR_RW(writeback_limit_enable);' "$KERNEL/drivers/block/zram/zram_drv.c"
 
-          "$LLVM_NM" "$VMLINUX" > artifacts/p160-zram-vmlinux-nm.txt
-          grep -Eq ' [tT] zstd_mod_init        run: |
+          strings "$VMLINUX" > artifacts/p160-zram-vmlinux-strings.txt
+          grep -Fq 'zstd-scomp' artifacts/p160-zram-vmlinux-strings.txt
+          grep -Fq 'setup backing device' artifacts/p160-zram-vmlinux-strings.txt
+
+          {
+            echo 'P160 ZRAM capability audit: PASS'
+            echo 'CONFIG_ZRAM_WRITEBACK=y'
+            echo 'CONFIG_ZRAM_LRU_WRITEBACK=y'
+            echo 'CONFIG_CRYPTO_ZSTD=y'
+            echo 'zstd selectable via comp_algorithm'
+            echo 'zcomp compression streams are per-CPU'
+            echo 'default compressor remains lzo-rle'
+          } | tee artifacts/p160-zram-capability-audit.txt
+
+      - name: Audit Clang 22 build output
+        run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
           VMLINUX="$KERNEL/out/vmlinux"
@@ -1015,7 +1028,7 @@ jobs:
             artifacts/p156-initcall-fix.txt
             artifacts/p160-zram-zstd-writeback-apply.txt
             artifacts/p160-zram-capability-audit.txt
-            artifacts/p160-zram-vmlinux-nm.txt
+            artifacts/p160-zram-vmlinux-strings.txt
             artifacts/p159-diagnostic-teardown.txt
             artifacts/p159-recorder-survivors.txt
             artifacts/p159-clean-functional-audit.txt

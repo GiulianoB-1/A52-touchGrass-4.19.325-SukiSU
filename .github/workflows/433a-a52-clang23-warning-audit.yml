@@ -413,7 +413,7 @@ jobs:
           EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang14.txt")"
 
           set +e
-          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang14-build.log"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-Wno-error -fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang14-build.log"
           RC="${PIPESTATUS[0]}"
           set -e
 
@@ -453,7 +453,7 @@ jobs:
           EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang23.txt")"
 
           set +e
-          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang23-build.log"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-Wno-error -fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang23-build.log"
           RC="${PIPESTATUS[0]}"
           set -e
 

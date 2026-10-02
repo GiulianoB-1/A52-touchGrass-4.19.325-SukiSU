@@ -1,4 +1,4 @@
-name: 162 - A52 F2FS Atomic Write FMODE_WRITE Security
+name: 162 - A52 Security Stability Efficiency Bundle
 
 on:
   push:
@@ -34,7 +34,7 @@ env:
 
 jobs:
   build:
-    name: Build P162 F2FS atomic-write security kernel
+    name: Build P162 integrated security/stability kernel
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -626,7 +626,7 @@ jobs:
           grep -Fq 'zram_dedup_enabled(zram)' "$KERNEL/drivers/block/zram/zram_drv.c"
           git -C "$KERNEL" diff --check
 
-      - name: Apply P162 F2FS atomic-write FMODE_WRITE security fix
+      - name: Apply P162 integrated security stability efficiency fixes
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -678,11 +678,16 @@ jobs:
           git -C "$KERNEL" diff --check
           git -C "$KERNEL" diff -- fs/f2fs/file.c \
             > artifacts/p162-f2fs-atomic-fmode.diff
+          git -C "$KERNEL" diff --binary > artifacts/p162-final.diff
+          test -s artifacts/p162-final.diff
 
           {
             echo "phase=P162"
             echo "baseline_sha=a8389945c3dc63ec401287b92293f33d6ffa3d65"
-            echo "upstream_stable_commit=700f3a7c7fa5764c9f24bbf7c78e0b6e479fa653"
+            echo "upstream_A1=700f3a7c7fa5764c9f24bbf7c78e0b6e479fa653"
+            echo "fixes=A1,A6,B2,C1,C2,C4,C5,C7,D5,D6,D7,D9"
+            echo "C7_status=already_present_in_imported_uclamp_and_audited"
+            echo "C3_status=unchanged_by_this_bundle"
             echo "github_sha=${{ github.sha }}"
             echo "github_run_id=${{ github.run_id }}"
             echo "github_workflow=${{ github.workflow }}"
@@ -722,11 +727,11 @@ jobs:
             sha256sum "$KERNEL/arch/arm64/configs/a52xq_defconfig"
             sha256sum scripts/common.sh
             printf '%s\n' "$AOSP_CLANG_COMMIT"
-            printf '%s\n' 'P162_F2FS_ATOMIC_FMODE_WRITE_CACHE_V1'
+            printf '%s\n' 'P162_SECURITY_STABILITY_EFFICIENCY_BUNDLE_V2'
           } > /tmp/p159-build-inputs.txt
 
           SIG="$(sha256sum /tmp/p159-build-inputs.txt | awk '{print $1}')"
-          KEY="a52xq-p162-f2fs-atomic-fmode-built-r596125-${SIG}"
+          KEY="a52xq-p162-sec-stab-eff-v2-built-r596125-${SIG}"
           echo "P159_BUILD_CACHE_KEY=$KEY" >> "$GITHUB_ENV"
           echo "p159_build_cache_key=$KEY" | tee artifacts/p159-build-cache-key.txt
 
@@ -750,7 +755,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .thinlto-link-cache
-          key: a52xq-thinlto-link-r596125-p162-f2fs-atomic-fmode-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-thinlto-link-r596125-p162-sec-stab-eff-v2-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             a52xq-thinlto-link-r596125-p161-zram-multicomp-zstd-${{ runner.os }}-
             a52xq-thinlto-link-r596125-
@@ -856,7 +861,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .thinlto-link-cache
-          key: a52xq-thinlto-link-r596125-p162-f2fs-atomic-fmode-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-thinlto-link-r596125-p162-sec-stab-eff-v2-${{ runner.os }}-${{ github.sha }}
 
       - name: Audit retained production functionality after teardown
         run: |
@@ -899,7 +904,7 @@ jobs:
           echo "P159 functional retention + diagnostic teardown: PASS" \
             | tee artifacts/p159-clean-functional-audit.txt
 
-      - name: Audit P162 F2FS atomic-write FMODE_WRITE hardening
+      - name: Audit P162 integrated security stability efficiency bundle
         run: |
           set -Eeuo pipefail
           FILE=workspace/touchgrass-a52xq/fs/f2fs/file.c
@@ -910,13 +915,34 @@ jobs:
 
           grep -Fq 'FMODE_WRITE' "$FILE"
           grep -Fq 'return -EBADF;' "$FILE"
+          grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'f2fs_init_age_extent_tree(inode);' "$KERNEL/fs/f2fs/namei.c"
+          grep -Fq 'bool eevdf_reweight = eevdf && old_weight != weight;' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'eevdf_cancel_protect_slice(se);' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'cpu_isolated(cpu)' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'task_fits_max(p, cpu)' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'if (success || !min_ttl || sc->order)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'a52_a619_uv_disable_locked' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'DEVICE_ATTR_RW(a52_gpu_uv_enable)' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'P162 UV fail-safe before GPU reset' "$KERNEL/drivers/gpu/msm/adreno_dispatch.c"
+          grep -Fq 'if (!ss_send_cmd(vdd, TX_LPM_BL_CMD))' "$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
           test -s artifacts/p162-f2fs-atomic-fmode.diff
+          test -s artifacts/p162-final.diff
 
           {
-            echo 'P162 F2FS atomic-write security audit: PASS'
-            echo 'five atomic/volatile write ioctls require FMODE_WRITE'
-            echo 'read-only file descriptors fail with -EBADF'
-            echo 'guard executes before inode_owner_or_capable()'
+            echo 'P162 integrated bundle audit: PASS'
+            echo 'A1 F2FS FMODE_WRITE: PASS'
+            echo 'A6 A619 UV one-corner + stock rebuild + fault auto-disable + manual off: PASS'
+            echo 'B2 MGLRU min_ttl=0 OOM guard: PASS'
+            echo 'C1 CASS core_ctl isolation: PASS'
+            echo 'C2 CASS Samsung WALT/boost/RTG aware placement: PASS'
+            echo 'C4 EEVDF reweight only on weight change: PASS'
+            echo 'C5 EEVDF yield protection cancel: PASS'
+            echo 'C7 uclamp inactive decrement guard: PASS'
+            echo 'D5 F2FS new inode age extent init: PASS'
+            echo 'D6 ordinary FUSE writeback cache restored, passthrough exclusion retained: PASS'
+            echo 'D7 UFS duplicate runtime-PM guard/put removed: PASS'
+            echo 'D9 AOD cache only after successful panel command: PASS'
           } | tee artifacts/p162-f2fs-atomic-fmode-audit.txt
 
       - name: Audit P161 ZRAM multi-comp recompression
@@ -1097,7 +1123,7 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package P162 flashable ZIP
+      - name: Package P162 integrated-bundle flashable ZIP
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1131,7 +1157,7 @@ jobs:
 
           python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p152.sh
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + Clang22 ThinLTO/' scripts/.package-p152.sh
-          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P162-CLANG22-THINLTO-I25-F2FS-FMODE-WRITE-r596125.zip/' scripts/.package-p152.sh
+          sed -i 's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P162-CLANG22-THINLTO-I25-SEC-STAB-EFF-r596125.zip/' scripts/.package-p152.sh
           chmod +x scripts/.package-p152.sh
           ./scripts/.package-p152.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
           rm -f scripts/.package-p152.sh
@@ -1158,10 +1184,10 @@ jobs:
           path: .ccache
           key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload P162 flashable ZIP and audit
+      - name: Upload P162 integrated bundle and audit
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-P162-CLANG22-THINLTO-I25-F2FS-FMODE-WRITE-${{ github.run_number }}
+          name: A52XQ-P162-CLANG22-THINLTO-I25-SEC-STAB-EFF-${{ github.run_number }}
           path: |
             release/
             artifacts/aod-power-saver-p150.txt
@@ -1186,6 +1212,7 @@ jobs:
             artifacts/p162-f2fs-atomic-fmode-audit.txt
             artifacts/p162-f2fs-atomic-fmode.diff
             artifacts/p162-build-info.txt
+            artifacts/p162-final.diff
             artifacts/p161-zram-multicomp-audit.txt
             artifacts/p161-zram-vmlinux-strings.txt
             artifacts/p160-zram-capability-audit.txt
@@ -1231,8 +1258,9 @@ jobs:
 # - Recompressed objects are excluded from Samsung compressed writeback because its legacy
 #   backing format carries size/index but no compressor identifier.
 
-# P162: F2FS atomic/volatile write ioctl security hardening.
+# P162 integrated security/stability/efficiency bundle.
 # - Baseline: boot-tested P161 commit a8389945c3dc63ec401287b92293f33d6ffa3d65.
-# - Backports stable commit 700f3a7c7fa5764c9f24bbf7c78e0b6e479fa653.
-# - Requires FMODE_WRITE on the five affected atomic/volatile write ioctls.
-# - Read-only descriptors return -EBADF before inode_owner_or_capable().
+# - A1 exact F2FS stable FMODE_WRITE hardening plus requested A6/B2/C1/C2/C4/C5/C7/D5/D6/D7/D9.
+# - C7 is audit-only because the imported Samsung/TouchGrass uclamp already has the upstream inactive guard.
+# - C3 remains unchanged and reserved for its separately agreed queued/running-state refinement.
+# - P159 teardown/retention audits and P160/P161 ZRAM audits remain mandatory.

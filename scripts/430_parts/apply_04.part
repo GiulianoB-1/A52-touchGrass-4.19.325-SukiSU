@@ -1,0 +1,92 @@
+    old = '''\tif (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER)) {\n\t\tif (a52_p421_target_active()) {\n\t\t\ta52_p421_survival_record(7U, 0U, 0U, 0, 0U, 0);\n\t\t\ta52_p424_snapshot(ctrl);\n\t\t\ta52_p427_road_snapshot(ctrl, 0U);\n\t\t}\n\t\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\t\tif (a52_p421_target_active())\n\t\t\ta52_p421_survival_record(8U, 0U, 0U, 0, 0U, 0);\n'''
+    new = '''\tif (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER)) {\n\t\tif (a52_p421_target_active()) {\n\t\t\ta52_p421_survival_record(7U, 0U, 0U, 0, 0U, 0);\n\t\t\ta52_p424_snapshot(ctrl);\n\t\t\ta52_p427_road_snapshot(ctrl, 0U);\n\t\t\ta52_p430_dma_arm(ctrl);\n\t\t}\n\t\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\t\tif (a52_p421_target_active()) {\n\t\t\ta52_p430_dma_triggered(ctrl);\n\t\t\ta52_p421_survival_record(8U, 0U, 0U, 0, 0U, 0);\n\t\t}\n'''
+    text = one(text, old, new, 'arm raw DMA timeline')
+    # Correct the inherited Phase427 TCS parser too, so both text and P430 image agree.
+    text = one(text, 's->num_tcs = (s->child_cfg >> 6) & 0x3f;\n',
+               's->num_tcs = s->child_cfg & 0x3f;\n', 'correct Phase427 num_tcs')
+    text = one(text, '#define A52_P427_MAX_CMDS     8U\n',
+               '#define A52_P427_MAX_CMDS     16U\n', 'expand Phase427 TCS commands')
+    return text + '\n/* '+MARK+': corrected TCS + raw DMA timeline. */\n'
+
+
+def patch_smmu(text:str)->str:
+    if MARK in text:
+        return text
+    anchor = 'EXPORT_SYMBOL_GPL(a52_p427_smmu_dump);\n'
+    text = one(text, anchor, anchor + '\n' + SMMU_BLOCK + '\n', 'SMMU forensic block')
+    return text + '\n/* '+MARK+': passive state plus explicit ATOS. */\n'
+
+
+def patch_dsi(text:str)->str:
+    if MARK in text:
+        return text
+    if '#include <linux/printk.h>\n' not in text:
+        text = one(text, '#include <linux/iommu.h>\n', '#include <linux/iommu.h>\n#include <linux/printk.h>\n', 'printk include')
+    if '#include <linux/init.h>\n' not in text:
+        text = one(text, '#include <linux/iommu.h>\n', '#include <linux/iommu.h>\n#include <linux/init.h>\n', 'init include')
+    anchor = 'static LIST_HEAD(dsi_ctrl_list);\nstatic DEFINE_MUTEX(dsi_ctrl_list_lock);\n'
+    setup = r'''
+static bool a52_p430_bad_iova;
+static u64 a52_p430_programmed_iova;
+static int __init a52_p430_bad_iova_setup(char *str)
+{
+	(void)str;
+	a52_p430_bad_iova = true;
+	return 0;
+}
+early_param("a52_p430_bad_iova", a52_p430_bad_iova_setup);
+bool a52_p430_bad_iova_active(void)
+{
+	return READ_ONCE(a52_p430_bad_iova);
+}
+EXPORT_SYMBOL_GPL(a52_p430_bad_iova_active);
+extern void a52_p430_dma_finalize(struct dsi_ctrl_hw *ctrl, u64 iova,
+		u32 irq_trig, int wait_ret);
+'''
+    text = one(text, anchor, anchor + setup + '\n', 'bad IOVA setup')
+    old = '''\tif (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {\n\t\t/* Embedded mode config is selected */\n\t\tcmd_mem.offset = dsi_ctrl->cmd_buffer_iova;\n'''
+    new = '''\tif (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {\n\t\t/* Embedded mode config is selected */\n\t\tcmd_mem.offset = dsi_ctrl->cmd_buffer_iova;\n\t\tif (a52_p421_f0 && READ_ONCE(a52_p430_bad_iova))\n\t\t\tcmd_mem.offset = 0xdead0000U;\n\t\tif (a52_p421_f0)\n\t\t\tWRITE_ONCE(a52_p430_programmed_iova, (u64)cmd_mem.offset);\n'''
+    text = one(text, old, new, 'switchable invalid IOVA')
+    # Snapshot immediately after S10 and before inherited timeout dumps.
+    anchor2 = '''\tif (a52_p421_target_active())\n\t\ta52_p421_survival_record(10U, A52_P421_V_IRQ | A52_P421_V_RET,\n\t\t\t0U, 0, (unsigned int)atomic_read(&dsi_ctrl->dma_irq_trig),\n\t\t\tret);\n'''
+    ins = anchor2 + '''\tif (a52_p421_target_active())\n\t\ta52_p430_dma_finalize(&dsi_ctrl->hw,\n\t\t\tREAD_ONCE(a52_p430_programmed_iova) ?\n\t\t\tREAD_ONCE(a52_p430_programmed_iova) : (u64)dsi_ctrl->cmd_buffer_iova,\n\t\t\t(u32)atomic_read(&dsi_ctrl->dma_irq_trig), ret);\n'''
+    text = one(text, anchor2, ins, 'P430 timeout finalizer')
+    # Short-success path also gets a final image.
+    short = '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {\n\t\tif (a52_p421_target_active())\n\t\t\ta52_p427_post_wait(dsi_ctrl);\n'''
+    short_new = '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {\n\t\tif (a52_p421_target_active())\n\t\t\ta52_p430_dma_finalize(&dsi_ctrl->hw,\n\t\t\t\tREAD_ONCE(a52_p430_programmed_iova) ?\n\t\t\t\tREAD_ONCE(a52_p430_programmed_iova) : (u64)dsi_ctrl->cmd_buffer_iova,\n\t\t\t\t(u32)atomic_read(&dsi_ctrl->dma_irq_trig), 1);\n\t\tif (a52_p421_target_active())\n\t\t\ta52_p427_post_wait(dsi_ctrl);\n'''
+    text = one(text, short, short_new, 'P430 success finalizer')
+    panic_old = '''static __noreturn void a52_p411_timeout_panic(struct dsi_ctrl *dsi_ctrl)\n{\n\ta52_p411_dump_domains(dsi_ctrl, "timeout");\n\tpr_emerg("A52P411 PANIC first DSI DMA_DONE timeout ctrl=%d irq=%u queued=%u\\n",\n'''
+    panic_new = '''static __noreturn void a52_p411_timeout_panic(struct dsi_ctrl *dsi_ctrl)\n{\n\ta52_ackfr_record("P430 PANIC_ARMED ctrl=%d irq=%u",\n\t\tdsi_ctrl ? dsi_ctrl->cell_index : -1,\n\t\tdsi_ctrl ? (u32)atomic_read(&dsi_ctrl->dma_irq_trig) : 0U);\n\ta52_p411_dump_domains(dsi_ctrl, "timeout");\n\tdump_stack();\n\tpr_emerg("A52P411 PANIC first DSI DMA_DONE timeout ctrl=%d irq=%u queued=%u\\n",\n'''
+    text = one(text, panic_old, panic_new, 'panic marker + stack')
+    return text + '\n/* '+MARK+': switchable invalid IOVA, finalize-before-panic. */\n'
+
+
+def patch_rec(text:str)->str:
+    if MARK in text:
+        return text
+    text = one(text,
+        'return !strncmp(message, "P429 ", 5) ||\n',
+        'return !strncmp(message, "P430 ", 5) ||\n\t       !strncmp(message, "P429 ", 5) ||\n',
+        'critical P430')
+    text = one(text,
+        '\tif (unlikely(atomic_read(&a52_r280_retained)) &&\n\t    strncmp(fmt, "P429", 4) &&\n',
+        '\tif (unlikely(atomic_read(&a52_r280_retained)) &&\n\t    strncmp(fmt, "P430", 4) &&\n\t    strncmp(fmt, "P429", 4) &&\n',
+        'retained P430')
+    text = one(text,
+        'if (strncmp(fmt, "P429", 4) &&\n',
+        'if (strncmp(fmt, "P430", 4) &&\n    strncmp(fmt, "P429", 4) &&\n',
+        'normal P430')
+    text = one(text,
+        '\tif (!fmt || (\n\t    strncmp(fmt, "P429", 4) &&\n',
+        '\tif (!fmt || (\n\t    strncmp(fmt, "P430", 4) &&\n\t    strncmp(fmt, "P429", 4) &&\n',
+        'clean P430')
+    return text + '\n/* '+MARK+': P430 evidence admitted. */\n'
+
+
+def validate(root:Path)->None:
+    files = {p:(root/p).read_text(errors='replace') for p in (SYSCALL,UFS,MSM,DSI,HWC,SMMU,REC)}
+    req = {
+        SYSCALL:[MARK,'A52_P430_COPY_BYTES         0x2800U','A52_P430_SNAPSHOTS          6U','a52_p430_note_first_atomic','5U, 20U, 40U, 60U, 70U','crc32c = a52_r382_crc32c'],
+        UFS:['void a52_p430_ufs_compact','WRITE_ONCE(a52_r378_hba, hba);','P430 U id=%u h=1'],
+        MSM:['extern void a52_p430_note_first_atomic','if (*seq == 1U)'],
+        DSI:['a52_p430_bad_iova_setup','(void)str;','0xdead0000U','a52_p430_dma_finalize','P430 PANIC_ARMED','dump_stack();','#include <linux/printk.h>'],

@@ -55,10 +55,13 @@ jobs:
           chmod +x "$RUNNER_TEMP/llvm.sh"
           sudo "$RUNNER_TEMP/llvm.sh" 23
           sudo apt-get install -y --no-install-recommends \
-            clang-23 clang-tools-23 lld-23 llvm-23
+            clang-23 clang-tools-23 clang-tidy-23 lld-23 llvm-23
 
           /usr/bin/clang-23 --version
-          TIDY_BIN="$(dpkg -L clang-tools-23 | grep -E '/bin/clang-tidy$' | head -n1)"
+          TIDY_BIN="$(command -v clang-tidy-23 || true)"
+          if [ -z "$TIDY_BIN" ] && [ -x /usr/lib/llvm-23/bin/clang-tidy ]; then
+            TIDY_BIN=/usr/lib/llvm-23/bin/clang-tidy
+          fi
           test -n "$TIDY_BIN"
           test -x "$TIDY_BIN"
           "$TIDY_BIN" --version

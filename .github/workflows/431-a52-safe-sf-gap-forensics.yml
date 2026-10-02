@@ -16,7 +16,18 @@ permissions:
   actions: read
 
 env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
   group: a52-phase431-safe-gap-${{ github.ref }}
@@ -26,59 +37,163 @@ jobs:
   build:
     name: Build Phase431 safe SF gap forensics
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare runner
+      - name: Prepare runner and ccache wrappers
         run: |
           set -Eeuo pipefail
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git make gcc g++ python3 bc bison flex clang lld llvm \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex \
+            clang lld llvm ccache gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
           python3 -m py_compile scripts/431_apply_safe_gap_forensics.py scripts/decode_phase431_gap.py
           python3 scripts/431_apply_safe_gap_forensics.py --help >/dev/null
           python3 scripts/decode_phase431_gap.py --help >/dev/null
 
-      - name: Restore exact Phase429 reconstructed baseline
-        id: phase429
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore rolling clang ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          ccache -s
+
+      - name: Restore Phase429 source baseline
+        id: phase429-source
         uses: actions/cache/restore@v4
         with:
           path: |
             gki/common
-            workspace/gki-phase199-out
             phase429-gki-out
-          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
-      - name: Restore exact Phase357 baseline if Phase429 cache is gone
-        if: steps.phase429.outputs.cache-hit != 'true'
-        id: phase357
+      - name: Restore Phase357 source baseline
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        id: phase357-source
         uses: actions/cache/restore@v4
         with:
           path: |
             gki/common
-            workspace/gki-phase199-out
             phase357-gki-out
-          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290270313b39e87e48d8a76cfac85e9a4517c8c0ff65c5957f1a24b6d54
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
 
-      - name: Require a cached baseline
-        if: steps.phase429.outputs.cache-hit != 'true'
+      - name: Restore pinned GKI source on source-baseline miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: gki-source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync exact pinned GKI on complete source miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
-          test "${{ steps.phase357.outputs.cache-hit }}" = "true" || {
-            echo "Phase431 refuses an hour-long cold rebuild. Neither Phase429 nor Phase357 cache is available."
-            exit 1
-          }
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 
-      - name: Reconstruct Phase429 only when exact Phase429 cache missed
-        if: steps.phase429.outputs.cache-hit != 'true'
+      - name: Save pinned GKI source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: touchgrass-source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on source-cache miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Save TouchGrass source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Cold-reconstruct Phase357 only when both source baselines are gone
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "No Phase429/357 source snapshot survived. Reconstructing once with rolling ccache enabled."
+          bash scripts/345_ci_build_gki.sh
+          PHASE346_PREWARMED_PHASE345=1 bash scripts/346_ci_build_gki.sh
+          PHASE357_PREWARMED_PHASE346=1 bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 source baseline
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' \
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          echo "Phase357 source baseline validation: PASS"
+
+      - name: Save compact Phase357 source baseline
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Reconstruct Phase429 from Phase357 source
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/gki-phase199-out
           python3 - <<'PY'
           from pathlib import Path
           src=Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
@@ -96,25 +211,36 @@ jobs:
           bash /tmp/p429-build.sh
           bash /tmp/p429-boot.sh
           test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
 
-      - name: Save exact Phase429 reconstructed baseline
-        if: steps.phase429.outputs.cache-hit != 'true'
+      - name: Save compact Phase429 source baseline
+        if: steps.phase429-source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             gki/common
-            workspace/gki-phase199-out
             phase429-gki-out
-          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
-      - name: Restore Phase430 object cache
-        id: phase430obj
+      - name: Restore optional Phase430 object cache
+        id: phase430-objects
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/430_parts/**', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py') }}
+          key: a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-171864d59e68077e7e8b27bb3dcd75b0f36989ea45faa2998151c40b636ffed8
           restore-keys: |
             a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Prepare Phase429 build directory
+        if: steps.phase430-objects.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
 
       - name: Reapply exact Phase430 diagnostics
         run: |
@@ -132,8 +258,7 @@ jobs:
           python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
           python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
 
-          # Keep the Phase414 3 MiB chronology exactly as designed:
-          # first 2 MiB in Samsung debug partition, then 1 MiB persistent RAM.
+          # Phase414 stays exactly 2 MiB Samsung first, then 1 MiB persistent RAM.
           grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' \
             "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
           grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' \
@@ -146,7 +271,13 @@ jobs:
           ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
           ! grep -Fq 'WRITE_ONCE(a52_r378_hba, hba);' "$ROOT/drivers/scsi/ufs/ufshcd.c"
 
-      - name: Incremental compile Phase431
+          # TouchGrass-validated event-style chronology, bounded to the SF window.
+          grep -Fq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
+          grep -Fq 'P431 RC n=%d id=%d e=%d st=%u c=%u' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
+          grep -Fq 'P276 301R e st=%d ty=%d n=%d off=%d use=%u ws=%u irq=%d' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
+          grep -Fq 'P276 301B A r=%d st=%d mb=%s' "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c"
+
+      - name: Compile Phase431 with ccache
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
@@ -165,16 +296,20 @@ jobs:
           grep -aFq 'P431 SB id=%u rel=%llu' "$IMAGE"
           grep -aFq 'P431 SD id=%u nr=%u rel=%llu' "$IMAGE"
           grep -aFq 'P431 EXEC affinity cpu=7 rc=%d' "$IMAGE"
+          grep -aFq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$IMAGE"
+          grep -aFq 'P431 RC n=%d id=%d e=%d st=%u c=%u' "$IMAGE"
           grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
           grep -Fq ' a52_p430_dma_finalize' "$MAP"
           grep -Fq ' a52_p430_smmu_forensic' "$MAP"
 
-      - name: Save Phase431 incremental compile cache
+          ccache -s
+
+      - name: Save rolling clang ccache
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: workspace/gki-phase199-out
-          key: a52xq-phase431-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/431_apply_safe_gap_forensics.py') }}
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
 
       - name: Package Phase431
         if: success()
@@ -193,6 +328,8 @@ jobs:
           cp "$BUILD/.config" "$OUT/config/final.config"
           cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/syscall.c"
           cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
+          cp "$ROOT/drivers/soc/qcom/rpmh-rsc.c" "$OUT/source/rpmh-rsc.c"
+          cp "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$OUT/source/msm_bus_fabric_rpmh.c"
           cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
           cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
           cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
@@ -214,17 +351,22 @@ jobs:
           - Removes Phase430's re-registration of a52_r378_hba.
           - Keeps the Phase403-retired historical UFS sampler retired.
           - SurfaceFlinger snapshots: +0, +1, +3, +5, +20, +60 s plus first atomic.
-          - P431 SB is written before task discovery; SL after discovery; TB/TD around
-            each task stack capture; SD after task records are persisted.
+          - P431 SB is persisted before task discovery; SL after discovery; TB/TD
+            bracket each stack capture; SD is written after task records persist.
           - Three-copy CRC task records remain.
-          - Final 0x200 bytes of the task sideband carry a three-copy CNTPCT
-            execution witness around SF+4.5..20 s.
+          - Final 0x200 bytes of the task sideband carry the CPU7 CNTPCT
+            non-interrupt execution witness around SF+4.5..20 s.
+          - TouchGrass-style event chronology is retained without broad function
+            tracing: inherited Phase301 Display-RSC/RPMh/msm_bus send/vote markers,
+            plus bounded P431 RI/RC Display-RSC IRQ completion records.
           - Phase430 exact-F0 diagnostics remain intact: raw DSI samples, corrected
             TCS0/TCS1, clocks/power, passive SMMU, SW translation, hardware
             ATS1PR/ATSR/PAR, three-copy DMA image, PANIC_ARMED + dump_stack().
           - Invalid-IOVA control remains compiled but disabled.
           - Phase414 chronology remains 2 MiB Samsung debug partition first,
             followed by 1 MiB persistent RAM, non-wrapping.
+          - Build caching uses compact Phase357/429 source snapshots plus a rolling
+            1 GiB clang ccache; full 600-900 MiB object-tree caches are optional only.
           EOF
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
@@ -239,6 +381,8 @@ jobs:
           path: |
             gki/common/arch/arm64/kernel/syscall.c
             gki/common/drivers/scsi/ufs/ufshcd.c
+            gki/common/drivers/soc/qcom/rpmh-rsc.c
+            gki/common/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c

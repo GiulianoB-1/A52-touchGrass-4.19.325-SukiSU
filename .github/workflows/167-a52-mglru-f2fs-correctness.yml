@@ -607,9 +607,15 @@ jobs:
           s = makefile.read_text()
           old = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=.thinlto-cache'
           new = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=$(A52_THINLTO_CACHE_DIR)'
-          if s.count(old) != 1:
-              raise SystemExit(f'ThinLTO cache-dir anchor count: {s.count(old)}')
-          makefile.write_text(s.replace(old, new, 1))
+          if new in s:
+              print('[already] ThinLTO cache-dir uses A52_THINLTO_CACHE_DIR')
+          elif s.count(old) == 1:
+              makefile.write_text(s.replace(old, new, 1))
+              print('[patched] ThinLTO cache-dir moved outside out/')
+          else:
+              raise SystemExit(
+                  f'ThinLTO cache-dir shape unknown: old={s.count(old)} new={s.count(new)}'
+              )
 
           # LLVM 22 treats SIGPIPE from llvm-nm as a fatal diagnostic.
           # Old Android 4.19 Kbuild uses grep -q, which exits as soon as it
@@ -618,11 +624,15 @@ jobs:
           s = build.read_text()
           old = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep -q __ksymtab; then'
           new = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep __ksymtab >/dev/null; then'
-          count = s.count(old)
-          if count < 1:
-              raise SystemExit('LLVM_NM grep-q anchor not found')
-          build.write_text(s.replace(old, new))
-          print(f'[patched] {count} llvm-nm grep-q pipeline(s)')
+          old_count = s.count(old)
+          new_count = s.count(new)
+          if old_count:
+              build.write_text(s.replace(old, new))
+              print(f'[patched] {old_count} llvm-nm grep-q pipeline(s)')
+          elif new_count:
+              print(f'[already] {new_count} llvm-nm pipeline(s) consume full stream')
+          else:
+              raise SystemExit('LLVM_NM pipeline shape unknown')
           PY
       - name: Apply P156 Clang22 initcall-order repair
         if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
@@ -1719,3 +1729,7 @@ jobs:
 # - adds remaining stable F2FS correctness ports 2d291651, 24dfe070, eb926232.
 # - restores and reuses the exact P166 source snapshot cache, plus a P167 snapshot cache.
 # - no FUSE negotiation, scheduler, GPU, UFS, display, or AOD runtime changes.
+
+# P167 cache-idempotency:
+# - ThinLTO Makefile and llvm-nm compatibility setup accept either pristine or already-patched cached source.
+# - required environment variables are still refreshed on every run.

@@ -95,26 +95,106 @@ jobs:
           restore-keys: |
             a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
-      - name: Require usable Phase429 source cache
+      - name: Check restored Phase429 source snapshot
+        id: phase429-source-check
+        run: |
+          set -Eeuo pipefail
+          if test -d gki/common              && test -s phase429-gki-out/config/final.config              && test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Phase429 source snapshot is usable."
+            echo "actions/cache exact-hit flag: ${{ steps.phase429-source.outputs.cache-hit }}"
+            echo "NOTE: a prefix restore is usable even when cache-hit is false."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Compact Phase429 source snapshot is absent."
+            rm -rf gki/common phase429-gki-out workspace/gki-phase199-out
+          fi
+
+      - name: Restore exact Phase357 baseline fallback
+        if: steps.phase429-source-check.outputs.ready != 'true'
+        id: phase357-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Check restored Phase357 baseline
+        if: steps.phase429-source-check.outputs.ready != 'true'
+        id: phase357-check
+        run: |
+          set -Eeuo pipefail
+          if test -d gki/common              && test -s workspace/gki-phase199-out/.config              && test -s phase357-gki-out/config/final.config              && test -s phase357-gki-out/package/boot.img              && grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Exact Phase357 baseline is usable."
+            echo "actions/cache exact-hit flag: ${{ steps.phase357-baseline.outputs.cache-hit }}"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Exact Phase357 baseline cache is unavailable."
+          fi
+
+      - name: Restore Phase429 incremental compile cache
+        if: steps.phase429-source-check.outputs.ready != 'true' && steps.phase357-check.outputs.ready == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase429-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Reconstruct Phase429 from exact Phase357 baseline
+        if: steps.phase429-source-check.outputs.ready != 'true' && steps.phase357-check.outputs.ready == 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/gki-phase199-out
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+          def extract(name,out):
+              start=next(i for i,l in enumerate(src) if l.strip()==f"- name: {name}")
+              runline=next(i for i in range(start+1,len(src)) if src[i].strip()=="run: |")
+              end=next((i for i in range(runline+1,len(src)) if src[i].startswith("      - name:")),len(src))
+              body=[line[10:] if line.startswith("          ") else line for line in src[runline+1:end]]
+              Path(out).write_text("set -Eeuo pipefail\n"+"\n".join(body)+"\n")
+          extract("Reapply Phase358 and Phase359","/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts","/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image","/tmp/p429-boot.sh")
+          PY
+
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
+
+          test -s phase429-gki-out/config/final.config
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 reconstructed from exact Phase357 baseline: PASS"
+
+      - name: Save refreshed Phase429 source snapshot
+        if: steps.phase429-source-check.outputs.ready != 'true' && steps.phase357-check.outputs.ready == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase433a-refresh-${{ github.run_id }}
+
+      - name: Require usable Phase429 source snapshot
         run: |
           set -Eeuo pipefail
           test -d gki/common || {
-            echo "Phase433A: no restored gki/common tree."
-            echo "Refusing a duplicate cold source reconstruction."
+            echo "Phase433A: no usable GKI source snapshot."
             exit 1
           }
           test -s phase429-gki-out/config/final.config || {
-            echo "Phase433A: no restored Phase429 final.config."
-            echo "Refusing a duplicate cold source reconstruction."
+            echo "Phase433A: no usable Phase429 config."
             exit 1
           }
           test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img || {
-            echo "Phase433A: restored Phase429 snapshot is incomplete."
+            echo "Phase433A: no usable Phase429 boot baseline."
             exit 1
           }
-          echo "Phase429 source snapshot is usable."
-          echo "actions/cache exact-hit flag: ${{ steps.phase429-source.outputs.cache-hit }}"
-          echo "NOTE: a prefix restore is usable even when cache-hit is false."
+          echo "Phase429 source prerequisite: PASS"
 
       - name: Restore exact Phase432 object cache
         id: phase432-objects

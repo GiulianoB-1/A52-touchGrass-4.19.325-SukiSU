@@ -1,0 +1,1844 @@
+name: Phase392 - PID1 Scudo fixed mmap compat
+
+on:
+  push:
+    branches:
+      - agent/a52-phase383-16k-dual-elf-census-v1
+    paths:
+      - .github/workflows/392-a52-pid1-scudo-fixed-mmap.yml
+      - scripts/150_apply_aod_power_saver_p1.py
+      - scripts/151_apply_boot_async_deferred_init_p1.py
+      - scripts/152_apply_boot_async_peripherals_p2.py
+      - scripts/377c_apply_incfs_16k_compat.py
+      - scripts/379_apply_16k_boot_census.py
+      - scripts/380_apply_16k_cma_pageblock.py
+      - scripts/381_apply_16k_fast_smmu.py
+      - scripts/382_apply_16k_fast_pgtable_stride.py
+      - scripts/383_apply_16k_dual_persist_elf_census.py
+      - scripts/384_apply_pid1_full_elf_overlap_census.py
+      - scripts/385_apply_pid1_16k_compat_loader.py
+      - scripts/386_apply_pid1_icache_exit_trace.py
+      - scripts/387_apply_pid1_syscall_ring.py
+      - scripts/388_apply_pid1_fatal_text.py
+      - scripts/389_apply_pid1_writeprotected_compat.py
+      - scripts/390_apply_pid1_thread_tls_mprotect_compat.py
+      - scripts/391_apply_exact_ramoops_alias_dedup.py
+      - scripts/392_apply_pid1_scudo_fixed_mmap_compat.py
+      - scripts/decode_phase383_16k_dual.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-phase392-pid1-scudo-mmap-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P150_BASELINE_SHA: 763a272cba83463fc495b3787812a1e78157250f
+  P150_BASELINE_RUN: '36054686392'
+
+jobs:
+  build:
+    name: Build PID1 Scudo fixed mmap compat
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P150 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P150_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-phase392-pid1-scudo-mmap-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-phase392-pid1-scudo-mmap-${{ runner.os }}-
+            a52xq-phase391-ramoops-alias-${{ runner.os }}-
+            a52xq-phase390-pid1-thread-tls-${{ runner.os }}-
+            a52xq-phase389-pid1-writeprotected-${{ runner.os }}-
+            a52xq-phase388-pid1-fatal-text-${{ runner.os }}-
+            a52xq-phase387-pid1-syscall-ring-${{ runner.os }}-
+            a52xq-p152-boot-async-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore prepared P152 16K + IncFS source cache
+        id: p152_16k_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
+          restore-keys: |
+            a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-
+
+      - name: Restore exact prepared P134 feature source cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Restore exact 35461116688 pre-build source on P134 miss
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Restore exact 35196552336 prepared source on deeper cache miss
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        id: base351_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
+
+      - name: Restore Linux stable checkpoint cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        id: stable_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/linux-stable-checkpoint-cache
+          key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release workspace
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Fetch persistent Phase383 dual-recorder decoder
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/decode_phase383_16k_dual.py" \
+            -o artifacts/decode_phase383_16k_dual.py
+          python3 -m py_compile artifacts/decode_phase383_16k_dual.py
+          test -s artifacts/decode_phase383_16k_dual.py
+
+      - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          ./scripts/84_apply_android17_binder_alloc.sh
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_a619_gpu_modernization.py workspace/touchgrass-a52xq
+          python3 scripts/87_apply_a619_gpu_modernization_p2.py workspace/touchgrass-a52xq
+          python3 scripts/90_apply_a619_gpu_modernization_p3.py workspace/touchgrass-a52xq
+          python3 scripts/91_apply_a619_gpu_modernization_p4.py workspace/touchgrass-a52xq
+          python3 scripts/94_apply_a619_gpu_modernization_p5.py workspace/touchgrass-a52xq
+
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq
+
+          python3 scripts/98_apply_fuse_passthrough_modern_p1.py workspace/touchgrass-a52xq
+          python3 scripts/99_apply_fuse_passthrough_modern_p2.py workspace/touchgrass-a52xq
+          python3 scripts/101_apply_fuse_passthrough_modern_p3.py workspace/touchgrass-a52xq
+          python3 scripts/102_apply_fuse_negotiation_probe.py workspace/touchgrass-a52xq
+          python3 scripts/103_apply_fuse_740_init_compat.py workspace/touchgrass-a52xq
+
+          python3 scripts/104_apply_a619_gpu_undervolt_p1.py workspace/touchgrass-a52xq
+          python3 scripts/105_apply_a619_gpu_undervolt_p1_diag.py workspace/touchgrass-a52xq
+          python3 scripts/106_apply_mglru_modern_p1.py workspace/touchgrass-a52xq
+
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Rebuild exact 35461116688 pre-build boundary
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
+          python3 scripts/115_apply_a52_efficiency_p1.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
+
+          # Phase 112 in the pinned reconstruction already exports
+          # /proc/lru_gen_trace. Older cached trees needed Phase 117 to migrate
+          # the debugfs-only recorder. Keep the fallback compatible with both.
+          if grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"; then
+            echo "MGLRU recorder already has procfs export; Phase 117 migration not required." \
+              | tee artifacts/mglru-procfs-migration-apply.txt
+          else
+            python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+            python3 scripts/117_migrate_mglru_trace_to_proc.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          fi
+
+          python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
+          python3 scripts/116_apply_a52_scheduler_recorder.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-scheduler-recorder-apply.txt
+
+          python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
+          python3 scripts/104_apply_fuse_740_upstream_passthrough.py "$KERNEL" \
+            2>&1 | tee artifacts/fuse-740-native-apply.txt
+
+          git -C "$KERNEL" diff --check
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+
+      - name: Require usable source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P152 16K cache hit: ${{ steps.p152_16k_source.outputs.cache-hit }}"
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          echo "prebuild cache hit: ${{ steps.prebuild_source.outputs.cache-hit }}"
+          echo "base351 cache hit: ${{ steps.base351_source.outputs.cache-hit }}"
+          test -d workspace/touchgrass-a52xq/.git
+
+          if [ "${{ steps.p152_16k_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' workspace/touchgrass-a52xq/fs/incfs/vfs.c
+            grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig
+            grep -Fq 'A52 BOOT RESCUE P137' workspace/touchgrass-a52xq/drivers/input/input.c
+          elif [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'static void dev_map_hash_remove_netdev' workspace/touchgrass-a52xq/kernel/bpf/devmap.c
+          else
+            grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
+            grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' workspace/touchgrass-a52xq/mm/vmscan.c
+            grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+            grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
+          fi
+
+      - name: Rebuild prepared P134 boundary on cache miss
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            "$KERNEL" artifacts/f2fs-stable325-p1.txt artifacts/f2fs-stable325-patches
+          python3 scripts/119_apply_f2fs_gc_merge_p2.py "$KERNEL"
+          python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py "$KERNEL" artifacts/f2fs-inmem-p3a
+
+          mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
+          cp -a "$KERNEL/fs/f2fs" artifacts/pre-atgc-p3b/fs/
+          cp -a "$KERNEL/include/trace/events/f2fs.h" artifacts/pre-atgc-p3b/include/trace/events/
+
+          python3 scripts/122_apply_f2fs_atgc_p3b.py "$KERNEL" artifacts/f2fs-atgc-p3b
+          python3 scripts/123_enable_f2fs_atgc_p3c.py "$KERNEL" artifacts/f2fs-atgc-p3c
+          python3 scripts/124_apply_f2fs_atgc_p4.py "$KERNEL" artifacts/f2fs-atgc-p4
+          python3 scripts/125_apply_f2fs_block_age_p5a.py "$KERNEL" artifacts/f2fs-block-age-p5a
+          python3 scripts/126_enable_f2fs_block_age_p5b.py "$KERNEL" artifacts/f2fs-block-age-p5b
+          python3 scripts/127_apply_f2fs_gc_cp_p6.py "$KERNEL" artifacts/f2fs-gc-cp-p6
+          python3 scripts/128_apply_f2fs_correctness_p7.py "$KERNEL" artifacts/f2fs-correctness-p7
+          python3 scripts/129_apply_bpf_bootfix_p1.py "$KERNEL" artifacts/bpf-bootfix-p1
+          python3 scripts/134_apply_bpf_devmap_rndis_clean_fix.py "$KERNEL" artifacts/bpf-devmap-rndis-clean-p134
+
+          git -C "$KERNEL" diff --check
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'F2FS_MOUNT_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
+
+      - name: Save rebuilt P134 source cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Replay production chain through boot-tested P149
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
+          python3 scripts/145_apply_teo_baseline_p1.py workspace/touchgrass-a52xq backports/145_teo_4.19.c
+          python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq
+          python3 scripts/148_apply_qcom_lpm_fixpack_p1.py workspace/touchgrass-a52xq
+          python3 scripts/149_apply_ufs_runtime_autosuspend_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/ufs-runtime-autosuspend-p149.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P150 AOD power saver
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/150_apply_aod_power_saver_p1.py" \
+            -o /tmp/150_apply_aod_power_saver_p1.py
+
+          python3 -m py_compile /tmp/150_apply_aod_power_saver_p1.py
+          python3 /tmp/150_apply_aod_power_saver_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/aod-power-saver-p150.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
+
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'static int a52_aod_last_lpm_bl[MAX_DISPLAY_NDX];' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
+          test "$(grep -Fc 'int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);' "$PANEL")" -eq 2
+          test "$(grep -Fc 'switch (lpm_bl_level) {' "$PANEL")" -eq 2
+          grep -Fq 'case LPM_30NIT:' "$PANEL"
+          grep -Fq 'case LPM_60NIT:' "$PANEL"
+          grep -Fq 'vdd->panel_lpm.esd_recovery' "$PANEL"
+          grep -Fq 'unlikely(vdd->is_factory_mode)' "$PANEL"
+          grep -Fq 'Hz : 30Hz' "$COMMON"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c \
+            > artifacts/aod-power-saver-p150.diff
+
+      - name: Apply boot-proven P151 deferred init + first async batch
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/151_apply_boot_async_deferred_init_p1.py" \
+            -o /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 -m py_compile /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 /tmp/151_apply_boot_async_deferred_init_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-deferred-p151.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/nfc/sec_nfc.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P152 second selective async peripheral batch
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/152_apply_boot_async_peripherals_p2.py" \
+            -o /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 -m py_compile /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 /tmp/152_apply_boot_async_peripherals_p2.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-peripherals-p152.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/sensors/sx9360.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- \
+            arch/arm64/configs/a52xq_defconfig \
+            drivers/nfc/sec_nfc.c \
+            drivers/fingerprint/et7xx-spi.c \
+            drivers/sensors/sx9360.c \
+            drivers/vibrator/dc/dc_vibrator.c \
+            > artifacts/boot-async-p151-p152.diff
+      - name: Apply kernel-only 16K ARM64 page geometry
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+
+          cp "$CFG" artifacts/a52xq_defconfig.pre-16k
+
+          "$KERNEL/scripts/config" --file "$CFG" \
+            -d ARM64_4K_PAGES \
+            -e ARM64_16K_PAGES \
+            -d ARM64_64K_PAGES \
+            -d ARM64_VA_BITS_36 \
+            -d ARM64_VA_BITS_39 \
+            -d ARM64_VA_BITS_42 \
+            -e ARM64_VA_BITS_47 \
+            -d ARM64_VA_BITS_48
+
+          cp "$CFG" artifacts/a52xq_defconfig.requested-16k
+
+          {
+            echo "=== requested ARM64 page geometry ==="
+            grep -E '^(CONFIG_ARM64_(4K|16K|64K)_PAGES=|# CONFIG_ARM64_(4K|16K|64K)_PAGES|CONFIG_ARM64_VA_BITS(_[0-9]+)?=|# CONFIG_ARM64_VA_BITS_|CONFIG_ARM64_PAGE_SHIFT=|CONFIG_PGTABLE_LEVELS=)' "$CFG" || true
+          } | tee artifacts/phase377c-16k-requested-config.txt
+
+          git -C "$KERNEL" diff --check
+
+      - name: Backport Android IncFS 16K-page compatibility
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/377c_apply_incfs_16k_compat.py" \
+            -o /tmp/377c_apply_incfs_16k_compat.py
+
+          python3 -m py_compile /tmp/377c_apply_incfs_16k_compat.py
+          python3 /tmp/377c_apply_incfs_16k_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase377c-incfs-16k-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          VFS="$KERNEL/fs/incfs/vfs.c"
+          grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$VFS"
+          grep -Fq 'while (offset + total_read < size)' "$VFS"
+          grep -Fq 'if (total_read == PAGE_SIZE)' "$VFS"
+          grep -Fq 'data_buf = kzalloc(data_buf_size, GFP_NOFS);' "$VFS"
+          ! grep -Fq 'BUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);' "$VFS"
+          git -C "$KERNEL" diff --check
+
+      - name: Save prepared P152 16K source cache
+        if: steps.p152_16k_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
+
+      - name: Restore prepared Phase382 native-16K source cache
+        id: phase382_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
+
+      - name: Validate prepared Phase382 source cache
+        if: steps.phase382_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52 P379 EXEC_REQ:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_UNMAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
+          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE)' "$KERNEL/arch/arm64/Kconfig"
+
+          {
+            echo "phase382_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a"
+          } | tee artifacts/phase382-source-cache.txt
+
+      - name: Apply retained Phase379 early 16K boot census diagnostics
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/379_apply_16k_boot_census.py" \
+            -o /tmp/379_apply_16k_boot_census.py
+
+          python3 -m py_compile /tmp/379_apply_16k_boot_census.py
+          python3 /tmp/379_apply_16k_boot_census.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase379-boot-census-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 P379 EXEC_REQ:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P379 EXEC_FAIL:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P379 ELF_ENTER:' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P379 ELF_FAIL:' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P379 SNAPSHOT:' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq '#define A52_RAMOOPS_BOOT_HOLD_NS' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq '0ULL /* A52 P379: capture current 16K boot from t=0 */' "$KERNEL/fs/pstore/ram.c"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/exec.c fs/binfmt_elf.c fs/pstore/ram.c \
+            > artifacts/phase379-boot-census.diff
+
+      - name: Apply retained Phase380 16K CMA pageblock compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/380_apply_16k_cma_pageblock.py" \
+            -o /tmp/380_apply_16k_cma_pageblock.py
+
+          python3 -m py_compile /tmp/380_apply_16k_cma_pageblock.py
+          python3 /tmp/380_apply_16k_cma_pageblock.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase380-cma-pageblock-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          KCFG="$KERNEL/arch/arm64/Kconfig"
+
+          grep -Fq 'default "9" if (ARM64_16K_PAGES && !TRANSPARENT_HUGEPAGE) # A52 P380: keep 4MiB physical pageblocks' "$KCFG"
+          ! grep -Eq '^CONFIG_FORCE_MAX_ZONEORDER=' "$CFG"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
+          grep -Fq 'A52 P380 ION_DT_FAIL:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
+
+          python3 - <<'PY'
+          page_size = 16384
+          max_order = 9
+          physical = page_size << (max_order - 1)
+          assert physical == 4 * 1024 * 1024, physical
+          print(f"P380 physical MAX_ORDER/pageblock target: {physical // 1024 // 1024} MiB")
+          PY
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            arch/arm64/Kconfig \
+            arch/arm64/configs/a52xq_defconfig \
+            kernel/dma/contiguous.c \
+            drivers/staging/android/ion/msm/msm_ion_of.c \
+            > artifacts/phase380-cma-pageblock.diff
+
+      - name: Apply retained Phase381 16K fast-SMMU compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/381_apply_16k_fast_smmu.py" \
+            -o /tmp/381_apply_16k_fast_smmu.py
+
+          python3 -m py_compile /tmp/381_apply_16k_fast_smmu.py
+          python3 /tmp/381_apply_16k_fast_smmu.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase381-fast-smmu-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          FAST="$KERNEL/drivers/iommu/dma-mapping-fast.c"
+
+          grep -Fq '#define FAST_PAGE_MASK (~(FAST_PAGE_SIZE - 1))' "$FAST"
+          grep -Fq 'size_t count = PAGE_ALIGN(size) >> PAGE_SHIFT' "$FAST"
+          grep -Fq 'size_t cpu_size = PAGE_ALIGN(size);' "$FAST"
+          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$FAST"
+          ! grep -Fq '#define FAST_PAGE_MASK (~(PAGE_SIZE - 1))' "$FAST"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- drivers/iommu/dma-mapping-fast.c \
+            > artifacts/phase381-fast-smmu.diff
+
+      - name: Apply retained Phase382 16K fast io-pgtable stride compatibility
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/382_apply_16k_fast_pgtable_stride.py" \
+            -o /tmp/382_apply_16k_fast_pgtable_stride.py
+          python3 -m py_compile /tmp/382_apply_16k_fast_pgtable_stride.py
+          python3 /tmp/382_apply_16k_fast_pgtable_stride.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase382-fast-pgtable-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          PGT="$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$PGT"
+          grep -Fq 'A52 P382 FAST_PGTBL_UNMAP:' "$PGT"
+          grep -Fq 'AV8L_FAST_PTES_PER_TABLE' "$PGT"
+          grep -Fq '* PAGE_SIZE' "$PGT"
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- drivers/iommu/io-pgtable-fast.c \
+            > artifacts/phase382-fast-pgtable.diff
+
+      - name: Save prepared Phase382 native-16K source cache
+        if: steps.phase382_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
+
+      - name: Record Phase382 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase382_prepared_source_cache_hit=${{ steps.phase382_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a"
+            echo "future_16k_phases_should_reuse_branch=agent/a52-phase383-16k-dual-elf-census-v1"
+          } > artifacts/phase382-source-cache.txt
+
+      - name: Restore prepared Phase383 dual-recorder source cache
+        id: phase383_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449
+
+      - name: Validate prepared Phase383 source cache
+        if: steps.phase383_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'a52_p383_record_critical("MAPF2' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          {
+            echo "phase383_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449"
+          } | tee artifacts/phase383-source-cache.txt
+
+      - name: Apply retained Phase383 16K-safe Samsung-debug + ramoops ELF census
+        if: steps.phase383_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/383_apply_16k_dual_persist_elf_census.py" \
+            -o /tmp/383_apply_16k_dual_persist_elf_census.py
+
+          python3 -m py_compile /tmp/383_apply_16k_dual_persist_elf_census.py
+          python3 /tmp/383_apply_16k_dual_persist_elf_census.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase383-dual-elf-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          REC="$KERNEL/kernel/a52_p383_dual_recorder.c"
+          ELF="$KERNEL/fs/binfmt_elf.c"
+
+          test -s "$REC"
+          test -s "$KERNEL/include/linux/a52_p383_dual_recorder.h"
+          test -s scripts/decode_phase383_16k_dual.py
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$REC"
+          grep -Fq '#define A52_P383_DEBUG_OFFSET        0x00800000ULL' "$REC"
+          grep -Fq '#define A52_P383_DISK_BYTES          (2U * SZ_1M)' "$REC"
+          grep -Fq 'A52_P383_HEADER_BYTES        SZ_4K' "$REC"
+          grep -Fq 'bio_add_page(bio, page, PAGE_SIZE, 0)' "$REC"
+          grep -Fq 'late_initcall_sync(a52_p383_late_arm);' "$REC"
+          grep -Fq 'REQ_SYNC | REQ_FUA' "$REC"
+          grep -Fq 'blkdev_issue_flush(bdev, GFP_KERNEL, NULL)' "$REC"
+          grep -Fq 'A52 Phase383: persist the PID1 ELF geometry' "$ELF"
+          grep -Fq 'a52_p383_record_critical("MAPF2' "$ELF"
+          grep -Fq 'obj-y += a52_p383_dual_recorder.o' "$KERNEL/kernel/Makefile"
+
+          # Important: fixed recorder record format, native-page-sized BIO transport.
+          python3 - <<'PY'
+          page_size = 16384
+          disk_bytes = 2 * 1024 * 1024
+          assert disk_bytes % page_size == 0
+          assert page_size % 512 == 0
+          assert 128 <= page_size
+          print("P383 transport geometry: PASS, 2MiB disk / 16KiB BIO / 128-byte records")
+          PY
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            fs/binfmt_elf.c kernel/Makefile \
+            > artifacts/phase383-dual-elf.diff
+
+          # Decoder is fetched independently so prepared-source cache hits are safe.
+
+      - name: Save prepared Phase383 dual-recorder source cache
+        if: steps.phase383_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449
+
+      - name: Record Phase383 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase383_prepared_source_cache_hit=${{ steps.phase383_source.outputs.cache-hit }}"
+            echo "phase384_prepared_source_cache_hit=${{ steps.phase384_source.outputs.cache-hit }}"
+            echo "phase385_pid1_compat_loader=yes"
+            echo "phase385_target_scope=pid1_/init_exact_fingerprint"
+            echo "phase385_mapping=anonymous_native_16k"
+            echo "phase385_copy_granule=legacy_4k_segment_semantics"
+            echo "phase385_permissions=RWX_compat"
+            echo "phase385_userspace_rebuild_preferred_long_term=yes"
+            echo "phase385_prepared_source_cache_hit=${{ steps.phase385_source.outputs.cache-hit }}"
+            echo "phase386_user_icache_sync=yes"
+            echo "phase386_icache_helper=__flush_cache_user_range"
+            echo "phase386_pid1_exit_group_trace=yes"
+            echo "phase386_pid1_do_exit_trace=yes"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase386_decoder_fetch_independent=yes"
+            echo "phase386_prepared_source_cache_hit=${{ steps.phase386_source.outputs.cache-hit }}"
+            echo "phase387_pid1_syscall_ring=yes"
+            echo "phase387_syscall_ring_entries=32"
+            echo "phase387_syscall_hotpath_disk_io=no"
+            echo "phase387_dump_on_pid1_exit=yes"
+            echo "phase387_prepared_source_cache_hit=${{ steps.phase387_source.outputs.cache-hit }}"
+            echo "phase388_capture_writev_stderr=yes"
+            echo "phase388_capture_extended_args=yes"
+            echo "phase388_hotpath_disk_io=no"
+            echo "phase388_prepared_source_cache_hit=${{ steps.phase388_source.outputs.cache-hit }}"
+            echo "phase389_writeprotected_compat=yes"
+            echo "phase389_exact_start=0x373000"
+            echo "phase389_exact_len=4096"
+            echo "phase389_supported_prot=R_or_RW"
+            echo "phase389_other_misaligned_mprotect=record_then_normal_fail"
+            echo "phase389_prepared_source_cache_hit=${{ steps.phase389_source.outputs.cache-hit }}"
+            echo "phase390_main_thread_tls_compat=yes"
+            echo "phase390_legacy_request=base_plus_4k_len_12k_RW"
+            echo "phase390_native_effect=first_16k_page_RW"
+            echo "phase390_trailing_native_guard=PROT_NONE"
+            echo "phase390_prepared_source_cache_hit=${{ steps.phase390_source.outputs.cache-hit }}"
+            echo "phase391_exact_ramoops_alias_dedup=yes"
+            echo "phase391_alias_base=0xB1B00000"
+            echo "phase391_alias_bytes=1048576"
+            echo "phase391_other_reserved_overlaps_still_fatal=yes"
+            echo "phase391_prepared_source_cache_hit=${{ steps.phase391_source.outputs.cache-hit }}"
+            echo "phase392_pid1_scudo_fixed_mmap_compat=yes"
+            echo "phase392_requires_reserved_prot_none_vma=yes"
+            echo "phase392_legacy_alignment=4096"
+            echo "phase392_native_alignment=16384"
+            echo "phase392_returns_original_user_address=yes"
+            echo "phase392_other_mmap_semantics_unchanged=yes"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449"
+          } > artifacts/phase383-source-cache.txt
+
+      - name: Restore prepared Phase384 source cache
+        id: phase384_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858
+
+      - name: Validate prepared Phase384 source cache
+        if: steps.phase384_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P384 DONE loads=%d ov=%d wx=%d page=%lu' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          {
+            echo "phase384_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858"
+          } | tee artifacts/phase384-source-cache.txt
+
+      - name: Apply retained Phase384 full PID1 4K-vs-16K ELF overlap census
+        if: steps.phase384_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/384_apply_pid1_full_elf_overlap_census.py" \
+            -o /tmp/384_apply_pid1_full_elf_overlap_census.py
+
+          python3 -m py_compile /tmp/384_apply_pid1_full_elf_overlap_census.py
+          python3 /tmp/384_apply_pid1_full_elf_overlap_census.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase384-pid1-elf-overlap-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          ELF="$KERNEL/fs/binfmt_elf.c"
+
+          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$ELF"
+          grep -Fq 'P384 R4 i=%d %lx-%lx sz=%lx' "$ELF"
+          grep -Fq 'P384 RN i=%d %lx-%lx sz=%lx' "$ELF"
+          grep -Fq 'P384 OP a=%x b=%x u=%x wx=%d' "$ELF"
+          grep -Fq 'P384 DONE loads=%d ov=%d wx=%d page=%lu' "$ELF"
+          grep -Fq 'a52_p383_record_critical("P384 DONE' "$ELF"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/binfmt_elf.c \
+            > artifacts/phase384-pid1-elf-overlap.diff
+
+      - name: Save prepared Phase384 source cache
+        if: steps.phase384_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858
+
+      - name: Record Phase384 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase384_prepared_source_cache_hit=${{ steps.phase384_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858"
+          } > artifacts/phase384-source-cache.txt
+
+      - name: Restore prepared Phase385 source cache
+        id: phase385_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0
+
+      - name: Validate prepared Phase385 source cache
+        if: steps.phase385_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P385 READY RWX' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          {
+            echo "phase385_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0"
+          } | tee artifacts/phase385-source-cache.txt
+
+      - name: Apply retained Phase385 PID1 native-16K compatibility loader
+        if: steps.phase385_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/385_apply_pid1_16k_compat_loader.py" \
+            -o /tmp/385_apply_pid1_16k_compat_loader.py
+
+          python3 -m py_compile /tmp/385_apply_pid1_16k_compat_loader.py
+          python3 /tmp/385_apply_pid1_16k_compat_loader.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase385-pid1-compat-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          ELF="$KERNEL/fs/binfmt_elf.c"
+
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$ELF"
+          grep -Fq 'a52_p385_pid1_target' "$ELF"
+          grep -Fq 'a52_p385_load_pid1_compat' "$ELF"
+          grep -Fq 'PROT_READ | PROT_WRITE | PROT_EXEC' "$ELF"
+          grep -Fq 'MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE' "$ELF"
+          grep -Fq 'P385 READY RWX' "$ELF"
+          grep -Fq 'P385 ACTIVE pid=1 file=/init' "$ELF"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/binfmt_elf.c \
+            > artifacts/phase385-pid1-compat.diff
+
+      - name: Save prepared Phase385 source cache
+        if: steps.phase385_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0
+
+      - name: Record Phase385 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase385_prepared_source_cache_hit=${{ steps.phase385_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0"
+          } > artifacts/phase385-source-cache.txt
+
+      - name: Restore prepared Phase386 source cache
+        id: phase386_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54
+
+      - name: Validate prepared Phase386 source cache
+        if: steps.phase386_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P386 ICACHE_OK' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P386 EXITGRP' "$KERNEL/kernel/exit.c"
+          {
+            echo "phase386_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54"
+          } | tee artifacts/phase386-source-cache.txt
+
+      - name: Apply retained Phase386 PID1 icache synchronization + exit trace
+        if: steps.phase386_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/386_apply_pid1_icache_exit_trace.py" \
+            -o /tmp/386_apply_pid1_icache_exit_trace.py
+
+          python3 -m py_compile /tmp/386_apply_pid1_icache_exit_trace.py
+          python3 /tmp/386_apply_pid1_icache_exit_trace.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase386-pid1-icache-exit-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          ELF="$KERNEL/fs/binfmt_elf.c"
+          EXIT="$KERNEL/kernel/exit.c"
+
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$ELF"
+          grep -Fq '__flush_cache_user_range(map_start, map_end)' "$ELF"
+          grep -Fq 'P386 ICACHE_OK' "$ELF"
+          grep -Fq 'P386 ICACHE_FAIL' "$ELF"
+          grep -Fq 'P386 EXITGRP' "$EXIT"
+          grep -Fq 'P386 EXITREG' "$EXIT"
+          grep -Fq 'P386 DOEXIT' "$EXIT"
+          grep -Fq 'P386 DOREGS' "$EXIT"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/binfmt_elf.c kernel/exit.c \
+            > artifacts/phase386-pid1-icache-exit.diff
+
+      - name: Save prepared Phase386 source cache
+        if: steps.phase386_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54
+
+      - name: Record Phase386 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase386_prepared_source_cache_hit=${{ steps.phase386_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54"
+          } > artifacts/phase386-source-cache.txt
+
+      - name: Restore prepared Phase387 source cache
+        id: phase387_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421
+
+      - name: Validate prepared Phase387 source cache
+        if: steps.phase387_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
+          {
+            echo "phase387_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421"
+          } | tee artifacts/phase387-source-cache.txt
+
+      - name: Apply retained Phase387 PID1 syscall ring
+        if: steps.phase387_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/387_apply_pid1_syscall_ring.py" \
+            -o /tmp/387_apply_pid1_syscall_ring.py
+          python3 -m py_compile /tmp/387_apply_pid1_syscall_ring.py
+          python3 /tmp/387_apply_pid1_syscall_ring.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase387-pid1-syscall-ring-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          SYSC="$KERNEL/arch/arm64/kernel/syscall.c"
+          EXIT="$KERNEL/kernel/exit.c"
+          HDR="$KERNEL/include/linux/a52_p387_syscall_ring.h"
+
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$SYSC"
+          grep -Fq '#define A52_P387_RING 32U' "$SYSC"
+          grep -Fq 'a52_p387_sys_enter' "$SYSC"
+          grep -Fq 'P387 SDONE' "$SYSC"
+          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$EXIT"
+          test -s "$HDR"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- arch/arm64/kernel/syscall.c kernel/exit.c include/linux/a52_p387_syscall_ring.h \
+            > artifacts/phase387-pid1-syscall-ring.diff
+
+      - name: Save prepared Phase387 source cache
+        if: steps.phase387_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421
+
+      - name: Record Phase387 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase387_prepared_source_cache_hit=${{ steps.phase387_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421"
+          } > artifacts/phase387-source-cache.txt
+
+      - name: Restore prepared Phase388 source cache
+        id: phase388_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29
+
+      - name: Validate prepared Phase388 source cache
+        if: steps.phase388_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P388 MSG' "$KERNEL/arch/arm64/kernel/syscall.c"
+          {
+            echo "phase388_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29"
+          } | tee artifacts/phase388-source-cache.txt
+
+      - name: Apply retained Phase388 PID1 fatal-text capture
+        if: steps.phase388_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/388_apply_pid1_fatal_text.py" \
+            -o /tmp/388_apply_pid1_fatal_text.py
+          python3 -m py_compile /tmp/388_apply_pid1_fatal_text.py
+          python3 /tmp/388_apply_pid1_fatal_text.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase388-pid1-fatal-text-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          SYSC="$KERNEL/arch/arm64/kernel/syscall.c"
+
+          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$SYSC"
+          grep -Fq 'a52_p388_capture_writev' "$SYSC"
+          grep -Fq 'P388 MHEAD' "$SYSC"
+          grep -Fq 'P388 MSG' "$SYSC"
+          grep -Fq 'P388 A q=' "$SYSC"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- arch/arm64/kernel/syscall.c \
+            > artifacts/phase388-pid1-fatal-text.diff
+
+      - name: Save prepared Phase388 source cache
+        if: steps.phase388_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29
+
+      - name: Record Phase388 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase388_prepared_source_cache_hit=${{ steps.phase388_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29"
+          } > artifacts/phase388-source-cache.txt
+
+      - name: Restore prepared Phase389 source cache
+        id: phase389_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62
+
+      - name: Validate prepared Phase389 source cache
+        if: steps.phase389_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'P389 WPCOMPAT' "$KERNEL/mm/mprotect.c"
+          {
+            echo "phase389_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62"
+          } | tee artifacts/phase389-source-cache.txt
+
+      - name: Apply retained Phase389 PID1 WriteProtected mprotect compatibility
+        if: steps.phase389_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/389_apply_pid1_writeprotected_compat.py" \
+            -o /tmp/389_apply_pid1_writeprotected_compat.py
+          python3 -m py_compile /tmp/389_apply_pid1_writeprotected_compat.py
+          python3 /tmp/389_apply_pid1_writeprotected_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase389-pid1-writeprotected-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          MP="$KERNEL/mm/mprotect.c"
+
+          grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$MP"
+          grep -Fq 'a52_p389_pid1_writeprotected' "$MP"
+          grep -Fq 'P389 WPCOMPAT' "$MP"
+          grep -Fq 'P389 OTHER' "$MP"
+          grep -Fq 'start != 0x373000UL || len != SZ_4K' "$MP"
+          grep -Fq 'READ_ONCE(mm->end_code) != 0x3692fcUL' "$MP"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- mm/mprotect.c \
+            > artifacts/phase389-pid1-writeprotected.diff
+
+      - name: Save prepared Phase389 source cache
+        if: steps.phase389_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62
+
+      - name: Record Phase389 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase389_prepared_source_cache_hit=${{ steps.phase389_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62"
+          } > artifacts/phase389-source-cache.txt
+
+      - name: Restore prepared Phase390 source cache
+        id: phase390_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc
+
+      - name: Validate prepared Phase390 source cache
+        if: steps.phase390_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'P390 TLSMP old=%lx/%zx new=%lx/%zx' "$KERNEL/mm/mprotect.c"
+          {
+            echo "phase390_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc"
+          } | tee artifacts/phase390-source-cache.txt
+
+      - name: Apply retained Phase390 PID1 main-thread TLS mprotect compatibility
+        if: steps.phase390_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/390_apply_pid1_thread_tls_mprotect_compat.py" \
+            -o /tmp/390_apply_pid1_thread_tls_mprotect_compat.py
+          python3 -m py_compile /tmp/390_apply_pid1_thread_tls_mprotect_compat.py
+          python3 /tmp/390_apply_pid1_thread_tls_mprotect_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase390-pid1-thread-tls-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          MP="$KERNEL/mm/mprotect.c"
+
+          grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$MP"
+          grep -Fq 'a52_p390_pid1_thread_tls_adjust' "$MP"
+          grep -Fq 'P390 TLSMP old=%lx/%zx new=%lx/%zx' "$MP"
+          grep -Fq '(*start & ~PAGE_MASK) != SZ_4K' "$MP"
+          grep -Fq '*len = PAGE_SIZE' "$MP"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- mm/mprotect.c \
+            > artifacts/phase390-pid1-thread-tls.diff
+
+      - name: Save prepared Phase390 source cache
+        if: steps.phase390_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc
+
+      - name: Record Phase390 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase390_prepared_source_cache_hit=${{ steps.phase390_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc"
+          } > artifacts/phase390-source-cache.txt
+
+      - name: Restore prepared Phase391 source cache
+        id: phase391_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c
+
+      - name: Validate prepared Phase391 source cache
+        if: steps.phase391_source.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'A52_PHASE391_EXACT_RAMOOPS_ALIAS_DEDUP_V1' "$KERNEL/drivers/of/of_reserved_mem.c"
+          grep -Fq 'A52 P391 RMEM_ALIAS:' "$KERNEL/drivers/of/of_reserved_mem.c"
+          grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
+          grep -Fq 'P392 SCUDOOK' "$KERNEL/mm/util.c"
+          {
+            echo "phase391_prepared_source_cache_hit=true"
+            echo "cache_key=a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c"
+          } | tee artifacts/phase391-source-cache.txt
+
+      - name: Apply retained Phase391 exact ramoops reservation alias dedup
+        if: steps.phase391_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/391_apply_exact_ramoops_alias_dedup.py" \
+            -o /tmp/391_apply_exact_ramoops_alias_dedup.py
+          python3 -m py_compile /tmp/391_apply_exact_ramoops_alias_dedup.py
+          python3 /tmp/391_apply_exact_ramoops_alias_dedup.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase391-ramoops-alias-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          RMEM="$KERNEL/drivers/of/of_reserved_mem.c"
+
+          grep -Fq 'A52_PHASE391_EXACT_RAMOOPS_ALIAS_DEDUP_V1' "$RMEM"
+          grep -Fq 'a52_p391_same_ramoops_alias' "$RMEM"
+          grep -Fq 'A52 P391 RMEM_ALIAS:' "$RMEM"
+          grep -Fq 'a52-ramoops-reserved@b1b00000' "$RMEM"
+          grep -Fq 'panic("overlap on reserved memory, check the latest change")' "$RMEM"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- drivers/of/of_reserved_mem.c \
+            > artifacts/phase391-ramoops-alias.diff
+
+      - name: Save prepared Phase391 source cache
+        if: steps.phase391_source.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c
+
+      - name: Record Phase391 source cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase391_prepared_source_cache_hit=${{ steps.phase391_source.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c"
+          } > artifacts/phase391-source-cache.txt
+
+      - name: Apply Phase392 PID1 Scudo fixed-mmap compatibility
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/392_apply_pid1_scudo_fixed_mmap_compat.py" \
+            -o /tmp/392_apply_pid1_scudo_fixed_mmap_compat.py
+          python3 -m py_compile /tmp/392_apply_pid1_scudo_fixed_mmap_compat.py
+          python3 /tmp/392_apply_pid1_scudo_fixed_mmap_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase392-pid1-scudo-mmap-apply.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          UTIL="$KERNEL/mm/util.c"
+
+          grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$UTIL"
+          grep -Fq 'a52_p392_pid1_scudo_fixed_mmap' "$UTIL"
+          grep -Fq 'P392 SCUDOMAP' "$UTIL"
+          grep -Fq 'P392 SCUDOOK' "$UTIL"
+          grep -Fq 'P392 SCUDOFAIL' "$UTIL"
+          grep -Fq 'vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC)' "$UTIL"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- mm/util.c \
+            > artifacts/phase392-pid1-scudo-mmap.diff
+
+      - name: Audit obvious downstream 4K page assumptions
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          OUT=artifacts/phase377c-page-size-source-audit.txt
+          : > "$OUT"
+
+          {
+            echo "=== explicit PAGE_SIZE/PAGE_SHIFT vs 4096/12 comparisons ==="
+            grep -RInE \
+              --exclude-dir=.git --exclude-dir=out \
+              '(PAGE_SIZE[[:space:]]*(==|!=|<=|>=|<|>)[[:space:]]*4096|4096[[:space:]]*(==|!=|<=|>=|<|>)[[:space:]]*PAGE_SIZE|PAGE_SHIFT[[:space:]]*(==|!=)[[:space:]]*12|12[[:space:]]*(==|!=)[[:space:]]*PAGE_SHIFT)' \
+              "$KERNEL/arch" "$KERNEL/drivers" "$KERNEL/fs" "$KERNEL/mm" "$KERNEL/include" \
+              2>/dev/null || true
+
+            echo
+            echo "=== selected downstream 0x1000 / SZ_4K references ==="
+            for d in \
+              "$KERNEL/drivers/gpu" \
+              "$KERNEL/drivers/iommu" \
+              "$KERNEL/drivers/dma-buf" \
+              "$KERNEL/drivers/scsi" \
+              "$KERNEL/drivers/media" \
+              "$KERNEL/drivers/android" \
+              "$KERNEL/techpack/display"; do
+              [ -d "$d" ] || continue
+              grep -RInE \
+                --exclude-dir=.git --exclude-dir=out \
+                '(0x1000|SZ_4K)' "$d" 2>/dev/null || true
+            done
+          } >> "$OUT"
+
+          wc -l "$OUT"
+          head -200 "$OUT" || true
+
+      - name: Restore Phase392 built kernel cache
+        id: phase392_build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/vmlinux
+          key: a52xq-p392-built-v1-${{ runner.os }}-40727ee741b3
+
+      - name: Validate restored Phase392 built kernel
+        if: steps.phase392_build.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          test -s "$IMAGE"
+          test -s workspace/touchgrass-a52xq/out/.config
+          test -s workspace/touchgrass-a52xq/out/vmlinux
+          grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' workspace/touchgrass-a52xq/out/.config
+          grep -Fxq 'CONFIG_ARM64_PAGE_SHIFT=14' workspace/touchgrass-a52xq/out/.config
+          gzip -t "$IMAGE" 2>/dev/null || true
+          {
+            echo "phase392_built_kernel_cache_hit=true"
+            echo "cache_key=a52xq-p392-built-v1-${{ runner.os }}-40727ee741b3"
+          } > artifacts/phase392-build-cache.txt
+
+      - name: Build integrated kernel
+        if: steps.phase392_build.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/boot-async-p152-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          exit "$RC"
+
+      - name: Save Phase392 built kernel cache
+        if: steps.phase392_build.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/vmlinux
+          key: a52xq-p392-built-v1-${{ runner.os }}-40727ee741b3
+
+      - name: Record Phase392 build cache status
+        run: |
+          mkdir -p artifacts
+          {
+            echo "phase392_built_kernel_cache_hit=${{ steps.phase392_build.outputs.cache-hit }}"
+            echo "cache_key=a52xq-p392-built-v1-${{ runner.os }}-40727ee741b3"
+          } > artifacts/phase392-build-cache.txt
+
+      - name: Audit P152 retained stack and final 16K geometry
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
+          UFS="$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          LPM="$KERNEL/drivers/cpuidle/lpm-levels.c"
+          NFC="$KERNEL/drivers/nfc/sec_nfc.c"
+          FP="$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          GRIP="$KERNEL/drivers/sensors/sx9360.c"
+          VIB="$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$CFG"
+
+          echo '=== Phase392 generated allocator/page geometry ==='
+          grep -E '^(CONFIG_ARM64_(4K|16K|64K)_PAGES=|# CONFIG_ARM64_(4K|16K|64K)_PAGES|CONFIG_ARM64_PAGE_SHIFT=|CONFIG_ARM64_VA_BITS(_[0-9]+)?=|CONFIG_PGTABLE_LEVELS=|CONFIG_FORCE_MAX_ZONEORDER=|CONFIG_CMA_ALIGNMENT=)' "$CFG" || true
+
+          grep -Fxq '# CONFIG_ARM64_4K_PAGES is not set' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' "$CFG"
+          grep -Fxq '# CONFIG_ARM64_64K_PAGES is not set' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_PAGE_SHIFT=14' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_VA_BITS_47=y' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_VA_BITS=47' "$CFG"
+          grep -Fxq 'CONFIG_PGTABLE_LEVELS=3' "$CFG"
+          ! grep -Fxq 'CONFIG_ARM64_VA_BITS_39=y' "$CFG"
+          grep -Fxq 'CONFIG_FORCE_MAX_ZONEORDER=9' "$CFG"
+          grep -Fxq 'CONFIG_CMA_ALIGNMENT=8' "$CFG"
+
+          {
+            echo 'Phase377C final ARM64 geometry:'
+            grep -E '^(CONFIG_ARM64_(4K|16K|64K)_PAGES=|# CONFIG_ARM64_(4K|16K|64K)_PAGES|CONFIG_ARM64_PAGE_SHIFT=|CONFIG_ARM64_VA_BITS(_[0-9]+)?=|# CONFIG_ARM64_VA_BITS_|CONFIG_PGTABLE_LEVELS=)' "$CFG"
+          } | tee artifacts/phase377c-16k-final-config.txt
+
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$CFG"
+          grep -Fxq 'CONFIG_SPARSEMEM=y' "$CFG"
+          grep -Fxq 'CONFIG_NO_BOOTMEM=y' "$CFG"
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$NFC")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$FP")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$GRIP")" -eq 1
+          test "$(grep -Fc 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$VIB")" -eq 1
+
+          grep -Eq '^CONFIG_PANEL_S6E3FC3_AMS646YD01_FHD=y$' "$CFG"
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'Hz : 30Hz' "$COMMON"
+
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$UFS"
+          grep -Fq '#define UFSHCD_AUTO_SUSPEND_DELAY_MS 2000' "$UFS"
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$LPM"
+          grep -Fq 'A52 P148 BATTERY: Qualcomm LPM + WALT/schedutil correctness' "$KERNEL/kernel/sched/cpufreq_schedutil.c"
+          grep -Fq 'A52 UCLAMP P4: Android17 rq access helpers + idle-rq semantics' "$KERNEL/kernel/sched/sched.h"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'A52 P379 EXEC_REQ:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P379 EXEC_FAIL:' "$KERNEL/fs/exec.c"
+          grep -Fq 'A52 P379 ELF_ENTER:' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P379 ELF_FAIL:' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52 P379 SNAPSHOT:' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq '0ULL /* A52 P379: capture current 16K boot from t=0 */' "$KERNEL/fs/pstore/ram.c"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
+
+          {
+            echo 'P152 final config:'
+            grep -E '^(CONFIG_(DEFERRED_STRUCT_PAGE_INIT|SPARSEMEM|NO_BOOTMEM)=)' "$CFG"
+            echo
+            echo 'Async drivers:'
+            grep -n 'PROBE_PREFER_ASYNCHRONOUS, /\* A52 P151 \*/' "$NFC" "$FP"
+            grep -n 'PROBE_PREFER_ASYNCHRONOUS, /\* A52 P152 \*/' "$GRIP" "$VIB"
+          } | tee artifacts/boot-async-p152-audit.txt
+
+          git -C "$KERNEL" diff --check
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package Phase392 16K flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p392.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p392.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p392.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p392.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p392.sh
+
+          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P392-SCUDO-MMAP/'             scripts/.package-p392.sh
+
+          sed -i             's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P392-P152-16K-SCUDO-MMAP.zip/'             scripts/.package-p392.sh
+
+          chmod +x scripts/.package-p392.sh
+          ./scripts/.package-p392.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p392.sh
+
+          cat > release/PHASE392-READ-ME-FIRST.txt <<'EOF'
+          A52 PHASE 392 - PID1 SCUDO FIXED MMAP 4K-TO-16K COMPAT
+
+          Baseline: P152 / run 36058491006.
+          Kernel: native ARM64 16 KiB pages, PAGE_SHIFT=14, VA_BITS=47.
+          IncFS: Android 16K compatibility backport applied.
+          Userspace/UN1CA: unchanged and still expected to advertise 4K initially.
+
+          Phase 380 CMA/pageblock compatibility is retained.
+
+          Phase 381 separates the Qualcomm fast-SMMU hardware granule (4 KiB)
+          from the Linux CPU page size (16 KiB). IOVA/PTE math remains 4 KiB,
+          while CPU backing allocation/remap/free counts use PAGE_SIZE.
+
+          Phase 382 fixes the second half of that boundary: each hardware PTE
+          table still contains 512 x 8-byte entries, but alloc_page() now gives
+          it a 16 KiB Linux backing page. The direct software lookup therefore
+          advances between tables using PAGE_SIZE while keeping 4 KiB PTE
+          indexing inside each table.
+
+          Phase 383 adds a 16K-safe dual persistent transport for the current
+          /init ELF failure. Every P383 census record is emitted to printk
+          (ramoops/pstore) and to the last 2 MiB of the Samsung debug partition
+          starting at +0x800000. Raw partition writes are late-armed and use
+          PAGE_SIZE-sized BIOs; the on-disk header remains 4 KiB and records
+          remain fixed at 128 bytes.
+
+          The decoder is included as decode_phase383_16k_dual.py.
+
+          Phase 384 keeps the Phase383 transport unchanged and records every
+          PID1 PT_LOAD before mapping. It computes both legacy 4 KiB and native
+          16 KiB file-map ranges, reports adjacent-segment overlaps and reports
+          whether merging permissions would create a writable+executable page.
+          Phase 384 is diagnostic only: ELF mapping behavior is unchanged.
+
+          Phase 385 is the first actual /init compatibility fix. For the exact
+          Phase384-captured /init fingerprint only, the kernel reserves the
+          full image as anonymous native-16K memory, copies each legacy 4K
+          PT_LOAD from the file into its exact virtual address, preserves BSS
+          zeroing, and uses RWX compatibility permissions for the image.
+
+          This mirrors Android 16's own 16K app-compat fallback strategy when
+          an RX/RW boundary cannot be represented at native-page granularity.
+          The workaround is intentionally restricted to PID1 /init and should
+          ultimately be replaced by a properly 16K-linked first-stage init.
+
+          Phase 386 fixes an ARM64 requirement in the Phase385 anonymous-copy
+          loader: after executable bytes are written through copy_to_user(),
+          the userspace D/I caches are synchronized before start_thread().
+          It also persists PID1 exit_group/do_exit code and user PC/LR/SP
+          through the Phase383 Samsung-debug + ramoops recorder.
+
+          Phase 387 keeps all Phase386 behavior and adds a 32-entry in-RAM
+          syscall ring for PID1. The syscall hot path performs no disk I/O.
+          If PID1 exits, the ring is emitted once through the Phase383 dual
+          recorder and critical-flushed. This is intended to distinguish a
+          Bionic stack-protector failure from other explicit exit(127) paths.
+
+          Phase 388 extends the RAM-only syscall ring with x2/x3 and captures
+          up to four PID1 writev(fd=2) payloads before the syscall executes.
+          Because stderr is closed on this boot, the writes still fail with
+          EBADF, but the fatal Bionic text is preserved in RAM and dumped only
+          when PID1 exits. No new compatibility behavior is introduced.
+
+          Phase 389 is an actual compatibility fix for the fatal proven by
+          Phase388. The current 4 KiB-built Bionic WriteProtected object calls
+          mprotect(0x373000, 0x1000, PROT_READ), which is invalid on native
+          16 KiB pages. For the exact Phase384/385 PID1 image fingerprint only,
+          this one 4 KiB WriteProtected cell (and its RW mutation form) returns
+          success while the enclosing Phase385 anonymous page remains RWX.
+          Other mprotect calls retain normal kernel semantics. Any other
+          misaligned PID1 mprotect is recorded as P389 OTHER and still fails.
+
+          Phase 390 fixes the next Phase389 hardware-proven Bionic mismatch:
+          __allocate_thread_mapping() creates a legacy 20 KiB PROT_NONE mapping
+          and asks mprotect(base+4 KiB, 12 KiB, RW). Native 16 KiB Linux cannot
+          represent that leading 4 KiB guard. For the exact PID1 bootstrap mm
+          only, Phase390 expands that RW request to the first native 16 KiB
+          page. The second native page remains PROT_NONE as a trailing guard.
+          The protection change is real; this is not a fake-success shim.
+
+          Phase 391 addresses an independent boot-environment contamination
+          exposed only after the userspace fixes progressed far enough. The
+          current boot DT contains both ramoops@B1B00000 and the old GKI
+          diagnostic alias a52-ramoops-reserved@b1b00000 for the exact same
+          1 MiB range. Samsung's late reserved-memory sanity check therefore
+          panics at ~37 s. Phase391 ignores only that exact same-base/same-size
+          alias pair. Every other reserved-memory overlap remains fatal.
+
+          Phase 392 fixes the next hardware-proven PID1 blocker. Scudo first
+          reserves a large PROT_NONE arena, then commits a fixed anonymous RW
+          subrange at a 4 KiB-aligned address. On native 16 KiB Linux that
+          MAP_FIXED address is rejected with EINVAL. Phase392 only adapts such
+          a request when its entire native-rounded range is already contained
+          in one anonymous PROT_NONE VMA belonging to the exact PID1 /init mm.
+          It maps the native-rounded range but returns Scudo's original legacy
+          address. Other mmap calls retain normal kernel semantics.
+
+          Phase 379 exec/ELF census diagnostics and the ~12 second snapshot are
+          retained. UN1CA/userspace remains untouched. Keep the known-good P152
+          package available for rollback.
+          EOF
+
+          cp artifacts/decode_phase383_16k_dual.py release/decode_phase383_16k_dual.py
+
+      - name: Verify Phase392 package and 16K invariants
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          ZIP="$(find release -maxdepth 1 -name '*A52-P392-P152-16K-SCUDO-MMAP.zip' -type f | head -1)"
+
+          test -s "$ZIP"
+          grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_PAGE_SHIFT=14' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_VA_BITS_47=y' "$CFG"
+          grep -Fxq 'CONFIG_ARM64_VA_BITS=47' "$CFG"
+          grep -Fxq 'CONFIG_PGTABLE_LEVELS=3' "$CFG"
+          grep -Fxq 'CONFIG_FORCE_MAX_ZONEORDER=9' "$CFG"
+          grep -Fxq 'CONFIG_CMA_ALIGNMENT=8' "$CFG"
+          grep -Fq 'A52 BOOT RESCUE P137' "$KERNEL/drivers/input/input.c"
+          grep -Fq 'A52 P380 CMA_GEOM:' "$KERNEL/kernel/dma/contiguous.c"
+          grep -Fq 'A52 P380 ION_DT_OK:' "$KERNEL/drivers/staging/android/ion/msm/msm_ion_of.c"
+          grep -Fq 'A52 P381 FAST_SMMU_GEOM:' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_MAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52 P382 FAST_PGTBL_UNMAP:' "$KERNEL/drivers/iommu/io-pgtable-fast.c"
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'a52_p383_record_critical("MAPF2' "$KERNEL/fs/binfmt_elf.c"
+          test -s release/decode_phase383_16k_dual.py
+          grep -Fq 'A52_PHASE383_16K_DUAL_ELF_CENSUS_V1' "$KERNEL/kernel/a52_p383_dual_recorder.c"
+          grep -Fq 'a52_p383_record_critical("MAPF2' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq '#define FAST_PAGE_MASK (~(FAST_PAGE_SIZE - 1))' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'size_t count = PAGE_ALIGN(size) >> PAGE_SHIFT' "$KERNEL/drivers/iommu/dma-mapping-fast.c"
+          grep -Fq 'A52 P377C: IncFS 16K-page compatibility backport' "$KERNEL/fs/incfs/vfs.c"
+          grep -Fq 'A52_PHASE384_PID1_FULL_ELF_OVERLAP_CENSUS_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P384 DONE loads=%d ov=%d wx=%d page=%lu' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE385_PID1_16K_COMPAT_LOADER_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P385 READY RWX' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P385 ACTIVE pid=1 file=/init' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'A52_PHASE386_PID1_ICACHE_EXIT_TRACE_V1' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P386 ICACHE_OK' "$KERNEL/fs/binfmt_elf.c"
+          grep -Fq 'P386 EXITGRP' "$KERNEL/kernel/exit.c"
+          grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
+          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P388 MHEAD' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'P388 MSG' "$KERNEL/arch/arm64/kernel/syscall.c"
+          grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'P389 WPCOMPAT' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'P390 TLSMP old=%lx/%zx new=%lx/%zx' "$KERNEL/mm/mprotect.c"
+          grep -Fq 'A52_PHASE391_EXACT_RAMOOPS_ALIAS_DEDUP_V1' "$KERNEL/drivers/of/of_reserved_mem.c"
+          grep -Fq 'A52 P391 RMEM_ALIAS:' "$KERNEL/drivers/of/of_reserved_mem.c"
+          grep -Fq 'panic("overlap on reserved memory, check the latest change")' "$KERNEL/drivers/of/of_reserved_mem.c"
+          grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
+          grep -Fq 'P392 SCUDOOK' "$KERNEL/mm/util.c"
+
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P392-SCUDO-MMAP'
+
+          cp "$CFG" artifacts/phase392-final.config
+          sha256sum "$ZIP" | tee artifacts/phase392-package-sha256.txt
+          sha256sum "$IMAGE" | tee artifacts/phase392-image-sha256.txt
+
+          {
+            echo "baseline_run=36058491006"
+            echo "baseline_head_sha=c932824ddbd67cf9792599edd98ea4ce95c1ac12"
+            echo "page_size=16384"
+            echo "page_shift=14"
+            echo "va_bits=47"
+            echo "pgtable_levels=3"
+            echo "incfs_16k_compat=yes"
+            echo "userspace_modified=no"
+            echo "boot_rescue_retained=yes"
+            echo "flashable=yes"
+            echo "hardware_validated=phase378_kernel_alive"
+            echo "phase379_exec_census=yes"
+            echo "phase379_elf_census=yes"
+            echo "phase379_early_snapshot_seconds=12"
+            echo "phase379_ramoops_hold_seconds=0"
+            echo "phase380_force_max_zoneorder=9"
+            echo "phase380_physical_pageblock_bytes=4194304"
+            echo "phase380_cma_alignment_order=8"
+            echo "phase380_required_cma_align_bytes=4194304"
+            echo "phase381_fast_smmu_granule_bytes=4096"
+            echo "phase381_linux_page_bytes=16384"
+            echo "phase381_fast_page_mask_independent=yes"
+            echo "phase381_cpu_page_accounting_fixed=yes"
+            echo "phase382_fast_pgtable_backing_stride=PAGE_SIZE"
+            echo "phase382_hw_pte_granule_bytes=4096"
+            echo "phase382_pte_entries_per_table=512"
+            echo "phase383_dual_persistent_recorder=yes"
+            echo "phase383_samsung_debug_offset=0x800000"
+            echo "phase383_samsung_debug_bytes=2097152"
+            echo "phase383_record_bytes=128"
+            echo "phase383_disk_io_page_size=16384"
+            echo "phase383_pid1_elf_load_census=yes"
+            echo "phase383_critical_sync_flush=yes"
+            echo "phase382_prepared_source_cache_hit=${{ steps.phase382_source.outputs.cache-hit }}"
+            echo "phase383_lineage_branch_cache=yes"
+            echo "phase384_full_pid1_ptload_census=yes"
+            echo "phase384_legacy_map_granule=4096"
+            echo "phase384_native_map_granule=16384"
+            echo "phase384_overlap_permission_union=yes"
+            echo "phase383_prepared_source_cache_hit=${{ steps.phase383_source.outputs.cache-hit }}"
+            echo "prepared_16k_cache_hit=${{ steps.p152_16k_source.outputs.cache-hit }}"
+            echo "compiler_cache_hit=${{ steps.ccache_restore.outputs.cache-hit }}"
+          } > artifacts/phase392-metadata.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-phase392-pid1-scudo-mmap-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload Phase392 Scudo-mmap package
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE392-P152-BASE36058491006-16K-SCUDO-MMAP-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/phase392-final.config
+            artifacts/phase392-package-sha256.txt
+            artifacts/phase392-image-sha256.txt
+            artifacts/phase392-metadata.txt
+            artifacts/phase383-dual-elf-apply.txt
+            artifacts/phase383-dual-elf.diff
+            artifacts/phase382-source-cache.txt
+            artifacts/phase383-source-cache.txt
+            artifacts/phase384-pid1-elf-overlap-apply.txt
+            artifacts/phase384-pid1-elf-overlap.diff
+            artifacts/phase384-source-cache.txt
+            artifacts/phase385-pid1-compat-apply.txt
+            artifacts/phase385-pid1-compat.diff
+            artifacts/phase385-source-cache.txt
+            artifacts/phase386-pid1-icache-exit-apply.txt
+            artifacts/phase386-pid1-icache-exit.diff
+            artifacts/phase386-source-cache.txt
+            artifacts/phase387-pid1-syscall-ring-apply.txt
+            artifacts/phase387-pid1-syscall-ring.diff
+            artifacts/phase387-source-cache.txt
+            artifacts/phase388-pid1-fatal-text-apply.txt
+            artifacts/phase388-pid1-fatal-text.diff
+            artifacts/phase388-source-cache.txt
+            artifacts/phase389-pid1-writeprotected-apply.txt
+            artifacts/phase389-pid1-writeprotected.diff
+            artifacts/phase389-source-cache.txt
+            artifacts/phase390-pid1-thread-tls-apply.txt
+            artifacts/phase390-pid1-thread-tls.diff
+            artifacts/phase390-source-cache.txt
+            artifacts/phase391-ramoops-alias-apply.txt
+            artifacts/phase391-ramoops-alias.diff
+            artifacts/phase391-source-cache.txt
+            artifacts/phase392-pid1-scudo-mmap-apply.txt
+            artifacts/phase392-pid1-scudo-mmap.diff
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/phase392-build-cache.txt
+            artifacts/decode_phase383_16k_dual.py
+            artifacts/phase382-fast-pgtable-apply.txt
+            artifacts/phase382-fast-pgtable.diff
+            artifacts/phase381-fast-smmu-apply.txt
+            artifacts/phase381-fast-smmu.diff
+            artifacts/phase380-cma-pageblock-apply.txt
+            artifacts/phase380-cma-pageblock.diff
+            artifacts/phase379-boot-census-apply.txt
+            artifacts/phase379-boot-census.diff
+            artifacts/phase377c-incfs-16k-apply.txt
+            artifacts/phase377c-16k-final-config.txt
+            artifacts/phase377c-page-size-source-audit.txt
+            artifacts/boot-async-p152-audit.txt
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase392 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE392-16K-SCUDO-MMAP-FAILED-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+# Phase392 baseline:
+# Phase391 exact duplicate ramoops alias handling, same long-lived native-16K branch.
+#
+# Phase391 hardware result:
+# - exact legacy kernel build is Clang 11.0.1, Fri Oct 2 13:40:57 UTC 2026.
+# - old reserved-memory overlap panic is no longer the active blocker.
+# - Phase390 TLS adapter fires successfully.
+# - PID1 then fails in Scudo:
+#     mmap(NULL, 0x210000000, PROT_NONE, ...) = native-aligned arena
+#     mmap(legacy_4K_aligned_addr, 0x40000, RW, MAP_FIXED|ANON|PRIVATE) = -EINVAL
+# - fatal text:
+#     "Scudo ERROR: internal map or unmap failure"
+#
+# Phase392 actual fix:
+# - exact PID1 /init mm fingerprint only
+# - anonymous private MAP_FIXED RW request only
+# - legacy request must remain 4 KiB aligned but not native 16 KiB aligned
+# - whole native-rounded range must already be inside one anonymous PROT_NONE VMA
+# - commit the native-rounded range and return the original Scudo address
+# - all other mmap behavior remains unchanged
+# - retain P387 syscall ring/P388 fatal text/P389/P390/P391 fixes
+#
+# Cache policy present from first Phase392 workflow:
+# - same long-lived branch
+# - compiler ccache restores Phase391/390 lineage
+# - prepared Phase382..390 caches retained
+# - prepared Phase391 source cache added
+# - Phase392 Image/.config/vmlinux built-output cache added

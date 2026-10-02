@@ -1,0 +1,190 @@
+extern int a52_p430_smmu_forensic(u64 iova, void *out, size_t len);
+extern bool a52_p430_bad_iova_active(void);
+
+static u32 a52_p430_crc32c(const void *buffer, size_t len)
+{
+	const u8 *bytes = buffer;
+	u32 crc = ~0U;
+	size_t index;
+	unsigned int bit;
+	for (index = 0; index < len; index++) {
+		crc ^= bytes[index];
+		for (bit = 0; bit < 8; bit++)
+			crc = (crc >> 1) ^ ((crc & 1U) ? 0x82f63b78U : 0U);
+	}
+	return ~crc;
+}
+
+static void a52_p430_dma_sample(struct dsi_ctrl_hw *ctrl, u32 point)
+{
+	struct a52_p430_dma_sample *s;
+	u32 i = READ_ONCE(a52_p430_dma.sample_count);
+	if (!ctrl || !ctrl->base || i >= A52_P430_DMA_SAMPLES)
+		return;
+	s = &a52_p430_dma.sample[i];
+	memset(s, 0, sizeof(*s));
+	s->ns = ktime_get_ns();
+	s->point = point;
+	s->status = DSI_R32(ctrl, DSI_STATUS);
+	s->fifo = DSI_R32(ctrl, DSI_FIFO_STATUS);
+	s->clk_ctrl = DSI_R32(ctrl, DSI_CLK_CTRL);
+	s->clk_status = DSI_R32(ctrl, DSI_CLK_STATUS);
+	s->int_ctrl = DSI_R32(ctrl, DSI_INT_CTRL);
+	s->lane_status = DSI_R32(ctrl, DSI_LANE_STATUS);
+	s->dma_ctrl = DSI_R32(ctrl, DSI_COMMAND_MODE_DMA_CTRL);
+	s->dma_offset = DSI_R32(ctrl, DSI_DMA_CMD_OFFSET);
+	s->dma_length = DSI_R32(ctrl, DSI_DMA_CMD_LENGTH);
+	s->sw_trigger = DSI_R32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER);
+	s->trig_ctrl = DSI_R32(ctrl, DSI_TRIG_CTRL);
+	s->ack_err = DSI_R32(ctrl, DSI_ACK_ERR_STATUS);
+	s->timeout_status = DSI_R32(ctrl, DSI_TIMEOUT_STATUS);
+	s->phy_err = DSI_R32(ctrl, DSI_DLN0_PHY_ERR);
+	s->axi2ahb = DSI_R32(ctrl, DSI_AXI2AHB_CTRL);
+	s->err_mask0 = DSI_R32(ctrl, DSI_ERR_INT_MASK0);
+	WRITE_ONCE(a52_p430_dma.sample_count, i + 1U);
+}
+
+static enum hrtimer_restart a52_p430_dma_timer_fn(struct hrtimer *timer)
+{
+	static const u32 delta_us[4] = { 90U, 900U, 9000U, 0U };
+	int idx = atomic_inc_return(&a52_p430_timer_index) - 1;
+	struct dsi_ctrl_hw *ctrl = READ_ONCE(a52_p430_dma_ctrl);
+	if (!atomic_read(&a52_p430_dma_armed) || !ctrl || idx < 0 || idx >= 4)
+		return HRTIMER_NORESTART;
+	a52_p430_dma_sample(ctrl, (u32)idx + 2U);
+	if (idx < 3) {
+		hrtimer_forward_now(timer, ns_to_ktime((u64)delta_us[idx] * NSEC_PER_USEC));
+		return HRTIMER_RESTART;
+	}
+	return HRTIMER_NORESTART;
+}
+
+void a52_p430_dma_arm(struct dsi_ctrl_hw *ctrl)
+{
+	if (!a52_p421_target_active() || !ctrl || !ctrl->base)
+		return;
+	if (atomic_cmpxchg(&a52_p430_dma_armed, 0, 1) != 0)
+		return;
+	memset(&a52_p430_dma, 0, sizeof(a52_p430_dma));
+	a52_p430_dma.magic = A52_P430_DMA_MAGIC;
+	a52_p430_dma.valid = 1U;
+	a52_p430_dma.bad_iova = a52_p430_bad_iova_active() ? 1U : 0U;
+	WRITE_ONCE(a52_p430_dma_ctrl, ctrl);
+	atomic_set(&a52_p430_timer_index, 0);
+	a52_p430_dma_sample(ctrl, 0U);
+}
+EXPORT_SYMBOL_GPL(a52_p430_dma_arm);
+
+void a52_p430_dma_triggered(struct dsi_ctrl_hw *ctrl)
+{
+	if (!atomic_read(&a52_p430_dma_armed) || ctrl != READ_ONCE(a52_p430_dma_ctrl))
+		return;
+	a52_p430_dma_sample(ctrl, 1U);
+	hrtimer_start(&a52_p430_dma_timer, ns_to_ktime(10ULL * NSEC_PER_USEC),
+		HRTIMER_MODE_REL_PINNED);
+}
+EXPORT_SYMBOL_GPL(a52_p430_dma_triggered);
+
+static void a52_p430_tcs_snapshot(struct a52_p430_dma_image *im)
+{
+	u32 t, n;
+	im->child_cfg = a52_p424_r(a52_p424_rsc_drv, 0x0c);
+	/* drv-id 0 occupies the low six bits; Phase427 incorrectly shifted by 6. */
+	im->num_tcs = im->child_cfg & 0x3fU;
+	im->ncpt = (im->child_cfg >> 27) & 0x1fU;
+	for (t = 0; t < min_t(u32, im->num_tcs, 2U); t++) {
+		u32 base = A52_P427_TCS_BASE + t * A52_P427_TCS_STRIDE;
+		im->tcs[t].wait = a52_p424_r(a52_p424_rsc_drv, base + 0x10);
+		im->tcs[t].control = a52_p424_r(a52_p424_rsc_drv, base + 0x14);
+		im->tcs[t].status = a52_p424_r(a52_p424_rsc_drv, base + 0x18);
+		im->tcs[t].enable = a52_p424_r(a52_p424_rsc_drv, base + 0x1c);
+		for (n = 0; n < min_t(u32, im->ncpt, A52_P430_TCS_CMDS); n++) {
+			u32 c = base + 0x30 + n * A52_P427_CMD_STRIDE;
+			im->tcs[t].cmd[n].addr = a52_p424_r(a52_p424_rsc_drv, c + 0x04);
+			im->tcs[t].cmd[n].data = a52_p424_r(a52_p424_rsc_drv, c + 0x08);
+			im->tcs[t].cmd[n].status = a52_p424_r(a52_p424_rsc_drv, c + 0x0c);
+		}
+	}
+}
+
+static void a52_p430_clock_snapshot(struct a52_p430_dma_image *im)
+{
+	static const u32 disp_off[14] = {
+		0x100c,0x1010,0x102c,0x1030,0x1034,0x104c,
+		0x1064,0x1068,0x107c,0x1080,0x10c4,0x10c8,0x10e0,0x10e4,
+	};
+	u32 i;
+	for (i = 0; i < ARRAY_SIZE(disp_off); i++)
+		im->clk[i] = a52_p424_r(a52_p424_dispcc, disp_off[i]);
+	im->clk[14] = a52_p424_r(a52_p424_gcc, 0x1700c);
+	im->clk[15] = a52_p424_r(a52_p424_gcc, 0x1701c);
+	im->clk[16] = a52_p424_r(a52_p427_hf0_gcc, 0x40);
+	im->clk[17] = a52_p424_r(a52_p427_hf0_gcc, 0x44);
+	im->clk[18] = a52_p424_r(a52_p424_rsc_drv, 0x0404);
+	im->clk[19] = a52_p424_r(a52_p424_rsc_drv, 0x0408);
+	im->pwr[0] = a52_p424_r(a52_p424_dispcc, 0x1004);
+	im->pwr[1] = a52_p424_r(a52_p424_dispcc, 0x2004);
+	im->pwr[2] = a52_p424_r(a52_p424_dispcc, 0x2008);
+	im->pwr[3] = a52_p424_r(a52_p424_dispcc, 0x200c);
+}
+
+static void a52_p430_persist(void)
+{
+	void *d0, *d1, *d2;
+	if (!a52_p430_dma_sideband)
+		return;
+	a52_p430_dma.capture_ns = ktime_get_boottime_ns();
+	a52_p430_dma.crc32c = a52_p430_crc32c(&a52_p430_dma,
+		offsetof(struct a52_p430_dma_image, crc32c));
+	a52_p430_dma.commit = A52_P430_DMA_COMMIT;
+	a52_p430_dma.version = A52_P430_DMA_VERSION;
+	d0 = a52_p430_dma_sideband;
+	d1 = (u8 *)a52_p430_dma_sideband + A52_P430_DMA_COPY_BYTES;
+	d2 = (u8 *)a52_p430_dma_sideband + 2U * A52_P430_DMA_COPY_BYTES;
+	memset(d0, 0, A52_P430_DMA_COPY_BYTES);
+	memset(d1, 0, A52_P430_DMA_COPY_BYTES);
+	memset(d2, 0, A52_P430_DMA_COPY_BYTES);
+	memcpy(d0, &a52_p430_dma, sizeof(a52_p430_dma));
+	memcpy(d1, &a52_p430_dma, sizeof(a52_p430_dma));
+	memcpy(d2, &a52_p430_dma, sizeof(a52_p430_dma));
+	wmb();
+	__flush_dcache_area(d0, A52_P430_DMA_COPY_BYTES);
+	__flush_dcache_area(d1, A52_P430_DMA_COPY_BYTES);
+	__flush_dcache_area(d2, A52_P430_DMA_COPY_BYTES);
+	dsb(sy);
+}
+
+void a52_p430_dma_finalize(struct dsi_ctrl_hw *ctrl, u64 iova,
+			   u32 irq_trig, int wait_ret)
+{
+	int sr;
+	if (!atomic_read(&a52_p430_dma_armed) || !ctrl)
+		return;
+	hrtimer_cancel(&a52_p430_dma_timer);
+	a52_p430_dma_sample(ctrl, 6U);
+	a52_p430_dma.iova = iova;
+	a52_p430_dma.wait_ret = (u32)wait_ret;
+	a52_p430_dma.irq_trig = irq_trig;
+	a52_p430_tcs_snapshot(&a52_p430_dma);
+	a52_p430_clock_snapshot(&a52_p430_dma);
+	sr = a52_p430_smmu_forensic(iova, &a52_p430_dma.smmu,
+		sizeof(a52_p430_dma.smmu));
+	a52_p430_persist();
+	a52_ackfr_record("P430 D n=%u ret=%d irq=%u raw=%x bad=%u sr=%d",
+		a52_p430_dma.sample_count, wait_ret, irq_trig,
+		a52_p430_dma.sample_count ?
+		a52_p430_dma.sample[a52_p430_dma.sample_count - 1U].int_ctrl : 0U,
+		a52_p430_dma.bad_iova, sr);
+	a52_ackfr_record("P430 M sw=%llx hw=%llx par=%llx at=%u fs=%x gf=%x",
+		(unsigned long long)a52_p430_dma.smmu.sw_phys,
+		(unsigned long long)a52_p430_dma.smmu.hw_phys,
+		(unsigned long long)a52_p430_dma.smmu.par,
+		a52_p430_dma.smmu.atos_timeout,
+		a52_p430_dma.smmu.fsr, a52_p430_dma.smmu.gfsr);
+	atomic_set(&a52_p430_dma_armed, 0);
+}
+EXPORT_SYMBOL_GPL(a52_p430_dma_finalize);
+
+static int __init a52_p430_dma_init(void)
+{
+	BUILD_BUG_ON(sizeof(struct a52_p430_dma_image) > A52_P430_DMA_COPY_BYTES);

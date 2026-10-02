@@ -21,16 +21,16 @@ permissions:
 
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
-  CCACHE_DIR: \${{ github.workspace }}/.ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 1G
   CCACHE_COMPRESS: 'true'
   CCACHE_COMPRESSLEVEL: '6'
-  CCACHE_BASEDIR: \${{ github.workspace }}
+  CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: 'true'
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase432-sf-hwc-chain-\${{ github.ref }}
+  group: a52-phase432-sf-hwc-chain-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,12 +80,12 @@ jobs:
           path: |
             gki/common
             phase429-gki-out
-          key: a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
       - name: Require Phase429 source cache
         run: |
           set -Eeuo pipefail
-          test "\${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
+          test "${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
             echo "Phase432 cache contract: Phase429 compact source cache is missing."
             echo "Refusing a 40-60 minute cold lineage rebuild."
             exit 1
@@ -100,18 +100,18 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase431-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
           restore-keys: |
-            a52xq-phase431-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Restore rolling clang ccache
         id: ccache
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-phase432-\${{ github.run_id }}
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-${{ github.run_id }}
           restore-keys: |
-            a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Configure compiler cache
         run: |
@@ -120,8 +120,8 @@ jobs:
           ccache -o compression=true
           ccache -o compression_level=6
           ccache -z
-          echo "Phase431 object cache hit: \${{ steps.phase431-objects.outputs.cache-hit }}"
-          echo "clang ccache hit: \${{ steps.ccache.outputs.cache-hit }}"
+          echo "Phase431 object cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
           ccache -s
 
       - name: Prepare build directory on object-cache miss
@@ -201,18 +201,18 @@ jobs:
           ccache -s
 
       - name: Save Phase432 object cache
-        if: always()
+        if: always() && steps.phase429-source.outputs.cache-hit == 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
 
       - name: Save rolling clang ccache
-        if: always()
+        if: always() && steps.ccache.outcome != 'skipped'
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-phase432-\${{ github.run_id }}
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-${{ github.run_id }}
 
       - name: Package Phase432
         if: success()
@@ -275,7 +275,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE432-FAIL-DIAG-\${{ github.run_number }}
+          name: A52XQ-PHASE432-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/arch/arm64/kernel/syscall.c
             gki/common/drivers/a52_display/msm/msm_drv.c
@@ -297,7 +297,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE432-SF-HWC-CHAIN-\${{ github.run_number }}
+          name: A52XQ-PHASE432-SF-HWC-CHAIN-${{ github.run_number }}
           path: phase432-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -307,7 +307,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE432-SF-HWC-CHAIN-\${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE432-SF-HWC-CHAIN-${{ github.run_number }}-BOOT-IMG
           path: phase432-gki-out/package/boot-phase432-sf-hwc-bootanim-chain-v1.img
           if-no-files-found: error
           compression-level: 0

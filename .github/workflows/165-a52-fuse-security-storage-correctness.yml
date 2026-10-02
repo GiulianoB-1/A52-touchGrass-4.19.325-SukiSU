@@ -1234,7 +1234,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
-          ZIP="$(find release -maxdepth 1 -name 'A52-P165-*.zip' -type f | head -1)"
+          ZIP="$(find release -maxdepth 1 -name '*A52-P165-*.zip' -type f | head -1)"
           test -s "$KERNEL/out/arch/arm64/boot/Image"
           test -s "$KERNEL/out/vmlinux"
           test -s "$ZIP"
@@ -1254,6 +1254,7 @@ jobs:
           key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload P165 bundle and audit
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P165-CLANG22-THINLTO-I25-FUSE-SEC-STORAGE-${{ github.run_number }}
@@ -1302,7 +1303,7 @@ jobs:
             artifacts/p159-build-cache-key.txt
             artifacts/p159-vmlinux-nm.txt
             artifacts/p159-vmlinux-sections.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
 # Exact user-selected baseline:

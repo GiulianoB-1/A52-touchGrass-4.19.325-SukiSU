@@ -77,6 +77,26 @@ jobs:
           chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
           echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
 
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          echo "Phase431 object cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
+          ccache -s
+
       - name: Restore compact Phase429 source cache
         id: phase429-source
         uses: actions/cache/restore@v4
@@ -223,26 +243,6 @@ jobs:
           key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
           restore-keys: |
             a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
-
-      - name: Restore rolling clang ccache
-        id: ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ccache
-          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-${{ github.run_id }}
-          restore-keys: |
-            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
-
-      - name: Configure compiler cache
-        run: |
-          set -Eeuo pipefail
-          ccache -M "$CCACHE_MAXSIZE"
-          ccache -o compression=true
-          ccache -o compression_level=6
-          ccache -z
-          echo "Phase431 object cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
-          echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
-          ccache -s
 
       - name: Prepare build directory on object-cache miss
         if: steps.phase431-objects.outputs.cache-hit != 'true'

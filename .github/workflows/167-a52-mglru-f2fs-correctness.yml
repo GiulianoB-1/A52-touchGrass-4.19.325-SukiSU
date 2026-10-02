@@ -953,7 +953,7 @@ jobs:
             echo "phase=P167"
             echo "runtime_baseline=P166_boot_and_fuse_tested"
             echo "p166_workflow_run=37013957497"
-            echo "new_fixes=B6_MGLRU,2d291651,24dfe070,eb926232"
+            echo "new_fixes=MGLRU_EVICTABLE_READ_CLAMP,2d291651,24dfe070,eb926232"
             echo "fuse_delta=none"
             echo "scheduler_delta=none"
             echo "gpu_delta=none"
@@ -1299,7 +1299,7 @@ jobs:
           a=vm.index("static long get_nr_evictable(")
           b=vm.index("\n}\n",a)+3
           ev=vm[a:b]
-          assert "size += max_t(long," in ev, "B6 per-zone clamp missing"
+          assert "size += max_t(long," in ev, "MGLRU evictable read clamp missing"
           assert "READ_ONCE(lrugen->nr_pages[gen][type][zone]), 0);" in ev
 
           inode=(root/"fs/f2fs/inode.c").read_text()
@@ -1332,7 +1332,7 @@ jobs:
           assert "!(arg->flags & FUSE_WRITEBACK_CACHE)" not in modern
 
           print("P167 post-build audit: PASS")
-          print("B6_MGLRU_negative_size_clamp=PASS")
+          print("MGLRU_evictable_read_clamp=PASS")
           print("F2FS_2d291651=PASS")
           print("F2FS_24dfe070=PASS")
           print("F2FS_eb926232=PASS")
@@ -1715,7 +1715,7 @@ jobs:
 
 # P167:
 # - baseline: P166 booted and passed /sdcard text + 1 MiB FUSE writes.
-# - B6 clamps transient negative MGLRU per-zone generation sizes in get_nr_evictable().
+# - MGLRU read-side hardening clamps transient negative per-zone generation sizes only while summing get_nr_evictable().
 # - adds remaining stable F2FS correctness ports 2d291651, 24dfe070, eb926232.
 # - restores and reuses the exact P166 source snapshot cache, plus a P167 snapshot cache.
 # - no FUSE negotiation, scheduler, GPU, UFS, display, or AOD runtime changes.

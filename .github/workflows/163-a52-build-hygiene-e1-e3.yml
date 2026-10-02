@@ -721,10 +721,12 @@ jobs:
           set -Eeuo pipefail
 
           python3 - <<'PY'
+          import os
+          import re
           from pathlib import Path
 
-          p = Path("scripts/common.sh")
-          s = p.read_text()
+          wrapper = Path("scripts/common.sh")
+          s = wrapper.read_text()
 
           export_flag = "  export KCFLAGS=-w\n"
           make_flag = "      KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \\\n"
@@ -742,7 +744,63 @@ jobs:
 
           s = s.replace(export_flag, audit_export, 1)
           s = s.replace(make_flag, audit_make)
-          p.write_text(s)
+          wrapper.write_text(s)
+
+          root = Path("workspace/touchgrass-a52xq")
+          report = Path("artifacts/p163-werror-neutralization.txt")
+          skip_dirs = {".git", "out", "toolchain"}
+          changed = []
+          total = 0
+
+          eq_pat = re.compile(r"(?<![A-Za-z0-9_])-Werror=([A-Za-z0-9_-]+)")
+          dash_pat = re.compile(r"(?<![A-Za-z0-9_])-Werror-([A-Za-z0-9_-]+)")
+          bare_pat = re.compile(r"(?<![A-Za-z0-9_])-Werror(?![A-Za-z0-9_=-])")
+
+          for dirpath, dirnames, filenames in os.walk(root):
+              dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+              for name in filenames:
+                  if name not in {"Makefile", "Kbuild"} and not name.endswith(".mk"):
+                      continue
+                  p = Path(dirpath) / name
+                  try:
+                      old = p.read_text()
+                  except UnicodeDecodeError:
+                      continue
+
+                  new, n1 = eq_pat.subn(r"-Wno-error=\1", old)
+                  new, n2 = dash_pat.subn(r"-Wno-error=\1", new)
+                  new, n3 = bare_pat.subn("-Wno-error", new)
+                  n = n1 + n2 + n3
+                  if n:
+                      p.write_text(new)
+                      changed.append(f"{p.relative_to(root)} replacements={n}")
+                      total += n
+
+          leftovers = []
+          for dirpath, dirnames, filenames in os.walk(root):
+              dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+              for name in filenames:
+                  if name not in {"Makefile", "Kbuild"} and not name.endswith(".mk"):
+                      continue
+                  p = Path(dirpath) / name
+                  try:
+                      text = p.read_text()
+                  except UnicodeDecodeError:
+                      continue
+                  for lineno, line in enumerate(text.splitlines(), 1):
+                      if re.search(r"(?<![A-Za-z0-9_])-Werror(?:=|-|\b)", line):
+                          leftovers.append(f"{p.relative_to(root)}:{lineno}:{line}")
+
+          body = [f"werror_tokens_neutralized={total}", *changed]
+          body += ["LEFTOVERS:", *leftovers] if leftovers else ["leftovers=0"]
+          report.write_text("\n".join(body) + "\n")
+
+          if total == 0:
+              raise SystemExit("P163 E1: no -Werror tokens found to neutralize")
+          if leftovers:
+              raise SystemExit(
+                  f"P163 E1: {len(leftovers)} fatal warning tokens remain; see {report}"
+              )
           PY
 
           if grep -nE 'KCFLAGS=.*(^|[[:space:]])-w([[:space:]]|$)|KCFLAGS=-w([[:space:]]|$)' scripts/common.sh; then
@@ -751,12 +809,17 @@ jobs:
           fi
           test "$(grep -Fc 'KCFLAGS=-Wno-error' scripts/common.sh)" -eq 3
           grep -Fq 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' scripts/common.sh
+          grep -Eq '^werror_tokens_neutralized=[1-9][0-9]*$' artifacts/p163-werror-neutralization.txt
+          grep -Fxq 'leftovers=0' artifacts/p163-werror-neutralization.txt
 
           {
-            echo 'P163 E1 warning-visible nonfatal build wrapper: PASS'
+            echo 'P163 E1 warning-visible nonfatal build policy: PASS'
             echo 'KCFLAGS=-w removed'
-            echo 'KCFLAGS=-Wno-error enabled so warnings remain visible but do not abort the audit build'
-            echo 'CONFIG_SECTION_MISMATCH_WARN_ONLY retained'
+            echo 'KCFLAGS=-Wno-error enabled'
+            echo 'Kbuild/Makefile -Werror tokens converted to matching -Wno-error forms'
+            echo 'C source and runtime logic untouched'
+            echo
+            cat artifacts/p163-werror-neutralization.txt
           } | tee artifacts/p163-e1-warning-wrapper-audit.txt
 
       - name: P163 E2 capture final reconstructed kernel diff
@@ -1325,6 +1388,7 @@ jobs:
           key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload P163 build hygiene bundle and audit
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P163-CLANG22-THINLTO-I25-BUILD-HYGIENE-${{ github.run_number }}
@@ -1354,6 +1418,7 @@ jobs:
             artifacts/p162-build-info.txt
             artifacts/p162-final.diff
             artifacts/p163-e1-warning-wrapper-audit.txt
+            artifacts/p163-werror-neutralization.txt
             artifacts/p163-compiler-warnings.txt
             artifacts/p163-warning-summary.txt
             artifacts/p163-final.diff
@@ -1376,7 +1441,7 @@ jobs:
             artifacts/p159-build-cache-key.txt
             artifacts/p159-vmlinux-nm.txt
             artifacts/p159-vmlinux-sections.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
 # Exact user-selected baseline:

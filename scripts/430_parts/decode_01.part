@@ -1,0 +1,15 @@
+        print(f'iova=0x{d["iova"]:x} bad_iova={d["bad_iova"]} wait_ret={d["wait_ret"]} irq={d["irq_trig"]} samples={d["sample_count"]} child_cfg=0x{d["child_cfg"]:x} num_tcs={d["num_tcs"]} ncpt={d["ncpt"]}')
+        base=None
+        for s in d['samples'][:min(d['sample_count'],7)]:
+            if base is None:base=s['ns']
+            print(f"{DMA_POINT.get(s['point'],s['point']):>13} +{(s['ns']-base)/1000:9.1f}us INT=0x{s['int_ctrl']:08x} done={(s['int_ctrl']&1)!=0} en={(s['int_ctrl']&2)!=0} STATUS=0x{s['status']:x} FIFO=0x{s['fifo']:x} CLK=0x{s['clk_status']:x} ACK=0x{s['ack']:x} TO=0x{s['timeout']:x}")
+        for ti,t in enumerate(d['tcs'][:min(d['num_tcs'],2)]):
+            print(f'TCS{ti}: ctrl=0x{t["control"]:x} st=0x{t["status"]:x} en=0x{t["enable"]:x} wait=0x{t["wait"]:x}')
+            for n,(a,v,st) in enumerate(t['cmd'][:min(d['ncpt'],16)]):
+                if a or v or st:print(f'  cmd{n:02d}: addr=0x{a:x} data=0x{v:x} status=0x{st:x}')
+        m=d['smmu'];print(f'SMMU valid={m["valid"]} sid=0x{m["sid"]:x} sme={m["sme"]} cb={m["cb"]} irq={m["irq"]} FSR=0x{m["fsr"]:x} FSYNR0=0x{m["fsynr0"]:x} FAR=0x{m["far"]:x} GFSR=0x{m["gfsr"]:x} TLB=0x{m["tlbstatus"]:x}/0x{m["gtlbstatus"]:x}')
+        print(f'TTBR0=0x{m["ttbr0"]:x} TCR=0x{m["tcr"]:x} MAIR0=0x{m["mair0"]:x} SWphys=0x{m["sw_phys"]:x} HWphys=0x{m["hw_phys"]:x} PAR=0x{m["par"]:x} ATOS_timeout={m["atos_timeout"]} ATSR=0x{m["atos_status"]:x}')
+    out=dict(task_meta=meta,task_records=[r for r in recs if r],slide=slide,dma=d)
+    if ns.json: ns.json.write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+    return 0
+if __name__=='__main__': raise SystemExit(main())

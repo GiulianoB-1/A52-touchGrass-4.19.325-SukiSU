@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import argparse
+from pathlib import Path
+
+MARK = 'A52_PHASE430_SF_DMA_FORENSICS_V1'
+SYSCALL = 'arch/arm64/kernel/syscall.c'
+UFS = 'drivers/scsi/ufs/ufshcd.c'
+MSM = 'drivers/a52_display/msm/msm_drv.c'
+DSI = 'drivers/a52_display/msm/dsi/dsi_ctrl.c'
+HWC = 'drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c'
+SMMU = 'drivers/iommu/arm/arm-smmu/arm-smmu.c'
+REC = 'drivers/a52_secure/a52_ack_secure_flight_recorder.c'
+
+
+def one(text:str, old:str, new:str, label:str)->str:
+    n=text.count(old)
+    if n != 1:
+        raise SystemExit(f'{label}: expected one anchor, found {n}')
+    return text.replace(old,new,1)
+
+TASK_BLOCK = r'''
+/* A52_PHASE430_SF_DMA_FORENSICS_V1
+ *
+ * Event-relative userspace display census.  Phase429 proved that the old
+ * apexd page-read stall can disappear while the first DRM atomic is still
+ * delayed by ~73 s.  Phase430 therefore starts its clock when SurfaceFlinger
+ * actually exists and samples the display stack at +5/+20/+40/+60/+70 s,
+ * plus one endpoint snapshot when Phase418 observes the first DRM atomic.
+ *
+ * The 32 KiB Phase429 sideband is retained but upgraded to three independent
+ * copies with per-record CRC32C.  Composer identity comes from Phase269's
+ * exec-derived TGID, not a truncated comm prefix.
+ */
+#define A52_P430_TASK_PHYS          0xB1BF0000ULL
+#define A52_P430_TASK_BYTES         0x8000U
+#define A52_P430_COPY_BYTES         0x2800U
+#define A52_P430_SLOT_BYTES         256U
+#define A52_P430_SNAPSHOTS          6U
+#define A52_P430_PER_SNAPSHOT       6U
+#define A52_P430_SLOTS              36U
+#define A52_P430_STACK              8U
+#define A52_P430_MAGIC              0x303334534e454353ULL
+#define A52_P430_COMMIT             0x430c0de5U
+#define A52_P430_VERSION            1U
+#define A52_P430_ROLE_SF            2U
+#define A52_P430_ROLE_COMPOSER      3U
+#define A52_P430_ROLE_SYSTEM        4U
+
+struct a52_p430_task_record {
+	u64 magic;
+	u64 ns;
+	u64 wchan;
+	u64 user_pc;
+	u64 user_lr;
+	u64 user_sp;
+	u64 sum_exec_runtime;
+	unsigned long stack[A52_P430_STACK];
+	u32 snapshot_id;
+	u32 role;
+	u32 pid;
+	u32 tgid;
+	u32 ppid;
+	u32 task_state;
+	u32 exit_state;
+	u32 task_flags;
+	u32 on_cpu;
+	u32 on_rq;
+	u32 task_cpu;
+	u32 stack_nr;
+	u32 nr_threads;
+	u32 live_threads;
+	u32 nvcsw;
+	u32 nivcsw;
+	u32 slot;
+	char comm[TASK_COMM_LEN];
+	char wchan_symbol[32];
+	u8 reserved[8];
+	u32 crc32c;
+	u32 commit;
+	u32 version;
+} __packed;
+
+static void *a52_p430_task_sideband;
+static struct task_struct *a52_p430_sampler;
+static atomic_t a52_p430_first_atomic = ATOMIC_INIT(0);
+static atomic_t a52_p430_atomic_tgid = ATOMIC_INIT(-1);
+static u64 a52_p430_sf_start_ns;
+extern void a52_p430_ufs_compact(unsigned int snapshot_id);
+extern bool a52_ackfr_phase269_is_composer_tgid(pid_t tgid);
+
+void a52_p430_note_first_atomic(pid_t tgid)
+{
+	if (atomic_cmpxchg(&a52_p430_first_atomic, 0, 1) == 0) {
+		atomic_set(&a52_p430_atomic_tgid, (int)tgid);
+		a52_ackfr_record("P430 AT0 t=%d ns=%llu", tgid,
+			(unsigned long long)ktime_get_boottime_ns());
+	}
+}
+EXPORT_SYMBOL_GPL(a52_p430_note_first_atomic);
+
+static bool a52_p430_comm_is(struct task_struct *p, const char *name)
+{
+	char comm[TASK_COMM_LEN];
+	if (!p || !name)
+		return false;
+	get_task_comm(comm, p);
+	return !strncmp(comm, name, TASK_COMM_LEN);
+}
+
+static struct task_struct *a52_p430_find_leader(unsigned int role)
+{
+	struct task_struct *g, *best = NULL;
+	pid_t best_pid = 0;
+	int exact_tgid = atomic_read(&a52_p430_atomic_tgid);
+	bool match;
+
+	rcu_read_lock();
+	for_each_process(g) {
+		if (g->pid != g->tgid)
+			continue;
+		match = false;
+		if (role == A52_P430_ROLE_SF)
+			match = a52_p430_comm_is(g, "surfaceflinger");
+		else if (role == A52_P430_ROLE_COMPOSER)
+			match = exact_tgid > 0 ? g->tgid == exact_tgid :
+				a52_ackfr_phase269_is_composer_tgid(g->tgid);
+		else if (role == A52_P430_ROLE_SYSTEM)
+			match = a52_p430_comm_is(g, "system_server");
+		if (!match || g->pid <= best_pid)
+			continue;
+		best = g;
+		best_pid = g->pid;
+	}
+	if (best)
+		get_task_struct(best);
+	rcu_read_unlock();
+	return best;
+}
+
+static bool a52_p430_has(struct task_struct **tasks, unsigned int nr,
+			 struct task_struct *p)
+{
+	unsigned int i;
+	for (i = 0; i < nr; i++)
+		if (tasks[i] == p)
+			return true;
+	return false;
+}
+
+static bool a52_p430_add(struct task_struct **tasks, u32 *roles,
+			 unsigned int *nr, unsigned int cap,
+			 struct task_struct *p, u32 role)
+{
+	if (!p || !nr || *nr >= cap || a52_p430_has(tasks, *nr, p))
+		return false;
+	get_task_struct(p);
+	tasks[*nr] = p;
+	roles[*nr] = role;
+	(*nr)++;
+	return true;
+}
+
+static bool a52_p430_preferred(struct task_struct *p, unsigned int role)
+{
+	char comm[TASK_COMM_LEN];
+	if (!p)
+		return false;
+	get_task_comm(comm, p);
+	if (role == A52_P430_ROLE_SYSTEM)
+		return !strncmp(comm, "android.display", TASK_COMM_LEN);
+	if (role == A52_P430_ROLE_COMPOSER)
+		return strnstr(comm, "HwBinder", TASK_COMM_LEN) ||
+		       strnstr(comm, "Binder", TASK_COMM_LEN) ||
+		       strnstr(comm, "binder", TASK_COMM_LEN);
+	if (role == A52_P430_ROLE_SF)
+		return strnstr(comm, "EventThread", TASK_COMM_LEN) ||
+		       strnstr(comm, "RenderEngine", TASK_COMM_LEN) ||
+		       strnstr(comm, "Binder", TASK_COMM_LEN) ||
+		       strnstr(comm, "binder", TASK_COMM_LEN);
+	return false;
+}
+
+static void a52_p430_add_one_thread(struct task_struct *leader, u32 role,
+				    struct task_struct **tasks, u32 *roles,
+				    unsigned int *nr, unsigned int cap)
+{
+	struct task_struct *t;
+	if (!leader || *nr >= cap)
+		return;
+	rcu_read_lock();
+	for_each_thread(leader, t) {
+		if ((READ_ONCE(t->state) & TASK_UNINTERRUPTIBLE) &&
+		    a52_p430_add(tasks, roles, nr, cap, t, role)) {
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+	rcu_read_lock();
+	for_each_thread(leader, t) {
+		if (a52_p430_preferred(t, role) &&
+		    a52_p430_add(tasks, roles, nr, cap, t, role)) {
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+	rcu_read_lock();
+	for_each_thread(leader, t) {
+		if (a52_p430_add(tasks, roles, nr, cap, t, role)) {
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+}
+
+static unsigned int a52_p430_display_tasks(struct task_struct **tasks,
+		u32 *roles, unsigned int cap, int *sf_pid, int *cp_pid, int *ss_pid)
+{
+	struct task_struct *sf, *cp, *ss;
+	unsigned int nr = 0;
+
+	sf = a52_p430_find_leader(A52_P430_ROLE_SF);
+	cp = a52_p430_find_leader(A52_P430_ROLE_COMPOSER);
+	ss = a52_p430_find_leader(A52_P430_ROLE_SYSTEM);
+	if (sf) {
+		if (sf_pid) *sf_pid = sf->pid;
+		a52_p430_add(tasks, roles, &nr, cap, sf, A52_P430_ROLE_SF);
+		a52_p430_add_one_thread(sf, A52_P430_ROLE_SF, tasks, roles, &nr, cap);
+	}
+	if (cp) {
+		if (cp_pid) *cp_pid = cp->pid;
+		a52_p430_add(tasks, roles, &nr, cap, cp, A52_P430_ROLE_COMPOSER);
+		a52_p430_add_one_thread(cp, A52_P430_ROLE_COMPOSER, tasks, roles, &nr, cap);
+	}
+	if (ss) {
+		if (ss_pid) *ss_pid = ss->pid;
+		a52_p430_add(tasks, roles, &nr, cap, ss, A52_P430_ROLE_SYSTEM);
+		a52_p430_add_one_thread(ss, A52_P430_ROLE_SYSTEM, tasks, roles, &nr, cap);
+	}

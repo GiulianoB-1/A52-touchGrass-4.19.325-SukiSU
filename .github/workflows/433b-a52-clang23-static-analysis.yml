@@ -58,7 +58,263 @@ jobs:
             clang-23 clang-tools-23 lld-23 llvm-23
 
           /usr/bin/clang-23 --version
-          /usr/bin/clang-tidy-23 --version
+          TIDY_BIN="$(dpkg -L clang-tools-23 | grep -E '/bin/clang-tidy          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/433b_clang_static_analyzer.py
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          restore-keys: |
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Require usable Phase429 source snapshot
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common || { echo "Phase433B: no GKI source snapshot."; exit 1; }
+          test -s phase429-gki-out/config/final.config || { echo "Phase433B: no Phase429 config."; exit 1; }
+          echo "Phase429 source/config prerequisite: PASS"
+          echo "actions/cache exact-hit flag: ${{ steps.phase429-source.outputs.cache-hit }}"
+
+      - name: Restore Phase432 build configuration cache
+        id: phase432-build
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Reconstruct exact Phase432 source state
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' \
+            "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+      - name: Prepare Clang 23 wrappers and exact build configuration
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          TOOL23="$RUNNER_TEMP/a52-phase433b-clang23-bin"
+          mkdir -p "$BUILD" "$TOOL23" "$PWD/.ccache-phase433b-clang23" "$PWD/phase433b-report/db"
+
+          if [ ! -s "$BUILD/.config" ]; then
+            cp phase429-gki-out/config/final.config "$BUILD/.config"
+            echo "Phase432 object cache lacked .config; using unchanged Phase429 lineage config."
+          fi
+
+          cat > "$TOOL23/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang-23 "$@"
+          EOF
+          cat > "$TOOL23/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++-23 "$@"
+          EOF
+          chmod +x "$TOOL23/clang" "$TOOL23/clang++"
+
+          for t in ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip; do
+            test -x "/usr/bin/$t-23"
+            ln -sf "/usr/bin/$t-23" "$TOOL23/$t"
+          done
+
+          export PATH="$TOOL23:/usr/bin:/bin:$PATH"
+          export CCACHE_DIR="$PWD/.ccache-phase433b-clang23"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
+
+          cp "$BUILD/.config" phase433b-report/final.config
+          /usr/bin/clang-23 --version > phase433b-report/clang23-version.txt
+          "$CLANG_TIDY_23" --version > phase433b-report/clang-tidy23-version.txt
+
+      - name: Restore Phase433B Clang 23 ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-phase433b-clang23
+          key: a52xq-clang23-phase433b-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433b_clang_static_analyzer.py') }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang23-phase433b-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Rebuild only Phase433B target translation units with Clang 23
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          REPORT="$PWD/phase433b-report"
+          TOOL23="$RUNNER_TEMP/a52-phase433b-clang23-bin"
+
+          invalidate_dir() {
+            local d="$BUILD/$1"
+            [ -d "$d" ] || return 0
+            find "$d" -type f \( -name '*.o' -o -name '.*.cmd' -o -name '.*.d' \) -delete
+          }
+
+          invalidate_dir drivers/a52_display/msm
+          invalidate_dir drivers/iommu/arm/arm-smmu
+          invalidate_dir drivers/soc/qcom/msm_bus
+          invalidate_dir drivers/clk/qcom
+          invalidate_dir drivers/interconnect
+          rm -f "$BUILD/drivers/soc/qcom/rpmh-rsc.o" "$BUILD/drivers/soc/qcom/.rpmh-rsc.o.cmd"
+
+          export PATH="$TOOL23:/usr/bin:/bin:$PATH"
+          export CCACHE_DIR="$PWD/.ccache-phase433b-clang23"
+          ccache -z
+
+          set +e
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 W=1 \
+            KCFLAGS="-Wno-error -Wno-error=strict-prototypes -fno-color-diagnostics" \
+            -j"$(nproc)" \
+            drivers/a52_display/msm/ \
+            drivers/iommu/arm/arm-smmu/ \
+            drivers/soc/qcom/msm_bus/ \
+            drivers/clk/qcom/ \
+            drivers/interconnect/ \
+            drivers/soc/qcom/rpmh-rsc.o \
+            2>&1 | tee "$REPORT/target-build.log"
+          RC="${PIPESTATUS[0]}"
+          set -e
+          echo "$RC" > "$REPORT/target-build-status.txt"
+          ccache -s > "$REPORT/clang23-ccache.txt"
+          echo "Target build status: $RC"
+
+      - name: Generate targeted kernel compilation database
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          REPORT="$PWD/phase433b-report"
+          mkdir -p "$REPORT/db"
+
+          test "$(cat "$REPORT/target-build-status.txt" 2>/dev/null || echo 999)" -eq 0 || {
+            echo "Target build failed; cannot produce a trustworthy analyzer database."
+            echo 2 > "$REPORT/compile-db-status.txt"
+            exit 0
+          }
+
+          python3 "$ROOT/scripts/clang-tools/gen_compile_commands.py" \
+            -d "$BUILD" \
+            -o "$REPORT/db/compile_commands.json" \
+            "$BUILD/drivers/a52_display/msm" \
+            "$BUILD/drivers/iommu/arm/arm-smmu" \
+            "$BUILD/drivers/soc/qcom/msm_bus" \
+            "$BUILD/drivers/clk/qcom" \
+            "$BUILD/drivers/interconnect" \
+            "$BUILD/drivers/soc/qcom/rpmh-rsc.o"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('phase433b-report/db/compile_commands.json')
+          db=json.loads(p.read_text())
+          print(f"Phase433B compile database entries: {len(db)}")
+          if len(db) < 25:
+              raise SystemExit(f"Too few targeted translation units: {len(db)}")
+          PY
+          echo 0 > "$REPORT/compile-db-status.txt"
+
+      - name: Run targeted Clang 23 Static Analyzer
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          REPORT="$PWD/phase433b-report"
+          ROOT="$PWD/gki/common"
+
+          if [ "$(cat "$REPORT/compile-db-status.txt" 2>/dev/null || echo 999)" -ne 0 ]; then
+            echo "Static analysis skipped because compilation database generation failed."
+            echo 2 > "$REPORT/phase433b-status.txt"
+            exit 0
+          fi
+
+          set +e
+          python3 scripts/433b_clang_static_analyzer.py \
+            --compile-db "$REPORT/db/compile_commands.json" \
+            --source-root "$ROOT" \
+            --out-dir "$REPORT" \
+            --clang-tidy "$CLANG_TIDY_23" \
+            --jobs 4 \
+            --timeout 180 \
+            2>&1 | tee "$REPORT/phase433b-runner.log"
+          RC="${PIPESTATUS[0]}"
+          set -e
+          echo "Static analyzer runner status: $RC"
+          test -f "$REPORT/phase433b-status.txt" || echo "$RC" > "$REPORT/phase433b-status.txt"
+
+          test -f "$REPORT/phase433b-static-analysis-summary.txt" && cat "$REPORT/phase433b-static-analysis-summary.txt" || true
+          test -f "$REPORT/phase433b-display-relevant-findings.md" && sed -n '1,180p' "$REPORT/phase433b-display-relevant-findings.md" || true
+
+      - name: Save Phase433B Clang 23 ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-phase433b-clang23
+          key: a52xq-clang23-phase433b-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433b_clang_static_analyzer.py') }}-${{ github.run_id }}
+
+      - name: Upload Phase433B static-analysis report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE433B-CLANG23-STATIC-ANALYSIS-${{ github.run_number }}
+          path: |
+            phase433b-report/
+            scripts/433b_clang_static_analyzer.py
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Gate on audit completeness
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          BUILD_RC="$(cat phase433b-report/target-build-status.txt 2>/dev/null || echo 999)"
+          DB_RC="$(cat phase433b-report/compile-db-status.txt 2>/dev/null || echo 999)"
+          ANALYZER_RC="$(cat phase433b-report/phase433b-status.txt 2>/dev/null || echo 999)"
+          echo "Target build status: $BUILD_RC"
+          echo "Compile DB status: $DB_RC"
+          echo "Analyzer status: $ANALYZER_RC"
+          if [ "$BUILD_RC" -ne 0 ] || [ "$DB_RC" -ne 0 ] || [ "$ANALYZER_RC" -ne 0 ]; then
+            echo "Phase433B analysis was incomplete. Artifact was uploaded for first-error inspection."
+            exit 1
+          fi
+ | head -n1)"
+          test -n "$TIDY_BIN"
+          test -x "$TIDY_BIN"
+          "$TIDY_BIN" --version
+          echo "CLANG_TIDY_23=$TIDY_BIN" >> "$GITHUB_ENV"
           /usr/bin/ld.lld-23 --version
           python3 -m py_compile \
             scripts/430_apply_sf_dma_forensics.py \

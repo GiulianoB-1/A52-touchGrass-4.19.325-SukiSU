@@ -398,8 +398,8 @@ def final_audit(root,out):
         ("fscrypt helper impl","EXPORT_SYMBOL_GPL(fscrypt_symlink_getattr);" in hooks),
         ("fscrypt helper declarations",hdr.count("fscrypt_symlink_getattr(const struct path *path") >= 2),
         ("f2fs encrypted getattr","static int f2fs_encrypted_symlink_getattr(" in namei),
-        ("f2fs encrypted ops",".getattr\t= f2fs_encrypted_symlink_getattr," in namei or
-                              ".getattr = f2fs_encrypted_symlink_getattr," in namei),
+        ("f2fs encrypted ops",
+         re.search(r"\\.getattr\\s*=\\s*f2fs_encrypted_symlink_getattr,", namei) is not None),
         ("f2fs dir GFP_NOFS",block(inode,"struct inode *f2fs_iget(").count(
             "mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);") >= 3),
         ("f2fs mkdir GFP_NOFS","mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);" in
@@ -425,7 +425,8 @@ def final_audit(root,out):
     vm=rd(root,"mm/vmscan.c")
     if "wait_event_killable(lruvec->mm_state.wait" in vm:
         die("B3 regression: rejected MGLRU wait restored")
-    if "size += max_t(long," not in block(vm,"static long get_nr_evictable("):
+    ev=block(vm,"static long get_nr_evictable(")
+    if "size += max_t(long," not in ev or "READ_ONCE(lrugen->nr_pages[gen][type][zone]), 0);" not in ev:
         die("P167 MGLRU evictable read hardening lost")
 
     fuse=rd(root,"fs/fuse/inode.c")

@@ -222,7 +222,17 @@ jobs:
             phase429-gki-out
           key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
+      - name: Restore Phase431 object cache
+        id: phase431-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
       - name: Restore optional Phase430 object cache
+        if: steps.phase431-objects.outputs.cache-hit != 'true'
         id: phase430-objects
         uses: actions/cache/restore@v4
         with:
@@ -232,7 +242,7 @@ jobs:
             a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Prepare Phase429 build directory
-        if: steps.phase430-objects.outputs.cache-hit != 'true'
+        if: steps.phase431-objects.outputs.cache-hit != 'true' && steps.phase430-objects.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           BUILD="$PWD/workspace/gki-phase199-out"
@@ -269,7 +279,14 @@ jobs:
             "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
 
           ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
-          ! grep -Fq 'WRITE_ONCE(a52_r378_hba, hba);' "$ROOT/drivers/scsi/ufs/ufshcd.c"
+          python3 - <<'PY'
+          from pathlib import Path
+          u=Path("gki/common/drivers/scsi/ufs/ufshcd.c").read_text()
+          assert u.count("WRITE_ONCE(a52_r378_hba, hba);") == 1, "unexpected HBA assignment count"
+          assert u.count("a52_r378_start_snapshots(") == 1, "Phase378 starter has an active call site"
+          assert "Phase430: retain HBA identity even though Phase378 sampler stays retired." not in u
+          print("Phase431 UFS safety validation: PASS")
+          PY
 
           # TouchGrass-validated event-style chronology, bounded to the SF window.
           grep -Fq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -303,6 +320,13 @@ jobs:
           grep -Fq ' a52_p430_smmu_forensic' "$MAP"
 
           ccache -s
+
+      - name: Save Phase431 object cache
+        if: success() && steps.phase431-objects.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
 
       - name: Save rolling clang ccache
         if: always()

@@ -369,8 +369,12 @@ def patch_ufs(text: str) -> str:
         text = one(text, active,
             "\t/* Phase431: do not reactivate out-of-band UFS sampling. */\n",
             "remove Phase430 HBA registration")
-    if "WRITE_ONCE(a52_r378_hba, hba);" in text:
-        raise SystemExit("Phase431 found another active a52_r378_hba registration")
+    # One historical assignment is intentionally retained inside the dormant
+    # Phase378 starter.  Phase431 only removes the Phase430 probe-time publish.
+    if text.count("WRITE_ONCE(a52_r378_hba, hba);") != 1:
+        raise SystemExit("Phase431 unexpected a52_r378_hba assignment count")
+    if text.count("a52_r378_start_snapshots(") != 1:
+        raise SystemExit("Phase431 dormant Phase378 starter has an active call site")
 
     text += (
         "\n/* " + MARK + "\n"
@@ -512,8 +516,12 @@ def validate(root: Path) -> None:
         raise SystemExit("Phase431 UFS snapshot call is still active")
     if "extern void a52_p430_ufs_compact" in s:
         raise SystemExit("Phase431 UFS snapshot extern is still active")
-    if "WRITE_ONCE(a52_r378_hba, hba);" in u:
-        raise SystemExit("Phase431 UFS HBA registration is still active")
+    if u.count("WRITE_ONCE(a52_r378_hba, hba);") != 1:
+        raise SystemExit("Phase431 unexpected a52_r378_hba assignment count")
+    if u.count("a52_r378_start_snapshots(") != 1:
+        raise SystemExit("Phase431 dormant Phase378 starter has an active call site")
+    if "Phase430: retain HBA identity even though Phase378 sampler stays retired." in u:
+        raise SystemExit("Phase431 Phase430 probe-time HBA registration is still active")
 
     for tok in (
         MARK,

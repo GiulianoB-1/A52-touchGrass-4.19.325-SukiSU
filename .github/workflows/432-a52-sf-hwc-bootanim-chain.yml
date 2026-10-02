@@ -20,7 +20,11 @@ permissions:
   actions: read
 
 env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 1G
   CCACHE_COMPRESS: 'true'
@@ -49,9 +53,9 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
           python3 -m py_compile \
             scripts/430_apply_sf_dma_forensics.py \
             scripts/430_postapply_hardening.py \
@@ -82,18 +86,132 @@ jobs:
             phase429-gki-out
           key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
-      - name: Require Phase429 source cache
+      - name: Restore Phase357 source fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        id: phase357-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Restore pinned GKI source on complete baseline miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: gki-source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync exact pinned GKI on complete source miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
-          test "${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
-            echo "Phase432 cache contract: Phase429 compact source cache is missing."
-            echo "Refusing a 40-60 minute cold lineage rebuild."
-            exit 1
-          }
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Save pinned GKI source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: touchgrass-source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Save TouchGrass source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Cold reconstruct Phase357 only if both compact baselines vanished
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Phase429 and Phase357 compact caches both missing. Reconstructing Phase357 once; ccache will retain compiled units."
+          bash scripts/345_ci_build_gki.sh
+          PHASE346_PREWARMED_PHASE345=1 bash scripts/346_ci_build_gki.sh
+          PHASE357_PREWARMED_PHASE346=1 bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
           test -d gki/common
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          echo "Phase357 fallback: PASS"
+
+      - name: Save compact Phase357 fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Reconstruct Phase429 from Phase357
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/gki-phase199-out
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+          def extract(name,out):
+              start=next(i for i,l in enumerate(src) if l.strip()==f"- name: {name}")
+              runline=next(i for i in range(start+1,len(src)) if src[i].strip()=="run: |")
+              end=next((i for i in range(runline+1,len(src)) if src[i].startswith("      - name:")),len(src))
+              body=[line[10:] if line.startswith("          ") else line for line in src[runline+1:end]]
+              Path(out).write_text("set -Eeuo pipefail\n"+"\n".join(body)+"\n")
+          extract("Reapply Phase358 and Phase359","/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts","/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image","/tmp/p429-boot.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
           test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
-          test -s phase429-gki-out/config/final.config
-          echo "Phase429 compact source cache: HIT"
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 reconstructed from Phase357: PASS"
+
+      - name: Save compact Phase429 source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-refresh-${{ github.run_id }}
 
       - name: Restore exact Phase431 object cache
         id: phase431-objects
@@ -201,7 +319,7 @@ jobs:
           ccache -s
 
       - name: Save Phase432 object cache
-        if: always() && steps.phase429-source.outputs.cache-hit == 'true'
+        if: always() && steps.phase429-source.outcome != 'skipped'
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out

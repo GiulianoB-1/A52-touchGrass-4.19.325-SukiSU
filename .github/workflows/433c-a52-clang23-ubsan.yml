@@ -1,0 +1,417 @@
+name: Phase433C - Clang23 UBSAN reporting
+run-name: Phase433C - Clang23 UBSAN reporting boot diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/433c-a52-clang23-ubsan.yml
+      - scripts/432_apply_sf_hwc_bootanim_chain.py
+      - scripts/431_apply_safe_gap_forensics.py
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/430_postapply_hardening.py
+      - scripts/430_parts/**
+      - scripts/38_repack_a52_p1_boot.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
+  CCACHE_COMPRESSLEVEL: "6"
+  CCACHE_BASEDIR: \${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+
+concurrency:
+  group: a52-phase433c-clang23-ubsan-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase433C Clang23 UBSAN diagnostic
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Clang 23 toolchain
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves \
+            wget ca-certificates gnupg lsb-release unzip
+
+          wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
+          chmod +x "$RUNNER_TEMP/llvm.sh"
+          sudo "$RUNNER_TEMP/llvm.sh" 23
+          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23
+
+          /usr/bin/clang-23 --version
+          /usr/bin/ld.lld-23 --version
+
+          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/38_repack_a52_p1_boot.py
+
+          TOOL23="$RUNNER_TEMP/a52-phase433c-clang23-bin"
+          mkdir -p "$TOOL23"
+          cat > "$TOOL23/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang-23 "$@"
+          EOF
+          cat > "$TOOL23/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++-23 "$@"
+          EOF
+          chmod +x "$TOOL23/clang" "$TOOL23/clang++"
+
+          for t in ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip; do
+            test -x "/usr/bin/$t-23"
+            ln -sf "/usr/bin/$t-23" "$TOOL23/$t"
+          done
+          echo "$TOOL23" >> "$GITHUB_PATH"
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          restore-keys: |
+            a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Require usable Phase429 source snapshot
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common || {
+            echo "Phase433C: no usable GKI source snapshot."
+            exit 1
+          }
+          test -s phase429-gki-out/config/final.config || {
+            echo "Phase433C: no usable baseline config."
+            exit 1
+          }
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img || {
+            echo "Phase433C: no usable repack baseline."
+            exit 1
+          }
+          echo "Phase429 source prerequisite: PASS"
+          echo "actions/cache exact-hit flag: \${{ steps.phase429-source.outputs.cache-hit }}"
+
+      - name: Restore Phase432 build configuration cache
+        id: phase432-build
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore Phase433C object cache
+        id: phase433c-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase433c-out
+          key: a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore Phase433C Clang23 ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-phase433c-clang23
+          key: a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure isolated compiler cache
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/.ccache-phase433c-clang23"
+          export CCACHE_DIR="$PWD/.ccache-phase433c-clang23"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          ccache -s
+
+      - name: Reconstruct exact Phase432 source state
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' \
+            "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+      - name: Configure Phase433C UBSAN reporting mode
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase433c-out"
+          REPORT="$PWD/phase433c-report"
+          mkdir -p "$BUILD" "$REPORT"
+
+          if [ ! -s "$BUILD/.config" ]; then
+            if [ -s "$PWD/workspace/gki-phase199-out/.config" ]; then
+              cp "$PWD/workspace/gki-phase199-out/.config" "$BUILD/.config"
+              echo "Baseline config source: restored Phase432 build tree"
+            else
+              cp "$PWD/phase429-gki-out/config/final.config" "$BUILD/.config"
+              echo "Baseline config source: Phase429 final config (Phase430-432 are source-only diagnostics)"
+            fi
+          fi
+
+          cp "$BUILD/.config" "$REPORT/phase432-baseline.config"
+
+          "$ROOT/scripts/config" --file "$BUILD/.config" \
+            -e UBSAN \
+            -d UBSAN_TRAP \
+            -e UBSAN_BOUNDS \
+            -e UBSAN_ARRAY_BOUNDS \
+            -d UBSAN_LOCAL_BOUNDS \
+            -e UBSAN_SHIFT \
+            -e UBSAN_DIV_ZERO \
+            -d UBSAN_UNREACHABLE \
+            -e UBSAN_OBJECT_SIZE \
+            -e UBSAN_BOOL \
+            -e UBSAN_ENUM \
+            -e UBSAN_ALIGNMENT \
+            -e UBSAN_SANITIZE_ALL
+
+          export CCACHE_DIR="$PWD/.ccache-phase433c-clang23"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+          cp "$BUILD/.config" "$REPORT/phase433c-final.config"
+
+          grep -Fxq 'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_LTO_NONE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_UBSAN_TRAP is not set' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_BOUNDS=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_ARRAY_BOUNDS=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_UBSAN_LOCAL_BOUNDS is not set' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_SHIFT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_DIV_ZERO=y' "$BUILD/.config"
+          grep -Fxq '# CONFIG_UBSAN_UNREACHABLE is not set' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_OBJECT_SIZE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_BOOL=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_ENUM=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_ALIGNMENT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_UBSAN_SANITIZE_ALL=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_CONSOLE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+
+          diff -u "$REPORT/phase432-baseline.config" "$REPORT/phase433c-final.config" \
+            > "$REPORT/phase433c-config-diff.txt" || true
+
+          {
+            echo "Clang:"
+            /usr/bin/clang-23 --version
+            echo
+            echo "UBSAN config:"
+            grep -E '^(CONFIG_UBSAN|# CONFIG_UBSAN)' "$BUILD/.config" || true
+            echo
+            echo "Optimization/LTO:"
+            grep -E '^(CONFIG_CC_OPTIMIZE|CONFIG_LTO|# CONFIG_LTO)' "$BUILD/.config" || true
+          } > "$REPORT/phase433c-toolchain-config.txt"
+
+          echo "Phase433C UBSAN reporting config: PASS"
+          cat "$REPORT/phase433c-toolchain-config.txt"
+
+      - name: Build Phase433C kernel
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase433c-out"
+          REPORT="$PWD/phase433c-report"
+
+          export CCACHE_DIR="$PWD/.ccache-phase433c-clang23"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="-Wno-error -Wno-error=strict-prototypes" \
+            -j"$(nproc)" Image 2>&1 | tee "$REPORT/phase433c-build.log"
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          grep -aFq 'P432 SF0 p=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P432 AT n=%u t=%d test=%u fl=%x objs=%u' "$IMAGE"
+          grep -aFq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$IMAGE"
+          grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
+          grep -Fq ' a52_p430_dma_finalize' "$MAP"
+          grep -Fq ' a52_p430_smmu_forensic' "$MAP"
+
+          grep -E ' __ubsan_handle_' "$MAP" > "$REPORT/phase433c-ubsan-symbols.txt"
+          test -s "$REPORT/phase433c-ubsan-symbols.txt"
+          grep -Eq '__ubsan_handle_(out_of_bounds|type_mismatch|shift_out_of_bounds|divrem_overflow|load_invalid_value)' \
+            "$REPORT/phase433c-ubsan-symbols.txt"
+
+          {
+            echo "Image bytes: $(stat -c '%s' "$IMAGE")"
+            echo "System.map bytes: $(stat -c '%s' "$MAP")"
+            echo "UBSAN handler count: $(wc -l < "$REPORT/phase433c-ubsan-symbols.txt")"
+          } > "$REPORT/phase433c-build-metrics.txt"
+
+          ccache -s > "$REPORT/phase433c-ccache.txt"
+          cat "$REPORT/phase433c-build-metrics.txt"
+
+      - name: Save Phase433C object cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase433c-out
+          key: a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+
+      - name: Save Phase433C Clang23 ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-phase433c-clang23
+          key: a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+
+      - name: Package Phase433C boot diagnostic
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase433c-out"
+          OUT="$PWD/phase433c-gki-out"
+          REPORT="$PWD/phase433c-report"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase433c-clang23-ubsan-reporting-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          mkdir -p "$OUT/compile" "$OUT/config" "$OUT/source" "$OUT/audit" "$OUT/report" "$OUT/package"
+
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp -a "$REPORT/." "$OUT/report/"
+
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/syscall.c"
+          cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
+          cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
+            "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$ROOT/drivers/soc/qcom/rpmh-rsc.c" "$OUT/source/rpmh-rsc.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/dsi_display.c"
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_rm.c" "$OUT/source/sde_rm.c"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/source/arm-smmu.c"
+
+          cp scripts/430_apply_sf_dma_forensics.py \
+             scripts/430_postapply_hardening.py \
+             scripts/431_apply_safe_gap_forensics.py \
+             scripts/432_apply_sf_hwc_bootanim_chain.py \
+             scripts/38_repack_a52_p1_boot.py \
+             "$OUT/audit/"
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" \
+            --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" \
+            --report "$OUT/package/phase433c-repack-report.json"
+
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE433C-NOTES.txt" <<'EOF'
+          Phase433C Clang 23 UBSAN reporting diagnostic
+          =========================================================
+          - Separate runtime sanitizer experiment based on exact Phase432 source/instrumentation lineage.
+          - Compiler: Clang 23.
+          - Optimization baseline retained: O2.
+          - LTO baseline retained exactly as Phase432: LTO_NONE.
+          - UBSAN trap mode is disabled so undefined behavior is reported instead of immediately trapped.
+          - Enabled UBSAN checks include bounds, shift, divide-by-zero, object-size, bool, enum, and alignment.
+          - Phase430 exact-F0 DSI/TCS/SMMU/ATOS forensic lane remains intact.
+          - Phase432 SF/HWC/bootanimation chain remains intact.
+          - UFS asynchronous sampler remains disabled.
+          - Persistent recorder remains 2 MiB Samsung debug partition + 1 MiB persistent RAM.
+          - PSTORE/console/ramoops remain enabled so UBSAN printk reports can survive the existing F0 panic/reboot path.
+          - This build changes timing. A changed stall duration or disappearance of the failure is NOT a fix.
+          - Treat an actual UBSAN report in the relevant display/platform path as strong evidence.
+          - No Phase433A/433B source warning fixes are included.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+          sha256sum "$FINAL"
+          file "$FINAL"
+
+      - name: Upload Phase433C diagnostic bundle
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE433C-CLANG23-UBSAN-\${{ github.run_number }}
+          path: phase433c-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase433C boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE433C-CLANG23-UBSAN-\${{ github.run_number }}-BOOT-IMG
+          path: phase433c-gki-out/package/boot-phase433c-clang23-ubsan-reporting-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Phase433C failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE433C-FAILURE-\${{ github.run_number }}
+          path: |
+            phase433c-report/
+            workspace/gki-phase433c-out/.config
+            workspace/gki-phase433c-out/System.map
+          if-no-files-found: ignore
+          compression-level: 1
+          retention-days: 14

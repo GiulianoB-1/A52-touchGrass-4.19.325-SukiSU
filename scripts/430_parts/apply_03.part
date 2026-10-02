@@ -1,0 +1,166 @@
+	a52_p430_dma_sideband = memremap(A52_P430_DMA_PHYS,
+		A52_P430_DMA_BYTES, MEMREMAP_WB);
+	if (a52_p430_dma_sideband) {
+		memset(a52_p430_dma_sideband, 0, A52_P430_DMA_BYTES);
+		wmb();
+		__flush_dcache_area(a52_p430_dma_sideband, A52_P430_DMA_BYTES);
+	}
+	hrtimer_init(&a52_p430_dma_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	a52_p430_dma_timer.function = a52_p430_dma_timer_fn;
+	return 0;
+}
+subsys_initcall(a52_p430_dma_init);
+'''
+
+SMMU_BLOCK = r'''
+/* A52_PHASE430_SF_DMA_FORENSICS_V1
+ * Passive SID800/CB2 state first, then one explicit ATOS translation.  The
+ * software pgtable walk and hardware PAR result are kept separate so a hard
+ * translation timeout cannot silently fall back and masquerade as success.
+ */
+struct a52_p430_smmu_diag {
+	u32 valid, rpm_ret, sid, sme, cb, irq;
+	u32 smr, s2cr, cbar, cba2r, cbfrsynra;
+	u32 sctlr, actlr, tcr, tcr2, mair0, mair1, contextidr;
+	u32 fsr, fsynr0, gfsr, gfsynr0, gfsynr1, gfsynr2;
+	u32 tlbstatus, gtlbstatus, atos_status, atos_timeout;
+	u64 ttbr0, ttbr1, far, sw_phys, hw_phys, par;
+} __packed;
+
+int a52_p430_smmu_forensic(u64 iova, void *buffer, size_t len)
+{
+	struct a52_p430_smmu_diag *o = buffer;
+	struct a52_p427_handoff_state *h = &a52_p427_handoff;
+	struct arm_smmu_device *smmu = READ_ONCE(h->smmu);
+	struct iommu_domain *domain = READ_ONCE(h->domain);
+	struct arm_smmu_domain *sd;
+	struct arm_smmu_cfg *cfg;
+	struct io_pgtable_ops *ops;
+	void __iomem *reg;
+	unsigned long flags;
+	u32 tmp = ~0U;
+	u64 va, par;
+	int ret;
+
+	if (!o || len < sizeof(*o))
+		return -EINVAL;
+	memset(o, 0, sizeof(*o));
+	o->sid = h->sid;
+	o->sme = (u32)h->sme;
+	o->cb = h->chosen_cb;
+	o->irq = (u32)h->irq;
+	if (!smmu || !domain || h->sme < 0 ||
+	    h->sme >= smmu->num_mapping_groups ||
+	    h->chosen_cb >= smmu->num_context_banks)
+		return -ENODEV;
+	sd = to_smmu_domain(domain);
+	cfg = &sd->cfg;
+	ops = sd->pgtbl_ops;
+
+	ret = arm_smmu_rpm_get(smmu);
+	o->rpm_ret = (u32)ret;
+	if (ret < 0)
+		return ret;
+
+	/* Passive snapshot before ATOS or any fault clear. */
+	o->smr = smmu->smrs ? arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(h->sme)) : 0U;
+	o->s2cr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_S2CR(h->sme));
+	o->cbar = arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBAR(cfg->cbndx));
+	o->cba2r = arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBA2R(cfg->cbndx));
+	o->cbfrsynra = arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBFRSYNRA(cfg->cbndx));
+	o->sctlr = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_SCTLR);
+	o->actlr = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_ACTLR);
+	o->tcr = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_TCR);
+	o->tcr2 = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_TCR2);
+	o->ttbr0 = arm_smmu_cb_readq(smmu, cfg->cbndx, ARM_SMMU_CB_TTBR0);
+	o->ttbr1 = arm_smmu_cb_readq(smmu, cfg->cbndx, ARM_SMMU_CB_TTBR1);
+	o->mair0 = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_S1_MAIR0);
+	o->mair1 = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_S1_MAIR1);
+	o->contextidr = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_CONTEXTIDR);
+	o->fsr = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_FSR);
+	o->fsynr0 = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_FSYNR0);
+	o->far = arm_smmu_cb_readq(smmu, cfg->cbndx, ARM_SMMU_CB_FAR);
+	o->gfsr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSR);
+	o->gfsynr0 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR0);
+	o->gfsynr1 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR1);
+	o->gfsynr2 = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSYNR2);
+	o->tlbstatus = arm_smmu_cb_read(smmu, cfg->cbndx, ARM_SMMU_CB_TLBSTATUS);
+	o->gtlbstatus = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sTLBGSTATUS);
+	if (ops)
+		o->sw_phys = (u64)ops->iova_to_phys(ops, (unsigned long)iova);
+
+	/* Explicit hardware ATOS after the passive image is complete. */
+	spin_lock_irqsave(&sd->cb_lock, flags);
+	va = iova & ~0xfffULL;
+	if (cfg->fmt == ARM_SMMU_CTX_FMT_AARCH64)
+		arm_smmu_cb_writeq(smmu, cfg->cbndx, ARM_SMMU_CB_ATS1PR, va);
+	else
+		arm_smmu_cb_write(smmu, cfg->cbndx, ARM_SMMU_CB_ATS1PR, (u32)va);
+	reg = arm_smmu_page(smmu, ARM_SMMU_CB(smmu, cfg->cbndx)) + ARM_SMMU_CB_ATSR;
+	if (readl_poll_timeout_atomic(reg, tmp, !(tmp & ARM_SMMU_ATSR_ACTIVE), 5, 50)) {
+		o->atos_timeout = 1U;
+		o->atos_status = tmp;
+		spin_unlock_irqrestore(&sd->cb_lock, flags);
+	} else {
+		o->atos_status = tmp;
+		par = arm_smmu_cb_readq(smmu, cfg->cbndx, ARM_SMMU_CB_PAR);
+		o->par = par;
+		if (!(par & ARM_SMMU_CB_PAR_F))
+			o->hw_phys = (par & GENMASK_ULL(39, 12)) | (iova & 0xfffULL);
+		spin_unlock_irqrestore(&sd->cb_lock, flags);
+	}
+	o->valid = 1U;
+	arm_smmu_rpm_put(smmu);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(a52_p430_smmu_forensic);
+'''
+
+
+def patch_syscall(text:str)->str:
+    if MARK in text:
+        return text
+    start = text.find('/* A52_PHASE429_APEX_SF_FOCUSED_CENSUS_V1')
+    if start < 0:
+        raise SystemExit('Phase430 requires Phase429 task block')
+    end_marker = 'late_initcall(a52_p429_init);\n'
+    end = text.find(end_marker, start)
+    if end < 0:
+        raise SystemExit('Phase429 task block end missing')
+    end += len(end_marker)
+    return text[:start] + TASK_BLOCK + text[end:]
+
+
+def patch_ufs(text:str)->str:
+    if MARK in text:
+        return text
+    text = one(text, 'void a52_p429_ufs_compact(unsigned int snapshot_id)',
+               'void a52_p430_ufs_compact(unsigned int snapshot_id)', 'rename UFS helper')
+    text = one(text, 'EXPORT_SYMBOL_GPL(a52_p429_ufs_compact);',
+               'EXPORT_SYMBOL_GPL(a52_p430_ufs_compact);', 'rename UFS export')
+    text = text.replace('"P429 U id=%u h=0"', '"P430 U id=%u h=0"', 1)
+    text = text.replace('"P429 U id=%u h=1 rpm=%u db=%x out=%lx old=%lld',
+                        '"P430 U id=%u h=1 rpm=%u db=%x out=%lx old=%lld', 1)
+    anchor = '\thba->irq = irq;\n'
+    text = one(text, anchor, anchor + '\t/* Phase430: retain HBA identity even though Phase378 sampler stays retired. */\n\tWRITE_ONCE(a52_r378_hba, hba);\n', 'register UFS HBA')
+    return text + '\n/* '+MARK+': independent UFS HBA registration. */\n'
+
+
+def patch_msm(text:str)->str:
+    if MARK in text:
+        return text
+    anchor = 'static atomic_t a52_p418_atomic_err = ATOMIC_INIT(0);\n'
+    text = one(text, anchor, anchor + 'extern void a52_p430_note_first_atomic(pid_t tgid);\n', 'P430 atomic extern')
+    anchor2 = '\t*seq = (unsigned int)atomic_inc_return(&a52_p418_atomic_seq);\n'
+    text = one(text, anchor2, anchor2 + '\tif (*seq == 1U)\n\t\ta52_p430_note_first_atomic(current->tgid);\n', 'first atomic endpoint')
+    return text + '\n/* '+MARK+': first atomic endpoint notifier. */\n'
+
+
+def patch_hwc(text:str)->str:
+    if MARK in text:
+        return text
+    inc = '#include <linux/hrtimer.h>\n'
+    if inc not in text:
+        text = one(text, '#include <linux/delay.h>\n', '#include <linux/delay.h>\n'+inc, 'hrtimer include')
+    anchor = 'EXPORT_SYMBOL_GPL(a52_p427_road_dump);\n'
+    text = one(text, anchor, anchor + '\n' + DMA_BLOCK + '\n', 'DMA forensic block')

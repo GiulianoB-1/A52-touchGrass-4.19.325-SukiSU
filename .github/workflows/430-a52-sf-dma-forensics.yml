@@ -1,0 +1,281 @@
+name: Phase430 - SF + DMA forensics
+run-name: Phase430 - SF + DMA forensics
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/430-a52-sf-dma-forensics.yml
+      - .github/workflows/429-a52-apex-sf-focused-census.yml
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/decode_phase430_sf_dma.py
+      - scripts/430_parts/**
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+
+concurrency:
+  group: a52-phase430-sf-dma-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase430 SF + DMA forensics
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner and verify split scripts
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             git make gcc g++ python3 bc bison flex clang lld llvm             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu             libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 scripts/430_apply_sf_dma_forensics.py --help >/dev/null
+          python3 scripts/decode_phase430_sf_dma.py --help >/dev/null
+
+      - name: Restore exact Phase357 baseline
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Require exact Phase357 cache
+        run: |
+          set -Eeuo pipefail
+          echo "Phase357 cache hit: ${{ steps.phase357-cache.outputs.cache-hit }}"
+          test "${{ steps.phase357-cache.outputs.cache-hit }}" = "true" || {
+            echo "Phase430 requires the exact Phase357 baseline cache; refusing an hour-long cold rebuild."
+            exit 1
+          }
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase357-gki-out/package/boot.img
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1'             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+
+      - name: Restore Phase430 incremental compile cache
+        id: phase430-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/430_parts/**', 'scripts/430_apply_sf_dma_forensics.py') }}
+          restore-keys: |
+            a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase429-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Reconstruct exact Phase429 source lineage
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+
+          def extract(step_name, out):
+              start = next(i for i,l in enumerate(src)
+                           if l.strip() == f"- name: {step_name}")
+              runline = next(i for i in range(start + 1, len(src))
+                             if src[i].strip() == "run: |")
+              end = next((i for i in range(runline + 1, len(src))
+                          if src[i].startswith("      - name:")), len(src))
+              body = [
+                  line[10:] if line.startswith("          ") else line
+                  for line in src[runline + 1:end]
+              ]
+              Path(out).write_text("set -Eeuo pipefail\n" + "\n".join(body) + "\n")
+
+          extract("Reapply Phase358 and Phase359", "/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts", "/tmp/p429-build.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          python3 scripts/429_apply_apex_sf_focused_census.py             --root "$PWD/gki/common" --check-only
+
+      - name: Apply Phase430 diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+
+          # First Phase430 flash must use the real command IOVA.
+          grep -q 'early_param("a52_p430_bad_iova"'             "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          if grep -q 'a52_p430_bad_iova' "$PWD/phase429-gki-out/PHASE429-BOOT.json"; then
+            echo "unexpected bad-IOVA parameter inherited from Phase429"
+            exit 1
+          fi
+
+      - name: Incremental compile Phase430
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+
+          grep -Fq ' a52_p430_note_first_atomic' "$MAP"
+          grep -Fq ' a52_p430_dma_finalize' "$MAP"
+          grep -Fq ' a52_p430_smmu_forensic' "$MAP"
+          grep -Fq ' a52_p430_bad_iova_active' "$MAP"
+          grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
+          grep -aFq 'P430 D n=%u ret=%d irq=%u raw=%x bad=%u sr=%d' "$IMAGE"
+          grep -aFq 'P430 SF0 p=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P430 U id=%u h=1 rpm=%u db=%x out=%lx old=%lld' "$IMAGE"
+          grep -aFq 'A52_PHASE430_SF_DMA_FORENSICS_V1' "$IMAGE" || true
+
+      - name: Save Phase430 incremental compile cache
+        if: always() && steps.phase430-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase430-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/430_parts/**', 'scripts/430_apply_sf_dma_forensics.py') }}
+
+      - name: Package Phase430
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase430-gki-out"
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase430-sf-dma-forensics-v1.img"
+
+          test -s "$SOURCE_BOOT"
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+
+          cp "$IMAGE" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/syscall.c"
+          cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
+          cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/source/arm-smmu.c"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"             "$OUT/source/a52_ack_secure_flight_recorder.c"
+
+          mkdir -p "$OUT/audit/430_parts"
+          cp scripts/430_apply_sf_dma_forensics.py              scripts/decode_phase430_sf_dma.py "$OUT/audit/"
+          cp scripts/430_parts/* "$OUT/audit/430_parts/"
+
+          gzip -n -c "$IMAGE" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py             --source "$SOURCE_BOOT"             --kernel "$OUT/package/Image.gz"             --output "$FINAL"             --report "$OUT/package/phase430-repack-report.json"
+
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec=importlib.util.spec_from_file_location("a52repack","scripts/38_repack_a52_p1_boot.py")
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          p=Path("phase430-gki-out/package/boot-phase430-sf-dma-forensics-v1.img")
+          boot=m.parse_boot(p.read_bytes())
+          toks=boot["cmdline"].split()
+          assert "nohlt" in toks
+          assert "cpuidle.off=1" in toks
+          assert "panic=1" in toks
+          assert not any(x.split("=",1)[0] == "a52_p430_bad_iova" for x in toks)
+          Path("phase430-gki-out/PHASE430-BOOT.json").write_text(json.dumps({
+              "cmdline":boot["cmdline"],
+              "invalid_iova_control_compiled":True,
+              "invalid_iova_control_enabled":False,
+              "diagnostic_only":True,
+          },indent=2,sort_keys=True)+"\n")
+          PY
+
+          cat > "$OUT/PHASE430-NOTES.txt" <<'EOF'
+          Phase430 SF + DMA forensics
+          ==========================
+          Diagnostic-only relative to Phase429.
+
+          Userspace lane:
+          - SurfaceFlinger-relative snapshots at +5/+20/+40/+60/+70 seconds.
+          - Endpoint snapshot at the first DRM atomic request.
+          - SurfaceFlinger, exact Phase269 composer TGID/HwBinder, system_server.
+          - Three 256-byte copies per task record with CRC32C and majority recovery.
+          - UFS HBA pointer is registered independently of the retired Phase378 sampler.
+
+          Exact-F0 DMA lane:
+          - Correct Display RSC child_cfg decoding: two TCS, 16 commands/TCS.
+          - Raw DSI register samples pre-trigger, post-trigger, +10us, +100us,
+            +1ms, +10ms, and timeout/final.
+          - DSI local clock/power snapshot.
+          - Passive SMMU stream/context/global/TLB snapshot before ATOS.
+          - Software io_pgtable translation and explicit ATS1PR/ATSR/PAR hardware
+            translation are recorded separately.
+          - Three CRC32C DMA-image copies are persisted before timeout panic.
+          - PANIC_ARMED marker + dump_stack() precede the inherited panic.
+
+          Positive control:
+          - a52_p430_bad_iova is compiled but intentionally NOT enabled in this image.
+          - A later sacrificial flash may enable it to test whether DSI DMA reaches SMMU.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z |             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase430 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE430-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/arch/arm64/kernel/syscall.c
+            gki/common/drivers/scsi/ufs/ufshcd.c
+            gki/common/drivers/a52_display/msm/msm_drv.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            scripts/430_apply_sf_dma_forensics.py
+            scripts/decode_phase430_sf_dma.py
+            scripts/430_parts/
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase430
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE430-SF-DMA-FORENSICS-${{ github.run_number }}
+          path: phase430-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase430 boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE430-SF-DMA-FORENSICS-${{ github.run_number }}-BOOT-IMG
+          path: phase430-gki-out/package/boot-phase430-sf-dma-forensics-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

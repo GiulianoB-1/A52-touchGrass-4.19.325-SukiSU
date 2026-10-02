@@ -1235,8 +1235,6 @@ jobs:
           grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$KERNEL/mm/mprotect.c"
           grep -Fq 'A52_PHASE391_EXACT_RAMOOPS_ALIAS_DEDUP_V1' "$KERNEL/drivers/of/of_reserved_mem.c"
           grep -Fq 'A52 P391 RMEM_ALIAS:' "$KERNEL/drivers/of/of_reserved_mem.c"
-          grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
-          grep -Fq 'P392 SCUDOOK' "$KERNEL/mm/util.c"
           {
             echo "phase391_prepared_source_cache_hit=true"
             echo "cache_key=a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c"

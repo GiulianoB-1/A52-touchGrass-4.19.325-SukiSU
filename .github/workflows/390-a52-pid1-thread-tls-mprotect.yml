@@ -1092,8 +1092,6 @@ jobs:
           grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
           grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$KERNEL/mm/mprotect.c"
           grep -Fq 'P389 WPCOMPAT' "$KERNEL/mm/mprotect.c"
-          grep -Fq 'A52_PHASE390_PID1_THREAD_TLS_MPROTECT_COMPAT_V1' "$KERNEL/mm/mprotect.c"
-          grep -Fq 'P390 TLSMP old=%lx/%zx new=%lx/%zx' "$KERNEL/mm/mprotect.c"
           {
             echo "phase389_prepared_source_cache_hit=true"
             echo "cache_key=a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62"

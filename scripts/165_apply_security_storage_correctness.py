@@ -67,11 +67,26 @@ def bpf(r,o):
         if q<0 or e<0: die("BPF alloc_mem branch missing")
         z=x[q:e]
         # Vendor 4.19 emits this block with spaces rather than the donor tab layout.
-        # Match the semantic type-check instead of exact indentation.
+        # Match the semantic type check and splice after it. This deliberately
+        # avoids re.sub replacement escaping.
         pat=re.compile(
-            r"(?P<guard>else if \\(type != expected_type\\)\\s*\\n\\s*goto err_type;)"
+            r"else if \(type != expected_type\)\s*\n\s*goto err_type;"
         )
-        add=r"""\\g<guard>
+        vendor_shape="""} else if (arg_type_is_alloc_mem_ptr(arg_type)) {
+            expected_type = PTR_TO_MEM;
+            if (register_is_null(reg) &&
+                arg_type == ARG_PTR_TO_ALLOC_MEM_OR_NULL)
+                /* final test in check_stack_boundary() */;
+            else if (type != expected_type)
+                goto err_type;
+            if (meta->ptr_id || !reg->id) {
+"""
+        if len(pat.findall(vendor_shape)) != 1:
+            die("internal BPF vendor-shape regex self-test failed")
+        m=pat.search(z)
+        if not m:
+            die("BPF alloc_mem semantic type-check not found")
+        insert="""
 
         /*
          * Upstream 64620e0a: submit/discard use ARG_PTR_TO_ALLOC_MEM and
@@ -84,8 +99,7 @@ def bpf(r,o):
                         regno);
                 return -EACCES;
         }"""
-        z,n=pat.subn(add,z,count=1)
-        if n!=1: die(f"BPF alloc_mem semantic type-check count {n}")
+        z=z[:m.end()]+insert+z[m.end():]
         x=x[:q]+z+x[e:]; s=s[:a]+x+s[b:]
         o.append("A2_BPF_OFFSET=patched")
     else: o.append("A2_BPF_OFFSET=present")

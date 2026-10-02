@@ -1,0 +1,235 @@
+	if (sf) put_task_struct(sf);
+	if (cp) put_task_struct(cp);
+	if (ss) put_task_struct(ss);
+	return nr;
+}
+
+static void a52_p430_fill(struct a52_p430_task_record *r,
+			  struct task_struct *p, unsigned int snapshot_id,
+			  unsigned int role, unsigned int slot)
+{
+	struct pt_regs *regs;
+	memset(r, 0, sizeof(*r));
+	r->magic = A52_P430_MAGIC;
+	r->ns = ktime_get_boottime_ns();
+	r->snapshot_id = snapshot_id;
+	r->role = role;
+	r->slot = slot;
+	r->pid = (u32)p->pid;
+	r->tgid = (u32)p->tgid;
+	r->ppid = (u32)task_ppid_nr(p);
+	r->task_state = (u32)READ_ONCE(p->state);
+	r->exit_state = (u32)READ_ONCE(p->exit_state);
+	r->task_flags = (u32)READ_ONCE(p->flags);
+#ifdef CONFIG_SMP
+	r->on_cpu = (u32)READ_ONCE(p->on_cpu);
+#endif
+	r->on_rq = (u32)READ_ONCE(p->on_rq);
+	r->task_cpu = (u32)task_cpu(p);
+	r->sum_exec_runtime = READ_ONCE(p->se.sum_exec_runtime);
+	r->nvcsw = (u32)READ_ONCE(p->nvcsw);
+	r->nivcsw = (u32)READ_ONCE(p->nivcsw);
+	if (p->signal) {
+		r->nr_threads = (u32)READ_ONCE(p->signal->nr_threads);
+		r->live_threads = (u32)atomic_read(&p->signal->live);
+	}
+	get_task_comm(r->comm, p);
+	r->wchan = (u64)get_wchan(p);
+	if (r->wchan)
+		sprint_symbol(r->wchan_symbol, (unsigned long)r->wchan);
+	if (try_get_task_stack(p)) {
+		r->stack_nr = stack_trace_save_tsk(p, r->stack, A52_P430_STACK, 0);
+		if (p->mm) {
+			regs = task_pt_regs(p);
+			r->user_pc = READ_ONCE(regs->pc);
+			r->user_lr = READ_ONCE(regs->regs[30]);
+			r->user_sp = READ_ONCE(regs->sp);
+		}
+		put_task_stack(p);
+	}
+	r->crc32c = a52_r382_crc32c(r, offsetof(struct a52_p430_task_record, crc32c));
+	r->commit = A52_P430_COMMIT;
+	r->version = A52_P430_VERSION;
+}
+
+static void a52_p430_write(unsigned int slot, const struct a52_p430_task_record *r)
+{
+	unsigned int off;
+	void *d0, *d1, *d2;
+	if (!a52_p430_task_sideband || !r || slot >= A52_P430_SLOTS)
+		return;
+	off = slot * A52_P430_SLOT_BYTES;
+	d0 = (u8 *)a52_p430_task_sideband + off;
+	d1 = (u8 *)a52_p430_task_sideband + A52_P430_COPY_BYTES + off;
+	d2 = (u8 *)a52_p430_task_sideband + 2U * A52_P430_COPY_BYTES + off;
+	memcpy(d0, r, sizeof(*r));
+	memcpy(d1, r, sizeof(*r));
+	memcpy(d2, r, sizeof(*r));
+	wmb();
+	__flush_dcache_area(d0, sizeof(*r));
+	__flush_dcache_area(d1, sizeof(*r));
+	__flush_dcache_area(d2, sizeof(*r));
+}
+
+static void a52_p430_snapshot(unsigned int snapshot_id)
+{
+	struct task_struct *tasks[A52_P430_PER_SNAPSHOT];
+	u32 roles[A52_P430_PER_SNAPSHOT];
+	struct a52_p430_task_record r;
+	unsigned int nr, i, base = snapshot_id * A52_P430_PER_SNAPSHOT;
+	int sf = -1, cp = -1, ss = -1;
+
+	memset(tasks, 0, sizeof(tasks));
+	memset(roles, 0, sizeof(roles));
+	nr = a52_p430_display_tasks(tasks, roles, A52_P430_PER_SNAPSHOT,
+		&sf, &cp, &ss);
+	a52_p430_ufs_compact(snapshot_id);
+	a52_ackfr_record("P430 S id=%u nr=%u sf=%d cp=%d ss=%d rel=%llu",
+		snapshot_id, nr, sf, cp, ss,
+		(unsigned long long)(a52_p430_sf_start_ns ?
+		(ktime_get_boottime_ns() - a52_p430_sf_start_ns) : 0));
+	for (i = 0; i < nr; i++) {
+		a52_p430_fill(&r, tasks[i], snapshot_id, roles[i], i);
+		a52_p430_write(base + i, &r);
+		put_task_struct(tasks[i]);
+	}
+}
+
+static int a52_p430_sampler_fn(void *unused)
+{
+	static const u32 rel_s[5] = { 5U, 20U, 40U, 60U, 70U };
+	unsigned int next = 0;
+	bool endpoint_done = false;
+	struct task_struct *sf;
+	u64 elapsed;
+
+	while (!kthread_should_stop()) {
+		if (!a52_p430_sf_start_ns) {
+			sf = a52_p430_find_leader(A52_P430_ROLE_SF);
+			if (sf) {
+				a52_p430_sf_start_ns = ktime_get_boottime_ns();
+				a52_ackfr_record("P430 SF0 p=%d ns=%llu", sf->pid,
+					(unsigned long long)a52_p430_sf_start_ns);
+				put_task_struct(sf);
+			}
+		}
+		if (a52_p430_sf_start_ns) {
+			elapsed = div_u64(ktime_get_boottime_ns() - a52_p430_sf_start_ns,
+				NSEC_PER_SEC);
+			while (next < ARRAY_SIZE(rel_s) && elapsed >= rel_s[next]) {
+				a52_p430_snapshot(next);
+				next++;
+			}
+			if (!endpoint_done && atomic_read(&a52_p430_first_atomic)) {
+				a52_p430_snapshot(5U);
+				endpoint_done = true;
+			}
+			if (endpoint_done && next >= ARRAY_SIZE(rel_s))
+				break;
+		}
+		if (msleep_interruptible(100) && kthread_should_stop())
+			break;
+	}
+	return 0;
+}
+
+static int __init a52_p430_init(void)
+{
+	BUILD_BUG_ON(sizeof(struct a52_p430_task_record) != A52_P430_SLOT_BYTES);
+	BUILD_BUG_ON(A52_P430_SNAPSHOTS * A52_P430_PER_SNAPSHOT != A52_P430_SLOTS);
+	BUILD_BUG_ON(A52_P430_SLOTS * A52_P430_SLOT_BYTES > A52_P430_COPY_BYTES);
+	BUILD_BUG_ON(3U * A52_P430_COPY_BYTES > A52_P430_TASK_BYTES);
+	a52_p430_task_sideband = memremap(A52_P430_TASK_PHYS,
+		A52_P430_TASK_BYTES, MEMREMAP_WB);
+	if (!a52_p430_task_sideband)
+		return 0;
+	memset(a52_p430_task_sideband, 0, A52_P430_TASK_BYTES);
+	wmb();
+	__flush_dcache_area(a52_p430_task_sideband, A52_P430_TASK_BYTES);
+	a52_p430_sampler = kthread_run(a52_p430_sampler_fn, NULL, "a52_p430_sf");
+	if (IS_ERR(a52_p430_sampler))
+		a52_p430_sampler = NULL;
+	return 0;
+}
+late_initcall(a52_p430_init);
+'''
+
+DMA_BLOCK = r'''
+/* A52_PHASE430_SF_DMA_FORENSICS_V1
+ * Exact-F0 DMA forensic image.  Timing samples stay in normal RAM until the
+ * completion outcome is known; timeout then persists three CRC32C copies into
+ * the dormant upper pmsg sideband before the deliberate panic.
+ */
+#define A52_P430_DMA_PHYS          0xB1BF8000ULL
+#define A52_P430_DMA_BYTES         0x1800U
+#define A52_P430_DMA_COPY_BYTES    0x0800U
+#define A52_P430_DMA_MAGIC         0x303334414d445349ULL
+#define A52_P430_DMA_COMMIT        0x430d0de5U
+#define A52_P430_DMA_VERSION       1U
+#define A52_P430_DMA_SAMPLES       7U
+#define A52_P430_TCS_CMDS          16U
+
+struct a52_p430_dma_sample {
+	u64 ns;
+	u32 point;
+	u32 status;
+	u32 fifo;
+	u32 clk_ctrl;
+	u32 clk_status;
+	u32 int_ctrl;
+	u32 lane_status;
+	u32 dma_ctrl;
+	u32 dma_offset;
+	u32 dma_length;
+	u32 sw_trigger;
+	u32 trig_ctrl;
+	u32 ack_err;
+	u32 timeout_status;
+	u32 phy_err;
+	u32 axi2ahb;
+	u32 err_mask0;
+} __packed;
+
+struct a52_p430_tcs_cmd { u32 addr, data, status; } __packed;
+struct a52_p430_tcs {
+	u32 control, status, enable, wait;
+	struct a52_p430_tcs_cmd cmd[A52_P430_TCS_CMDS];
+} __packed;
+
+struct a52_p430_smmu_diag {
+	u32 valid, rpm_ret, sid, sme, cb, irq;
+	u32 smr, s2cr, cbar, cba2r, cbfrsynra;
+	u32 sctlr, actlr, tcr, tcr2, mair0, mair1, contextidr;
+	u32 fsr, fsynr0, gfsr, gfsynr0, gfsynr1, gfsynr2;
+	u32 tlbstatus, gtlbstatus, atos_status, atos_timeout;
+	u64 ttbr0, ttbr1, far, sw_phys, hw_phys, par;
+} __packed;
+
+struct a52_p430_dma_image {
+	u64 magic;
+	u64 capture_ns;
+	u64 iova;
+	u32 sample_count;
+	u32 wait_ret;
+	u32 irq_trig;
+	u32 bad_iova;
+	u32 child_cfg;
+	u32 num_tcs;
+	u32 ncpt;
+	u32 valid;
+	struct a52_p430_dma_sample sample[A52_P430_DMA_SAMPLES];
+	struct a52_p430_tcs tcs[2];
+	u32 clk[20];
+	u32 pwr[4];
+	struct a52_p430_smmu_diag smmu;
+	u32 crc32c;
+	u32 commit;
+	u32 version;
+} __packed;
+
+static struct a52_p430_dma_image a52_p430_dma;
+static void *a52_p430_dma_sideband;
+static struct hrtimer a52_p430_dma_timer;
+static struct dsi_ctrl_hw *a52_p430_dma_ctrl;
+static atomic_t a52_p430_dma_armed = ATOMIC_INIT(0);
+static atomic_t a52_p430_timer_index = ATOMIC_INIT(0);

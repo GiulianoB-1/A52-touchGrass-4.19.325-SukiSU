@@ -205,21 +205,21 @@ jobs:
           restore-keys: |
             a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
-      - name: Check restored Phase432 object tree
+      - name: Check restored Phase432 build tree
         id: phase432-object-check
         run: |
           set -Eeuo pipefail
           BUILD="$PWD/workspace/gki-phase199-out"
-          if test -s "$BUILD/.config"              && test -f "$BUILD/drivers/a52_display/msm/msm_drv.o"              && test -f "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o"; then
+          if test -s "$BUILD/.config"; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "Phase432 object tree is usable."
+            echo "Phase432 build tree has a usable .config."
+            echo "Object completeness is intentionally not required for Phase433A."
             echo "actions/cache exact-hit flag: ${{ steps.phase432-objects.outputs.cache-hit }}"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "No complete Phase432 object tree restored; trying Phase431."
+            echo "Phase432 cache has no usable .config; trying Phase431."
             rm -rf "$BUILD"
           fi
-
       - name: Fallback to Phase431 object cache
         if: steps.phase432-object-check.outputs.ready != 'true'
         id: phase431-objects
@@ -230,27 +230,18 @@ jobs:
           restore-keys: |
             a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
-      - name: Require usable warm object cache
+      - name: Require usable warm build tree
         run: |
           set -Eeuo pipefail
           BUILD="$PWD/workspace/gki-phase199-out"
           test -s "$BUILD/.config" || {
-            echo "Phase433A requires a usable Phase432/Phase431 object tree."
-            echo "Refusing the expensive cold full-kernel rebuild."
+            echo "Phase433A requires a cached Phase432/Phase431 .config."
+            echo "Refusing an unnecessary full cold rebuild."
             exit 1
           }
-          test -f "$BUILD/drivers/a52_display/msm/msm_drv.o" || {
-            echo "Warm object tree is missing display objects."
-            exit 1
-          }
-          test -f "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o" || {
-            echo "Warm object tree is missing SMMU objects."
-            exit 1
-          }
-          echo "Warm object tree is usable."
+          echo "Warm build configuration is usable."
           echo "Phase432 exact-hit flag: ${{ steps.phase432-objects.outputs.cache-hit }}"
           echo "Phase431 exact-hit flag: ${{ steps.phase431-objects.outputs.cache-hit }}" || true
-
       - name: Restore Clang 14 audit ccache
         id: ccache14
         uses: actions/cache/restore@v4
@@ -371,40 +362,24 @@ jobs:
           echo "Clang 23 explicit warnings:"
           cat phase433a-report/supported-warnings-clang23.txt
 
-      - name: Identify configured target objects
+      - name: Record targeted audit scope
         run: |
           set -Eeuo pipefail
           BUILD="$PWD/workspace/gki-phase199-out"
-          OUT="$PWD/phase433a-report/target-objects.txt"
-          : > "$OUT"
-
-          add_dir() {
-            local d="$1"
-            if [ -d "$BUILD/$d" ]; then
-              find "$BUILD/$d" -type f -name '*.o' -printf '%P\n' | \
-                sed "s#^#$d/#" >> "$OUT"
-            fi
-          }
-
-          add_dir drivers/a52_display
-          add_dir drivers/iommu/arm/arm-smmu
-          add_dir drivers/soc/qcom/msm_bus
-          add_dir drivers/clk/qcom
-          add_dir drivers/interconnect
-          add_dir drivers/gpu/drm
-
-          if [ -f "$BUILD/drivers/soc/qcom/rpmh-rsc.o" ]; then
-            echo drivers/soc/qcom/rpmh-rsc.o >> "$OUT"
-          fi
-
-          sort -u -o "$OUT" "$OUT"
-
-          COUNT="$(wc -l < "$OUT")"
-          echo "Configured target objects: $COUNT"
-          test "$COUNT" -ge 25
-
-          cp "$BUILD/.config" "$PWD/phase433a-report/final.config"
-
+          REPORT="$PWD/phase433a-report"
+          cat > "$REPORT/audit-targets.txt" <<'EOF'
+          drivers/a52_display/
+          drivers/iommu/arm/arm-smmu/
+          drivers/soc/qcom/msm_bus/
+          drivers/clk/qcom/
+          drivers/interconnect/
+          drivers/soc/qcom/rpmh-rsc.o
+          drivers/gpu/drm/drm_atomic.o
+          drivers/gpu/drm/drm_atomic_helper.o
+          drivers/gpu/drm/drm_ioctl.o
+          EOF
+          cp "$BUILD/.config" "$REPORT/final.config"
+          echo "Phase433A will rebuild only the listed targets for each compiler."
       - name: Clang 14 control warning audit
         run: |
           set -Eeuo pipefail
@@ -413,17 +388,20 @@ jobs:
           REPORT="$PWD/phase433a-report"
           TOOL14="$RUNNER_TEMP/a52-phase433a-clang14-bin"
 
-          invalidate_targets() {
-            while IFS= read -r rel; do
-              [ -n "$rel" ] || continue
-              obj="$BUILD/$rel"
-              dir="$(dirname "$obj")"
-              base="$(basename "$obj")"
-              rm -f "$obj" "$dir/.$base.cmd" "$dir/.$base.d"
-            done < "$REPORT/target-objects.txt"
+          invalidate_dir() {
+            local rel="$1"
+            local d="$BUILD/$rel"
+            [ -d "$d" ] || return 0
+            find "$d" -type f \( -name '*.o' -o -name '.*.cmd' -o -name '.*.d' \) -delete
           }
 
-          invalidate_targets
+          invalidate_dir drivers/a52_display
+          invalidate_dir drivers/iommu/arm/arm-smmu
+          invalidate_dir drivers/soc/qcom/msm_bus
+          invalidate_dir drivers/clk/qcom
+          invalidate_dir drivers/interconnect
+
+          rm -f             "$BUILD/drivers/soc/qcom/rpmh-rsc.o"             "$BUILD/drivers/soc/qcom/.rpmh-rsc.o.cmd"             "$BUILD/drivers/gpu/drm/drm_atomic.o"             "$BUILD/drivers/gpu/drm/.drm_atomic.o.cmd"             "$BUILD/drivers/gpu/drm/drm_atomic_helper.o"             "$BUILD/drivers/gpu/drm/.drm_atomic_helper.o.cmd"             "$BUILD/drivers/gpu/drm/drm_ioctl.o"             "$BUILD/drivers/gpu/drm/.drm_ioctl.o.cmd"
 
           export PATH="$TOOL14:/usr/bin:/bin:$PATH"
           export CCACHE_DIR="$PWD/.ccache-phase433a-clang14"
@@ -435,18 +413,13 @@ jobs:
           EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang14.txt")"
 
           set +e
-          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1 W=1 \
-            KCFLAGS="-fno-color-diagnostics $EXTRA" \
-            -j"$(nproc)" Image 2>&1 | tee "$REPORT/clang14-build.log"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang14-build.log"
           RC="${PIPESTATUS[0]}"
           set -e
 
           echo "$RC" > "$REPORT/clang14-status.txt"
           ccache -s > "$REPORT/clang14-ccache.txt"
           echo "Clang 14 compile status: $RC"
-
       - name: Clang 23 warning audit
         run: |
           set -Eeuo pipefail
@@ -455,17 +428,20 @@ jobs:
           REPORT="$PWD/phase433a-report"
           TOOL23="$RUNNER_TEMP/a52-phase433a-clang23-bin"
 
-          invalidate_targets() {
-            while IFS= read -r rel; do
-              [ -n "$rel" ] || continue
-              obj="$BUILD/$rel"
-              dir="$(dirname "$obj")"
-              base="$(basename "$obj")"
-              rm -f "$obj" "$dir/.$base.cmd" "$dir/.$base.d"
-            done < "$REPORT/target-objects.txt"
+          invalidate_dir() {
+            local rel="$1"
+            local d="$BUILD/$rel"
+            [ -d "$d" ] || return 0
+            find "$d" -type f \( -name '*.o' -o -name '.*.cmd' -o -name '.*.d' \) -delete
           }
 
-          invalidate_targets
+          invalidate_dir drivers/a52_display
+          invalidate_dir drivers/iommu/arm/arm-smmu
+          invalidate_dir drivers/soc/qcom/msm_bus
+          invalidate_dir drivers/clk/qcom
+          invalidate_dir drivers/interconnect
+
+          rm -f             "$BUILD/drivers/soc/qcom/rpmh-rsc.o"             "$BUILD/drivers/soc/qcom/.rpmh-rsc.o.cmd"             "$BUILD/drivers/gpu/drm/drm_atomic.o"             "$BUILD/drivers/gpu/drm/.drm_atomic.o.cmd"             "$BUILD/drivers/gpu/drm/drm_atomic_helper.o"             "$BUILD/drivers/gpu/drm/.drm_atomic_helper.o.cmd"             "$BUILD/drivers/gpu/drm/drm_ioctl.o"             "$BUILD/drivers/gpu/drm/.drm_ioctl.o.cmd"
 
           export PATH="$TOOL23:/usr/bin:/bin:$PATH"
           export CCACHE_DIR="$PWD/.ccache-phase433a-clang23"
@@ -477,18 +453,13 @@ jobs:
           EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang23.txt")"
 
           set +e
-          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1 W=1 \
-            KCFLAGS="-fno-color-diagnostics $EXTRA" \
-            -j"$(nproc)" Image 2>&1 | tee "$REPORT/clang23-build.log"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-             LLVM=1 LLVM_IAS=1 W=1             KCFLAGS="-fno-color-diagnostics $EXTRA"             -j"$(nproc)"             drivers/a52_display/             drivers/iommu/arm/arm-smmu/             drivers/soc/qcom/msm_bus/             drivers/clk/qcom/             drivers/interconnect/             drivers/soc/qcom/rpmh-rsc.o             drivers/gpu/drm/drm_atomic.o             drivers/gpu/drm/drm_atomic_helper.o             drivers/gpu/drm/drm_ioctl.o             2>&1 | tee "$REPORT/clang23-build.log"
           RC="${PIPESTATUS[0]}"
           set -e
 
           echo "$RC" > "$REPORT/clang23-status.txt"
           ccache -s > "$REPORT/clang23-ccache.txt"
           echo "Clang 23 compile status: $RC"
-
       - name: Generate differential warning report
         if: always()
         run: |

@@ -1,0 +1,314 @@
+name: Phase432 - SF HWC bootanimation chain
+run-name: Phase432 - SF HWC bootanimation chain
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/432-a52-sf-hwc-bootanim-chain.yml
+      - scripts/432_apply_sf_hwc_bootanim_chain.py
+      - scripts/decode_phase432_chain.py
+      - scripts/431_apply_safe_gap_forensics.py
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/430_postapply_hardening.py
+      - scripts/430_parts/**
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  CCACHE_DIR: \${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: \${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
+
+concurrency:
+  group: a52-phase432-sf-hwc-chain-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase432 SF HWC bootanimation chain
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: \${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves
+          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/decode_phase432_chain.py
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --help >/dev/null
+          python3 scripts/decode_phase432_chain.py --help >/dev/null
+
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+
+      - name: Require Phase429 source cache
+        run: |
+          set -Eeuo pipefail
+          test "\${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
+            echo "Phase432 cache contract: Phase429 compact source cache is missing."
+            echo "Refusing a 40-60 minute cold lineage rebuild."
+            exit 1
+          }
+          test -d gki/common
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          test -s phase429-gki-out/config/final.config
+          echo "Phase429 compact source cache: HIT"
+
+      - name: Restore exact Phase431 object cache
+        id: phase431-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
+          restore-keys: |
+            a52xq-phase431-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-phase432-\${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          echo "Phase431 object cache hit: \${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "clang ccache hit: \${{ steps.ccache.outputs.cache-hit }}"
+          ccache -s
+
+      - name: Prepare build directory on object-cache miss
+        if: steps.phase431-objects.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+      - name: Reapply exact Phase430 diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+
+      - name: Reapply exact Phase431 safe-gap diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+
+      - name: Apply Phase432 SF HWC bootanimation chain
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          # Recorder contract stays 2 MiB Samsung first, then 1 MiB RAM.
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          # UFS NoC trigger stays retired.
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          # Phase432 intentionally removes the heavy pre-atomic CPU7 busy witness.
+          ! grep -Fq 'kthread_run(a52_p431_exec_fn' "$ROOT/arch/arm64/kernel/syscall.c"
+
+      - name: Incremental compile Phase432
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          grep -aFq 'P432 SF0 p=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P432 SL id=%u nr=%u sf=%d cp=%d ba=%d ss=%d' "$IMAGE"
+          grep -aFq 'P432 BA old=%d new=%d' "$IMAGE"
+          grep -aFq 'P432 OWN n=%u p=%d t=%d c=%.15s idx=%d' "$IMAGE"
+          grep -aFq 'P432 IO n=%u p=%d t=%d nr=0x%x' "$IMAGE"
+          grep -aFq 'P432 AT n=%u t=%d test=%u fl=%x objs=%u' "$IMAGE"
+          grep -aFq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$IMAGE"
+          grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
+          grep -Fq ' a52_p432_frontier' "$MAP"
+          grep -Fq ' a52_ackfr_phase432_note_drm_owner' "$MAP"
+          grep -Fq ' a52_p430_dma_finalize' "$MAP"
+          grep -Fq ' a52_p430_smmu_forensic' "$MAP"
+          ccache -s
+
+      - name: Save Phase432 object cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+
+      - name: Save rolling clang ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-phase432-\${{ github.run_id }}
+
+      - name: Package Phase432
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase432-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase432-sf-hwc-bootanim-chain-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/syscall.c"
+          cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
+          cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$ROOT/drivers/soc/qcom/rpmh-rsc.c" "$OUT/source/rpmh-rsc.c"
+          cp "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$OUT/source/msm_bus_fabric_rpmh.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/source/arm-smmu.c"
+
+          mkdir -p "$OUT/audit"
+          cp scripts/430_apply_sf_dma_forensics.py scripts/430_postapply_hardening.py \
+             scripts/431_apply_safe_gap_forensics.py \
+             scripts/432_apply_sf_hwc_bootanim_chain.py scripts/decode_phase432_chain.py \
+             "$OUT/audit/"
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase432-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE432-NOTES.txt" <<'EOF'
+          Phase432 SF/HWC/bootanimation chain forensics
+          =================================================
+          - Real Composer/HWC identity comes from the successful DRM primary/card0 open.
+          - P432 OWN/IO/AT persist card0 ownership, owner ioctls, and TEST/REAL atomic progress.
+          - Snapshots capture SF + real HWC + bootanimation + system_server when available.
+          - SF+0 is metadata-only. Full stacks: +250 ms, +1 s, +3 s, +5 s, +20 s, first atomic.
+          - Bootanimation lifecycle is polled every 50 ms and persisted as P432 BA.
+          - Phase431 CPU7 busy witness is disabled to reduce perturbation.
+          - Separate three-copy fixed records preserve snapshot progress and the HWC/bootanimation frontier.
+          - Phase431 TouchGrass-style Display-RSC/RPMh chronology remains active.
+          - Phase430 F0/TCS/SMMU/ATOS lane and ~200 ms DSI timeout panic remain intact.
+          - UFS asynchronous sampler remains disabled.
+          - Recorder remains 2 MiB Samsung debug partition first, then 1 MiB persistent RAM.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase432 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-FAIL-DIAG-\${{ github.run_number }}
+          path: |
+            gki/common/arch/arm64/kernel/syscall.c
+            gki/common/drivers/a52_display/msm/msm_drv.c
+            gki/common/drivers/scsi/ufs/ufshcd.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/soc/qcom/rpmh-rsc.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            scripts/432_apply_sf_hwc_bootanim_chain.py
+            scripts/decode_phase432_chain.py
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase432
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-SF-HWC-CHAIN-\${{ github.run_number }}
+          path: phase432-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase432 boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-SF-HWC-CHAIN-\${{ github.run_number }}-BOOT-IMG
+          path: phase432-gki-out/package/boot-phase432-sf-hwc-bootanim-chain-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

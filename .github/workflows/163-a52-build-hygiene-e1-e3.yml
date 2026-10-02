@@ -728,6 +728,8 @@ jobs:
 
           export_flag = "  export KCFLAGS=-w\n"
           make_flag = "      KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \\\n"
+          audit_export = "  export KCFLAGS=-Wno-error\n"
+          audit_make = "      KCFLAGS=-Wno-error CONFIG_SECTION_MISMATCH_WARN_ONLY=y \\\n"
 
           if s.count(export_flag) != 1:
               raise SystemExit(
@@ -738,24 +740,22 @@ jobs:
                   f"P163 E1: expected two make KCFLAGS=-w sites, found {s.count(make_flag)}"
               )
 
-          s = s.replace(export_flag, "", 1)
-          s = s.replace(
-              make_flag,
-              "      CONFIG_SECTION_MISMATCH_WARN_ONLY=y \\\n",
-          )
+          s = s.replace(export_flag, audit_export, 1)
+          s = s.replace(make_flag, audit_make)
           p.write_text(s)
           PY
 
-          if grep -nE 'KCFLAGS=.*(^|[[:space:]])-w([[:space:]]|$)|KCFLAGS=-w' scripts/common.sh; then
+          if grep -nE 'KCFLAGS=.*(^|[[:space:]])-w([[:space:]]|$)|KCFLAGS=-w([[:space:]]|$)' scripts/common.sh; then
             echo "P163 E1: warning suppression survived in scripts/common.sh" >&2
             exit 1
           fi
+          test "$(grep -Fc 'KCFLAGS=-Wno-error' scripts/common.sh)" -eq 3
           grep -Fq 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' scripts/common.sh
 
           {
-            echo 'P163 E1 warning-visible build wrapper: PASS'
-            echo 'KCFLAGS=-w export removed'
-            echo 'KCFLAGS=-w make arguments removed'
+            echo 'P163 E1 warning-visible nonfatal build wrapper: PASS'
+            echo 'KCFLAGS=-w removed'
+            echo 'KCFLAGS=-Wno-error enabled so warnings remain visible but do not abort the audit build'
             echo 'CONFIG_SECTION_MISMATCH_WARN_ONLY retained'
           } | tee artifacts/p163-e1-warning-wrapper-audit.txt
 
@@ -791,7 +791,7 @@ jobs:
             echo "runner_os=${{ runner.os }}"
             echo "aosp_clang_revision=$AOSP_CLANG_REVISION"
             echo "aosp_clang_commit=$AOSP_CLANG_COMMIT"
-            echo "warning_policy=KCFLAGS_-w_removed"
+            echo "warning_policy=KCFLAGS_-w_removed_KCFLAGS_-Wno-error_enabled"
             echo "kernel_head=$(git -C "$KERNEL" rev-parse HEAD)"
             echo "kernel_diff_sha256=$(sha256sum artifacts/p163-final.diff | awk '{print $1}')"
             echo "defconfig_sha256=$(sha256sum "$KERNEL/arch/arm64/configs/a52xq_defconfig" | awk '{print $1}')"
@@ -919,13 +919,15 @@ jobs:
             echo 'P163 E1 compiler warning audit'
             echo "warnings_total=$WARNINGS"
             echo "warnings_unique=$UNIQUE_WARNINGS"
-            echo "kcflags_minus_w_in_wrapper=$(grep -Eq 'KCFLAGS=-w' scripts/common.sh && echo yes || echo no)"
+            echo "kcflags_minus_w_in_wrapper=$(grep -Eq 'KCFLAGS=-w([[:space:]]|$)' scripts/common.sh && echo yes || echo no)"
+            echo "kcflags_wnoerror_count=$(grep -Fc 'KCFLAGS=-Wno-error' scripts/common.sh)"
             echo
             echo 'First 200 warning lines:'
             head -n 200 artifacts/p163-compiler-warnings.txt
           } | tee artifacts/p163-warning-summary.txt
 
-          test "$(grep -Ec 'KCFLAGS=-w' scripts/common.sh || true)" -eq 0
+          test "$(grep -Ec 'KCFLAGS=-w([[:space:]]|$)' scripts/common.sh || true)" -eq 0
+          test "$(grep -Fc 'KCFLAGS=-Wno-error' scripts/common.sh)" -eq 3
 
       - name: Prove P159 initcall table is populated
         run: |
@@ -1411,7 +1413,7 @@ jobs:
 # - P159 teardown/retention audits and P160/P161 ZRAM audits remain mandatory.
 
 # P163 build hygiene only. No intentional runtime kernel behavior changes versus P162.
-# - E1: remove KCFLAGS=-w and retain the complete warning-visible build log plus warning summary.
+# - E1: replace KCFLAGS=-w with KCFLAGS=-Wno-error so warnings are visible and recorded without aborting the audit build.
 # - E2: capture/upload the final reconstructed kernel git diff --binary after teardown and all kernel patches.
 # - E3: record source/workflow/toolchain/cache/diff/image/vmlinux/package provenance in p163-build-info.txt.
 # - Baseline: successful P162 run 36977369765 / b73b3474d544476c3af7a66a5879f1a52c242e75.

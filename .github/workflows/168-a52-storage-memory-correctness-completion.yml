@@ -1826,13 +1826,9 @@ jobs:
             artifacts/p165-build-info.txt
             artifacts/p166-apply-audit.txt
             artifacts/p166-build-info.txt
-            artifacts/p168-final.diff
-            artifacts/p168-final-diff-sha256.txt
             artifacts/p166-postbuild-audit.txt
             artifacts/p167-apply-audit.txt
             artifacts/p167-build-info.txt
-            artifacts/p168-final.diff
-            artifacts/p168-final-diff-sha256.txt
             artifacts/p167-postbuild-audit.txt
             artifacts/p168-apply-audit.txt
             artifacts/p168-build-info.txt

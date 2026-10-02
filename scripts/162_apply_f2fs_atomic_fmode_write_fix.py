@@ -80,8 +80,8 @@ def patch_a1(root):
 def patch_d6(root):
     path = root / "fs/fuse/inode.c"
     s = require(path)
-    old = "FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |\n\t\t\t\tFUSE_NO_OPEN_SUPPORT |"
-    new = "FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |\n\t\t\t\tFUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT |"
+    old = "FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |\n\t\tFUSE_NO_OPEN_SUPPORT |"
+    new = "FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |\n\t\tFUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT |"
     if old in s:
         s = replace_once(s, old, new, "D6 restore FUSE_WRITEBACK_CACHE")
     elif new not in s:

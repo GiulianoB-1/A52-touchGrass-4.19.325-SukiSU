@@ -907,7 +907,8 @@ jobs:
       - name: Audit P162 integrated security stability efficiency bundle
         run: |
           set -Eeuo pipefail
-          FILE=workspace/touchgrass-a52xq/fs/f2fs/file.c
+          KERNEL=workspace/touchgrass-a52xq
+          FILE="$KERNEL/fs/f2fs/file.c"
 
           python3 /tmp/162_apply_f2fs_atomic_fmode_write_fix.py workspace/touchgrass-a52xq \
             | tee artifacts/p162-f2fs-atomic-fmode-postbuild-audit.txt

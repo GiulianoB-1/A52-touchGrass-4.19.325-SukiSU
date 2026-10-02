@@ -274,6 +274,13 @@ jobs:
             phase357-gki-out
           key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
 
+      - name: Restore Phase429 incremental compile cache
+        id: phase429-compile-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase429-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}
+
       - name: Reapply Phase358 and Phase359
         run: |
           set -Eeuo pipefail
@@ -809,7 +816,15 @@ jobs:
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
 
+      - name: Save Phase429 incremental compile cache
+        if: always() && steps.phase429-compile-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase429-compile-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}
+
       - name: Build Phase429 focused-census boot image
+        if: success()
         run: |
           set -Eeuo pipefail
           OUT="$PWD/phase429-gki-out"

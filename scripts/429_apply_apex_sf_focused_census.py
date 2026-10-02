@@ -564,6 +564,11 @@ def patch_rec(text: str) -> str:
         text = one(text, "\ta52_p418_apex_sample(boot_s);\n",
                    "\t/* Phase429: periodic P418 APX text sampler retired; binary census owns this. */\n",
                    "retire P418 APEX text sampler")
+    if "static void a52_p418_apex_sample(unsigned long boot_s)" in text:
+        text = one(text,
+                   "static void a52_p418_apex_sample(unsigned long boot_s)",
+                   "static void __maybe_unused a52_p418_apex_sample(unsigned long boot_s)",
+                   "mark retired P418 APEX helper maybe_unused")
     text += "\n/* " + MARK + ": focused APEX/SF census admitted; DSI instrumentation unchanged. */\n"
     return text
 
@@ -614,6 +619,8 @@ def validate(root: Path) -> None:
             raise SystemExit("Phase429 recorder validation missing: " + tok)
     if "\ta52_p418_apex_sample(boot_s);\n" in rec:
         raise SystemExit("Phase429 P418 APEX periodic call remains")
+    if "static void __maybe_unused a52_p418_apex_sample(unsigned long boot_s)" not in rec:
+        raise SystemExit("Phase429 retired P418 helper is not marked __maybe_unused")
 
 
 def main() -> int:

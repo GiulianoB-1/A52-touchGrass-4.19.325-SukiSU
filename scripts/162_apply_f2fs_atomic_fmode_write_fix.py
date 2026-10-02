@@ -14,12 +14,27 @@ def replace_once(text, old, new, label):
 
 
 def function_span(text, signature):
-    start = text.find(signature)
-    if start < 0:
-        raise SystemExit(f"missing function: {signature}")
-    brace = text.find("{", start)
-    if brace < 0:
-        raise SystemExit(f"missing opening brace: {signature}")
+    """
+    Return the real C function definition, not an earlier forward declaration.
+
+    Several Samsung files declare static functions near the top of the file
+    before defining them later. A blind find(signature) followed by find("{")
+    can therefore jump from a prototype into an unrelated initializer.
+    """
+    search = 0
+    while True:
+        start = text.find(signature, search)
+        if start < 0:
+            raise SystemExit(f"missing function definition: {signature}")
+
+        brace = text.find("{", start)
+        semi = text.find(";", start)
+
+        if brace >= 0 and (semi < 0 or brace < semi):
+            break
+
+        search = start + len(signature)
+
     depth = 0
     for i in range(brace, len(text)):
         if text[i] == "{":
@@ -28,6 +43,7 @@ def function_span(text, signature):
             depth -= 1
             if depth == 0:
                 return start, i + 1
+
     raise SystemExit(f"unterminated function: {signature}")
 
 

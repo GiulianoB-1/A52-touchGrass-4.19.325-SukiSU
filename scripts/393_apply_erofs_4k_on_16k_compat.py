@@ -108,8 +108,8 @@ def main():
     # ------------------------------------------------------------------
     one(
         superc,
-        '#include "internal.h"\n',
-        '#include "internal.h"\n#include <linux/a52_p383_dual_recorder.h>\n',
+        '#include "xattr.h"\n',
+        '#include "xattr.h"\n#include <linux/a52_p383_dual_recorder.h>\n',
         "dual-recorder include",
     )
     old = r'''	blkszbits = dsb->blkszbits;

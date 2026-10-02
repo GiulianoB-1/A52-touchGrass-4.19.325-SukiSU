@@ -197,7 +197,16 @@ def f2fs(r,o):
     else:
         o.append("A3_F2FS_CPERROR_META=present")
 
-    wait_sig="void f2fs_wait_on_all_pages_writeback(struct f2fs_sb_info *sbi)"
+    # Samsung's newer F2FS uses the generalized f2fs_wait_on_all_pages()
+    # helper instead of the older stable branch's writeback-only helper.
+    # Apply 92575f0's close-vs-cp_error semantics to whichever variant exists.
+    if "void f2fs_wait_on_all_pages(struct f2fs_sb_info *sbi, int type)" in s:
+        wait_sig="void f2fs_wait_on_all_pages(struct f2fs_sb_info *sbi, int type)"
+    elif "void f2fs_wait_on_all_pages_writeback(struct f2fs_sb_info *sbi)" in s:
+        wait_sig="void f2fs_wait_on_all_pages_writeback(struct f2fs_sb_info *sbi)"
+    else:
+        die("F2FS cp_error wait helper variant not found")
+
     wa,wb=span(s,wait_sig); wait=s[wa:wb]
     old_wait="\t\tif (unlikely(f2fs_cp_error(sbi)))\n\t\t\tbreak;\n"
     new_wait="\t\tif (unlikely(f2fs_cp_error(sbi) &&\n\t\t\t!is_sbi_flag_set(sbi, SBI_IS_CLOSE)))\n\t\t\tbreak;\n"
@@ -211,10 +220,17 @@ def f2fs(r,o):
         o.append("A3_F2FS_CPERROR_WAIT=present")
     wr(r,p,s)
 
-    # 92575f0 part 3: during close, dirty directory data pages may be dropped too.
+    # 92575f0 part 3: this Samsung tree renamed/expanded __write_data_page()
+    # into f2fs_write_single_data_page(). Support both layouts.
     p="fs/f2fs/data.c"; s=rd(r,p)
-    sig="static int __write_data_page(struct page *page, bool *submitted,"
-    da,db=span(s,sig); data=s[da:db]
+    if "int f2fs_write_single_data_page(struct page *page, int *submitted," in s:
+        data_sig="int f2fs_write_single_data_page(struct page *page, int *submitted,"
+    elif "static int __write_data_page(struct page *page, bool *submitted," in s:
+        data_sig="static int __write_data_page(struct page *page, bool *submitted,"
+    else:
+        die("F2FS cp_error data-page helper variant not found")
+
+    da,db=span(s,data_sig); data=s[da:db]
     old_dir="\t\tif (S_ISDIR(inode->i_mode))\n\t\t\tgoto redirty_out;\n"
     new_dir="\t\tif (S_ISDIR(inode->i_mode) &&\n\t\t\t\t!is_sbi_flag_set(sbi, SBI_IS_CLOSE))\n\t\t\tgoto redirty_out;\n"
     if new_dir not in data:
@@ -236,13 +252,16 @@ def f2fs(r,o):
         die("F2FS special-inode GC fix missing after patch")
     if read_good not in gc:
         die("F2FS skipped_gc_rwsem READ accounting missing after patch")
-    cp=fun(rd(r,"fs/f2fs/checkpoint.c"),sig.replace("__write_data_page","__f2fs_write_meta_page") if False else "static int __f2fs_write_meta_page(struct page *page,")
+
+    cp=fun(rd(r,"fs/f2fs/checkpoint.c"),"static int __f2fs_write_meta_page(struct page *page,")
     if not all(v in cp for v in ("SBI_IS_CLOSE","ClearPageUptodate(page);","dec_page_count(sbi, F2FS_DIRTY_META);")):
         die("F2FS cp_error close meta handling missing after patch")
+
     wait=fun(rd(r,"fs/f2fs/checkpoint.c"),wait_sig)
     if "!is_sbi_flag_set(sbi, SBI_IS_CLOSE)" not in wait:
         die("F2FS cp_error close writeback-wait handling missing")
-    data=fun(rd(r,"fs/f2fs/data.c"),"static int __write_data_page(struct page *page, bool *submitted,")
+
+    data=fun(rd(r,"fs/f2fs/data.c"),data_sig)
     if "S_ISDIR(inode->i_mode) &&" not in data or "SBI_IS_CLOSE" not in data:
         die("F2FS cp_error close data-page handling missing")
 

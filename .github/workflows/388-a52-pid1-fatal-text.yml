@@ -947,8 +947,6 @@ jobs:
           grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
           grep -Fq 'P387 SDONE' "$KERNEL/arch/arm64/kernel/syscall.c"
           grep -Fq 'a52_p387_dump_pid1_syscalls();' "$KERNEL/kernel/exit.c"
-          grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'P388 MSG' "$KERNEL/arch/arm64/kernel/syscall.c"
           {
             echo "phase387_prepared_source_cache_hit=true"
             echo "cache_key=a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421"

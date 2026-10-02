@@ -92,18 +92,29 @@ jobs:
             gki/common
             phase429-gki-out
           key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          restore-keys: |
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
-      - name: Require Phase429 source cache
+      - name: Require usable Phase429 source cache
         run: |
           set -Eeuo pipefail
-          test "${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
-            echo "Phase433A cache contract: Phase429 compact source cache is missing."
-            echo "Refusing a cold source rebuild."
+          test -d gki/common || {
+            echo "Phase433A: no restored gki/common tree."
+            echo "Refusing a duplicate cold source reconstruction."
             exit 1
           }
-          test -d gki/common
-          test -s phase429-gki-out/config/final.config
-          echo "Phase429 compact source cache: HIT"
+          test -s phase429-gki-out/config/final.config || {
+            echo "Phase433A: no restored Phase429 final.config."
+            echo "Refusing a duplicate cold source reconstruction."
+            exit 1
+          }
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img || {
+            echo "Phase433A: restored Phase429 snapshot is incomplete."
+            exit 1
+          }
+          echo "Phase429 source snapshot is usable."
+          echo "actions/cache exact-hit flag: ${{ steps.phase429-source.outputs.cache-hit }}"
+          echo "NOTE: a prefix restore is usable even when cache-hit is false."
 
       - name: Restore exact Phase432 object cache
         id: phase432-objects
@@ -114,8 +125,23 @@ jobs:
           restore-keys: |
             a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
+      - name: Check restored Phase432 object tree
+        id: phase432-object-check
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config"              && test -f "$BUILD/drivers/a52_display/msm/msm_drv.o"              && test -f "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Phase432 object tree is usable."
+            echo "actions/cache exact-hit flag: ${{ steps.phase432-objects.outputs.cache-hit }}"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "No complete Phase432 object tree restored; trying Phase431."
+            rm -rf "$BUILD"
+          fi
+
       - name: Fallback to Phase431 object cache
-        if: steps.phase432-objects.outputs.cache-hit != 'true'
+        if: steps.phase432-object-check.outputs.ready != 'true'
         id: phase431-objects
         uses: actions/cache/restore@v4
         with:
@@ -124,20 +150,26 @@ jobs:
           restore-keys: |
             a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
-      - name: Require warm object cache
+      - name: Require usable warm object cache
         run: |
           set -Eeuo pipefail
-          if [ "${{ steps.phase432-objects.outputs.cache-hit }}" = "true" ]; then
-            echo "Warm object cache: exact Phase432 HIT"
-          elif [ "${{ steps.phase431-objects.outputs.cache-hit }}" = "true" ]; then
-            echo "Warm object cache: Phase431 fallback HIT"
-          else
-            echo "Phase433A requires a Phase432 or Phase431 object cache."
+          BUILD="$PWD/workspace/gki-phase199-out"
+          test -s "$BUILD/.config" || {
+            echo "Phase433A requires a usable Phase432/Phase431 object tree."
             echo "Refusing the expensive cold full-kernel rebuild."
             exit 1
-          fi
-
-          test -s workspace/gki-phase199-out/.config
+          }
+          test -f "$BUILD/drivers/a52_display/msm/msm_drv.o" || {
+            echo "Warm object tree is missing display objects."
+            exit 1
+          }
+          test -f "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o" || {
+            echo "Warm object tree is missing SMMU objects."
+            exit 1
+          }
+          echo "Warm object tree is usable."
+          echo "Phase432 exact-hit flag: ${{ steps.phase432-objects.outputs.cache-hit }}"
+          echo "Phase431 exact-hit flag: ${{ steps.phase431-objects.outputs.cache-hit }}" || true
 
       - name: Restore Clang 14 audit ccache
         id: ccache14

@@ -399,7 +399,7 @@ def final_audit(root,out):
         ("fscrypt helper declarations",hdr.count("fscrypt_symlink_getattr(const struct path *path") >= 2),
         ("f2fs encrypted getattr","static int f2fs_encrypted_symlink_getattr(" in namei),
         ("f2fs encrypted ops",
-         re.search(r"\\.getattr\\s*=\\s*f2fs_encrypted_symlink_getattr,", namei) is not None),
+         re.search(r"\.getattr\s*=\s*f2fs_encrypted_symlink_getattr,", namei) is not None),
         ("f2fs dir GFP_NOFS",block(inode,"struct inode *f2fs_iget(").count(
             "mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);") >= 3),
         ("f2fs mkdir GFP_NOFS","mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);" in

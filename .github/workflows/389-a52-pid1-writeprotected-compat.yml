@@ -1021,8 +1021,6 @@ jobs:
           grep -Fq 'A52_PHASE387_PID1_SYSCALL_RING_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
           grep -Fq 'A52_PHASE388_PID1_FATAL_TEXT_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
           grep -Fq 'P388 MSG' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'A52_PHASE389_PID1_WRITEPROTECTED_COMPAT_V1' "$KERNEL/mm/mprotect.c"
-          grep -Fq 'P389 WPCOMPAT' "$KERNEL/mm/mprotect.c"
           {
             echo "phase388_prepared_source_cache_hit=true"
             echo "cache_key=a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29"

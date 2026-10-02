@@ -107,18 +107,144 @@ def bpf(r,o):
 
 def f2fs(r,o):
     p="fs/f2fs/gc.c"; s=rd(r,p)
+
+    # Stable GC retry accounting: reset the per-attempt rwsem counter at gc_more.
     old="\tcpc.reason = __get_cp_reason(sbi);\n\tsbi->skipped_gc_rwsem = 0;\n\tfirst_skipped = last_skipped;\ngc_more:\n"
     new="\tcpc.reason = __get_cp_reason(sbi);\n\tfirst_skipped = last_skipped;\ngc_more:\n\tsbi->skipped_gc_rwsem = 0;\n"
-    if old in s: s=s.replace(old,new,1); o.append("A3_F2FS_GC_RETRY=patched")
-    elif new in s: o.append("A3_F2FS_GC_RETRY=present")
-    else: die("F2FS gc_more counter anchor unknown")
-    alive=fun(s,"static bool is_alive(struct f2fs_sb_info *sbi,")
-    if not re.search(r"f2fs_check_nid_range\(sbi, dni->ino\).*?f2fs_put_page\(node_page, 1\).*?return false",alive,re.S): die("F2FS is_alive fix absent")
-    gc=fun(s,"static int gc_data_segment(struct f2fs_sb_info *sbi,")
-    if "special_file(inode->i_mode)" not in gc or gc.count("sbi->skipped_gc_rwsem++;")<2: die("F2FS stable GC fixes absent")
-    cp=fun(rd(r,"fs/f2fs/checkpoint.c"),"static int __f2fs_write_meta_page(struct page *page,")
-    if not all(v in cp for v in ("SBI_IS_CLOSE","ClearPageUptodate(page);","dec_page_count(sbi, F2FS_DIRTY_META);")): die("F2FS cp_error close fix absent")
-    wr(r,p,s); o.append("A3_F2FS_OTHER_STABLE=already_present")
+    if old in s:
+        s=s.replace(old,new,1); o.append("A3_F2FS_GC_RETRY=patched")
+    elif new in s:
+        o.append("A3_F2FS_GC_RETRY=present")
+    else:
+        die("F2FS gc_more counter anchor unknown")
+
+    # c782e68 + 89659bf: reject out-of-range inode NIDs and release node_page.
+    alive_sig="static bool is_alive(struct f2fs_sb_info *sbi,"
+    aa,ab=span(s,alive_sig); alive=s[aa:ab]
+    safe_nid="""\tif (f2fs_check_nid_range(sbi, dni->ino)) {
+\t\tf2fs_put_page(node_page, 1);
+\t\treturn false;
+\t}
+"""
+    if safe_nid not in alive:
+        unsafe_nid="\tif (f2fs_check_nid_range(sbi, dni->ino))\n\t\treturn false;\n"
+        if unsafe_nid in alive:
+            alive=alive.replace(unsafe_nid,safe_nid,1)
+        elif "f2fs_check_nid_range(sbi, dni->ino)" not in alive:
+            anchor="\t*nofs = ofs_of_node(node_page);\n"
+            if alive.count(anchor)!=1:
+                die(f"F2FS is_alive insertion anchor count {alive.count(anchor)}")
+            alive=alive.replace(anchor,safe_nid+"\n"+anchor,1)
+        else:
+            die("F2FS is_alive NID-check shape unknown")
+        s=s[:aa]+alive+s[ab:]
+        o.append("A3_F2FS_IS_ALIVE_NID=patched")
+    else:
+        o.append("A3_F2FS_IS_ALIVE_NID=present")
+
+    # 45c9da0: never migrate data through a special inode during GC.
+    gc_sig="static int gc_data_segment(struct f2fs_sb_info *sbi,"
+    ga,gb=span(s,gc_sig); gc=s[ga:gb]
+    if "special_file(inode->i_mode)" not in gc:
+        old_cond="\t\t\tif (IS_ERR(inode) || is_bad_inode(inode)) {\n"
+        new_cond="\t\t\tif (IS_ERR(inode) || is_bad_inode(inode) ||\n\t\t\t\t\tspecial_file(inode->i_mode)) {\n"
+        if gc.count(old_cond)!=1:
+            die(f"F2FS special-inode condition count {gc.count(old_cond)}")
+        gc=gc.replace(old_cond,new_cond,1)
+        o.append("A3_F2FS_SPECIAL_INODE=patched")
+    else:
+        o.append("A3_F2FS_SPECIAL_INODE=present")
+
+    # 8002259: READ rwsem trylock failures must contribute to skipped_gc_rwsem.
+    read_bad="\t\t\t\tif (!down_write_trylock(&fi->i_gc_rwsem[READ]))\n\t\t\t\t\tcontinue;\n"
+    read_good="""\t\t\t\tif (!down_write_trylock(&fi->i_gc_rwsem[READ])) {
+\t\t\t\t\tsbi->skipped_gc_rwsem++;
+\t\t\t\t\tcontinue;
+\t\t\t\t}
+"""
+    if read_good not in gc:
+        if gc.count(read_bad)!=1:
+            die(f"F2FS READ rwsem accounting anchor count {gc.count(read_bad)}")
+        gc=gc.replace(read_bad,read_good,1)
+        o.append("A3_F2FS_RWSEM_ACCOUNTING=patched")
+    else:
+        o.append("A3_F2FS_RWSEM_ACCOUNTING=present")
+    s=s[:ga]+gc+s[gb:]
+    wr(r,p,s)
+
+    # 92575f0 part 1/2: when unmounting after cp_error, drop dirty meta pages
+    # and do not leave writeback waiting forever.
+    p="fs/f2fs/checkpoint.c"; s=rd(r,p)
+    sig="static int __f2fs_write_meta_page(struct page *page,"
+    ca,cb=span(s,sig); cp=s[ca:cb]
+    close_meta="""\tif (unlikely(f2fs_cp_error(sbi))) {
+\t\tif (is_sbi_flag_set(sbi, SBI_IS_CLOSE)) {
+\t\t\tClearPageUptodate(page);
+\t\t\tdec_page_count(sbi, F2FS_DIRTY_META);
+\t\t\tunlock_page(page);
+\t\t\treturn 0;
+\t\t}
+\t\tgoto redirty_out;
+\t}
+"""
+    if close_meta not in cp:
+        old_meta="\tif (unlikely(f2fs_cp_error(sbi)))\n\t\tgoto redirty_out;\n"
+        if cp.count(old_meta)!=1:
+            die(f"F2FS cp_error meta anchor count {cp.count(old_meta)}")
+        cp=cp.replace(old_meta,close_meta,1)
+        s=s[:ca]+cp+s[cb:]
+        o.append("A3_F2FS_CPERROR_META=patched")
+    else:
+        o.append("A3_F2FS_CPERROR_META=present")
+
+    wait_sig="void f2fs_wait_on_all_pages_writeback(struct f2fs_sb_info *sbi)"
+    wa,wb=span(s,wait_sig); wait=s[wa:wb]
+    old_wait="\t\tif (unlikely(f2fs_cp_error(sbi)))\n\t\t\tbreak;\n"
+    new_wait="\t\tif (unlikely(f2fs_cp_error(sbi) &&\n\t\t\t!is_sbi_flag_set(sbi, SBI_IS_CLOSE)))\n\t\t\tbreak;\n"
+    if new_wait not in wait:
+        if wait.count(old_wait)!=1:
+            die(f"F2FS cp_error wait anchor count {wait.count(old_wait)}")
+        wait=wait.replace(old_wait,new_wait,1)
+        s=s[:wa]+wait+s[wb:]
+        o.append("A3_F2FS_CPERROR_WAIT=patched")
+    else:
+        o.append("A3_F2FS_CPERROR_WAIT=present")
+    wr(r,p,s)
+
+    # 92575f0 part 3: during close, dirty directory data pages may be dropped too.
+    p="fs/f2fs/data.c"; s=rd(r,p)
+    sig="static int __write_data_page(struct page *page, bool *submitted,"
+    da,db=span(s,sig); data=s[da:db]
+    old_dir="\t\tif (S_ISDIR(inode->i_mode))\n\t\t\tgoto redirty_out;\n"
+    new_dir="\t\tif (S_ISDIR(inode->i_mode) &&\n\t\t\t\t!is_sbi_flag_set(sbi, SBI_IS_CLOSE))\n\t\t\tgoto redirty_out;\n"
+    if new_dir not in data:
+        if data.count(old_dir)!=1:
+            die(f"F2FS cp_error data-page anchor count {data.count(old_dir)}")
+        data=data.replace(old_dir,new_dir,1)
+        s=s[:da]+data+s[db:]
+        o.append("A3_F2FS_CPERROR_DATA=patched")
+    else:
+        o.append("A3_F2FS_CPERROR_DATA=present")
+    wr(r,p,s)
+
+    # Final F2FS semantic audit.
+    gc=fun(rd(r,"fs/f2fs/gc.c"),gc_sig)
+    alive=fun(rd(r,"fs/f2fs/gc.c"),alive_sig)
+    if safe_nid not in alive:
+        die("F2FS is_alive NID/page-release fix missing after patch")
+    if "special_file(inode->i_mode)" not in gc:
+        die("F2FS special-inode GC fix missing after patch")
+    if read_good not in gc:
+        die("F2FS skipped_gc_rwsem READ accounting missing after patch")
+    cp=fun(rd(r,"fs/f2fs/checkpoint.c"),sig.replace("__write_data_page","__f2fs_write_meta_page") if False else "static int __f2fs_write_meta_page(struct page *page,")
+    if not all(v in cp for v in ("SBI_IS_CLOSE","ClearPageUptodate(page);","dec_page_count(sbi, F2FS_DIRTY_META);")):
+        die("F2FS cp_error close meta handling missing after patch")
+    wait=fun(rd(r,"fs/f2fs/checkpoint.c"),wait_sig)
+    if "!is_sbi_flag_set(sbi, SBI_IS_CLOSE)" not in wait:
+        die("F2FS cp_error close writeback-wait handling missing")
+    data=fun(rd(r,"fs/f2fs/data.c"),"static int __write_data_page(struct page *page, bool *submitted,")
+    if "S_ISDIR(inode->i_mode) &&" not in data or "SBI_IS_CLOSE" not in data:
+        die("F2FS cp_error close data-page handling missing")
 
 def mglru(r,o):
     p="mm/vmscan.c"; s=rd(r,p)

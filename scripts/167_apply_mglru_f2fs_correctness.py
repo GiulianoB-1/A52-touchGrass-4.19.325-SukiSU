@@ -54,20 +54,20 @@ def patch_mglru_b6(root, out):
 \t\t\t\t\tREAD_ONCE(lrugen->nr_pages[gen][type][zone]), 0);
 """
     if new in fn:
-        out.append("B6_MGLRU_NEGATIVE_SIZE_CLAMP=present")
+        out.append("MGLRU_EVICTABLE_READ_CLAMP=present")
     elif old in fn:
-        fn=rep1(fn, old, new, "B6 get_nr_evictable per-zone clamp")
+        fn=rep1(fn, old, new, "MGLRU get_nr_evictable read clamp")
         s=s[:a]+fn+s[b:]
         wr(root, rel, s)
-        out.append("B6_MGLRU_NEGATIVE_SIZE_CLAMP=patched")
+        out.append("MGLRU_EVICTABLE_READ_CLAMP=patched")
     else:
-        die("B6 get_nr_evictable size accumulation shape unknown")
+        die("MGLRU get_nr_evictable size accumulation shape unknown")
 
     fn=rd(root, rel)
     a,b=span(fn, sig)
     fn=fn[a:b]
     if "size += max_t(long," not in fn or "READ_ONCE(lrugen->nr_pages[gen][type][zone]), 0);" not in fn:
-        die("B6 clamp missing after patch")
+        die("MGLRU evictable read clamp missing after patch")
 
 def patch_f2fs_readonly(root, out):
     rel="fs/f2fs/inode.c"
@@ -101,21 +101,25 @@ def patch_f2fs_area_overflow(root, out):
     a,b=span(s, sig)
     fn=s[a:b]
 
-    old1="(segment_count_main << log_blocks_per_seg)"
-    new1="((u64)segment_count_main << log_blocks_per_seg)"
-    old2="(segment_count << log_blocks_per_seg)"
-    new2="((u64)segment_count << log_blocks_per_seg)"
+    old_main="""\tu64 main_end_blkaddr = main_blkaddr +
+\t\t\t\t(segment_count_main << log_blocks_per_seg);
+"""
+    new_main="""\tu64 main_end_blkaddr = main_blkaddr +
+\t\t\t\t((u64)segment_count_main << log_blocks_per_seg);
+"""
+    old_seg="""\tu64 seg_end_blkaddr = segment0_blkaddr +
+\t\t\t\t(segment_count << log_blocks_per_seg);
+"""
+    new_seg="""\tu64 seg_end_blkaddr = segment0_blkaddr +
+\t\t\t\t((u64)segment_count << log_blocks_per_seg);
+"""
 
     changed=False
-    if new1 not in fn:
-        if fn.count(old1) != 1:
-            die(f"F2FS 24dfe main area anchor count {fn.count(old1)}")
-        fn=fn.replace(old1,new1,1)
+    if new_main not in fn:
+        fn=rep1(fn, old_main, new_main, "F2FS 24dfe main_end_blkaddr u64")
         changed=True
-    if new2 not in fn:
-        if fn.count(old2) != 1:
-            die(f"F2FS 24dfe segment area anchor count {fn.count(old2)}")
-        fn=fn.replace(old2,new2,1)
+    if new_seg not in fn:
+        fn=rep1(fn, old_seg, new_seg, "F2FS 24dfe seg_end_blkaddr u64")
         changed=True
 
     if changed:
@@ -184,7 +188,7 @@ def audit(root,out):
     a,b=span(v,"static long get_nr_evictable(struct lruvec *lruvec, unsigned long max_seq,")
     ev=v[a:b]
     if "size += max_t(long," not in ev:
-        die("audit: B6 MGLRU clamp missing")
+        die("audit: MGLRU evictable read clamp missing")
 
     inode=rd(root,"fs/f2fs/inode.c")
     a,b=span(inode,"void f2fs_mark_inode_dirty_sync(struct inode *inode, bool sync)")
@@ -251,7 +255,7 @@ def main():
     for x in out:
         print(x)
     print("baseline=P166_boot_and_fuse_tested")
-    print("new_fixes=B6,2d291651,24dfe070,eb926232")
+    print("new_fixes=MGLRU_EVICTABLE_READ_CLAMP,2d291651,24dfe070,eb926232")
     print("fuse_delta=none")
     print("scheduler_delta=none")
     print("gpu_delta=none")

@@ -85,6 +85,8 @@ jobs:
             gki/common
             phase429-gki-out
           key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          restore-keys: |
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Restore Phase357 source fallback
         if: steps.phase429-source.outputs.cache-hit != 'true'

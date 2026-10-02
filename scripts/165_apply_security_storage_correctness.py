@@ -66,16 +66,27 @@ def bpf(r,o):
         e=x.find("} else if (arg_type_is_int_ptr(arg_type)) {",q)
         if q<0 or e<0: die("BPF alloc_mem branch missing")
         z=x[q:e]
-        anchor="\t\telse if (type != expected_type)\n\t\t\tgoto err_type;\n"
-        if z.count(anchor)!=1: die(f"BPF alloc_mem anchor count {z.count(anchor)}")
-        add=anchor+"""\n		/* P165: ringbuf alloc_mem helper requires an unmodified reservation pointer */
-		if (reg->off || !tnum_is_const(reg->var_off) ||
-		    reg->var_off.value) {
-			verbose(env, "R%d ringbuf alloc_mem helper requires an unmodified reservation pointer\\n", regno);
-			return -EACCES;
-		}
-"""
-        z=z.replace(anchor,add,1); x=x[:q]+z+x[e:]; s=s[:a]+x+s[b:]
+        # Vendor 4.19 emits this block with spaces rather than the donor tab layout.
+        # Match the semantic type-check instead of exact indentation.
+        pat=re.compile(
+            r"(?P<guard>else if \\(type != expected_type\\)\\s*\\n\\s*goto err_type;)"
+        )
+        add=r"""\\g<guard>
+
+        /*
+         * Upstream 64620e0a: submit/discard use ARG_PTR_TO_ALLOC_MEM and
+         * must receive the exact reservation pointer returned by reserve().
+         */
+        if (arg_type == ARG_PTR_TO_ALLOC_MEM &&
+            (reg->off || !tnum_is_const(reg->var_off) ||
+             reg->var_off.value)) {
+                verbose(env, "R%d ringbuf alloc_mem helper requires an unmodified reservation pointer\\n",
+                        regno);
+                return -EACCES;
+        }"""
+        z,n=pat.subn(add,z,count=1)
+        if n!=1: die(f"BPF alloc_mem semantic type-check count {n}")
+        x=x[:q]+z+x[e:]; s=s[:a]+x+s[b:]
         o.append("A2_BPF_OFFSET=patched")
     else: o.append("A2_BPF_OFFSET=present")
     wr(r,p,s)
@@ -168,6 +179,7 @@ def audit(r):
     if not all(v in ring for v in ("VM_WRITE","VM_MAYWRITE","return -EPERM")): die("audit BPF mmap failed")
     v=fun(rd(r,"kernel/bpf/verifier.c"),"static int check_func_arg(struct bpf_verifier_env *env, u32 regno,")
     if "ringbuf alloc_mem helper requires an unmodified reservation pointer" not in v: die("audit BPF verifier failed")
+    if "arg_type == ARG_PTR_TO_ALLOC_MEM" not in v: die("audit BPF verifier scope failed")
     vm=rd(r,"mm/vmscan.c")
     if "if (!lru_gen_enabled())\n\t\t\tpgdat->kswapd_failures++;" in vm: die("audit B1 failed")
     if "else if (global_reclaim(sc) && get_swappiness(lruvec, sc))" in fun(vm,"static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)"): die("audit B5 failed")

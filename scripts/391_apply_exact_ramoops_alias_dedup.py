@@ -73,42 +73,22 @@ static void __init __rmem_check_for_overlap(void)
 '''
     replace_once(src, anchor, patch, "exact duplicate ramoops alias helper")
 
-    old = r'''		if (this->base + this->size > next->base) {
-			phys_addr_t this_end, next_end;
+    overlap_anchor = """\t\t\tthis_end = this->base + this->size;
+\t\t\tnext_end = next->base + next->size;
+"""
+    overlap_patch = """\t\t\tthis_end = this->base + this->size;
+\t\t\tnext_end = next->base + next->size;
 
-			this_end = this->base + this->size;
-			next_end = next->base + next->size;
-			pr_err("OVERLAP DETECTED!
-%s (%pa--%pa) overlaps with %s (%pa--%pa)
-",
-			       this->name, &this->base, &this_end,
-			       next->name, &next->base, &next_end);
-			rmem_overlap = true;
-		}
-'''
-    new = r'''		if (this->base + this->size > next->base) {
-			phys_addr_t this_end, next_end;
+\t\t\tif (a52_p391_same_ramoops_alias(this, next)) {
+\t\t\t\tpr_warn(\"A52 P391 RMEM_ALIAS: exact duplicate %s/%s %pa--%pa ignored\\\\n\",
+\t\t\t\t\tthis->name, next->name,
+\t\t\t\t\t&this->base, &this_end);
+\t\t\t\tcontinue;
+\t\t\t}
+"""
+    replace_once(src, overlap_anchor, overlap_patch,
+                 "skip only exact ramoops alias overlap")
 
-			this_end = this->base + this->size;
-			next_end = next->base + next->size;
-
-			if (a52_p391_same_ramoops_alias(this, next)) {
-				pr_warn("A52 P391 RMEM_ALIAS: exact duplicate %s/%s %pa--%pa ignored
-",
-					this->name, next->name,
-					&this->base, &this_end);
-				continue;
-			}
-
-			pr_err("OVERLAP DETECTED!
-%s (%pa--%pa) overlaps with %s (%pa--%pa)
-",
-			       this->name, &this->base, &this_end,
-			       next->name, &next->base, &next_end);
-			rmem_overlap = true;
-		}
-'''
-    replace_once(src, old, new, "skip only exact ramoops alias overlap")
 
     text = src.read_text()
     for token in (

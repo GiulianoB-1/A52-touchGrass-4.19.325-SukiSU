@@ -8,6 +8,7 @@ MARK = "A52_PHASE431_SAFE_SF_GAP_FORENSICS_V1"
 SYSCALL = Path("arch/arm64/kernel/syscall.c")
 UFS = Path("drivers/scsi/ufs/ufshcd.c")
 REC = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
+RSC = Path("drivers/soc/qcom/rpmh-rsc.c")
 
 
 def one(text: str, old: str, new: str, label: str) -> str:
@@ -57,6 +58,18 @@ struct a52_p431_witness {
 static DEFINE_RAW_SPINLOCK(a52_p431_witness_lock);
 static atomic_t a52_p431_witness_seq = ATOMIC_INIT(0);
 static struct task_struct *a52_p431_exec_task;
+
+bool a52_p431_trace_window_active(void)
+{
+	u64 start = READ_ONCE(a52_p430_sf_start_ns);
+	u64 now;
+
+	if (!start)
+		return false;
+	now = ktime_get_boottime_ns();
+	return now >= start && now - start <= 70ULL * NSEC_PER_SEC;
+}
+EXPORT_SYMBOL_GPL(a52_p431_trace_window_active);
 
 static __always_inline u64 a52_p431_cntpct(void)
 {
@@ -369,6 +382,81 @@ def patch_ufs(text: str) -> str:
     return text
 
 
+
+def patch_rsc(text: str) -> str:
+    if MARK in text:
+        return text
+
+    if "A52_PHASE301_RPMH_RSC_CONTRACT_TRACE_V1" not in text:
+        raise SystemExit("Phase431 requires inherited Phase301 RPMh/RSC trace")
+
+    helper = '''/* A52_PHASE301_RPMH_RSC_CONTRACT_TRACE_V1: observation only. */
+static bool a52_p301_disp_rsc(const struct rsc_drv *drv)
+{
+\treturn drv && drv->name && !strcmp(drv->name, "disp_rsc");
+}
+'''
+    helper_new = helper + '''
+/* Phase431: bounded persistent equivalent of the TouchGrass RPMh IRQ events. */
+extern bool a52_p431_trace_window_active(void);
+static atomic_t a52_p431_ri_seq = ATOMIC_INIT(0);
+'''
+    text = one(text, helper, helper_new, "Display-RSC trace helper")
+
+    text = one(text,
+        '''\tstruct tcs_cmd *cmd;
+
+\tirq_status = readl_relaxed(drv->tcs_base + RSC_DRV_IRQ_STATUS);
+''',
+        '''\tstruct tcs_cmd *cmd;
+\tint a52_p431_ri = 0;
+
+\tirq_status = readl_relaxed(drv->tcs_base + RSC_DRV_IRQ_STATUS);
+\tif (a52_p301_disp_rsc(drv) && a52_p431_trace_window_active()) {
+\t\ta52_p431_ri = atomic_inc_return(&a52_p431_ri_seq);
+\t\tif (a52_p431_ri <= 96)
+\t\t\ta52_ackfr_record("P431 RI e n=%d irq=%d st=%lx use=%u",
+\t\t\t\ta52_p431_ri, irq, irq_status,
+\t\t\t\t(unsigned int)bitmap_weight(drv->tcs_in_use, MAX_TCS_NR));
+\t}
+''',
+        "Display-RSC IRQ entry")
+
+    text = one(text,
+        '''\t\ttrace_rpmh_tx_done(drv, i, req, err);
+
+\t\t/* Clear AMC trigger & enable modes and
+''',
+        '''\t\ttrace_rpmh_tx_done(drv, i, req, err);
+\t\tif (a52_p431_ri > 0 && a52_p431_ri <= 96)
+\t\t\ta52_ackfr_record("P431 RC n=%d id=%d e=%d st=%u c=%u",
+\t\t\t\ta52_p431_ri, i, err, req->state, req->num_cmds);
+
+\t\t/* Clear AMC trigger & enable modes and
+''',
+        "Display-RSC completion")
+
+    text = one(text,
+        '''\treturn IRQ_HANDLED;
+}
+
+/**
+ * __tcs_buffer_write()''',
+        '''\tif (a52_p431_ri > 0 && a52_p431_ri <= 96)
+\t\ta52_ackfr_record("P431 RI x n=%d use=%u",
+\t\t\ta52_p431_ri,
+\t\t\t(unsigned int)bitmap_weight(drv->tcs_in_use, MAX_TCS_NR));
+\treturn IRQ_HANDLED;
+}
+
+/**
+ * __tcs_buffer_write()''',
+        "Display-RSC IRQ exit")
+
+    text += "\n/* " + MARK + ": bounded TouchGrass-style Display-RSC IRQ chronology. */\n"
+    return text
+
+
 def patch_rec(text: str) -> str:
     if MARK in text:
         return text
@@ -394,6 +482,7 @@ def validate(root: Path) -> None:
     s = (root / SYSCALL).read_text(errors="replace")
     u = (root / UFS).read_text(errors="replace")
     r = (root / REC).read_text(errors="replace")
+    q = (root / RSC).read_text(errors="replace")
 
     for tok in (
         MARK,
@@ -414,6 +503,7 @@ def validate(root: Path) -> None:
         "a52_p431_exec_fn",
         'mrs %0, cntpct_el0',
         "set_cpus_allowed_ptr(current, cpumask_of(7))",
+        "a52_p431_trace_window_active",
     ):
         if tok not in s:
             raise SystemExit("Phase431 syscall token missing: " + tok)
@@ -433,6 +523,17 @@ def validate(root: Path) -> None:
         if tok not in r:
             raise SystemExit("Phase431 recorder token missing: " + tok)
 
+    for tok in (
+        MARK,
+        'P431 RI e n=%d irq=%d st=%lx use=%u',
+        'P431 RC n=%d id=%d e=%d st=%u c=%u',
+        'P431 RI x n=%d use=%u',
+        'trace_rpmh_tx_done(drv, i, req, err);',
+        'P276 301R e st=%d ty=%d n=%d off=%d use=%u ws=%u irq=%d',
+    ):
+        if tok not in q:
+            raise SystemExit("Phase431 RSC chronology token missing: " + tok)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -440,7 +541,7 @@ def main() -> int:
     ap.add_argument("--check-only", action="store_true")
     ns = ap.parse_args()
 
-    for rel in (SYSCALL, UFS, REC):
+    for rel in (SYSCALL, UFS, REC, RSC):
         if not (ns.root / rel).is_file():
             raise SystemExit("Phase431 source missing: " + str(rel))
 
@@ -451,6 +552,8 @@ def main() -> int:
         p.write_text(patch_ufs(p.read_text(errors="replace")))
         p = ns.root / REC
         p.write_text(patch_rec(p.read_text(errors="replace")))
+        p = ns.root / RSC
+        p.write_text(patch_rsc(p.read_text(errors="replace")))
 
     validate(ns.root)
     print("Phase431 safe SF-gap forensics: PASS")

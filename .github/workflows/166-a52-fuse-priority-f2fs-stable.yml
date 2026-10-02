@@ -1364,8 +1364,6 @@ jobs:
             artifacts/p166-final.diff
             artifacts/p166-final-diff-sha256.txt
             artifacts/p166-postbuild-audit.txt
-            artifacts/p166-final.diff
-            artifacts/p166-final-diff-sha256.txt
             artifacts/p161-zram-multicomp-audit.txt
             artifacts/p161-zram-vmlinux-strings.txt
             artifacts/p160-zram-capability-audit.txt

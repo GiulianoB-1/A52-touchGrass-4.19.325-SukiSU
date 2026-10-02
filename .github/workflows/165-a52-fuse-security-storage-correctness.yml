@@ -699,7 +699,12 @@ jobs:
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
 
-          python3 scripts/165_apply_security_storage_correctness.py "$KERNEL" \
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/165_apply_security_storage_correctness.py" \
+            -o /tmp/165_apply_security_storage_correctness.py
+
+          python3 -m py_compile /tmp/165_apply_security_storage_correctness.py
+          python3 /tmp/165_apply_security_storage_correctness.py "$KERNEL" \
             | tee artifacts/p165-apply-audit.txt
 
           git -C "$KERNEL" diff --check

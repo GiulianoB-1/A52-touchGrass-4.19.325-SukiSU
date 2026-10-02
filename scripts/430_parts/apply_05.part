@@ -1,0 +1,28 @@
+        HWC:['A52_P430_DMA_PHYS          0xB1BF8000ULL','A52_P430_DMA_SAMPLES       7U','hrtimer_start','a52_p430_smmu_forensic','im->num_tcs = im->child_cfg & 0x3fU','A52_P427_MAX_CMDS     16U'],
+        SMMU:['int a52_p430_smmu_forensic','ARM_SMMU_CB_ATS1PR','ARM_SMMU_CB_PAR','ops->iova_to_phys','ARM_SMMU_GR0_sGFSR','ARM_SMMU_CB_TLBSTATUS'],
+        REC:['strncmp(fmt, "P430", 4)','!strncmp(message, "P430 ", 5)'],
+    }
+    for p,toks in req.items():
+        for tok in toks:
+            if tok not in files[p]:
+                raise SystemExit(f'{p}: missing {tok}')
+    if 'late_initcall(a52_p429_init);' in files[SYSCALL]:
+        raise SystemExit('Phase429 task sampler still active')
+    if 's->num_tcs = (s->child_cfg >> 6) & 0x3f;' in files[HWC]:
+        raise SystemExit('old Phase427 TCS parser remains')
+
+
+def main()->int:
+    ap=argparse.ArgumentParser()
+    ap.add_argument('--root',type=Path,required=True)
+    ap.add_argument('--check-only',action='store_true')
+    ns=ap.parse_args(); root=ns.root
+    if ns.check_only:
+        validate(root); print('Phase430 validation: PASS'); return 0
+    patchers={SYSCALL:patch_syscall,UFS:patch_ufs,MSM:patch_msm,DSI:patch_dsi,HWC:patch_hwc,SMMU:patch_smmu,REC:patch_rec}
+    for p,fn in patchers.items():
+        q=root/p; q.write_text(fn(q.read_text(errors='replace')))
+    validate(root); print('Phase430 apply: PASS'); return 0
+
+if __name__=='__main__':
+    raise SystemExit(main())

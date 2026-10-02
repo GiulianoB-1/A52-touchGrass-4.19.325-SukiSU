@@ -200,10 +200,16 @@ def patch_f2fs_acl_checkpoint(root,out):
     rel="fs/f2fs/f2fs.h"
     s=rd(root,rel)
     if "XATTR_DIR_INO" not in s:
-        s=rep1(s,
-            "\tTRANS_DIR_INO,\t\t/* for trasactions dir ino list */\n\tFLUSH_INO,",
-            "\tTRANS_DIR_INO,\t\t/* for trasactions dir ino list */\n\tXATTR_DIR_INO,\t\t/* for xattr updated dir ino list */\n\tFLUSH_INO,",
-            "F2FS XATTR_DIR_INO enum")
+        # Earlier F2FS cleanup corrected the vendor comment typo from
+        # "trasactions" to "transactions". Insert by enum members, not comment text.
+        trans=s.find("\tTRANS_DIR_INO,")
+        flush=s.find("\tFLUSH_INO,", trans)
+        if trans < 0 or flush < 0:
+            die("F2FS TRANS_DIR_INO/FLUSH_INO enum members not found")
+        line_end=s.find("\n", trans)
+        if line_end < 0 or line_end >= flush:
+            die("F2FS TRANS_DIR_INO enum layout unexpected")
+        s=s[:line_end+1] + "\tXATTR_DIR_INO,\t\t/* for xattr updated dir ino list */\n" + s[line_end+1:]
     if "CP_XATTR_DIR" not in s:
         s=rep1(s,
             "\tCP_RECOVER_DIR,\n\tNR_CP_REASON,",

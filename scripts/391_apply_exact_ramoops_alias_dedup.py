@@ -80,7 +80,7 @@ static void __init __rmem_check_for_overlap(void)
 \t\t\tnext_end = next->base + next->size;
 
 \t\t\tif (a52_p391_same_ramoops_alias(this, next)) {
-\t\t\t\tpr_warn(\"A52 P391 RMEM_ALIAS: exact duplicate %s/%s %pa--%pa ignored\\\\n\",
+\t\t\t\tpr_warn(\"A52 P391 RMEM_ALIAS: exact duplicate %s/%s %pa--%pa ignored\\n\",
 \t\t\t\t\tthis->name, next->name,
 \t\t\t\t\t&this->base, &this_end);
 \t\t\t\tcontinue;

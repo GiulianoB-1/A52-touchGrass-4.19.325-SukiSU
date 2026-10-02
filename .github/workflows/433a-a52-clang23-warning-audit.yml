@@ -1,0 +1,450 @@
+name: Phase433A - Clang23 warning audit
+run-name: Phase433A - Clang14 vs Clang23 warning audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase433a-clang23-warning-audit-v1
+    paths:
+      - .github/workflows/433a-a52-clang23-warning-audit.yml
+      - scripts/433_compare_clang_warnings.py
+      - scripts/432_apply_sf_hwc_bootanim_chain.py
+      - scripts/431_apply_safe_gap_forensics.py
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/430_postapply_hardening.py
+      - scripts/430_parts/**
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPRESS: "true"
+  CCACHE_COMPRESSLEVEL: "6"
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+
+concurrency:
+  group: a52-phase433a-clang23-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Compile-only Clang 14 vs 23 audit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner and install Clang 14 + Clang 23
+        run: |
+          set -Eeuo pipefail
+
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex \
+            clang clang-14 lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves \
+            wget ca-certificates gnupg lsb-release
+
+          wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
+          chmod +x "$RUNNER_TEMP/llvm.sh"
+          sudo "$RUNNER_TEMP/llvm.sh" 23
+          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23
+
+          /usr/bin/clang --version
+          /usr/bin/clang-23 --version
+          /usr/bin/ld.lld --version
+          /usr/bin/ld.lld-23 --version
+
+          /usr/bin/clang --version > "$RUNNER_TEMP/clang14-version.txt"
+          /usr/bin/clang-23 --version > "$RUNNER_TEMP/clang23-version.txt"
+          {
+            echo "Ubuntu packages:"
+            dpkg-query -W \
+              -f='${Package}\t${Version}\n' \
+              clang clang-14 lld llvm clang-23 lld-23 llvm-23 2>/dev/null || true
+          } > "$RUNNER_TEMP/toolchain-packages.txt"
+
+          grep -Eq 'clang version 14\.' "$RUNNER_TEMP/clang14-version.txt"
+          grep -Eq 'clang version 23\.' "$RUNNER_TEMP/clang23-version.txt"
+
+          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/433_compare_clang_warnings.py
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+
+      - name: Require Phase429 source cache
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase429-source.outputs.cache-hit }}" = "true" || {
+            echo "Phase433A cache contract: Phase429 compact source cache is missing."
+            echo "Refusing a cold source rebuild."
+            exit 1
+          }
+          test -d gki/common
+          test -s phase429-gki-out/config/final.config
+          echo "Phase429 compact source cache: HIT"
+
+      - name: Restore exact Phase432 object cache
+        id: phase432-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Fallback to Phase431 object cache
+        if: steps.phase432-objects.outputs.cache-hit != 'true'
+        id: phase431-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
+          restore-keys: |
+            a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Require warm object cache
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ steps.phase432-objects.outputs.cache-hit }}" = "true" ]; then
+            echo "Warm object cache: exact Phase432 HIT"
+          elif [ "${{ steps.phase431-objects.outputs.cache-hit }}" = "true" ]; then
+            echo "Warm object cache: Phase431 fallback HIT"
+          else
+            echo "Phase433A requires a Phase432 or Phase431 object cache."
+            echo "Refusing the expensive cold full-kernel rebuild."
+            exit 1
+          fi
+
+          test -s workspace/gki-phase199-out/.config
+
+      - name: Restore Clang 14 audit ccache
+        id: ccache14
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-phase433a-clang14
+          key: a52xq-clang14-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433_compare_clang_warnings.py') }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang14-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore Clang 23 audit ccache
+        id: ccache23
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-phase433a-clang23
+          key: a52xq-clang23-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433_compare_clang_warnings.py') }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang23-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Reconstruct exact Phase432 source state
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' \
+            "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' \
+            "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+      - name: Prepare isolated compiler wrappers and warning probes
+        run: |
+          set -Eeuo pipefail
+
+          TOOL14="$RUNNER_TEMP/a52-phase433a-clang14-bin"
+          TOOL23="$RUNNER_TEMP/a52-phase433a-clang23-bin"
+          mkdir -p "$TOOL14" "$TOOL23" \
+            "$PWD/.ccache-phase433a-clang14" "$PWD/.ccache-phase433a-clang23" \
+            "$PWD/phase433a-report"
+
+          cat > "$TOOL14/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$TOOL14/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+
+          cat > "$TOOL23/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang-23 "$@"
+          EOF
+          cat > "$TOOL23/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++-23 "$@"
+          EOF
+          chmod +x "$TOOL14/clang" "$TOOL14/clang++" "$TOOL23/clang" "$TOOL23/clang++"
+
+          for t in ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip; do
+            test -x "/usr/bin/$t"
+            ln -sf "/usr/bin/$t" "$TOOL14/$t"
+
+            test -x "/usr/bin/$t-23"
+            ln -sf "/usr/bin/$t-23" "$TOOL23/$t"
+          done
+
+          WARNINGS=(
+            -Wuninitialized
+            -Wsometimes-uninitialized
+            -Wconditional-uninitialized
+            -Warray-bounds
+            -Warray-bounds-pointer-arithmetic
+            -Wcast-function-type-strict
+            -Wshift-overflow
+            -Wimplicit-fallthrough
+            -Wtautological-compare
+          )
+
+          : > phase433a-report/supported-warnings-clang14.txt
+          : > phase433a-report/supported-warnings-clang23.txt
+
+          for flag in "${WARNINGS[@]}"; do
+            if /usr/bin/clang -Werror -Wunknown-warning-option "$flag" \
+                -x c -c /dev/null -o "$RUNNER_TEMP/p433a-probe14.o" >/dev/null 2>&1; then
+              echo "$flag" >> phase433a-report/supported-warnings-clang14.txt
+            fi
+
+            if /usr/bin/clang-23 -Werror -Wunknown-warning-option "$flag" \
+                -x c -c /dev/null -o "$RUNNER_TEMP/p433a-probe23.o" >/dev/null 2>&1; then
+              echo "$flag" >> phase433a-report/supported-warnings-clang23.txt
+            fi
+          done
+
+          cp "$RUNNER_TEMP/clang14-version.txt" phase433a-report/
+          cp "$RUNNER_TEMP/clang23-version.txt" phase433a-report/
+          cp "$RUNNER_TEMP/toolchain-packages.txt" phase433a-report/
+
+          echo "Clang 14 explicit warnings:"
+          cat phase433a-report/supported-warnings-clang14.txt
+          echo "Clang 23 explicit warnings:"
+          cat phase433a-report/supported-warnings-clang23.txt
+
+      - name: Identify configured target objects
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase433a-report/target-objects.txt"
+          : > "$OUT"
+
+          add_dir() {
+            local d="$1"
+            if [ -d "$BUILD/$d" ]; then
+              find "$BUILD/$d" -type f -name '*.o' -printf '%P\n' | \
+                sed "s#^#$d/#" >> "$OUT"
+            fi
+          }
+
+          add_dir drivers/a52_display
+          add_dir drivers/iommu/arm/arm-smmu
+          add_dir drivers/soc/qcom/msm_bus
+          add_dir drivers/clk/qcom
+          add_dir drivers/interconnect
+          add_dir drivers/gpu/drm
+
+          if [ -f "$BUILD/drivers/soc/qcom/rpmh-rsc.o" ]; then
+            echo drivers/soc/qcom/rpmh-rsc.o >> "$OUT"
+          fi
+
+          sort -u -o "$OUT" "$OUT"
+
+          COUNT="$(wc -l < "$OUT")"
+          echo "Configured target objects: $COUNT"
+          test "$COUNT" -ge 25
+
+          cp "$BUILD/.config" "$PWD/phase433a-report/final.config"
+
+      - name: Clang 14 control warning audit
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          REPORT="$PWD/phase433a-report"
+          TOOL14="$RUNNER_TEMP/a52-phase433a-clang14-bin"
+
+          invalidate_targets() {
+            while IFS= read -r rel; do
+              [ -n "$rel" ] || continue
+              obj="$BUILD/$rel"
+              dir="$(dirname "$obj")"
+              base="$(basename "$obj")"
+              rm -f "$obj" "$dir/.$base.cmd" "$dir/.$base.d"
+            done < "$REPORT/target-objects.txt"
+          }
+
+          invalidate_targets
+
+          export PATH="$TOOL14:/usr/bin:/bin:$PATH"
+          export CCACHE_DIR="$PWD/.ccache-phase433a-clang14"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+
+          EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang14.txt")"
+
+          set +e
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 W=1 \
+            KCFLAGS="-fno-color-diagnostics $EXTRA" \
+            -j"$(nproc)" Image 2>&1 | tee "$REPORT/clang14-build.log"
+          RC="${PIPESTATUS[0]}"
+          set -e
+
+          echo "$RC" > "$REPORT/clang14-status.txt"
+          ccache -s > "$REPORT/clang14-ccache.txt"
+          echo "Clang 14 compile status: $RC"
+
+      - name: Clang 23 warning audit
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          REPORT="$PWD/phase433a-report"
+          TOOL23="$RUNNER_TEMP/a52-phase433a-clang23-bin"
+
+          invalidate_targets() {
+            while IFS= read -r rel; do
+              [ -n "$rel" ] || continue
+              obj="$BUILD/$rel"
+              dir="$(dirname "$obj")"
+              base="$(basename "$obj")"
+              rm -f "$obj" "$dir/.$base.cmd" "$dir/.$base.d"
+            done < "$REPORT/target-objects.txt"
+          }
+
+          invalidate_targets
+
+          export PATH="$TOOL23:/usr/bin:/bin:$PATH"
+          export CCACHE_DIR="$PWD/.ccache-phase433a-clang23"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+
+          EXTRA="$(tr '\n' ' ' < "$REPORT/supported-warnings-clang23.txt")"
+
+          set +e
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 W=1 \
+            KCFLAGS="-fno-color-diagnostics $EXTRA" \
+            -j"$(nproc)" Image 2>&1 | tee "$REPORT/clang23-build.log"
+          RC="${PIPESTATUS[0]}"
+          set -e
+
+          echo "$RC" > "$REPORT/clang23-status.txt"
+          ccache -s > "$REPORT/clang23-ccache.txt"
+          echo "Clang 23 compile status: $RC"
+
+      - name: Generate differential warning report
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          REPORT="$PWD/phase433a-report"
+          ROOT="$PWD/gki/common"
+
+          test -f "$REPORT/clang14-build.log" || : > "$REPORT/clang14-build.log"
+          test -f "$REPORT/clang23-build.log" || : > "$REPORT/clang23-build.log"
+          test -f "$REPORT/clang14-status.txt" || echo 999 > "$REPORT/clang14-status.txt"
+          test -f "$REPORT/clang23-status.txt" || echo 999 > "$REPORT/clang23-status.txt"
+
+          python3 scripts/433_compare_clang_warnings.py \
+            --clang14-log "$REPORT/clang14-build.log" \
+            --clang23-log "$REPORT/clang23-build.log" \
+            --source-root "$ROOT" \
+            --out-dir "$REPORT" \
+            --clang14-version "$REPORT/clang14-version.txt" \
+            --clang23-version "$REPORT/clang23-version.txt" \
+            --supported14 "$REPORT/supported-warnings-clang14.txt" \
+            --supported23 "$REPORT/supported-warnings-clang23.txt" \
+            --status14 "$REPORT/clang14-status.txt" \
+            --status23 "$REPORT/clang23-status.txt"
+
+          echo
+          cat "$REPORT/phase433a-clang23-warning-audit.txt"
+          echo
+          sed -n '1,160p' "$REPORT/phase433a-display-relevant-findings.md"
+
+      - name: Save Clang 14 Phase433A ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-phase433a-clang14
+          key: a52xq-clang14-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433_compare_clang_warnings.py') }}-${{ github.run_id }}
+
+      - name: Save Clang 23 Phase433A ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-phase433a-clang23
+          key: a52xq-clang23-phase433a-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/433_compare_clang_warnings.py') }}-${{ github.run_id }}
+
+      - name: Upload Phase433A diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE433A-CLANG23-WARNING-AUDIT-${{ github.run_number }}
+          path: |
+            phase433a-report/
+            scripts/433_compare_clang_warnings.py
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Gate on compile status
+        if: always()
+        run: |
+          set -Eeuo pipefail
+
+          RC14="$(cat phase433a-report/clang14-status.txt 2>/dev/null || echo 999)"
+          RC23="$(cat phase433a-report/clang23-status.txt 2>/dev/null || echo 999)"
+
+          echo "Clang 14 status: $RC14"
+          echo "Clang 23 status: $RC23"
+
+          if [ "$RC14" -ne 0 ] || [ "$RC23" -ne 0 ]; then
+            echo "One or both compiler audit passes failed."
+            echo "The report artifact was uploaded first so the initial failure can be analyzed."
+            exit 1
+          fi

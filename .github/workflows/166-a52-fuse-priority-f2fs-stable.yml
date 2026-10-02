@@ -265,7 +265,71 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
+      - name: Prepare P166 source-cache identity
+        id: p166_identity
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/166_apply_fuse_priority_f2fs_stable.py" \
+            -o /tmp/166_apply_fuse_priority_f2fs_stable.py
+          python3 -m py_compile /tmp/166_apply_fuse_priority_f2fs_stable.py
+
+          SHA="$(sha256sum /tmp/166_apply_fuse_priority_f2fs_stable.py | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "P166 source-cache script sha256=$SHA"
+
+      - name: Restore exact P166 applied-source snapshot
+        id: p166_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p166-source.tar.zst
+          key: a52xq-p166-source-v2-r596125-${{ steps.p166_identity.outputs.sha }}
+
+      - name: Restore boot-tested P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        id: p165_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p165-source.tar.zst
+          key: a52xq-p165-source-v2-r596125-3b66837b0643b90eb34dc0f6ad527e52bf77b0b4
+
+      - name: Activate cached P165 or P166 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit == 'true' || steps.p165_source_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+
+          if [ "${{ steps.p166_source_cache.outputs.cache-hit }}" = "true" ]; then
+            SNAP=.phase-cache/p166-source.tar.zst
+            LEVEL=P166
+          else
+            SNAP=.phase-cache/p165-source.tar.zst
+            LEVEL=P165
+          fi
+
+          test -s "$SNAP"
+          rm -rf workspace/touchgrass-a52xq artifacts
+          tar --zstd -xf "$SNAP"
+          mkdir -p artifacts
+
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          git -C "$KERNEL" diff --check
+
+          if [ "$LEVEL" = P166 ]; then
+            grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'fc->writeback_cache = 0;' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'CP_XATTR_DIR' "$KERNEL/fs/f2fs/f2fs.h"
+          else
+            ! grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'FUSE_NO_OPEN_SUPPORT |' "$KERNEL/fs/fuse/inode.c"
+          fi
+
+          echo "Activated cached source boundary: $LEVEL"
+
       - name: Replay production chain through boot-tested P149
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -290,6 +354,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P150 AOD power saver
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -325,6 +390,7 @@ jobs:
             > artifacts/aod-power-saver-p150.diff
 
       - name: Apply boot-proven P151 deferred init + first async batch
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -342,6 +408,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P152 second selective async peripheral batch
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -365,6 +432,7 @@ jobs:
             drivers/vibrator/dc/dc_vibrator.c \
             > artifacts/boot-async-p151-p152.diff
       - name: Apply P153 Binder Linux 4.19 MM compatibility
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -381,6 +449,7 @@ jobs:
           ! grep -Fq 'vma_lookup(mm, addr)' "$BINDER"
           git -C workspace/touchgrass-a52xq diff --check
       - name: Apply P154 Lagoon GPU clock Clang 22 compatibility
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
 
@@ -555,6 +624,7 @@ jobs:
           print(f'[patched] {count} llvm-nm grep-q pipeline(s)')
           PY
       - name: Apply P156 Clang22 initcall-order repair
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -574,6 +644,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P159 ThinLTO cross-TU import limit
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -592,6 +663,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Enable ZRAM Zstd backend and validate writeback stack
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -610,6 +682,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P161 ZRAM multi-comp recompression backport
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -629,6 +702,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P162 integrated security stability efficiency fixes
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -696,6 +770,7 @@ jobs:
           } | tee artifacts/p162-build-info.txt
 
       - name: Apply P165 FUSE security storage correctness bundle
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -724,16 +799,31 @@ jobs:
             echo "github_workflow=${{ github.workflow }}"
           } | tee artifacts/p165-build-info.txt
 
+      - name: Create P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p165-source.tar.zst
+          tar --zstd -cf .phase-cache/p165-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p165-source.tar.zst
+          du -h .phase-cache/p165-source.tar.zst
+
+      - name: Save boot-tested P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p165-source.tar.zst
+          key: a52xq-p165-source-v2-r596125-3b66837b0643b90eb34dc0f6ad527e52bf77b0b4
+
       - name: Apply P166 FUSE priority experiment and F2FS stable continuation
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
 
-          curl -fsSL \
-            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/166_apply_fuse_priority_f2fs_stable.py" \
-            -o /tmp/166_apply_fuse_priority_f2fs_stable.py
-
-          python3 -m py_compile /tmp/166_apply_fuse_priority_f2fs_stable.py
+          test -s /tmp/166_apply_fuse_priority_f2fs_stable.py
           python3 /tmp/166_apply_fuse_priority_f2fs_stable.py "$KERNEL" \
             | tee artifacts/p166-apply-audit.txt
 
@@ -754,6 +844,40 @@ jobs:
             echo "github_run_id=${{ github.run_id }}"
             echo "github_run_number=${{ github.run_number }}"
           } | tee artifacts/p166-build-info.txt
+
+      - name: Create P166 applied-source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p166-source.tar.zst
+          tar --zstd -cf .phase-cache/p166-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p166-source.tar.zst
+          du -h .phase-cache/p166-source.tar.zst
+
+      - name: Save exact P166 applied-source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p166-source.tar.zst
+          key: a52xq-p166-source-v2-r596125-${{ steps.p166_identity.outputs.sha }}
+
+      - name: Refresh P166 run provenance
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "phase=P166"
+            echo "runtime_baseline=P165_boot_and_fuse_tested"
+            echo "p165_workflow_run=37003864311"
+            echo "experiment=offer_writeback_but_prefer_upstream_passthrough"
+            echo "new_fixes=f2fs_4d9c9b7,f2fs_72c6b13"
+            echo "source_cache_p166=${{ steps.p166_source_cache.outputs.cache-hit }}"
+            echo "source_cache_p165=${{ steps.p165_source_cache.outputs.cache-hit }}"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+          } > artifacts/p166-build-info.txt
 
       - name: Teardown recorders and diagnostic markers
         run: |
@@ -1058,10 +1182,15 @@ jobs:
           assert "CP_XATTR_DIR" in trace
 
           vm=(root/"mm/vmscan.c").read_text()
-          assert "wait_event_killable(lruvec->mm_state.wait" not in vm
+          assert "wait_event_killable(lruvec->mm_state.wait" not in vm, "B3 mm_state wait unexpectedly present"
+
           lpm=(root/"drivers/cpuidle/lpm-levels.c").read_text()
-          assert "A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup" in lpm
-          assert "*stop_tick = false;" in lpm
+          start=lpm.index("static int cpu_power_select(")
+          cpu_select=lpm[start:start+3500]
+          assert "bool *stop_tick" in cpu_select, "D3 stop_tick parameter missing"
+          assert "tick_nohz_get_sleep_length(&delta_next)" in cpu_select, "D3 next-event horizon missing"
+          assert "*stop_tick = false;" in cpu_select, "D3 short-idle tick retention missing"
+          assert "return cpu_power_select(dev, cpu, stop_tick);" in lpm, "D3 stop_tick plumbing missing"
 
           print("P166 post-build audit: PASS")
           print("fuse_writeback_offer=enabled")
@@ -1364,6 +1493,7 @@ jobs:
             artifacts/p166-final.diff
             artifacts/p166-final-diff-sha256.txt
             artifacts/p166-postbuild-audit.txt
+            artifacts/p159-build-cache-key.txt
             artifacts/p161-zram-multicomp-audit.txt
             artifacts/p161-zram-vmlinux-strings.txt
             artifacts/p160-zram-capability-audit.txt
@@ -1433,3 +1563,9 @@ jobs:
 # - hand-ports stable F2FS 4d9c9b7 and 72c6b13.
 # - B3 and D3 are audited as already satisfied; B6 stays deferred.
 # - no scheduler/GPU/UFS/display/AOD runtime changes.
+
+# P166 cache v2:
+# - exact P165 source+artifact snapshot cache skips replay through P165 on P166 edits.
+# - exact P166 source+artifact snapshot cache is keyed by the P166 patcher SHA256.
+# - Clang toolchain, ccache, ThinLTO, P134 source, and final built-output caches remain enabled.
+# - post-build D3 audit checks executable source behavior, not teardown-removable marker comments.

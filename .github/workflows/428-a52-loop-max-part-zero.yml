@@ -1,0 +1,217 @@
+name: Phase428 - loop.max_part=0 A/B
+run-name: Phase428 - loop.max_part=0 A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/428-a52-loop-max-part-zero.yml
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PHASE427_RUN_ID: '36908334709'
+  PHASE427_ARTIFACT_ID: '11185822648'
+  PHASE427_BOOT_SHA256: 'cdf4eff6c4988a2c6b49783de41346cbe96aadda0ec4d39935d16a60aee3ad52'
+
+concurrency:
+  group: a52-phase428-loop-max-part-zero-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase428 loop.max_part=0 A/B boot image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact successful Phase427 boot image
+        run: |
+          set -Eeuo pipefail
+          rm -rf phase428-out
+          mkdir -p phase428-out/base phase428-out/package
+
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$PHASE427_ARTIFACT_ID/zip" \
+            -o phase428-out/phase427-boot-artifact.zip
+
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          archive = Path("phase428-out/phase427-boot-artifact.zip")
+          dest = Path("phase428-out/base")
+          with zipfile.ZipFile(archive) as zf:
+              names = [n for n in zf.namelist() if not n.endswith("/")]
+              if names != ["boot-phase427-cb2-handoff-road-probe-v1.img"]:
+                  raise SystemExit(f"unexpected Phase427 artifact contents: {names}")
+              zf.extractall(dest)
+          PY
+
+          BASE="phase428-out/base/boot-phase427-cb2-handoff-road-probe-v1.img"
+          test "$(stat -c '%s' "$BASE")" -eq 100663296
+          echo "$PHASE427_BOOT_SHA256  $BASE" | sha256sum -c -
+          echo "Exact Phase427 base from run $PHASE427_RUN_ID: PASS"
+
+      - name: Patch only loop.max_part from 7 to 0
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          base_path = Path("phase428-out/base/boot-phase427-cb2-handoff-road-probe-v1.img")
+          final_path = Path("phase428-out/package/boot-phase428-loop-max-part-zero.img")
+
+          base_bytes = base_path.read_bytes()
+          base = module.parse_boot(base_bytes)
+          tokens = base["cmdline"].split()
+
+          hits = [i for i, tok in enumerate(tokens)
+                  if tok.split("=", 1)[0] == "loop.max_part"]
+          if len(hits) != 1:
+              raise SystemExit(f"expected exactly one loop.max_part token, found {len(hits)}")
+          idx = hits[0]
+          if tokens[idx] != "loop.max_part=7":
+              raise SystemExit(f"unexpected Phase427 loop token: {tokens[idx]}")
+          tokens[idx] = "loop.max_part=0"
+
+          # Keep token ordering identical. The only intended boot-image byte
+          # difference is inside the two Android boot header cmdline fields.
+          cmdline = " ".join(tokens)
+          encoded = cmdline.encode("ascii")
+          if len(encoded) > 1534:
+              raise SystemExit(f"Phase428 command line too long: {len(encoded)}")
+
+          data = bytearray(base_bytes)
+          data[64:576] = b"\0" * 512
+          data[608:1632] = b"\0" * 1024
+          first = encoded[:511]
+          second = encoded[511:]
+          data[64:64 + len(first)] = first
+          data[608:608 + len(second)] = second
+          final_path.write_bytes(data)
+
+          final_bytes = final_path.read_bytes()
+          out = module.parse_boot(final_bytes)
+
+          base_loop = [x for x in base["cmdline"].split()
+                       if x.split("=", 1)[0] == "loop.max_part"]
+          final_loop = [x for x in out["cmdline"].split()
+                        if x.split("=", 1)[0] == "loop.max_part"]
+          assert base_loop == ["loop.max_part=7"], base_loop
+          assert final_loop == ["loop.max_part=0"], final_loop
+
+          # Preserve Phase427's survival/debug treatment exactly.
+          for tok in ("nohlt", "cpuidle.off=1", "panic=1", "ignore_loglevel"):
+              assert tok in out["cmdline"].split(), tok
+
+          # Parsed payload/header invariants.
+          for key in ("header_version", "page_size", "board", "kernel_addr",
+                      "ramdisk_addr", "tags_addr", "kernel", "ramdisk",
+                      "second", "dtb"):
+              assert out[key] == base[key], key
+          assert len(final_bytes) == len(base_bytes) == 100663296
+
+          # Strong byte-level proof: after blanking only the two cmdline
+          # regions, the entire 96 MiB boot image must be byte-identical.
+          before = bytearray(base_bytes)
+          after = bytearray(final_bytes)
+          for buf in (before, after):
+              buf[64:576] = b"\0" * 512
+              buf[608:1632] = b"\0" * 1024
+          if before != after:
+              raise SystemExit("bytes outside cmdline fields changed")
+
+          meta = {
+              "phase": 428,
+              "source_phase427_run": 36908334709,
+              "source_phase427_artifact": 11185822648,
+              "source_boot_sha256": hashlib.sha256(base_bytes).hexdigest(),
+              "output_boot_sha256": hashlib.sha256(final_bytes).hexdigest(),
+              "base_loop_token": "loop.max_part=7",
+              "treatment_loop_token": "loop.max_part=0",
+              "single_intended_change": True,
+              "bytes_outside_cmdline_fields_identical": True,
+              "kernel_payload_unchanged": True,
+              "phase427_recorders_and_cb2_treatment_unchanged": True,
+          }
+          Path("phase428-out/PHASE428-BOOT.json").write_text(
+              json.dumps(meta, indent=2, sort_keys=True) + "\n")
+
+          Path("phase428-out/PHASE428-NOTES.txt").write_text(
+              "Phase428 loop.max_part=0 A/B\n"
+              "============================\n"
+              "Exact base: successful Phase427 run 36908334709.\n"
+              "Only treatment: loop.max_part=7 -> loop.max_part=0 in boot cmdline.\n"
+              "No kernel rebuild and no kernel source change.\n"
+              "P421/P422/P424/P425/P426/P427 instrumentation is byte-identical.\n"
+              "Purpose: test whether global loop partition scanning is responsible\n"
+              "for the long apexd/block-layer delay before the first F0 command.\n"
+              "If apexd remains slow, the next phase should add the periodic\n"
+              "apexd thread/block/UFS census and recorder-routed hung-task evidence.\n"
+          )
+          PY
+
+          sha256sum phase428-out/base/boot-phase427-cb2-handoff-road-probe-v1.img
+          sha256sum phase428-out/package/boot-phase428-loop-max-part-zero.img
+          cat phase428-out/PHASE428-BOOT.json
+
+      - name: Verify Phase428 artifact
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "a52_boot_repack", "scripts/38_repack_a52_p1_boot.py")
+          module = importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+
+          p = Path("phase428-out/package/boot-phase428-loop-max-part-zero.img")
+          b = module.parse_boot(p.read_bytes())
+          toks = b["cmdline"].split()
+          assert "loop.max_part=0" in toks
+          assert "loop.max_part=7" not in toks
+          assert "nohlt" in toks
+          assert "cpuidle.off=1" in toks
+          assert "panic=1" in toks
+          meta = json.loads(Path("phase428-out/PHASE428-BOOT.json").read_text())
+          assert meta["single_intended_change"] is True
+          assert meta["bytes_outside_cmdline_fields_identical"] is True
+          print("Phase428 exact cmdline-only A/B audit: PASS")
+          print("cmdline:", b["cmdline"])
+          PY
+
+      - name: Upload Phase428
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE428-LOOP-MAX-PART-ZERO-${{ github.run_number }}
+          path: |
+            phase428-out/package/boot-phase428-loop-max-part-zero.img
+            phase428-out/PHASE428-BOOT.json
+            phase428-out/PHASE428-NOTES.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

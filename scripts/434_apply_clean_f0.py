@@ -463,6 +463,21 @@ def patch_msm(text: str) -> str:
         "static atomic_t a52_r269_event_sequence = ATOMIC_INIT(0);\n",
         "",
     )
+    text = re.sub(
+        r"#define A52_R269_EVENT_LIMIT 3072U\n",
+        "",
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"#define A52_R269_REC\(fmt, \.\.\.\) do \{ \\\n"
+        r"\tif \(\(unsigned int\)atomic_inc_return\(&a52_r269_event_sequence\) <= A52_R269_EVENT_LIMIT\) \\\n"
+        r"\t\ta52_ackfr_record\(\"P269 \" fmt, ##__VA_ARGS__\); \\\n"
+        r"\} while \(0\)\n",
+        "",
+        text,
+        count=1,
+    )
     anchor = "static long a52_r211_drm_ioctl(struct file *filp, unsigned int cmd,"
     pos = text.find(anchor)
     if pos < 0:
@@ -1152,8 +1167,8 @@ def validate(root: Path) -> None:
     if 'A52_R269_REC("PROP ' in msm or 'A52_R269_REC("PVAL ' in msm:
         # The strings may remain only if the whole old function was not replaced.
         die("verbose P269 property dump remains")
-    if "a52_r269_event_sequence" in msm:
-        die("retired P269 event sequence remains")
+    if "a52_r269_event_sequence" in msm or "#define A52_R269_REC" in msm:
+        die("retired P269 event macro remains")
     for token in (
         "P434 IO n=%u nr=%x rc=%ld",
         "P434 PROP n=%u obj=%u id=%u v=%llx",

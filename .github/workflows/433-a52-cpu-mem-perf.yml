@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Phase432-CTRL payload before setup
+      - name: Validate Phase433 payload before setup
         run: |
           set -Eeuo pipefail
           python3 -m py_compile \

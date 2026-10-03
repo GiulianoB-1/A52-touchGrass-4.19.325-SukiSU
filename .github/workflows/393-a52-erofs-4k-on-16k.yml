@@ -81,12 +81,39 @@ jobs:
             echo "cache_key=a52xq-p393-erofs-subpage-src-v2-${{ runner.os }}-50e28f3ececb"
           } | tee artifacts/phase393-source-cache.txt
 
+      # Immediate fallback: yesterday's successful Phase393-v1 run saved
+      # a complete tree containing P392 plus the older EROFS patch.  The v2
+      # backport replaces the EROFS implementation wholesale, so this is a
+      # safe and much faster base than replaying P152 -> P392.
+      - name: Fast restore prepared Phase393-v1 source tree
+        if: steps.phase393_fast.outputs.cache-hit != 'true'
+        id: phase393_v1_fast
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150
+
+      - name: Validate fast Phase393-v1 source cache
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release workspace
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
+          grep -Fq 'A52_PHASE393_EROFS_4K_ON_16K_COMPAT_V1' "$KERNEL/fs/erofs/internal.h"
+          grep -Fq 'P393 EROFSBLK disk=%u page=%lu' "$KERNEL/fs/erofs/super.c"
+          {
+            echo "phase393_v1_fast_cache_hit=true"
+            echo "cache_key=a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150"
+          } | tee artifacts/phase393-v1-source-cache.txt
+
       # Fast path: restore the newest complete source tree BEFORE replaying any
       # older baseline/phase chain. The same cache is also a cold-miss fallback
       # target later in the workflow, but restoring it at step 3 is what makes
       # retries and subsequent phase development fast.
       - name: Fast restore prepared Phase391 source tree
-        if: steps.phase393_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true'
         id: phase391_fast
         uses: actions/cache/restore@v4
         with:
@@ -94,7 +121,7 @@ jobs:
           key: a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c
 
       - name: Validate fast Phase391 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit == 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit == 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts release workspace
@@ -147,7 +174,7 @@ jobs:
           ccache --zero-stats
 
       - name: Restore prepared P152 16K + IncFS source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: p152_16k_source
         uses: actions/cache/restore@v4
         with:
@@ -157,7 +184,7 @@ jobs:
             a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-
 
       - name: Restore exact prepared P134 feature source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         id: p134_source
         uses: actions/cache/restore@v4
         with:
@@ -165,7 +192,7 @@ jobs:
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Restore exact 35461116688 pre-build source on P134 miss
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
         id: prebuild_source
         uses: actions/cache/restore@v4
         with:
@@ -173,7 +200,7 @@ jobs:
           key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
 
       - name: Restore exact 35196552336 prepared source on deeper cache miss
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true')
         id: base351_source
         uses: actions/cache/restore@v4
         with:
@@ -181,7 +208,7 @@ jobs:
           key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
 
       - name: Restore Linux stable checkpoint cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true')
         id: stable_cache
         uses: actions/cache/restore@v4
         with:
@@ -205,7 +232,7 @@ jobs:
           test -s artifacts/decode_phase383_16k_dual.py
 
       - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -268,7 +295,7 @@ jobs:
           git -C workspace/touchgrass-a52xq diff --check
 
       - name: Rebuild exact 35461116688 pre-build boundary
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -304,7 +331,7 @@ jobs:
           grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
 
       - name: Require usable source boundary
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           echo "P152 16K cache hit: ${{ steps.p152_16k_source.outputs.cache-hit }}"
@@ -327,7 +354,7 @@ jobs:
           fi
 
       - name: Rebuild prepared P134 boundary on cache miss
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -357,14 +384,14 @@ jobs:
           grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
 
       - name: Save rebuilt P134 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true' && steps.p134_source.outputs.cache-hit != 'true')
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
 
       - name: Replay production chain through boot-tested P149
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -389,7 +416,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P150 AOD power saver
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -425,7 +452,7 @@ jobs:
             > artifacts/aod-power-saver-p150.diff
 
       - name: Apply boot-proven P151 deferred init + first async batch
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -443,7 +470,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Apply P152 second selective async peripheral batch
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -467,7 +494,7 @@ jobs:
             drivers/vibrator/dc/dc_vibrator.c \
             > artifacts/boot-async-p151-p152.diff
       - name: Apply kernel-only 16K ARM64 page geometry
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -495,7 +522,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Backport Android IncFS 16K-page compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -517,7 +544,7 @@ jobs:
           git -C "$KERNEL" diff --check
 
       - name: Save prepared P152 16K source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.p152_16k_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -525,7 +552,7 @@ jobs:
           key: a52xq-p152-16k-incfs-src-v1-${{ runner.os }}-base36058491006-bc862599
 
       - name: Restore prepared Phase382 native-16K source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase382_source
         uses: actions/cache/restore@v4
         with:
@@ -533,7 +560,7 @@ jobs:
           key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
 
       - name: Validate prepared Phase382 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -553,7 +580,7 @@ jobs:
           } | tee artifacts/phase382-source-cache.txt
 
       - name: Apply retained Phase379 early 16K boot census diagnostics
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -578,7 +605,7 @@ jobs:
             > artifacts/phase379-boot-census.diff
 
       - name: Apply retained Phase380 16K CMA pageblock compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -617,7 +644,7 @@ jobs:
             > artifacts/phase380-cma-pageblock.diff
 
       - name: Apply retained Phase381 16K fast-SMMU compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -643,7 +670,7 @@ jobs:
             > artifacts/phase381-fast-smmu.diff
 
       - name: Apply retained Phase382 16K fast io-pgtable stride compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -664,7 +691,7 @@ jobs:
             > artifacts/phase382-fast-pgtable.diff
 
       - name: Save prepared Phase382 native-16K source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase382_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -672,7 +699,7 @@ jobs:
           key: a52xq-p383-phase382-prepared-src-v1-${{ runner.os }}-d1dab9c9118a
 
       - name: Record Phase382 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -682,7 +709,7 @@ jobs:
           } > artifacts/phase382-source-cache.txt
 
       - name: Restore prepared Phase383 dual-recorder source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase383_source
         uses: actions/cache/restore@v4
         with:
@@ -690,7 +717,7 @@ jobs:
           key: a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449
 
       - name: Validate prepared Phase383 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -704,7 +731,7 @@ jobs:
           } | tee artifacts/phase383-source-cache.txt
 
       - name: Apply retained Phase383 16K-safe Samsung-debug + ramoops ELF census
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -753,7 +780,7 @@ jobs:
           # Decoder is fetched independently so prepared-source cache hits are safe.
 
       - name: Save prepared Phase383 dual-recorder source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase383_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -761,7 +788,7 @@ jobs:
           key: a52xq-p384-phase383-prepared-src-v1-${{ runner.os }}-651f90ca1449
 
       - name: Record Phase383 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -814,6 +841,7 @@ jobs:
             echo "phase392_returns_original_user_address=yes"
             echo "phase392_other_mmap_semantics_unchanged=yes"
             echo "phase393_fast_source_cache_hit=${{ steps.phase393_fast.outputs.cache-hit }}"
+            echo "phase393_v1_fast_source_cache_hit=${{ steps.phase393_v1_fast.outputs.cache-hit }}"
             echo "phase393_erofs_subpage_v2=yes"
             echo "phase393_erofs_reference=EndCredits/kernel_xiaomi_sm7250@a264aed3fde518b43ab15ba530556e396502031f"
             echo "phase393_native_page_bytes=16384"
@@ -830,7 +858,7 @@ jobs:
           } > artifacts/phase383-source-cache.txt
 
       - name: Restore prepared Phase384 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase384_source
         uses: actions/cache/restore@v4
         with:
@@ -838,7 +866,7 @@ jobs:
           key: a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858
 
       - name: Validate prepared Phase384 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -853,7 +881,7 @@ jobs:
           } | tee artifacts/phase384-source-cache.txt
 
       - name: Apply retained Phase384 full PID1 4K-vs-16K ELF overlap census
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -880,7 +908,7 @@ jobs:
             > artifacts/phase384-pid1-elf-overlap.diff
 
       - name: Save prepared Phase384 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase384_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -888,7 +916,7 @@ jobs:
           key: a52xq-p385-phase384-prepared-src-v1-${{ runner.os }}-0c9c2c317858
 
       - name: Record Phase384 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -897,7 +925,7 @@ jobs:
           } > artifacts/phase384-source-cache.txt
 
       - name: Restore prepared Phase385 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase385_source
         uses: actions/cache/restore@v4
         with:
@@ -905,7 +933,7 @@ jobs:
           key: a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0
 
       - name: Validate prepared Phase385 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -921,7 +949,7 @@ jobs:
           } | tee artifacts/phase385-source-cache.txt
 
       - name: Apply retained Phase385 PID1 native-16K compatibility loader
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -949,7 +977,7 @@ jobs:
             > artifacts/phase385-pid1-compat.diff
 
       - name: Save prepared Phase385 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase385_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -957,7 +985,7 @@ jobs:
           key: a52xq-p386-phase385-prepared-src-v1-${{ runner.os }}-3183f6ae9da0
 
       - name: Record Phase385 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -966,7 +994,7 @@ jobs:
           } > artifacts/phase385-source-cache.txt
 
       - name: Restore prepared Phase386 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase386_source
         uses: actions/cache/restore@v4
         with:
@@ -974,7 +1002,7 @@ jobs:
           key: a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54
 
       - name: Validate prepared Phase386 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -990,7 +1018,7 @@ jobs:
           } | tee artifacts/phase386-source-cache.txt
 
       - name: Apply retained Phase386 PID1 icache synchronization + exit trace
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
 
@@ -1020,7 +1048,7 @@ jobs:
             > artifacts/phase386-pid1-icache-exit.diff
 
       - name: Save prepared Phase386 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase386_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1028,7 +1056,7 @@ jobs:
           key: a52xq-p387-phase386-prepared-src-v1-${{ runner.os }}-50c1888b7c54
 
       - name: Record Phase386 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1037,7 +1065,7 @@ jobs:
           } > artifacts/phase386-source-cache.txt
 
       - name: Restore prepared Phase387 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase387_source
         uses: actions/cache/restore@v4
         with:
@@ -1045,7 +1073,7 @@ jobs:
           key: a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421
 
       - name: Validate prepared Phase387 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1061,7 +1089,7 @@ jobs:
           } | tee artifacts/phase387-source-cache.txt
 
       - name: Apply retained Phase387 PID1 syscall ring
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1088,7 +1116,7 @@ jobs:
             > artifacts/phase387-pid1-syscall-ring.diff
 
       - name: Save prepared Phase387 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase387_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1096,7 +1124,7 @@ jobs:
           key: a52xq-p388-phase387-prepared-src-v1-${{ runner.os }}-21254b9f5421
 
       - name: Record Phase387 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1105,7 +1133,7 @@ jobs:
           } > artifacts/phase387-source-cache.txt
 
       - name: Restore prepared Phase388 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase388_source
         uses: actions/cache/restore@v4
         with:
@@ -1113,7 +1141,7 @@ jobs:
           key: a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29
 
       - name: Validate prepared Phase388 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1129,7 +1157,7 @@ jobs:
           } | tee artifacts/phase388-source-cache.txt
 
       - name: Apply retained Phase388 PID1 fatal-text capture
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1153,7 +1181,7 @@ jobs:
             > artifacts/phase388-pid1-fatal-text.diff
 
       - name: Save prepared Phase388 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase388_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1161,7 +1189,7 @@ jobs:
           key: a52xq-p389-phase388-prepared-src-v1-${{ runner.os }}-457e1fc9af29
 
       - name: Record Phase388 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1170,7 +1198,7 @@ jobs:
           } > artifacts/phase388-source-cache.txt
 
       - name: Restore prepared Phase389 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase389_source
         uses: actions/cache/restore@v4
         with:
@@ -1178,7 +1206,7 @@ jobs:
           key: a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62
 
       - name: Validate prepared Phase389 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1195,7 +1223,7 @@ jobs:
           } | tee artifacts/phase389-source-cache.txt
 
       - name: Apply retained Phase389 PID1 WriteProtected mprotect compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1220,7 +1248,7 @@ jobs:
             > artifacts/phase389-pid1-writeprotected.diff
 
       - name: Save prepared Phase389 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase389_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1228,7 +1256,7 @@ jobs:
           key: a52xq-p390-phase389-prepared-src-v1-${{ runner.os }}-3effbfe72a62
 
       - name: Record Phase389 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1237,7 +1265,7 @@ jobs:
           } > artifacts/phase389-source-cache.txt
 
       - name: Restore prepared Phase390 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase390_source
         uses: actions/cache/restore@v4
         with:
@@ -1245,7 +1273,7 @@ jobs:
           key: a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc
 
       - name: Validate prepared Phase390 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1263,7 +1291,7 @@ jobs:
           } | tee artifacts/phase390-source-cache.txt
 
       - name: Apply retained Phase390 PID1 main-thread TLS mprotect compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1287,7 +1315,7 @@ jobs:
             > artifacts/phase390-pid1-thread-tls.diff
 
       - name: Save prepared Phase390 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase390_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1295,7 +1323,7 @@ jobs:
           key: a52xq-p391-phase390-prepared-src-v1-${{ runner.os }}-45d3f7d9adcc
 
       - name: Record Phase390 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1304,7 +1332,7 @@ jobs:
           } > artifacts/phase390-source-cache.txt
 
       - name: Restore prepared Phase391 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         id: phase391_source
         uses: actions/cache/restore@v4
         with:
@@ -1312,7 +1340,7 @@ jobs:
           key: a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c
 
       - name: Validate prepared Phase391 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit == 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit == 'true')
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
@@ -1326,7 +1354,7 @@ jobs:
           } | tee artifacts/phase391-source-cache.txt
 
       - name: Apply retained Phase391 exact ramoops reservation alias dedup
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit != 'true')
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1350,7 +1378,7 @@ jobs:
             > artifacts/phase391-ramoops-alias.diff
 
       - name: Save prepared Phase391 source cache
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit != 'true')
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true' && (steps.phase391_source.outputs.cache-hit != 'true')
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1358,7 +1386,7 @@ jobs:
           key: a52xq-p392-phase391-prepared-src-v1-${{ runner.os }}-c29b1799639c
 
       - name: Record Phase391 source cache status
-        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true' && steps.phase391_fast.outputs.cache-hit != 'true'
         run: |
           mkdir -p artifacts
           {
@@ -1367,7 +1395,7 @@ jobs:
           } > artifacts/phase391-source-cache.txt
 
       - name: Apply retained Phase392 PID1 Scudo fixed-mmap compatibility
-        if: steps.phase393_fast.outputs.cache-hit != 'true'
+        if: steps.phase393_fast.outputs.cache-hit != 'true' && steps.phase393_v1_fast.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           curl -fsSL \
@@ -1984,3 +2012,11 @@ jobs:
 # - older P152/phase replay runs only if both caches miss
 # - compiler cache keeps Phase393-v1/P392 fallbacks
 # - v2 built-output cache key cannot reuse the old hand-patched Image
+
+# Cache hotfix:
+# - P393-v2 cache first
+# - complete successful P393-v1 source cache second
+# - Phase391 cache third
+# - only then old reconstruction
+# P393-v1 is safe as a v2 base because the v2 script replaces the active
+# EROFS source set from the pinned Android-4.19 reference before compiling.

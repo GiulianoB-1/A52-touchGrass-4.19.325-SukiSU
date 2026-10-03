@@ -37,9 +37,18 @@ if [[ $rc -ne 0 && "$BUILD" == "android16-release/aosp_cf_x86_64_only_phone-user
 fi
 
 if [[ $rc -ne 0 ]]; then
-  cat <<EOF
+  echo
+  echo "Automatic public Build API fetch failed (rc=$rc)."
+  echo
+  latest_log="$(ls -1t /var/tmp/cvd/"$(id -u)"/logs/cvd_*.log 2>/dev/null | head -1 || true)"
+  if [[ -n "$latest_log" && -s "$latest_log" ]]; then
+    echo "===== latest cvd fetch failure ====="
+    tail -n 120 "$latest_log" || true
+    echo "===== end cvd failure ====="
+    echo
+  fi
 
-Automatic public Build API fetch failed (rc=$rc).
+  cat <<EOF
 
 Use the official Android CI fallback:
   1. Open https://ci.android.com/

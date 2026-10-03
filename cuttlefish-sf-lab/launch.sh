@@ -11,6 +11,7 @@ fi
 GPU_MODE="${CF_GPU_MODE:-$DEFAULT_GPU_MODE}"
 WEBRTC="${CF_WEBRTC:-false}"
 WIFI="${CF_WIFI:-false}"
+SANDBOX="${CF_SANDBOX:-false}"
 BOOT_TIMEOUT="${CF_BOOT_TIMEOUT:-90}"
 
 test -x "$INSTANCE/bin/launch_cvd"
@@ -42,6 +43,7 @@ echo "Launching minimal SF-Q1 Cuttlefish:"
 echo "  gpu_mode=$GPU_MODE"
 echo "  webrtc=$WEBRTC"
 echo "  wifi=$WIFI"
+echo "  crosvm_sandbox=$SANDBOX"
 echo "  boot_timeout=${BOOT_TIMEOUT}s"
 echo
 
@@ -64,6 +66,9 @@ dump_boot_failure() {
     printf '  wchan: '; cat "/proc/$pid/wchan" 2>/dev/null || true; echo
   done
   echo
+  echo "Generated VM config:"
+  grep -nE '"vm_manager"|"enable_sandbox"|"seccomp_policy_dir"' "$I/cuttlefish_config.json" 2>/dev/null | head -n 40 || true
+  echo
   echo "Launcher: first relevant failures:"
   grep -nEi 'Subprocess .* exited|crosvm has exited|Detected unexpected exit|boot.*fail|timed out|timeout|failed|fatal|panic|permission denied|No such device' \
     "$I/logs/launcher.log" 2>/dev/null | head -n 160 || true
@@ -79,6 +84,7 @@ timeout --foreground "${BOOT_TIMEOUT}s" ./bin/launch_cvd \
   --daemon \
   --start_webrtc="$WEBRTC" \
   --enable_wifi="$WIFI" \
+  --enable_sandbox="$SANDBOX" \
   --gpu_mode="$GPU_MODE"
 launch_rc=$?
 set -e

@@ -59,7 +59,7 @@ echo "  webrtc=$WEBRTC"
 echo "  wifi=$WIFI"
 echo "  vm_manager=$VM_MANAGER"
 echo "  crosvm_sandbox=$SANDBOX"
-echo "  boot_timeout=${BOOT_TIMEOUT}s"
+echo "  launch_timeout=disabled (launch_cvd owns boot lifecycle)"
 echo
 
 dump_boot_failure() {
@@ -94,7 +94,7 @@ dump_boot_failure() {
 }
 
 set +e
-timeout --foreground "${BOOT_TIMEOUT}s" ./bin/launch_cvd \
+./bin/launch_cvd \
   --report_anonymous_usage_stats=n \
   --daemon \
   --start_webrtc="$WEBRTC" \
@@ -106,20 +106,9 @@ launch_rc=$?
 set -e
 
 if [[ "$launch_rc" -ne 0 ]]; then
-  if [[ "$launch_rc" -eq 124 ]]; then
-    echo "WARN: launch_cvd exceeded ${BOOT_TIMEOUT}s; checking whether the daemonized guest is still healthy..."
-    if timeout 30s ./bin/adb wait-for-device; then
-      echo "ADB appeared after launch_cvd timeout; continuing with boot-completion checks."
-    else
-      echo "FAIL: launch_cvd timed out and ADB is still unavailable."
-      dump_boot_failure
-      exit "$launch_rc"
-    fi
-  else
-    echo "FAIL: launch_cvd exited with rc=$launch_rc."
-    dump_boot_failure
-    exit "$launch_rc"
-  fi
+  echo "FAIL: launch_cvd exited with rc=$launch_rc."
+  dump_boot_failure
+  exit "$launch_rc"
 fi
 
 echo

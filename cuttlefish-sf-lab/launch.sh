@@ -11,6 +11,7 @@ fi
 GPU_MODE="${CF_GPU_MODE:-$DEFAULT_GPU_MODE}"
 WEBRTC="${CF_WEBRTC:-false}"
 WIFI="${CF_WIFI:-false}"
+BOOT_TIMEOUT="${CF_BOOT_TIMEOUT:-90}"
 
 test -x "$INSTANCE/bin/launch_cvd"
 test -e /dev/kvm
@@ -27,29 +28,44 @@ echo "Launching minimal SF-Q1 Cuttlefish:"
 echo "  gpu_mode=$GPU_MODE"
 echo "  webrtc=$WEBRTC"
 echo "  wifi=$WIFI"
+echo "  boot_timeout=${BOOT_TIMEOUT}s"
 echo
 
-./bin/launch_cvd \
-  --daemon \
-  --start_webrtc="$WEBRTC" \
-  --enable_wifi="$WIFI" \
-  --gpu_mode="$GPU_MODE"
-
-echo
-echo "Waiting up to 90s for Android ADB..."
-if ! timeout 90s ./bin/adb wait-for-device; then
-  echo "FAIL: Android ADB never appeared."
+dump_boot_failure() {
   I="$INSTANCE/cuttlefish/instances/cvd-1"
   echo
+  echo "===== SF-Q1 BOOT FAILURE DIAGNOSTICS ====="
   echo "Processes:"
   ps -ef | grep -E 'run_cvd|crosvm|qemu-system' | grep -v grep || true
   echo
   echo "Kernel/logcat sizes:"
   ls -lh "$I/kernel.log" "$I/logs/logcat" 2>/dev/null || true
   echo
-  echo "Early launcher failures:"
-  grep -nEi 'Subprocess .* exited|crosvm has exited|Detected unexpected exit|failed|fatal|panic|permission denied|No such device' \
-    "$I/logs/launcher.log" 2>/dev/null | head -n 120 || true
+  echo "Launcher: first relevant failures:"
+  grep -nEi 'Subprocess .* exited|crosvm has exited|Detected unexpected exit|boot.*fail|timed out|timeout|failed|fatal|panic|permission denied|No such device' \
+    "$I/logs/launcher.log" 2>/dev/null | head -n 160 || true
+  echo
+  echo "Launcher tail:"
+  tail -n 160 "$I/logs/launcher.log" 2>/dev/null || true
+  echo "===== END DIAGNOSTICS ====="
+}
+
+if ! ./bin/launch_cvd \
+  --daemon \
+  --start_webrtc="$WEBRTC" \
+  --enable_wifi="$WIFI" \
+  --gpu_mode="$GPU_MODE" \
+  --boot_timeout_secs="$BOOT_TIMEOUT"; then
+  echo "FAIL: launch_cvd did not complete a boot within ${BOOT_TIMEOUT}s."
+  dump_boot_failure
+  exit 1
+fi
+
+echo
+echo "Waiting up to 90s for Android ADB..."
+if ! timeout 90s ./bin/adb wait-for-device; then
+  echo "FAIL: Android ADB never appeared."
+  dump_boot_failure
   exit 1
 fi
 

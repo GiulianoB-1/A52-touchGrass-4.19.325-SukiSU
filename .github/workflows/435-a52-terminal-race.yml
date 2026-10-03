@@ -539,7 +539,10 @@ jobs:
           grep -aFq 'P434 ART do_unlinkat rc=%ld p=%.63s' "$IMAGE"
           grep -aFq 'P434 ART fsverity_ioctl_enable rc=%d' "$IMAGE"
           grep -aFq 'P435 BOOT id=%llx phys=%llx bytes=%x frq=%llu' "$IMAGE"
-          grep -aFq 'A52_PHASE435_TERMINAL_RACE_V1' "$IMAGE"
+          # The phase marker itself is a C comment and is intentionally not
+          # expected in the stripped Image. Runtime string + exported symbols
+          # prove the helper was linked.
+          grep -Fq ' a52_p435_boot_id' "$MAP"
           grep -Fq ' a52_p435_mark' "$MAP"
           grep -Fq ' a52_p435_target_current' "$MAP"
           grep -Fq ' a52_p435_arm_target' "$MAP"
@@ -568,7 +571,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
 
       - name: Save rolling clang ccache
         if: always() && steps.ccache.outcome != 'skipped'
@@ -685,6 +688,7 @@ jobs:
             gki/common/kernel/signal.c
             workspace/gki-phase199-out/.config
             workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
             scripts/434_apply_clean_f0.py
             scripts/435_apply_terminal_race.py
             scripts/435_apply_terminal_race.py.z64
@@ -709,7 +713,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE434-CLEAN-F0-${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE435-TERMINAL-RACE-${{ github.run_number }}-BOOT-IMG
           path: phase435-terminal-race-gki-out/package/boot-phase435-terminal-race-v1.img
           if-no-files-found: error
           compression-level: 0

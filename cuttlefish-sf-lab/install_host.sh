@@ -12,6 +12,7 @@ if [[ ! -d "$SRC/.git" ]]; then
   git clone https://github.com/google/android-cuttlefish "$SRC"
 else
   git -C "$SRC" fetch --all --prune
+  git -C "$SRC" pull --ff-only
 fi
 
 cd "$SRC"

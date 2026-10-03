@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 LAB_ROOT="${CF_LAB_ROOT:-$HOME/cuttlefish-sf-q1}"
 INSTANCE="$LAB_ROOT/instance"
-BUILD="${CF_BUILD:-android16-qpr2-release/aosp_cf_x86_64_only_phone-userdebug}"
+BUILD="${CF_BUILD:-android16-qpr2-release/aosp_cf_x86_64_only_phone-aosp_current-userdebug}"
 
 # Public catch-all key embedded by upstream Cuttlefish for unauthenticated
 # Android Build API v4 requests. Override only if Google changes it.
@@ -80,8 +80,10 @@ if [[ $rc -ne 0 ]]; then
   echo
 
   candidates=(
+    "android16-qpr2-release/aosp_cf_x86_64_only_phone-aosp_current-userdebug"
     "android16-qpr2-release/aosp_cf_x86_64_only_phone-userdebug"
     "android16-qpr2-release/aosp_cf_x86_64_phone-userdebug"
+    "android16-release/aosp_cf_x86_64_only_phone-aosp_current-userdebug"
     "android16-release/aosp_cf_x86_64_only_phone-userdebug"
     "android16-release/aosp_cf_x86_64_phone-userdebug"
   )
@@ -128,7 +130,7 @@ if [[ $rc -ne 0 ]]; then
 Use the official Android CI fallback:
   1. Open https://ci.android.com/
   2. Branch: android16-qpr2-release
-  3. Target: aosp_cf_x86_64_only_phone
+  3. Target: aosp_cf_x86_64_only_phone-aosp_current
   4. Variant: userdebug
   5. Download BOTH artifacts from the SAME build:
        - aosp_cf_x86_64_phone-img-<BUILD>.zip

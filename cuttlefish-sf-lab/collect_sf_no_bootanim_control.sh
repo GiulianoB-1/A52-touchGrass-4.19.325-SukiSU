@@ -48,7 +48,7 @@ restore() {
 trap restore EXIT
 
 cat > "$OUT/perfetto.pbtxt" <<'EOF'
-duration_ms: 26000
+duration_ms: 45000
 buffers: {
   size_kb: 65536
   fill_policy: RING_BUFFER
@@ -140,11 +140,13 @@ mark "NEW_SURFACEFLINGER_PID_$new_sf"
 
 # Deliberately leave SF with no normal framework/app clients.
 sleep 6
+"$ADB" shell dumpsys SurfaceFlinger > "$OUT/surfaceflinger-no-clients.txt" 2>/dev/null || true
 mark "START_ZYGOTE"
 "$ADB" shell start zygote
 
-# Let system_server / SystemUI / launcher return while the same trace continues.
-sleep 10
+# Give system_server/SystemUI/Launcher enough time to create real drawable layers.
+# The first SF-Q1B capture showed SystemUI starting just after the old 26 s trace ended.
+sleep 25
 mark "END_OBSERVATION"
 
 wait "$PERFETTO_PID" || true

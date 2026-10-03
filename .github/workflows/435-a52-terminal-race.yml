@@ -466,7 +466,6 @@ jobs:
 
           python3 scripts/434_apply_clean_f0.py --root "$ROOT"
           python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
-          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --check-only --overlap-report /tmp/p435-overlap-compile.txt
 
           # No periodic SF sampler, remote task stacks, timer-driven DMA MMIO,
           # or active UFS compact sampler may survive this build.
@@ -520,6 +519,7 @@ jobs:
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
           python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
           python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
+          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --check-only --overlap-report /tmp/p435-overlap-compile.txt
 
           grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
           grep -aFq 'P432 C PR S k=%u n=%u p=%d t=%d c=%.15s ns=%llu' "$IMAGE"

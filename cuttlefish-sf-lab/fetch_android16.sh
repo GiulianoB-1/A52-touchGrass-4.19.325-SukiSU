@@ -20,7 +20,7 @@ echo
 
 set +e
 cvd fetch \
-  --directory="$INSTANCE" \
+  --target_directory="$INSTANCE" \
   --default_build="$BUILD"
 rc=$?
 set -e
@@ -30,7 +30,7 @@ if [[ $rc -ne 0 && "$BUILD" == "android16-release/aosp_cf_x86_64_only_phone-user
   BUILD="android16-release/aosp_cf_x86_64_phone-userdebug"
   set +e
   cvd fetch \
-    --directory="$INSTANCE" \
+    --target_directory="$INSTANCE" \
     --default_build="$BUILD"
   rc=$?
   set -e

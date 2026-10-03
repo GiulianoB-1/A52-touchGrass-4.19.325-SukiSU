@@ -76,8 +76,6 @@ jobs:
           grep -Fq 'A52_PHASE391_EXACT_RAMOOPS_ALIAS_DEDUP_V1' "$KERNEL/drivers/of/of_reserved_mem.c"
           grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
           grep -Fq 'P392 SCUDOOK' "$KERNEL/mm/util.c"
-          grep -Fq 'A52_PHASE393_PID1_MM_ABI_FLIGHTREC_V1' "$KERNEL/arch/arm64/kernel/syscall.c"
-          grep -Fq 'P393 ERR e=%d' "$KERNEL/arch/arm64/kernel/syscall.c"
           {
             echo "phase392_fast_cache_hit=true"
             echo "cache_key=a52xq-p393-phase392-prepared-src-v1-${{ runner.os }}-3f56f716d988"

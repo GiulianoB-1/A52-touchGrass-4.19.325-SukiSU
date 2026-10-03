@@ -24,11 +24,11 @@ env:
   CCACHE_MAXSIZE: 3G
   CCACHE_COMPRESS: "true"
   CCACHE_COMPRESSLEVEL: "6"
-  CCACHE_BASEDIR: \${{ github.workspace }}
+  CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: "true"
 
 concurrency:
-  group: a52-phase433c-clang23-ubsan-\${{ github.ref }}
+  group: a52-phase433c-clang23-ubsan-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -91,9 +91,9 @@ jobs:
           path: |
             gki/common
             phase429-gki-out
-          key: a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
           restore-keys: |
-            a52xq-phase429-source-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Require usable Phase429 source snapshot
         run: |
@@ -111,33 +111,33 @@ jobs:
             exit 1
           }
           echo "Phase429 source prerequisite: PASS"
-          echo "actions/cache exact-hit flag: \${{ steps.phase429-source.outputs.cache-hit }}"
+          echo "actions/cache exact-hit flag: ${{ steps.phase429-source.outputs.cache-hit }}"
 
       - name: Restore Phase432 build configuration cache
         id: phase432-build
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
           restore-keys: |
-            a52xq-phase432-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase432-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Restore Phase433C object cache
         id: phase433c-objects
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase433c-out
-          key: a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          key: a52xq-phase433c-clang23-ubsan-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
           restore-keys: |
-            a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase433c-clang23-ubsan-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Restore Phase433C Clang23 ccache
         uses: actions/cache/restore@v4
         with:
           path: .ccache-phase433c-clang23
-          key: a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          key: a52xq-phase433c-clang23-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
           restore-keys: |
-            a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase433c-clang23-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
       - name: Configure isolated compiler cache
         run: |
@@ -302,14 +302,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase433c-out
-          key: a52xq-phase433c-clang23-ubsan-objects-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          key: a52xq-phase433c-clang23-ubsan-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
 
       - name: Save Phase433C Clang23 ccache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: .ccache-phase433c-clang23
-          key: a52xq-phase433c-clang23-ccache-v1-\${{ runner.os }}-\${{ env.GKI_COMMON_SHA }}-\${{ github.run_id }}
+          key: a52xq-phase433c-clang23-ccache-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ github.run_id }}
 
       - name: Package Phase433C boot diagnostic
         if: success()
@@ -387,7 +387,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE433C-CLANG23-UBSAN-\${{ github.run_number }}
+          name: A52XQ-PHASE433C-CLANG23-UBSAN-${{ github.run_number }}
           path: phase433c-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -397,7 +397,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE433C-CLANG23-UBSAN-\${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE433C-CLANG23-UBSAN-${{ github.run_number }}-BOOT-IMG
           path: phase433c-gki-out/package/boot-phase433c-clang23-ubsan-reporting-v1.img
           if-no-files-found: error
           compression-level: 0
@@ -407,7 +407,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE433C-FAILURE-\${{ github.run_number }}
+          name: A52XQ-PHASE433C-FAILURE-${{ github.run_number }}
           path: |
             phase433c-report/
             workspace/gki-phase433c-out/.config

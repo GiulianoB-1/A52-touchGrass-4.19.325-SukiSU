@@ -3,21 +3,6 @@ run-name: Phase432-CTRL - odsign KeyMint QSEECOM passive control
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
-    paths:
-      - .github/workflows/432c-a52-odsign-keymint-qsee-control.yml
-      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
-      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
-      - scripts/decode_phase432_ctrl.py
-      - scripts/decode_phase432_ctrl.py.z64
-      - scripts/432_apply_sf_hwc_bootanim_chain.py
-      - scripts/decode_phase432_chain.py
-      - scripts/431_apply_safe_gap_forensics.py
-      - scripts/430_apply_sf_dma_forensics.py
-      - scripts/430_postapply_hardening.py
-      - scripts/430_parts/**
 
 permissions:
   contents: read

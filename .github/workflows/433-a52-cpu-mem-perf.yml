@@ -3,22 +3,6 @@ run-name: Phase433 - CPU + DDR/L3 performance scaling
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
-    paths:
-      - .github/workflows/433-a52-cpu-mem-perf.yml
-      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
-      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
-      - scripts/decode_phase432_ctrl.py
-      - scripts/decode_phase432_ctrl.py.z64
-      - scripts/432_apply_sf_hwc_bootanim_chain.py
-      - scripts/decode_phase432_chain.py
-      - scripts/431_apply_safe_gap_forensics.py
-      - scripts/430_apply_sf_dma_forensics.py
-      - scripts/430_postapply_hardening.py
-      - scripts/430_parts/**
-      - scripts/433_apply_cpu_mem_perf.py
 
 permissions:
   contents: read

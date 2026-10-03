@@ -20,6 +20,15 @@ mkdir -p "$INSTANCE"
 tar -xvf "$HOST_PACKAGE" -C "$INSTANCE"
 unzip -o "$IMAGE_ZIP" -d "$INSTANCE"
 
+# Keep the downloaded host package self-consistent with the downloaded image.
+# If this marker remains, modern Cuttlefish start code may substitute host
+# binaries from /usr/lib/cuttlefish-common, mixing the locally installed host
+# package with this historical Android CI build.
+if [[ -e "$INSTANCE/etc/debian_substitution_marker" ]]; then
+  mv "$INSTANCE/etc/debian_substitution_marker" \
+     "$INSTANCE/etc/debian_substitution_marker.disabled-sfq1"
+fi
+
 test -x "$INSTANCE/bin/launch_cvd"
 test -x "$INSTANCE/bin/adb"
 
@@ -28,7 +37,8 @@ Prepared: $(date -Iseconds)
 Host package: $HOST_PACKAGE
 Image zip: $IMAGE_ZIP
 Target: aosp_cf_x86_64_only_phone-userdebug
-Android branch intended: android16-release
+Android baseline: build 14524720 / Android 16 QPR2
+Host substitutions: disabled (matching downloaded host package kept intact)
 EOF
 
 echo

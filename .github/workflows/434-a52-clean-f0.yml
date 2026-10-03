@@ -7,7 +7,7 @@ on:
     branches:
       - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
-      - .github/workflows/433-a52-cpu-mem-perf.yml
+      - .github/workflows/434-a52-clean-f0.yml
       - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
       - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
       - scripts/decode_phase432_ctrl.py
@@ -627,7 +627,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE434-CLEAN-F0-FAIL-DIAG-\${{ github.run_number }}
+          name: A52XQ-PHASE434-CLEAN-F0-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/arch/arm64/kernel/syscall.c
             gki/common/drivers/a52_display/msm/msm_drv.c
@@ -654,7 +654,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE434-CLEAN-F0-\${{ github.run_number }}
+          name: A52XQ-PHASE434-CLEAN-F0-${{ github.run_number }}
           path: phase434-clean-f0-gki-out/
           if-no-files-found: error
           compression-level: 1
@@ -664,7 +664,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE434-CLEAN-F0-\${{ github.run_number }}-BOOT-IMG
+          name: A52XQ-PHASE434-CLEAN-F0-${{ github.run_number }}-BOOT-IMG
           path: phase434-clean-f0-gki-out/package/boot-phase434-clean-f0-v1.img
           if-no-files-found: error
           compression-level: 0

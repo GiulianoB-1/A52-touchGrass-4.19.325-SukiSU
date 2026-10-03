@@ -12,7 +12,7 @@ if [[ "$MODE" == "packages" ]]; then
   echo "Installing official prebuilt Cuttlefish host packages..."
 
   sudo apt-get update
-  sudo apt-get install -y curl ca-certificates gnupg
+  sudo apt-get install -y curl ca-certificates gnupg libpulse0
 
   sudo curl -fsSL \
     https://us-apt.pkg.dev/doc/repo-signing-key.gpg \

@@ -5,6 +5,14 @@ This is the parallel **SF-Q** investigation for the A52 project.
 The purpose is to separate the generic Android graphics pipeline from the
 A52-specific Qualcomm SDE/DSI/RPMh/SMMU hardware path.
 
+## Kernel-lineage rule
+
+Do **not** assume the heavily modified TouchGrass features are present in the
+current GKI 5.10 display-port kernel. EEVDF, CASS, MGLRU, the newer Binder work,
+and similar changes belong to the TouchGrass line unless a phase explicitly
+ports them into GKI. SF-Q uses the GKI display project only as the A52 comparison
+target; it does not inherit TouchGrass feature assumptions.
+
 ## SF-Q1 goal
 
 Establish a clean Android 16 Cuttlefish baseline for:
@@ -55,7 +63,7 @@ The lab is pinned conceptually to:
 
 ```
 branch: android16-release
-target: aosp_cf_x86_64_phone-userdebug
+target: aosp_cf_x86_64_only_phone-userdebug
 ```
 
 First try the automated fetch:
@@ -100,7 +108,9 @@ Once Android reports boot complete:
 ```
 
 The capture intentionally restarts **only SurfaceFlinger** inside a 20-second
-Perfetto trace window. It records:
+Perfetto trace window. It also samples SurfaceFlinger/init/bootanimation state
+every 100 ms so the restart boundary can be compared directly with the A52
+Phase432 timeline. It records:
 
 - sched switch/wakeup/waking
 - Binder transactions
@@ -108,7 +118,8 @@ Perfetto trace window. It records:
 - SurfaceFlinger layer state with HWC metadata
 - SurfaceFlinger transactions
 - before/after SurfaceFlinger dumps
-- full logcat
+- full logcat plus an isolated restart-window logcat
+- a 100 ms `sf-restart-timeline.tsv` with SF PID/init state and bootanimation state
 - process/thread state
 - system properties
 

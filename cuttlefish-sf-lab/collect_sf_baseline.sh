@@ -12,9 +12,27 @@ TRACE_REMOTE="/data/misc/perfetto-traces/sfq1_$STAMP.perfetto-trace"
 test -x "$ADB"
 mkdir -p "$OUT"
 
-"$ADB" wait-for-device
+echo "Waiting for Cuttlefish ADB..."
+if ! timeout 45s "$ADB" wait-for-device; then
+  echo "FAIL: no Cuttlefish ADB device appeared within 45 seconds."
+  echo
+  echo "ADB devices:"
+  "$ADB" devices -l || true
+  echo
+  echo "Cuttlefish status:"
+  cvd status 2>&1 || true
+  echo
+  echo "Recent launcher log:"
+  tail -n 80 "$INSTANCE/cuttlefish/instances/cvd-1/logs/launcher.log" 2>/dev/null || true
+  exit 1
+fi
+
 "$ADB" root >/dev/null 2>&1 || true
-"$ADB" wait-for-device
+if ! timeout 45s "$ADB" wait-for-device; then
+  echo "FAIL: ADB disappeared after adb root."
+  "$ADB" devices -l || true
+  exit 1
+fi
 
 echo "Waiting for Android boot completion..."
 boot_ok=0

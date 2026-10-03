@@ -3,7 +3,12 @@ set -Eeuo pipefail
 
 LAB_ROOT="${CF_LAB_ROOT:-$HOME/cuttlefish-sf-q1}"
 INSTANCE="$LAB_ROOT/instance"
-GPU_MODE="${CF_GPU_MODE:-gfxstream}"
+if compgen -G "/dev/dri/renderD*" >/dev/null; then
+  DEFAULT_GPU_MODE="gfxstream"
+else
+  DEFAULT_GPU_MODE="guest_swiftshader"
+fi
+GPU_MODE="${CF_GPU_MODE:-$DEFAULT_GPU_MODE}"
 
 test -x "$INSTANCE/bin/launch_cvd"
 test -e /dev/kvm

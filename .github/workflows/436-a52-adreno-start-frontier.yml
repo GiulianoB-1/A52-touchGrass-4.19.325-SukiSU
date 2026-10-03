@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Phase435 payload before setup
+      - name: Validate Phase436 payload before setup
         run: |
           set -Eeuo pipefail
           python3 -m py_compile \
@@ -295,7 +295,7 @@ jobs:
           test -s workspace/touchgrass-a52xq/drivers/devfreq/devfreq_qcom_fw.c
           echo "TouchGrass performance source: PASS"
 
-      - name: Restore latest Phase435/Phase434 object cache
+      - name: Restore latest Phase436/Phase435 object cache
         id: phase433-objects
         uses: actions/cache/restore@v4
         with:
@@ -316,10 +316,10 @@ jobs:
           BUILD="$PWD/workspace/gki-phase199-out"
           if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
             echo "hit=true" >> "$GITHUB_OUTPUT"
-            echo "Phase433 warm object tree: HIT"
+            echo "Reusable Phase436/435 object tree: HIT"
           else
             echo "hit=false" >> "$GITHUB_OUTPUT"
-            echo "Phase433 warm object tree: MISS"
+            echo "Reusable Phase436/435 object tree: MISS"
           fi
 
       - name: Restore exact Phase431 object cache
@@ -522,7 +522,7 @@ jobs:
             --root "$ROOT" --check-only --overlap-report /tmp/p436-overlap-check.txt
 
           cmp -s /tmp/p436-overlap.txt /tmp/p436-overlap-check.txt
-          grep -Fq 'P414 RAM rollover         0xb1a00000-0xb1afbfff occupied/reserved' /tmp/p436-overlap.txt
+          grep -Fq 'P414 current RAM          0xb1a00000-0xb1afffff shrink by 0x4000' /tmp/p436-overlap.txt
           grep -Fq 'Phase436 allocation       0xb1afc000-0xb1afffff NEW, dual fixed copies' /tmp/p436-overlap.txt
           grep -Fq 'ramoops                   0xb1b00000-0xb1bfffff excluded entirely' /tmp/p436-overlap.txt
           grep -Fq 'A52_PHASE436_ADRENO_START_FRONTIER_V1' "$ROOT/drivers/a52_secure/a52_phase436_frontier.c"
@@ -668,8 +668,8 @@ jobs:
             --output "$FINAL" --report "$OUT/package/phase435-repack-report.json"
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
 
-          cat > "$OUT/PHASE435-NOTES.txt" <<'EOF'
-          Phase435 PID1 vs KGSL terminal race
+          cat > "$OUT/PHASE436-NOTES.txt" <<'EOF'
+          Phase436 Adreno start frontier
           ====================================
           - Exact Phase434 CLEAN-F0 behavior retained.
           - No DSI, regulator, clock, power, proxy-consumer or MMIO behavior change.

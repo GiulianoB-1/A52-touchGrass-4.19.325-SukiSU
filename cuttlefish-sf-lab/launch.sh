@@ -24,6 +24,20 @@ fi
 cd "$INSTANCE"
 export HOME="$INSTANCE"
 
+if [[ -e "$INSTANCE/etc/debian_substitution_marker" ]]; then
+  echo "FAIL: host substitution marker is still active."
+  echo "Rerun prepare_instance.sh with the matching CI host package and image."
+  exit 1
+fi
+
+echo "Host package provenance:"
+for tool in launch_cvd run_cvd crosvm adb; do
+  if [[ -e "$INSTANCE/bin/$tool" ]]; then
+    printf '  %-12s -> %s\n' "$tool" "$(readlink -f "$INSTANCE/bin/$tool")"
+  fi
+done
+echo
+
 echo "Launching minimal SF-Q1 Cuttlefish:"
 echo "  gpu_mode=$GPU_MODE"
 echo "  webrtc=$WEBRTC"
@@ -50,15 +64,23 @@ dump_boot_failure() {
   echo "===== END DIAGNOSTICS ====="
 }
 
-if ! ./bin/launch_cvd \
+set +e
+timeout --foreground "${BOOT_TIMEOUT}s" ./bin/launch_cvd \
   --daemon \
   --start_webrtc="$WEBRTC" \
   --enable_wifi="$WIFI" \
-  --gpu_mode="$GPU_MODE" \
-  --boot_timeout_secs="$BOOT_TIMEOUT"; then
-  echo "FAIL: launch_cvd did not complete a boot within ${BOOT_TIMEOUT}s."
+  --gpu_mode="$GPU_MODE"
+launch_rc=$?
+set -e
+
+if [[ "$launch_rc" -ne 0 ]]; then
+  if [[ "$launch_rc" -eq 124 ]]; then
+    echo "FAIL: launch_cvd exceeded ${BOOT_TIMEOUT}s."
+  else
+    echo "FAIL: launch_cvd exited with rc=$launch_rc."
+  fi
   dump_boot_failure
-  exit 1
+  exit "$launch_rc"
 fi
 
 echo

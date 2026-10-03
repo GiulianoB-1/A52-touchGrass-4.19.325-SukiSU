@@ -1,0 +1,716 @@
+name: Phase435 - PID1 vs KGSL terminal race
+run-name: Phase435 - PID1 vs KGSL terminal race
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/434-a52-clean-f0.yml
+      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
+      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
+      - scripts/decode_phase432_ctrl.py
+      - scripts/decode_phase432_ctrl.py.z64
+      - scripts/432_apply_sf_hwc_bootanim_chain.py
+      - scripts/decode_phase432_chain.py
+      - scripts/431_apply_safe_gap_forensics.py
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/430_postapply_hardening.py
+      - scripts/430_parts/**
+      - scripts/433_apply_cpu_mem_perf.py
+      - scripts/434_apply_clean_f0.py
+      - scripts/435_apply_terminal_race.py
+      - scripts/435_apply_terminal_race.py.z64
+      - scripts/decode_phase435_race.py
+      - scripts/decode_phase435_race.py.z64
+      - scripts/decode_phase414_sequential_3m.py
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
+
+concurrency:
+  group: a52-phase435-terminal-race-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase435 TERMINAL-RACE
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Phase435 payload before setup
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/decode_phase432_chain.py \
+            scripts/432ctrl_apply_odsign_keymint_qsee_trace.py \
+            scripts/decode_phase432_ctrl.py \
+            scripts/433_apply_cpu_mem_perf.py \
+            scripts/434_apply_clean_f0.py \
+            scripts/435_apply_terminal_race.py \
+            scripts/decode_phase435_race.py \
+            scripts/decode_phase414_sequential_3m.py
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --help >/dev/null
+          python3 scripts/decode_phase432_chain.py --help >/dev/null
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --help >/dev/null
+          python3 scripts/decode_phase432_ctrl.py --help >/dev/null
+          python3 scripts/433_apply_cpu_mem_perf.py --help >/dev/null
+          python3 scripts/434_apply_clean_f0.py --help >/dev/null
+          python3 scripts/435_apply_terminal_race.py --help >/dev/null
+          python3 scripts/decode_phase435_race.py --help >/dev/null
+          python3 scripts/decode_phase414_sequential_3m.py --help >/dev/null
+          echo "Phase435 payload integrity: PASS"
+
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
+          restore-keys: |
+            a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect usable Phase429 source tree
+        id: phase429-warm
+        run: |
+          set -Eeuo pipefail
+          if test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img && \
+             test -d gki/common && \
+             python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only >/dev/null 2>&1; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Reusable Phase429 source tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Reusable Phase429 source tree: MISS"
+          fi
+
+      - name: Restore Phase357 source fallback
+        if: steps.phase429-warm.outputs.hit != 'true'
+        id: phase357-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Restore pinned GKI source on complete baseline miss
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: gki-source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync exact pinned GKI on complete source miss
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Save pinned GKI source cache
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: touchgrass-source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Save TouchGrass source cache
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Cold reconstruct Phase357 only if both compact baselines vanished
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Phase429 and Phase357 compact caches both missing. Reconstructing Phase357 once; ccache will retain compiled units."
+          bash scripts/345_ci_build_gki.sh
+          PHASE346_PREWARMED_PHASE345=1 bash scripts/346_ci_build_gki.sh
+          PHASE357_PREWARMED_PHASE346=1 bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 fallback
+        if: steps.phase429-warm.outputs.hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          echo "Phase357 fallback: PASS"
+
+      - name: Save compact Phase357 fallback
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Reconstruct Phase429 from Phase357
+        if: steps.phase429-warm.outputs.hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/gki-phase199-out
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+          def extract(name,out):
+              start=next(i for i,l in enumerate(src) if l.strip()==f"- name: {name}")
+              runline=next(i for i in range(start+1,len(src)) if src[i].strip()=="run: |")
+              end=next((i for i in range(runline+1,len(src)) if src[i].startswith("      - name:")),len(src))
+              body=[line[10:] if line.startswith("          ") else line for line in src[runline+1:end]]
+              Path(out).write_text("set -Eeuo pipefail\n"+"\n".join(body)+"\n")
+          extract("Reapply Phase358 and Phase359","/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts","/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image","/tmp/p429-boot.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 reconstructed from Phase357: PASS"
+
+      - name: Save canonical Phase429 source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
+
+      - name: Restore TouchGrass source for Phase433 port
+        if: steps.touchgrass-source.outcome == 'skipped'
+        id: phase433-touchgrass
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass for Phase433 port on cache miss
+        if: steps.touchgrass-source.outcome == 'skipped' && steps.phase433-touchgrass.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Validate Phase433 TouchGrass port source
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          test -s workspace/touchgrass-a52xq/drivers/devfreq/bimc-bwmon.c
+          test -s workspace/touchgrass-a52xq/drivers/devfreq/arm-memlat-mon.c
+          test -s workspace/touchgrass-a52xq/drivers/devfreq/devfreq_qcom_fw.c
+          echo "TouchGrass performance source: PASS"
+
+      - name: Restore latest Phase435/Phase434 object cache
+        id: phase433-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase433-perf-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase432-ctrl-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase432-ctrl-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect warm Phase433 object tree
+        id: phase433-warm
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Phase433 warm object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Phase433 warm object tree: MISS"
+          fi
+
+      - name: Restore exact Phase431 object cache
+        if: steps.phase433-warm.outputs.hit != 'true'
+        id: phase431-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
+          restore-keys: |
+            a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect any warm object tree
+        id: warm-objects
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Reusable kernel object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Reusable kernel object tree: MISS"
+          fi
+
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          echo "Phase433 cache match: ${{ steps.phase433-objects.outputs.cache-hit }}"
+          echo "Reusable object tree: ${{ steps.warm-objects.outputs.hit }}"
+          echo "Phase431 fallback cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
+          ccache -s
+
+      - name: Prepare build directory on object-cache miss
+        if: steps.warm-objects.outputs.hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+      - name: Reapply exact Phase430 diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+
+      - name: Reapply exact Phase431 safe-gap diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+
+      - name: Apply Phase432 SF HWC bootanimation chain
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          # Recorder contract stays 2 MiB Samsung first, then 1 MiB RAM.
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          # UFS NoC trigger stays retired.
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          # Phase432 intentionally removes the heavy pre-atomic CPU7 busy witness.
+          ! grep -Fq 'kthread_run(a52_p431_exec_fn' "$ROOT/arch/arm64/kernel/syscall.c"
+
+      - name: Apply Phase432-CTRL odsign KeyMint QSEECOM passive trace
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+
+          grep -Fq 'a52_phase432_ctrl.o' "$ROOT/drivers/a52_secure/Makefile"
+          grep -Fq 'a52_p432ctrl_exec_result' "$ROOT/fs/exec.c"
+          grep -Fq 'a52_p432ctrl_task_exit' "$ROOT/kernel/exit.c"
+          grep -Fq 'a52_p432ctrl_qseecom_ioctl_inner' "$ROOT/drivers/a52_secure/qseecom.c"
+          grep -Fq '".fs-verity"' "$ROOT/security/keys/key.c"
+          grep -Fq 'a52_p432ctrl_fsverity_sysctl' "$ROOT/fs/verity/signature.c"
+
+      - name: Apply Phase433 CPU + DDR/L3 performance scaling
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          TG="$PWD/workspace/touchgrass-a52xq"
+
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --touchgrass "$TG"
+
+          "$ROOT/scripts/config" --file "$BUILD/.config" \
+            -e ARM_QCOM_CPUFREQ_HW \
+            -e CPU_FREQ_DEFAULT_GOV_PERFORMANCE \
+            -d CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
+            -e CPU_FREQ_GOV_PERFORMANCE \
+            -e QCOM_BIMC_BWMON \
+            -e DEVFREQ_GOV_QCOM_BW_HWMON \
+            -e ARM_MEMLAT_MON \
+            -e DEVFREQ_GOV_MEMLAT \
+            -e ARM_QCOM_DEVFREQ_FW \
+            -e QCOM_DEVFREQ_DEVBW \
+            -e DEVFREQ_SIMPLE_DEV
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
+
+          grep -Fxq 'CONFIG_ARM_QCOM_CPUFREQ_HW=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_BIMC_BWMON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_DEVFREQ_GOV_QCOM_BW_HWMON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_ARM_MEMLAT_MON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_DEVFREQ_GOV_MEMLAT=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_ARM_QCOM_DEVFREQ_FW=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_DEVFREQ_DEVBW=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_DEVFREQ_SIMPLE_DEV=y' "$BUILD/.config"
+          echo "Phase433 CPU + DDR/L3 config: PASS"
+
+      - name: Apply Phase434 CLEAN-F0 event-driven diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT"
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
+          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --check-only --overlap-report /tmp/p435-overlap-compile.txt
+
+          # No periodic SF sampler, remote task stacks, timer-driven DMA MMIO,
+          # or active UFS compact sampler may survive this build.
+          ! grep -Fq 'a52_p430_snapshot(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'a52_p430_fill(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'get_wchan(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'stack_trace_save_tsk(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'try_get_task_stack(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'task_pt_regs(' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'hrtimer_start(&a52_p430_dma_timer' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+
+          # P432C + P433 remain intact.
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
+          echo "Phase434 CLEAN-F0 source audit: PASS"
+
+      - name: Apply Phase435 PID1 vs KGSL terminal race
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/435_apply_terminal_race.py \
+            --root "$ROOT" --overlap-report /tmp/p435-overlap.txt
+          python3 scripts/435_apply_terminal_race.py \
+            --root "$ROOT" --check-only --overlap-report /tmp/p435-overlap-check.txt
+
+          cmp -s /tmp/p435-overlap.txt /tmp/p435-overlap-check.txt
+          grep -Fq 'Phase435 allocation       0xb1bfc000-0xb1bfefff' /tmp/p435-overlap.txt
+          grep -Fq 'writer RETIRED' /tmp/p435-overlap.txt
+          grep -Fq 'A52_PHASE435_TERMINAL_RACE_V1' "$ROOT/drivers/a52_secure/a52_phase435_race.c"
+          grep -Fq 'P435_I0_EXIT_GROUP_SYSCALL' "$ROOT/include/linux/a52_phase435_race.h"
+          grep -Fq 'P435_K3_BEFORE_FILP_OPEN' "$ROOT/include/linux/a52_phase435_race.h"
+          grep -Fq 'P435_GIT_IOMMU_ATTACH' "$ROOT/include/linux/a52_phase435_race.h"
+          echo "Phase435 terminal-race source audit: PASS"
+
+      - name: Incremental compile Phase435
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
+
+          grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
+          grep -aFq 'P432 C PR S k=%u n=%u p=%d t=%d c=%.15s ns=%llu' "$IMAGE"
+          grep -aFq 'P432 C KEY X p=%d t=%d c=%.15s rc=%ld serial=%ld ns=%llu' "$IMAGE"
+          grep -aFq 'P433 PERF init t=%llu cpu+ddr+l3=1' "$IMAGE"
+          grep -aFq 'P433 LUT s=%u d=%u i=%u f=%08x v=%08x' "$IMAGE"
+
+          grep -aFq 'P434 CLEAN sampler=0 remote_task=0' "$IMAGE"
+          grep -aFq 'P434 SF EXEC p=%d t=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P434 BA EXEC p=%d t=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P434 BA SIG p=%d t=%d s=%d code=%d sp=%d st=%d sc=%.15s' "$IMAGE"
+          grep -aFq 'P434 BA EXIT p=%d t=%d x=%lx sig=%u pf=%u ns=%llu' "$IMAGE"
+          grep -aFq 'P434 BA CORE_REQ p=%d t=%d sig=%d code=%d' "$IMAGE"
+          grep -aFq 'P434 IO n=%u nr=%x rc=%ld' "$IMAGE"
+          grep -aFq 'P434 PROP n=%u obj=%u id=%u v=%llx' "$IMAGE"
+          grep -aFq 'P434 RLC off n=%.31s' "$IMAGE"
+          grep -aFq 'P434 ART do_unlinkat rc=%ld p=%.63s' "$IMAGE"
+          grep -aFq 'P434 ART fsverity_ioctl_enable rc=%d' "$IMAGE"
+          grep -aFq 'P435 BOOT id=%llx phys=%llx bytes=%x frq=%llu' "$IMAGE"
+          grep -aFq 'A52_PHASE435_TERMINAL_RACE_V1' "$IMAGE"
+          grep -Fq ' a52_p435_mark' "$MAP"
+          grep -Fq ' a52_p435_target_current' "$MAP"
+          grep -Fq ' a52_p435_arm_target' "$MAP"
+
+          ! grep -Fq ' a52_p430_snapshot' "$MAP"
+          ! grep -Fq ' a52_p430_sampler_fn' "$MAP"
+          ! grep -Fq ' a52_p431_exec_fn' "$MAP"
+          ! grep -Fq ' a52_p430_dma_timer_fn' "$MAP"
+          ! grep -aFq 'P269 PROP n=%u' "$IMAGE"
+
+          grep -Fq ' a52_p430_dma_event' "$MAP"
+          grep -Fq ' a52_p434_sf_window_active' "$MAP"
+          grep -Fq ' a52_p434_rail_event' "$MAP"
+          grep -Fq ' of_fdt_get_ddrtype' "$MAP"
+
+          grep -Fxq 'CONFIG_ARM_QCOM_CPUFREQ_HW=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_BIMC_BWMON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_ARM_MEMLAT_MON=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_ARM_QCOM_DEVFREQ_FW=y' "$BUILD/.config"
+          grep -Fxq 'CONFIG_QCOM_DEVFREQ_DEVBW=y' "$BUILD/.config"
+          ccache -s
+
+      - name: Save Phase435 TERMINAL-RACE object cache
+        if: always() && steps.phase429-source.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+
+      - name: Save rolling clang ccache
+        if: always() && steps.ccache.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-${{ github.run_id }}
+
+      - name: Package Phase435 TERMINAL-RACE
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase435-terminal-race-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase435-terminal-race-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          mkdir -p "$OUT/source" "$OUT/audit"
+          for F in \
+            arch/arm64/kernel/syscall.c \
+            drivers/a52_display/msm/msm_drv.c \
+            drivers/a52_display/msm/dsi/dsi_ctrl.c \
+            drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c \
+            drivers/a52_secure/a52_ack_secure_flight_recorder.c \
+            drivers/a52_secure/a52_phase432_ctrl.c \
+            drivers/a52_secure/a52_phase433_perf.c \
+            drivers/a52_secure/a52_phase434_clean.c \
+            drivers/a52_secure/a52_phase435_race.c \
+            include/linux/a52_phase435_race.h \
+            fs/open.c fs/char_dev.c \
+            drivers/gpu/msm/kgsl.c drivers/gpu/msm/kgsl_mmu.c drivers/gpu/msm/kgsl_iommu.c \
+            drivers/regulator/core.c \
+            fs/exec.c fs/namei.c fs/coredump.c fs/verity/enable.c fs/verity/measure.c \
+            kernel/exit.c kernel/signal.c \
+            security/keys/key.c fs/verity/signature.c; do
+            cp "$ROOT/$F" "$OUT/source/$(echo "$F" | tr '/' '_')"
+          done
+
+          cp scripts/430_apply_sf_dma_forensics.py \
+             scripts/430_postapply_hardening.py \
+             scripts/431_apply_safe_gap_forensics.py \
+             scripts/432_apply_sf_hwc_bootanim_chain.py \
+             scripts/432ctrl_apply_odsign_keymint_qsee_trace.py \
+             scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64 \
+             scripts/433_apply_cpu_mem_perf.py \
+             scripts/434_apply_clean_f0.py \
+             scripts/435_apply_terminal_race.py scripts/435_apply_terminal_race.py.z64 \
+             scripts/decode_phase435_race.py scripts/decode_phase435_race.py.z64 \
+             scripts/decode_phase414_sequential_3m.py \
+             scripts/decode_phase432_chain.py \
+             scripts/decode_phase432_ctrl.py scripts/decode_phase432_ctrl.py.z64 \
+             "$OUT/audit/"
+          cp /tmp/p435-overlap*.txt "$OUT/audit/" 2>/dev/null || true
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase435-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE435-NOTES.txt" <<'EOF'
+          Phase435 PID1 vs KGSL terminal race
+          ====================================
+          - Exact Phase434 CLEAN-F0 behavior retained.
+          - No DSI, regulator, clock, power, proxy-consumer or MMIO behavior change.
+          - Allocates 12 KiB at 0xB1BFC000..0xB1BFEFFF only after a fail-closed
+            overlap audit proves the inherited Phase341/393 writer is retired.
+          - 48 fixed write-once 128-byte slots, two independent copies; no ring.
+          - Each record carries Phase435 boot_id, ARM CNTPCT, boottime_ns, CPU,
+            PID/TGID, comm, args and optional user PC/LR/SP/PSTATE.
+          - PID1 lane persists exit_group syscall entry, do_group_exit, do_exit,
+            make_task_dead and final init-panic stages independently.
+          - SurfaceFlinger lane persists /dev/kgsl-3d0 VFS open stages down to
+            chrdev_open, then mirrors the existing Phase261 KGSL/MMU/IOMMU points.
+          - ARM architectural counter is the primary causal ordering source.
+          EOF
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase435 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE435-TERMINAL-RACE-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/arch/arm64/kernel/syscall.c
+            gki/common/drivers/a52_display/msm/msm_drv.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_secure/a52_phase434_clean.c
+            gki/common/drivers/a52_secure/a52_phase435_race.c
+            gki/common/include/linux/a52_phase435_race.h
+            gki/common/fs/open.c
+            gki/common/fs/char_dev.c
+            gki/common/drivers/gpu/msm/kgsl.c
+            gki/common/drivers/gpu/msm/kgsl_mmu.c
+            gki/common/drivers/gpu/msm/kgsl_iommu.c
+            gki/common/drivers/regulator/core.c
+            gki/common/fs/exec.c
+            gki/common/fs/namei.c
+            gki/common/fs/coredump.c
+            gki/common/fs/verity/enable.c
+            gki/common/fs/verity/measure.c
+            gki/common/kernel/exit.c
+            gki/common/kernel/signal.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            scripts/434_apply_clean_f0.py
+            scripts/435_apply_terminal_race.py
+            scripts/435_apply_terminal_race.py.z64
+            scripts/decode_phase435_race.py
+            scripts/decode_phase435_race.py.z64
+            scripts/decode_phase414_sequential_3m.py
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase435
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE435-TERMINAL-RACE-${{ github.run_number }}
+          path: phase435-terminal-race-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase435 boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE434-CLEAN-F0-${{ github.run_number }}-BOOT-IMG
+          path: phase435-terminal-race-gki-out/package/boot-phase435-terminal-race-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

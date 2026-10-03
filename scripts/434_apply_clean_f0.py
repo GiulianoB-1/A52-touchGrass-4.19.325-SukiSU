@@ -17,7 +17,8 @@ SIGNAL = Path("kernel/signal.c")
 COREDUMP = Path("fs/coredump.c")
 REGCORE = Path("drivers/regulator/core.c")
 NAMEI = Path("fs/namei.c")
-VERITY_IOCTL = Path("fs/verity/ioctl.c")
+VERITY_ENABLE = Path("fs/verity/enable.c")
+VERITY_MEASURE = Path("fs/verity/measure.c")
 REC = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 A52_MAKE = Path("drivers/a52_secure/Makefile")
 HELPER = Path("drivers/a52_secure/a52_phase434_clean.c")
@@ -629,21 +630,56 @@ def patch_regulator_core(text: str) -> str:
     text = text[:a] + fn + text[b:]
 
     # Cache rail state only when the normal regulator core itself changes it.
-    for name, enabled, users_expr in (
-        ("_regulator_do_enable", 1, "rdev->use_count + 1"),
-        ("_regulator_do_disable", 0, "rdev->use_count > 0 ? rdev->use_count - 1 : 0"),
-    ):
-        try:
-            text = insert_before_last_return(
-                text, name,
-                f'''if (!ret)
-	a52_p434_rail_event(rdev_get_name(rdev), {enabled},
-		regulator_get_voltage_rdev(rdev), {users_expr});'''
-            )
-        except SystemExit:
-            # Function naming differs across common revisions; late-cleanup
-            # evidence remains mandatory, rail-cache enrichment is optional.
-            pass
+    # These hooks are after the hardware operation has completed successfully;
+    # they do not issue a second enable/disable/set-voltage transaction.
+    a, b = function_span(text, "_regulator_do_enable")
+    fn = text[a:b]
+    tail = "\ttrace_regulator_enable_complete(rdev_get_name(rdev));\n\n\treturn 0;\n"
+    tail_new = (
+        "\ttrace_regulator_enable_complete(rdev_get_name(rdev));\n"
+        "\ta52_p434_rail_event(rdev_get_name(rdev), 1,\n"
+        "\t\tregulator_get_voltage_rdev(rdev), rdev->use_count + 1);\n\n"
+        "\treturn 0;\n"
+    )
+    if tail not in fn:
+        die("_regulator_do_enable completion anchor missing")
+    fn = fn.replace(tail, tail_new, 1)
+    text = text[:a] + fn + text[b:]
+
+    a, b = function_span(text, "_regulator_do_disable")
+    fn = text[a:b]
+    tail = "\ttrace_regulator_disable_complete(rdev_get_name(rdev));\n\n\treturn 0;\n"
+    tail_new = (
+        "\ttrace_regulator_disable_complete(rdev_get_name(rdev));\n"
+        "\ta52_p434_rail_event(rdev_get_name(rdev), 0,\n"
+        "\t\tregulator_get_voltage_rdev(rdev),\n"
+        "\t\trdev->use_count > 0 ? rdev->use_count - 1 : 0);\n\n"
+        "\treturn 0;\n"
+    )
+    if tail not in fn:
+        die("_regulator_do_disable completion anchor missing")
+    fn = fn.replace(tail, tail_new, 1)
+    text = text[:a] + fn + text[b:]
+
+    a, b = function_span(text, "_regulator_do_set_voltage")
+    fn = text[a:b]
+    tail = (
+        "out:\n"
+        "\ttrace_regulator_set_voltage_complete(rdev_get_name(rdev), best_val);\n\n"
+        "\treturn ret;\n"
+    )
+    tail_new = (
+        "out:\n"
+        "\ttrace_regulator_set_voltage_complete(rdev_get_name(rdev), best_val);\n"
+        "\tif (!ret)\n"
+        "\t\ta52_p434_rail_event(rdev_get_name(rdev), -1,\n"
+        "\t\t\tregulator_get_voltage_rdev(rdev), rdev->use_count);\n\n"
+        "\treturn ret;\n"
+    )
+    if tail not in fn:
+        die("_regulator_do_set_voltage completion anchor missing")
+    fn = fn.replace(tail, tail_new, 1)
+    text = text[:a] + fn + text[b:]
 
     text += "\n/* " + MARK + ": regulator cleanup + cached display-rail transitions. */\n"
     return text
@@ -695,33 +731,42 @@ def patch_namei(text: str) -> str:
     return text
 
 
-def patch_verity_ioctl(text: str) -> str:
+def patch_verity_one(text: str, name: str) -> str:
     if MARK in text:
         return text
 
-    def wrap(src: str, name: str, args: str) -> str:
-        a, b = function_span(src, name)
-        fn = src[a:b]
-        sig_end = fn.find("{")
-        sig = fn[:sig_end].rstrip()
-        if not re.search(r"\bint\s+" + re.escape(name) + r"\s*\(", sig):
-            die(name + " signature drift")
-        inner = name + "_a52_p434_inner"
-        inner_fn = fn.replace(name + "(", inner + "(", 1)
-        wrapper = (
-            sig + "\n{\n"
-            "\tint a52_p434_rc;\n"
-            f"\ta52_p434_rc = {inner}({args});\n"
-            "\tif (!strcmp(current->comm, \"odsign\") ||\n"
-            "\t    !strcmp(current->comm, \"odrefresh\"))\n"
-            f"\t\ta52_ackfr_record(\"P434 ART {name} rc=%d\", a52_p434_rc);\n"
-            "\treturn a52_p434_rc;\n"
-            "}\n"
-        )
-        return src[:a] + inner_fn + "\n" + wrapper + src[b:]
+    a, b = function_span(text, name)
+    fn = text[a:b]
+    sig_end = fn.find("{")
+    sig = fn[:sig_end].rstrip()
+    if not re.search(r"\bint\s+" + re.escape(name) + r"\s*\(", sig):
+        die(name + " signature drift")
 
-    text = wrap(text, "fsverity_ioctl_enable", "filp, arg")
-    text = wrap(text, "fsverity_ioctl_measure", "filp, arg")
+    # Derive the original argument identifiers from the stable 5.10 signatures,
+    # rather than assuming const/void annotation details.
+    params = sig[sig.find("(") + 1:sig.rfind(")")]
+    names = []
+    for param in params.split(","):
+        param = param.strip()
+        ident = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", param)
+        if not ident:
+            die(name + " parameter parse failed: " + param)
+        names.append(ident.group(1))
+
+    inner = name + "_a52_p434_inner"
+    inner_fn = fn.replace(name + "(", inner + "(", 1)
+    wrapper = (
+        sig + "\n{\n"
+        "\tint a52_p434_rc;\n"
+        f"\ta52_p434_rc = {inner}(" + ", ".join(names) + ");\n"
+        "\tif (!strcmp(current->comm, \"odsign\") ||\n"
+        "\t    !strcmp(current->comm, \"odrefresh\"))\n"
+        f"\t\ta52_ackfr_record(\"P434 ART {name} rc=%d\", a52_p434_rc);\n"
+        "\treturn a52_p434_rc;\n"
+        "}\n"
+    )
+    text = text[:a] + inner_fn + "\n" + wrapper + text[b:]
+
     anchor = '#include "fsverity_private.h"'
     if anchor in text:
         text = text.replace(
@@ -731,7 +776,7 @@ def patch_verity_ioctl(text: str) -> str:
         )
     else:
         text = "extern void a52_ackfr_record(const char *fmt, ...);\n" + text
-    text += "\n/* " + MARK + ": fs-verity ioctl return codes for ART gate. */\n"
+    text += "\n/* " + MARK + f": {name} return code for ART gate. */\n"
     return text
 
 
@@ -981,7 +1026,8 @@ def apply(root: Path) -> None:
         COREDUMP: patch_coredump,
         REGCORE: patch_regulator_core,
         NAMEI: patch_namei,
-        VERITY_IOCTL: patch_verity_ioctl,
+        VERITY_ENABLE: lambda text: patch_verity_one(text, "fsverity_ioctl_enable"),
+        VERITY_MEASURE: lambda text: patch_verity_one(text, "fsverity_ioctl_measure"),
         REC: patch_recorder,
     }
     for rel, fn in files.items():
@@ -1008,7 +1054,8 @@ def validate(root: Path) -> None:
     helper = (root / HELPER).read_text(errors="replace")
     signal = (root / SIGNAL).read_text(errors="replace")
     namei = (root / NAMEI).read_text(errors="replace")
-    verity = (root / VERITY_IOCTL).read_text(errors="replace")
+    verity_enable = (root / VERITY_ENABLE).read_text(errors="replace")
+    verity_measure = (root / VERITY_MEASURE).read_text(errors="replace")
 
     for bad in (
         "a52_p430_snapshot(",
@@ -1053,7 +1100,7 @@ def validate(root: Path) -> None:
         "P434 ART fsverity_ioctl_enable",
         "P434 ART fsverity_ioctl_measure",
     ):
-        if token not in verity:
+        if token not in verity_enable + "\n" + verity_measure:
             die("ART fs-verity hook missing: " + token)
 
     if "hrtimer_start(&a52_p430_dma_timer" in hw or "a52_p430_dma_timer_fn" in hw:

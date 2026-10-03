@@ -570,7 +570,7 @@ jobs:
             drivers/a52_secure/a52_phase433_perf.c \
             drivers/a52_secure/a52_phase434_clean.c \
             drivers/regulator/core.c \
-            fs/exec.c fs/namei.c fs/coredump.c fs/verity/ioctl.c \
+            fs/exec.c fs/namei.c fs/coredump.c fs/verity/enable.c fs/verity/measure.c \
             kernel/exit.c kernel/signal.c \
             security/keys/key.c fs/verity/signature.c; do
             cp "$ROOT/$F" "$OUT/source/$(echo "$F" | tr '/' '_')"
@@ -639,7 +639,8 @@ jobs:
             gki/common/fs/exec.c
             gki/common/fs/namei.c
             gki/common/fs/coredump.c
-            gki/common/fs/verity/ioctl.c
+            gki/common/fs/verity/enable.c
+gki/common/fs/verity/measure.c
             gki/common/kernel/exit.c
             gki/common/kernel/signal.c
             workspace/gki-phase199-out/.config

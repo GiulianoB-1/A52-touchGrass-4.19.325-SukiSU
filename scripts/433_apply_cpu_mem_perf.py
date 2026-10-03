@@ -137,7 +137,7 @@ static void p433_cpu_policy(unsigned int sample, unsigned int cpu)
 				 sample, p433_ms(), cpu);
 		return;
 	}
-	if (p->governor && p->governor->name)
+	if (p->governor)
 		gov = p->governor->name;
 	cur = cpufreq_quick_get(cpu);
 	a52_ackfr_record("P433 CPU s=%u t=%llu c=%u cur=%u min=%u max=%u g=%.12s",
@@ -296,6 +296,22 @@ def apply(root: Path, tg: Path):
         s = p.read_text()
         s = s.replace("DEVFREQ_GOV_INTERVAL", "DEVFREQ_GOV_UPDATE_INTERVAL")
         s = s.replace("devfreq_interval_update", "devfreq_update_interval")
+
+        # Android common 5.10 no longer carries the downstream Qualcomm
+        # tracepoints. They are observational only, so remove the calls rather
+        # than porting trace ABI that is unrelated to frequency scaling.
+        s = re.sub(r"\n\s*trace_(?:bw_hwmon_(?:meas|update)|memlat_dev_(?:meas|update))"
+                   r"\(.*?\);\n", "\n", s, flags=re.S)
+
+        if rel.endswith("governor_bw_hwmon.c"):
+            # 5.10 devfreq folded the old max_freq/dev_suspended fields into
+            # scaling_max_freq and the suspend_count nesting counter.
+            s = s.replace("node->hw->df->max_freq",
+                          "node->hw->df->scaling_max_freq")
+            s = s.replace("!df->dev_suspended",
+                          "atomic_read(&df->suspend_count) == 0")
+            s = s.replace("df->dev_suspended",
+                          "atomic_read(&df->suspend_count) > 0")
         p.write_text(s)
 
     p = root / "drivers/devfreq/devfreq_qcom_fw.c"
@@ -387,7 +403,12 @@ def check(root: Path):
                 "drivers/devfreq/governor_memlat.c"]:
         s = (root / rel).read_text(errors="replace")
         if "DEVFREQ_GOV_INTERVAL" in s or "devfreq_interval_update" in s:
-            die(f"Phase433 old devfreq API remains: {rel}")
+            die(f"Phase433 old devfreq interval API remains: {rel}")
+        if re.search(r"trace_(?:bw_hwmon_|memlat_dev_)", s):
+            die(f"Phase433 downstream-only devfreq tracepoint remains: {rel}")
+        if rel.endswith("governor_bw_hwmon.c"):
+            if "->max_freq" in s or "dev_suspended" in s:
+                die("Phase433 old struct devfreq fields remain")
     s = (root / "drivers/devfreq/devfreq_qcom_fw.c").read_text(errors="replace")
     if "sec_smem_clk_osm_add_log_l3" in s or "linux/sec_smem.h" in s:
         die("Phase433 Samsung-only L3 logging remains")

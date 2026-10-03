@@ -1,4 +1,4 @@
-name: Phase393 - EROFS 4K-on-16K compatibility
+name: Phase393 - EROFS Android-4.19 subpage compatibility
 
 on:
   push:
@@ -25,6 +25,7 @@ on:
       - scripts/391_apply_exact_ramoops_alias_dedup.py
       - scripts/392_apply_pid1_scudo_fixed_mmap_compat.py
       - scripts/393_apply_erofs_4k_on_16k_compat.py
+      - scripts/393_apply_erofs_subpage_4k_on_16k.py
       - scripts/decode_phase383_16k_dual.py
   workflow_dispatch:
 
@@ -32,7 +33,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: a52-phase393-erofs-4k-on-16k-${{ github.ref }}
+  group: a52-phase393-erofs-subpage-v2-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -46,7 +47,7 @@ env:
 
 jobs:
   build:
-    name: Build EROFS 4K-on-16K compatibility
+    name: Build EROFS Android-4.19 subpage compatibility
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -56,14 +57,14 @@ jobs:
         with:
           ref: ${{ env.P150_BASELINE_SHA }}
 
-      - name: Fast restore prepared Phase393 source tree
+      - name: Fast restore prepared Phase393 EROFS-v2 source tree
         id: phase393_fast
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150
+          key: a52xq-p393-erofs-subpage-src-v2-${{ runner.os }}-50e28f3ececb
 
-      - name: Validate fast Phase393 source cache
+      - name: Validate fast Phase393 EROFS-v2 source cache
         if: steps.phase393_fast.outputs.cache-hit == 'true'
         run: |
           set -Eeuo pipefail
@@ -71,13 +72,13 @@ jobs:
           KERNEL=workspace/touchgrass-a52xq
           test -d "$KERNEL/.git"
           grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
-          grep -Fq 'A52_PHASE393_EROFS_4K_ON_16K_COMPAT_V1' "$KERNEL/fs/erofs/internal.h"
-          grep -Fq 'P393 EROFSBLK disk=%u page=%lu' "$KERNEL/fs/erofs/super.c"
-          grep -Fq 'a52_erofs_read_raw_subpage' "$KERNEL/fs/erofs/data.c"
-          grep -Fq '.inputsize = clusterpages * EROFS_BLKSIZ' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq 'A52_PHASE393_EROFS_SUBPAGE_4K_ON_16K_V1' "$KERNEL/fs/erofs/A52_PHASE393_REFERENCE.txt"
+          grep -Fq 'P393 EROFS_SB' "$KERNEL/fs/erofs/super.c"
+          grep -Fq 'P393 EROFS_ZIP' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq '.readpages = z_erofs_readpages' "$KERNEL/fs/erofs/zdata.c"
           {
             echo "phase393_fast_cache_hit=true"
-            echo "cache_key=a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150"
+            echo "cache_key=a52xq-p393-erofs-subpage-src-v2-${{ runner.os }}-50e28f3ececb"
           } | tee artifacts/phase393-source-cache.txt
 
       # Fast path: restore the newest complete source tree BEFORE replaying any
@@ -125,8 +126,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: a52xq-phase393-erofs-4k16k-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-phase393-erofs-subpage-v2-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
+            a52xq-phase393-erofs-subpage-v2-${{ runner.os }}-
             a52xq-phase393-erofs-4k16k-${{ runner.os }}-
             a52xq-phase392-pid1-scudo-mmap-${{ runner.os }}-
             a52xq-phase391-ramoops-alias-${{ runner.os }}-
@@ -812,8 +814,8 @@ jobs:
             echo "phase392_returns_original_user_address=yes"
             echo "phase392_other_mmap_semantics_unchanged=yes"
             echo "phase393_fast_source_cache_hit=${{ steps.phase393_fast.outputs.cache-hit }}"
-            echo "phase393_erofs_4k_on_16k=yes"
-            echo "phase393_erofs_disk_block_bytes=4096"
+            echo "phase393_erofs_subpage_v2=yes"
+            echo "phase393_erofs_reference=EndCredits/kernel_xiaomi_sm7250@a264aed3fde518b43ab15ba530556e396502031f"
             echo "phase393_native_page_bytes=16384"
             echo "phase393_compressed_subpage_bridge=yes"
             echo "phase393_inplace_compressed_io_subpage=disabled"
@@ -1389,41 +1391,47 @@ jobs:
           git -C "$KERNEL" diff -- mm/util.c \
             > artifacts/phase392-pid1-scudo-mmap.diff
 
-      - name: Apply Phase393 EROFS 4K-block on native-16K compatibility
+      - name: Apply Phase393 Android-4.19 EROFS subpage backport
         if: steps.phase393_fast.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
+
           curl -fsSL \
-            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/393_apply_erofs_4k_on_16k_compat.py" \
-            -o /tmp/393_apply_erofs_4k_on_16k_compat.py
-          python3 -m py_compile /tmp/393_apply_erofs_4k_on_16k_compat.py
-          python3 /tmp/393_apply_erofs_4k_on_16k_compat.py workspace/touchgrass-a52xq \
-            | tee artifacts/phase393-erofs-4k16k-apply.txt
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/393_apply_erofs_subpage_4k_on_16k.py" \
+            -o /tmp/393_apply_erofs_subpage_4k_on_16k.py
+
+          python3 -m py_compile /tmp/393_apply_erofs_subpage_4k_on_16k.py
+          python3 /tmp/393_apply_erofs_subpage_4k_on_16k.py workspace/touchgrass-a52xq \
+            | tee artifacts/phase393-erofs-subpage-apply.txt
 
           KERNEL=workspace/touchgrass-a52xq
-          grep -Fq 'A52_PHASE393_EROFS_4K_ON_16K_COMPAT_V1' "$KERNEL/fs/erofs/internal.h"
-          grep -Fq 'P393 EROFSBLK disk=%u page=%lu' "$KERNEL/fs/erofs/super.c"
-          grep -Fq 'a52_erofs_read_raw_subpage' "$KERNEL/fs/erofs/data.c"
-          grep -Fq 'bio_add_page(bio, page, EROFS_BLKSIZ, 0)' "$KERNEL/fs/erofs/zdata.c"
-          grep -Fq '.inputsize = clusterpages * EROFS_BLKSIZ' "$KERNEL/fs/erofs/zdata.c"
-          grep -Fq 'rq->inputsize > EROFS_BLKSIZ' "$KERNEL/fs/erofs/decompressor.c"
-          git -C "$KERNEL" diff --check
-          git -C "$KERNEL" diff -- fs/erofs > artifacts/phase393-erofs-4k16k.diff
+          test -s "$KERNEL/fs/erofs/A52_PHASE393_REFERENCE.txt"
+          grep -Fq 'A52_PHASE393_EROFS_SUBPAGE_4K_ON_16K_V1' "$KERNEL/fs/erofs/A52_PHASE393_REFERENCE.txt"
+          grep -Fq 'reference=EndCredits/kernel_xiaomi_sm7250@a264aed3fde518b43ab15ba530556e396502031f' "$KERNEL/fs/erofs/A52_PHASE393_REFERENCE.txt"
+          grep -Fq 'P393 EROFS_SB' "$KERNEL/fs/erofs/super.c"
+          grep -Fq 'P393 EROFS_ZIP' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq '.readpages = z_erofs_readpages' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq 'PAGE_ALIGN(pcl->pclustersize) >> PAGE_SHIFT' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq 'sb_set_blocksize(sb, 1 << sbi->blkszbits)' "$KERNEL/fs/erofs/super.c"
 
-      - name: Save prepared Phase393 source cache
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/erofs include/trace/events/erofs.h \
+            > artifacts/phase393-erofs-subpage.diff
+
+      - name: Save prepared Phase393 EROFS-v2 source cache
         if: steps.phase393_fast.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150
+          key: a52xq-p393-erofs-subpage-src-v2-${{ runner.os }}-50e28f3ececb
 
-      - name: Record Phase393 source cache status
+      - name: Record Phase393 EROFS-v2 source cache status
         run: |
           mkdir -p artifacts
           {
             echo "phase393_fast_source_cache_hit=${{ steps.phase393_fast.outputs.cache-hit }}"
-            echo "cache_key=a52xq-p393-prepared-src-v1-${{ runner.os }}-8773f2e9e150"
+            echo "cache_key=a52xq-p393-erofs-subpage-src-v2-${{ runner.os }}-50e28f3ececb"
           } > artifacts/phase393-source-cache.txt
 
       - name: Audit obvious downstream 4K page assumptions
@@ -1461,7 +1469,7 @@ jobs:
           wc -l "$OUT"
           head -200 "$OUT" || true
 
-      - name: Restore Phase393 built kernel cache
+      - name: Restore Phase393 EROFS-v2 built kernel cache
         id: phase393_build
         uses: actions/cache/restore@v4
         with:
@@ -1469,9 +1477,9 @@ jobs:
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             workspace/touchgrass-a52xq/out/.config
             workspace/touchgrass-a52xq/out/vmlinux
-          key: a52xq-p393-built-v1-${{ runner.os }}-8773f2e9e150
+          key: a52xq-p393-erofs-subpage-built-v2-${{ runner.os }}-50e28f3ececb
 
-      - name: Validate restored Phase393 built kernel
+      - name: Validate restored Phase393 EROFS-v2 built kernel
         if: steps.phase393_build.outputs.cache-hit == 'true'
         run: |
           set -Eeuo pipefail
@@ -1483,7 +1491,7 @@ jobs:
           gzip -t "$IMAGE" 2>/dev/null || true
           {
             echo "phase393_built_kernel_cache_hit=true"
-            echo "cache_key=a52xq-p393-built-v1-${{ runner.os }}-8773f2e9e150"
+            echo "cache_key=a52xq-p393-erofs-subpage-built-v2-${{ runner.os }}-50e28f3ececb"
           } > artifacts/phase393-build-cache.txt
 
       - name: Build integrated kernel
@@ -1502,7 +1510,7 @@ jobs:
           ccache --show-stats || true
           exit "$RC"
 
-      - name: Save Phase393 built kernel cache
+      - name: Save Phase393 EROFS-v2 built kernel cache
         if: steps.phase393_build.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
@@ -1511,14 +1519,14 @@ jobs:
             artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
             workspace/touchgrass-a52xq/out/.config
             workspace/touchgrass-a52xq/out/vmlinux
-          key: a52xq-p393-built-v1-${{ runner.os }}-8773f2e9e150
+          key: a52xq-p393-erofs-subpage-built-v2-${{ runner.os }}-50e28f3ececb
 
       - name: Record Phase392 build cache status
         run: |
           mkdir -p artifacts
           {
             echo "phase393_built_kernel_cache_hit=${{ steps.phase393_build.outputs.cache-hit }}"
-            echo "cache_key=a52xq-p393-built-v1-${{ runner.os }}-8773f2e9e150"
+            echo "cache_key=a52xq-p393-erofs-subpage-built-v2-${{ runner.os }}-50e28f3ececb"
           } > artifacts/phase393-build-cache.txt
 
       - name: Audit P152 retained stack and final 16K geometry
@@ -1607,16 +1615,16 @@ jobs:
           path: packaging/AnyKernel3
           fetch-depth: 1
 
-      - name: Package Phase393 16K flashable ZIP
+      - name: Package Phase393 EROFS-v2 16K flashable ZIP
         run: |
           set -Eeuo pipefail
-          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p393.sh
-          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p393.sh
-          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p393.sh
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p393v2.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p393v2.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p393v2.sh
 
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('scripts/.package-p393.sh')
+          p = Path('scripts/.package-p393v2.sh')
           s = p.read_text()
           anchor = 'dump_boot;\nwrite_boot;'
           if s.count(anchor) != 1:
@@ -1632,18 +1640,18 @@ jobs:
           p.write_text(s)
           PY
 
-          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p393.sh
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p393v2.sh
 
-          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P393-EROFS-4K16K/'             scripts/.package-p393.sh
+          sed -i             's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + P152-BASE36058491006 + 16K-P393-EROFS-SUBPAGE-V2/'             scripts/.package-p393v2.sh
 
-          sed -i             's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P393-P152-16K-EROFS-4K16K.zip/'             scripts/.package-p393.sh
+          sed -i             's/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P393-P152-16K-EROFS-SUBPAGE-V2.zip/'             scripts/.package-p393v2.sh
 
-          chmod +x scripts/.package-p393.sh
-          ./scripts/.package-p393.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
-          rm -f scripts/.package-p393.sh
+          chmod +x scripts/.package-p393v2.sh
+          ./scripts/.package-p393v2.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p393v2.sh
 
-          cat > release/PHASE393-READ-ME-FIRST.txt <<'EOF'
-          A52 PHASE 393 - EROFS 4K BLOCKS ON NATIVE 16K PAGES
+          cat > release/PHASE393-V2-READ-ME-FIRST.txt <<'EOF'
+          A52 PHASE 393 V2 - ANDROID-4.19 EROFS SUBPAGE BACKPORT
 
           Baseline: P152 / run 36058491006.
           Kernel: native ARM64 16 KiB pages, PAGE_SHIFT=14, VA_BITS=47.
@@ -1757,12 +1765,12 @@ jobs:
 
           cp artifacts/decode_phase383_16k_dual.py release/decode_phase383_16k_dual.py
 
-      - name: Verify Phase393 package and 16K invariants
+      - name: Verify Phase393 EROFS-v2 package and 16K invariants
         run: |
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
           CFG="$KERNEL/out/.config"
-          ZIP="$(find release -maxdepth 1 -name '*A52-P393-P152-16K-EROFS-4K16K.zip' -type f | head -1)"
+          ZIP="$(find release -maxdepth 1 -name '*A52-P393-P152-16K-EROFS-SUBPAGE-V2.zip' -type f | head -1)"
 
           test -s "$ZIP"
           grep -Fxq 'CONFIG_ARM64_16K_PAGES=y' "$CFG"
@@ -1809,15 +1817,15 @@ jobs:
           grep -Fq 'panic("overlap on reserved memory, check the latest change")' "$KERNEL/drivers/of/of_reserved_mem.c"
           grep -Fq 'A52_PHASE392_PID1_SCUDO_FIXED_MMAP_COMPAT_V1' "$KERNEL/mm/util.c"
           grep -Fq 'P392 SCUDOOK' "$KERNEL/mm/util.c"
-          grep -Fq 'A52_PHASE393_EROFS_4K_ON_16K_COMPAT_V1' "$KERNEL/fs/erofs/internal.h"
-          grep -Fq 'P393 EROFSBLK disk=%u page=%lu' "$KERNEL/fs/erofs/super.c"
-          grep -Fq 'a52_erofs_read_raw_subpage' "$KERNEL/fs/erofs/data.c"
-          grep -Fq '.inputsize = clusterpages * EROFS_BLKSIZ' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq 'A52_PHASE393_EROFS_SUBPAGE_4K_ON_16K_V1' "$KERNEL/fs/erofs/A52_PHASE393_REFERENCE.txt"
+          grep -Fq 'P393 EROFS_SB' "$KERNEL/fs/erofs/super.c"
+          grep -Fq '.readpages = z_erofs_readpages' "$KERNEL/fs/erofs/zdata.c"
+          grep -Fq 'PAGE_ALIGN(pcl->pclustersize) >> PAGE_SHIFT' "$KERNEL/fs/erofs/zdata.c"
 
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
           unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
-          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P393-EROFS-4K16K'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq '16K-P393-EROFS-SUBPAGE-V2'
 
           cp "$CFG" artifacts/phase393-final.config
           sha256sum "$ZIP" | tee artifacts/phase393-package-sha256.txt
@@ -1873,12 +1881,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-phase393-erofs-4k16k-${{ runner.os }}-${{ github.sha }}
+          key: a52xq-phase393-erofs-subpage-v2-${{ runner.os }}-${{ github.sha }}
 
-      - name: Upload Phase393 EROFS package
+      - name: Upload Phase393 EROFS-v2 package
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE393-P152-BASE36058491006-16K-EROFS-4K16K-${{ github.run_number }}
+          name: A52XQ-PHASE393-P152-BASE36058491006-16K-EROFS-SUBPAGE-V2-${{ github.run_number }}
           path: |
             release/
             artifacts/phase393-final.config
@@ -1916,8 +1924,8 @@ jobs:
             artifacts/phase392-pid1-scudo-mmap-apply.txt
             artifacts/phase392-pid1-scudo-mmap.diff
             artifacts/phase393-source-cache.txt
-            artifacts/phase393-erofs-4k16k-apply.txt
-            artifacts/phase393-erofs-4k16k.diff
+            artifacts/phase393-erofs-subpage-apply.txt
+            artifacts/phase393-erofs-subpage.diff
             artifacts/phase393-build-cache.txt
             artifacts/phase393-build-cache.txt
             artifacts/phase393-build-cache.txt
@@ -1947,33 +1955,32 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE393-16K-EROFS-4K16K-FAILED-${{ github.run_number }}
+          name: A52XQ-PHASE393-16K-EROFS-SUBPAGE-V2-FAILED-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30
 
 # Phase393 baseline:
-# Phase392 PID1 Scudo fixed-mmap compatibility, same long-lived native-16K branch.
+# Phase393 EROFS-v2 baseline:
+# Phase392 hardware proof:
+# - Scudo fixed-commit bridge succeeds repeatedly.
+# - Android first-stage init then reaches /system.
+# - EROFS on dm-0 reports "blksize 4096 isn't supported".
+# - mount(/dev/block/dm-0,/system,erofs) returns -EINVAL.
+# - 4K recovery mounts the same EROFS logical partition successfully.
 #
-# Phase392 hardware:
-# - repeated P392 SCUDOMAP/P392 SCUDOOK, no SCUDOFAIL
-# - first-stage init reaches logical partitions and attempts /system mount
-# - exact blocker: EROFS on dm-0 reports "blksize 4096 isn't supported"
-# - mount(/dev/block/dm-0,/system,erofs) returns -EINVAL
-# - 4K recovery mounts the same EROFS logical partitions successfully
+# Phase393-v2:
+# - import pinned Android-4.19 EROFS subpage-capable implementation from
+#   EndCredits/kernel_xiaomi_sm7250@a264aed3fde518b43ab15ba530556e396502031f
+# - adapt only modern ->readahead entrypoint back to TouchGrass ->readpages
+# - retain 4 KiB EROFS block size while Linux PAGE_SIZE is 16 KiB
+# - support compressed pclusters smaller than native PAGE_SIZE
+# - runtime proof markers: P393 EROFS_SB and P393 EROFS_ZIP
+# - provenance manifest: fs/erofs/A52_PHASE393_REFERENCE.txt
 #
-# Phase393:
-# - 4 KiB logical EROFS blocks on native 16 KiB Linux pages
-# - metadata 4K BIO into native-page containers
-# - raw page-cache reads aggregate 4K filesystem blocks
-# - compressed pcluster/workgroup addressing remains in 4K units
-# - compressed BIOs transfer 4K per logical block
-# - disable sub-page compressed inplace I/O
-# - gather multi-block LZ4 input into native-page scratch when necessary
-# - adapt shifted/plain compressed transform to sub-page input
-#
-# Cache:
-# - exact Phase393 prepared tree restored first on retry
-# - otherwise Phase391 tree restored first and only P392+P393 are applied
-# - cold full replay remains fallback
-# - compiler ccache + Phase393 Image/.config/vmlinux cache retained
+# Cache policy:
+# - Phase393-v2 prepared source cache is tried first
+# - known-good Phase391 prepared tree is immediate cold-miss fallback
+# - older P152/phase replay runs only if both caches miss
+# - compiler cache keeps Phase393-v1/P392 fallbacks
+# - v2 built-output cache key cannot reuse the old hand-patched Image

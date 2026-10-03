@@ -66,6 +66,7 @@ dump_boot_failure() {
 
 set +e
 timeout --foreground "${BOOT_TIMEOUT}s" ./bin/launch_cvd \
+  --report_anonymous_usage_stats=n \
   --daemon \
   --start_webrtc="$WEBRTC" \
   --enable_wifi="$WIFI" \

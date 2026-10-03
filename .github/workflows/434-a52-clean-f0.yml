@@ -640,7 +640,7 @@ jobs:
             gki/common/fs/namei.c
             gki/common/fs/coredump.c
             gki/common/fs/verity/enable.c
-gki/common/fs/verity/measure.c
+            gki/common/fs/verity/measure.c
             gki/common/kernel/exit.c
             gki/common/kernel/signal.c
             workspace/gki-phase199-out/.config

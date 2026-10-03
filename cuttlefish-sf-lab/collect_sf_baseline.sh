@@ -16,6 +16,21 @@ mkdir -p "$OUT"
 "$ADB" root >/dev/null 2>&1 || true
 "$ADB" wait-for-device
 
+echo "Waiting for Android boot completion..."
+boot_ok=0
+for _ in $(seq 1 180); do
+  if [[ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
+    boot_ok=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$boot_ok" -ne 1 ]]; then
+  echo "FAIL: Android did not report sys.boot_completed=1 within 180 seconds."
+  exit 1
+fi
+echo "Android boot complete."
+
 echo "Collecting pre-restart state..."
 "$ADB" shell getprop > "$OUT/getprop-before.txt"
 "$ADB" shell ps -A -T > "$OUT/ps-before.txt"

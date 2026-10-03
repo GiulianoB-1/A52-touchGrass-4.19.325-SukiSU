@@ -63,7 +63,7 @@ The lab is pinned conceptually to:
 
 ```
 branch: android16-release
-target: aosp_cf_x86_64_only_phone-userdebug
+CI target: aosp_cf_x86_64_only_phone (userdebug)
 ```
 
 First try the automated fetch:

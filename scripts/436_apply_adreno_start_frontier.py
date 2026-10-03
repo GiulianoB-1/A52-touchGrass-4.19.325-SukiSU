@@ -58,4 +58,30 @@ fixed = '''        anchor = "\\t\\tint ret = gmu_core_start(device);\\n"
 '''
 s = s[:start] + fixed + s[end:]
 
+# PID1 I1/I2/I3 inherit Phase435's single-statement guard:
+#     if (current->pid == 1)
+#         a52_p435_mark(...);
+# Appending a second statement without braces makes the P436 mark unconditional
+# and trips -Wmisleading-indentation. Rewrite the generator loop so the first
+# three PID1 stages wrap both generations in one explicit block. I4 already
+# lives inside the global-init panic block and does not need this guard.
+old_pid1_loop = '''    for old, add in pairs:
+        s = one(s, old, old + add, "PID1 exit stage")
+'''
+new_pid1_loop = '''    for idx, (old, add) in enumerate(pairs):
+        if idx < 3:
+            guard = "\\tif (current->pid == 1)\\n" + old
+            block = (
+                "\\tif (current->pid == 1) {\\n" +
+                old + add +
+                "\\t}\\n"
+            )
+            s = one(s, guard, block, "PID1 exit stage")
+        else:
+            s = one(s, old, old + add, "PID1 exit stage")
+'''
+if old_pid1_loop not in s:
+    raise RuntimeError("Phase436 wrapper: PID1 loop repair anchor missing")
+s = s.replace(old_pid1_loop, new_pid1_loop, 1)
+
 exec(compile(s, str(p)[:-4], "exec"), globals(), globals())

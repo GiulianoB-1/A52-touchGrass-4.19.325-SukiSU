@@ -382,6 +382,22 @@ int of_fdt_get_ddrtype(void)
     if line not in ams:
         amk.write_text(ams.rstrip() + "\n# A52_PHASE433_CPU_MEM_PERF_V1\n" + line + "\n")
 
+    # The inherited focused recorder has explicit phase-prefix admission gates.
+    # Without P433 here, all CPU/DDR/L3 telemetry calls are silently discarded.
+    recorder = root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+    rs = recorder.read_text()
+    p432_gate = 'strncmp(fmt, "P432", 4) &&'
+    p433_gate = 'strncmp(fmt, "P433", 4) &&'
+    if p433_gate not in rs:
+        gate_count = rs.count(p432_gate)
+        if gate_count < 3:
+            die(f"Phase433 recorder admission anchors missing: found {gate_count}")
+        rs = rs.replace(
+            p432_gate,
+            p433_gate + '\n    ' + p432_gate,
+        )
+        recorder.write_text(rs)
+
 
 def check(root: Path):
     required = PORT_FILES + [
@@ -390,6 +406,7 @@ def check(root: Path):
         "drivers/devfreq/Makefile",
         "drivers/of/fdt.c",
         "include/linux/of_fdt.h",
+        "drivers/a52_secure/a52_ack_secure_flight_recorder.c",
     ]
     for rel in required:
         if not (root / rel).is_file():
@@ -412,6 +429,9 @@ def check(root: Path):
     s = (root / "drivers/devfreq/devfreq_qcom_fw.c").read_text(errors="replace")
     if "sec_smem_clk_osm_add_log_l3" in s or "linux/sec_smem.h" in s:
         die("Phase433 Samsung-only L3 logging remains")
+    recorder = (root / "drivers/a52_secure/a52_ack_secure_flight_recorder.c").read_text(errors="replace")
+    if recorder.count('strncmp(fmt, "P433", 4) &&') < 3:
+        die("Phase433 recorder admission missing from one or more focused gates")
     print("Phase433 CPU + DDR/L3 performance port: PASS")
 
 

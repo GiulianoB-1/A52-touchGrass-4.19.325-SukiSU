@@ -27,7 +27,7 @@ cat > "$LAB_ROOT/BUILD-INFO.txt" <<EOF
 Prepared: $(date -Iseconds)
 Host package: $HOST_PACKAGE
 Image zip: $IMAGE_ZIP
-Target: aosp_cf_x86_64_phone-userdebug
+Target: aosp_cf_x86_64_only_phone-userdebug
 Android branch intended: android16-release
 EOF
 

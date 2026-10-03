@@ -186,7 +186,7 @@ SurfaceFlinger, observes a six-second no-client window, then starts zygote again
 while the same Perfetto trace continues.
 
 ```bash
-./collect_sf_no_bootanim_control.sh
+bash ./collect_sf_no_bootanim_control.sh
 ```
 
 This is intentionally stronger than merely disabling bootanimation on an already

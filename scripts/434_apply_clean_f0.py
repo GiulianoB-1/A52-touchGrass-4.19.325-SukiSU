@@ -45,6 +45,15 @@ def function_span(text: str, name: str) -> tuple[int, int]:
         if stripped.startswith(("*", "/*", "//", "#")):
             continue
         start = m.start()
+        # Some kernel functions split the return type from the function name.
+        # Include that preceding declaration line in the removable span.
+        prev_end = start - 1
+        if prev_end >= 0:
+            prev_start = text.rfind("\n", 0, prev_end) + 1
+            prev = text[prev_start:start].strip()
+            if (prev.startswith("static ") and
+                    ";" not in prev and "(" not in prev and ")" not in prev):
+                start = prev_start
         paren = text.find("(", m.start())
         if paren < 0:
             continue
@@ -1131,6 +1140,8 @@ def validate(root: Path) -> None:
 
     if "a52_p430_ufs_compact(snapshot_id);" in syscall:
         die("active UFS sampler call reappeared")
+    if "static unsigned int\n\n" in syscall:
+        die("orphan split return type remains after sampler removal")
     if "P434 ART KEY sc=%d op=%llx rc=%ld" not in syscall:
         die("ART add_key/keyctl return trace missing")
 

@@ -682,14 +682,14 @@ def patch_regulator_core(text: str) -> str:
     # state.  No extra regulator operation is issued.
     a, b = function_span(text, "regulator_late_cleanup")
     fn = text[a:b]
-    target = "_regulator_do_disable(rdev);"
+    target = "\t\tret = _regulator_do_disable(rdev);\n"
     if target not in fn:
-        die("regulator_late_cleanup disable anchor missing")
+        die("regulator_late_cleanup disable assignment anchor missing")
     fn = fn.replace(
         target,
-        'a52_ackfr_record("P434 RLC off n=%.31s", rdev_get_name(rdev));\n'
-        '\t\t\ta52_p434_rail_event(rdev_get_name(rdev), 0, -1, rdev->use_count);\n'
-        '\t\t\t' + target,
+        '\t\ta52_ackfr_record("P434 RLC off n=%.31s", rdev_get_name(rdev));\n'
+        '\t\ta52_p434_rail_event(rdev_get_name(rdev), 0, -1, rdev->use_count);\n'
+        + target,
         1,
     )
     text = text[:a] + fn + text[b:]

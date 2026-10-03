@@ -788,8 +788,8 @@ def patch_dsi_hw(text: str) -> str:
     # can be sampled at pre/post, +1/+5/+20/+100 us, IRQ entry, DMA_DONE,
     # wait-return, completion and final/timeout without any background timer.
     text = one(text,
-               "#define A52_P430_DMA_SAMPLES       7U\\n",
-               "#define A52_P430_DMA_SAMPLES       11U\\n",
+               "#define A52_P430_DMA_SAMPLES       7U\n",
+               "#define A52_P430_DMA_SAMPLES       11U\n",
                "DMA event sample capacity")
     text = remove_function(text, "a52_p430_dma_timer_fn")
     text = text.replace("static struct hrtimer a52_p430_dma_timer;\n", "")
@@ -919,8 +919,8 @@ EXPORT_SYMBOL_GPL(a52_p430_dma_event);
     text = text[:insert_at] + "\n" + event_fn + text[insert_at:]
 
     text = one(text,
-               "\ta52_p430_dma_sample(ctrl, 6U);\\n",
-               "\ta52_p430_dma_sample(ctrl, 10U);\\n",
+               "\ta52_p430_dma_sample(ctrl, 6U);\n",
+               "\ta52_p430_dma_sample(ctrl, 10U);\n",
                "final sample point")
     text += "\n/* " + MARK + ": timer polling retired; active-path F0 state only. */\n"
     return text

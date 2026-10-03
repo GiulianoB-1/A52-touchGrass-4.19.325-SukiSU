@@ -335,6 +335,7 @@ def patch_syscall(text: str) -> str:
     # Remove all periodic/remote-task machinery.  Keep only the tiny persistent
     # sideband allocation because P432 frontier records still use it.
     for name in (
+        # Current SF-gap samplers.
         "a52_p431_exec_fn",
         "a52_p431_witness_write",
         "a52_p430_find_leader",
@@ -347,8 +348,25 @@ def patch_syscall(text: str) -> str:
         "a52_p430_write",
         "a52_p430_snapshot",
         "a52_p430_sampler_fn",
+
+        # Older remote-task samplers are also incompatible with CLEAN-F0's
+        # event-driven-only rule.  They are already retired from the modern
+        # runtime lineage, but their compiled function bodies still contain
+        # get_wchan()/remote stack inspection and therefore fail the binary
+        # hygiene audit.  Remove the whole obsolete chains rather than merely
+        # weakening that audit.
+        "a52_r377_fill_task",
+        "a52_r377_take_snapshot",
+        "a52_r377_sampler_fn",
+        "a52_r377_init",
+        "a52_r380_vdc_snapshot",
+        "a52_r380_vdc_sampler_fn",
+        "a52_r380_vdc_init",
+        "a52_r373_sample_blocked_mounts",
+        "a52_r373_sampler_fn",
+        "a52_r373_init",
     ):
-        text = remove_function(text, name)
+        text = remove_function(text, name, required=False)
 
     text = text.replace("static struct task_struct *a52_p430_sampler;\n", "")
     text = text.replace("static struct task_struct *a52_p431_exec_task __maybe_unused;\n", "")
@@ -1066,9 +1084,12 @@ def validate(root: Path) -> None:
         "try_get_task_stack(",
         "task_pt_regs(",
         'kthread_run(a52_p430_sampler_fn',
+        'kthread_run(a52_r377_sampler_fn',
+        'kthread_run(a52_r380_vdc_sampler_fn',
+        'kthread_run(a52_r373_sampler_fn',
     ):
         if bad in syscall:
-            die("intrusive SF sampler token remains: " + bad)
+            die("intrusive/periodic sampler token remains: " + bad)
 
     if "a52_p430_ufs_compact(snapshot_id);" in syscall:
         die("active UFS sampler call reappeared")

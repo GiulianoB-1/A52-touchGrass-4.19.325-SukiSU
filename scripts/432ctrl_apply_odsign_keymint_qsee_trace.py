@@ -5,8 +5,8 @@ import zlib
 from pathlib import Path
 
 PAYLOAD = Path(__file__).with_suffix(Path(__file__).suffix + ".z64")
-ENC_SHA256 = "3aecbc61e038abdc7d32f671fd18dc23aa8dd346c8c8dddad985ebfd7bb716c9"
-RAW_SHA256 = "961f27d24a08aeeaae8ce71d92e3a190031584ed6d61be97d8fbd22d0441844b"
+ENC_SHA256 = "4ceef0163111029feefa6b6003e6ee089fb23e99e1a25b3dcc4aff26bede1378"
+RAW_SHA256 = "2600cd891e5ab1f5f0748d21f5d132b1e3cb8dfb52d0702a6e3451abf774e7bd"
 
 encoded = PAYLOAD.read_text(encoding="ascii").strip()
 if hashlib.sha256(encoded.encode("ascii")).hexdigest() != ENC_SHA256:

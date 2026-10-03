@@ -633,7 +633,7 @@ def patch_coredump(text: str) -> str:
         return text
     a, b = function_span(text, "do_coredump")
     fn = text[a:b]
-    block = r'''
+    block = '''
 \tif (!strcmp(current->comm, "bootanimation"))
 \t\ta52_ackfr_record("P434 BA CORE_REQ p=%d t=%d sig=%d code=%d",
 \t\t\tcurrent->pid, current->tgid,

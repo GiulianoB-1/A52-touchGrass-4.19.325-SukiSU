@@ -13,7 +13,7 @@ WEBRTC="${CF_WEBRTC:-false}"
 WIFI="${CF_WIFI:-false}"
 SANDBOX="${CF_SANDBOX:-false}"
 VM_MANAGER="${CF_VM_MANAGER:-qemu_cli}"
-BOOT_TIMEOUT="${CF_BOOT_TIMEOUT:-90}"
+BOOT_TIMEOUT="${CF_BOOT_TIMEOUT:-300}"
 
 test -x "$INSTANCE/bin/launch_cvd"
 test -e /dev/kvm
@@ -107,17 +107,24 @@ set -e
 
 if [[ "$launch_rc" -ne 0 ]]; then
   if [[ "$launch_rc" -eq 124 ]]; then
-    echo "FAIL: launch_cvd exceeded ${BOOT_TIMEOUT}s."
+    echo "WARN: launch_cvd exceeded ${BOOT_TIMEOUT}s; checking whether the daemonized guest is still healthy..."
+    if timeout 30s ./bin/adb wait-for-device; then
+      echo "ADB appeared after launch_cvd timeout; continuing with boot-completion checks."
+    else
+      echo "FAIL: launch_cvd timed out and ADB is still unavailable."
+      dump_boot_failure
+      exit "$launch_rc"
+    fi
   else
     echo "FAIL: launch_cvd exited with rc=$launch_rc."
+    dump_boot_failure
+    exit "$launch_rc"
   fi
-  dump_boot_failure
-  exit "$launch_rc"
 fi
 
 echo
-echo "Waiting up to 90s for Android ADB..."
-if ! timeout 90s ./bin/adb wait-for-device; then
+echo "Waiting up to 120s for Android ADB..."
+if ! timeout 120s ./bin/adb wait-for-device; then
   echo "FAIL: Android ADB never appeared."
   dump_boot_failure
   exit 1

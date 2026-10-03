@@ -38,6 +38,12 @@ def one(text: str, old: str, new: str, label: str) -> str:
 def function_span(text: str, name: str) -> tuple[int, int]:
     rx = re.compile(r"(?m)^[^\n;]*\b" + re.escape(name) + r"\s*\(")
     for m in rx.finditer(text):
+        line_end = text.find("\n", m.start())
+        if line_end < 0:
+            line_end = len(text)
+        stripped = text[m.start():line_end].lstrip()
+        if stripped.startswith(("*", "/*", "//", "#")):
+            continue
         start = m.start()
         paren = text.find("(", m.start())
         if paren < 0:
@@ -355,13 +361,18 @@ def patch_syscall(text: str) -> str:
         # get_wchan()/remote stack inspection and therefore fail the binary
         # hygiene audit.  Remove the whole obsolete chains rather than merely
         # weakening that audit.
+        "a52_r377_write_slot",
+        "a52_r377_get_latest_apexd_leader",
+        "a52_r377_collect_thread_refs",
         "a52_r377_fill_task",
         "a52_r377_take_snapshot",
         "a52_r377_sampler_fn",
         "a52_r377_init",
+        "a52_r380_get_latest_vdc",
         "a52_r380_vdc_snapshot",
         "a52_r380_vdc_sampler_fn",
         "a52_r380_vdc_init",
+        "a52_p430_comm_is",
         "a52_r373_sample_blocked_mounts",
         "a52_r373_sampler_fn",
         "a52_r373_init",
@@ -371,6 +382,33 @@ def patch_syscall(text: str) -> str:
     text = text.replace("static struct task_struct *a52_p430_sampler;\n", "")
     text = text.replace("static struct task_struct *a52_p431_exec_task __maybe_unused;\n", "")
     text = text.replace("static struct task_struct *a52_p431_exec_task;\n", "")
+    text = text.replace("static struct task_struct *a52_r377_sampler_task;\n", "")
+    text = text.replace("static void *a52_r377_sideband;\n", "")
+    text = text.replace("static struct task_struct *a52_r380_vdc_sampler_task;\n", "")
+    text = re.sub(
+        r"static const u32 a52_r380_vdc_target_ms\[A52_R380_VDC_SNAPSHOT_COUNT\] = \{.*?\};\n",
+        "",
+        text,
+        count=1,
+        flags=re.S,
+    )
+    text = text.replace("static struct task_struct *a52_r373_sampler_task;\n", "")
+
+    invoke = "\tinvoke_syscall(regs, scno, sc_nr, syscall_table);\n"
+    if invoke not in text:
+        die("syscall invoke anchor missing for ART key trace")
+    text = text.replace(
+        invoke,
+        invoke +
+        "\tif ((!strcmp(current->comm, \"odsign\") ||\n"
+        "\t     !strcmp(current->comm, \"odrefresh\")) &&\n"
+        "\t    (scno == __NR_add_key || scno == __NR_keyctl))\n"
+        "\t\ta52_ackfr_record(\"P434 ART KEY sc=%d op=%llx rc=%ld\",\n"
+        "\t\t\tscno, scno == __NR_keyctl ?\n"
+        "\t\t\t(unsigned long long)regs->orig_x0 : 0ULL,\n"
+        "\t\t\t(long)regs->regs[0]);\n",
+        1,
+    )
 
     init = r'''static int __init a52_p430_init(void)
 {
@@ -586,17 +624,18 @@ def patch_coredump(text: str) -> str:
         return text
     a, b = function_span(text, "do_coredump")
     fn = text[a:b]
-    brace = fn.find("{")
-    if brace < 0:
-        die("do_coredump opening brace missing")
     block = r'''
-	if (!strcmp(current->comm, "bootanimation"))
-		a52_ackfr_record("P434 BA CORE_REQ p=%d t=%d sig=%d code=%d",
-			current->pid, current->tgid,
-			siginfo ? siginfo->si_signo : 0,
-			siginfo ? siginfo->si_code : 0);
+\tif (!strcmp(current->comm, "bootanimation"))
+\t\ta52_ackfr_record("P434 BA CORE_REQ p=%d t=%d sig=%d code=%d",
+\t\t\tcurrent->pid, current->tgid,
+\t\t\tsiginfo ? siginfo->si_signo : 0,
+\t\t\tsiginfo ? siginfo->si_code : 0);
 '''
-    fn = fn[:brace + 1] + block + fn[brace + 1:]
+    # Keep declarations before statements for the kernel's GNU89 build.
+    stmt = "\taudit_core_dumps(siginfo->si_signo);\n"
+    if stmt not in fn:
+        die("do_coredump first-statement anchor missing")
+    fn = fn.replace(stmt, block + "\n" + stmt, 1)
     text = text[:a] + fn + text[b:]
     anchor = "#include <linux/coredump.h>"
     if anchor in text:
@@ -609,7 +648,6 @@ def patch_coredump(text: str) -> str:
         text = "extern void a52_ackfr_record(const char *fmt, ...);\n" + text
     text += "\n/* " + MARK + ": bootanimation core-request event. */\n"
     return text
-
 
 def patch_regulator_core(text: str) -> str:
     if MARK in text:
@@ -1093,6 +1131,8 @@ def validate(root: Path) -> None:
 
     if "a52_p430_ufs_compact(snapshot_id);" in syscall:
         die("active UFS sampler call reappeared")
+    if "P434 ART KEY sc=%d op=%llx rc=%ld" not in syscall:
+        die("ART add_key/keyctl return trace missing")
 
     if 'A52_R269_REC("PROP ' in msm or 'A52_R269_REC("PVAL ' in msm:
         # The strings may remain only if the whole old function was not replaced.

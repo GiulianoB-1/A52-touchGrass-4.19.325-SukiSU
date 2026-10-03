@@ -130,7 +130,7 @@ if [[ $rc -ne 0 ]]; then
 Use the official Android CI fallback:
   1. Open https://ci.android.com/
   2. Branch: android16-qpr2-release
-  3. Target: aosp_cf_x86_64_only_phone-aosp_current
+  3. Target: aosp_cf_x86_64_only_phone
   4. Variant: userdebug
   5. Download BOTH artifacts from the SAME build:
        - aosp_cf_x86_64_phone-img-<BUILD>.zip

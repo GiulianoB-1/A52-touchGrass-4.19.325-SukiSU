@@ -573,6 +573,7 @@ def patch_regulator_core(text: str) -> str:
     text = text.replace(
         anchor,
         "/* A52_PHASE434_CLEAN_F0_V1 */\n"
+        "extern void a52_ackfr_record(const char *fmt, ...);\n"
         "extern void a52_p434_rail_event(const char *name, int enabled, int uv, int users);\n\n"
         + anchor,
         1,
@@ -705,7 +706,13 @@ def patch_dsi_hw(text: str) -> str:
     if MARK in text:
         return text
 
-    # Retire timer-driven register polling.
+    # Retire timer-driven register polling.  Keep eleven slots so the exact F0
+    # can be sampled at pre/post, +1/+5/+20/+100 us, IRQ entry, DMA_DONE,
+    # wait-return, completion and final/timeout without any background timer.
+    text = one(text,
+               "#define A52_P430_DMA_SAMPLES       7U\\n",
+               "#define A52_P430_DMA_SAMPLES       11U\\n",
+               "DMA event sample capacity")
     text = remove_function(text, "a52_p430_dma_timer_fn")
     text = text.replace("static struct hrtimer a52_p430_dma_timer;\n", "")
     text = text.replace("static atomic_t a52_p430_timer_index = ATOMIC_INIT(0);\n", "")
@@ -796,6 +803,28 @@ def patch_dsi_hw(text: str) -> str:
         "pre-trigger cached rails",
     )
 
+    # Exact-F0 bounded microsecond samples replace the old hrtimer.  Total
+    # deliberate delay is 100 us and only occurs on the already-identified
+    # failing target command.
+    triggered = r'''void a52_p430_dma_triggered(struct dsi_ctrl_hw *ctrl)
+{
+	if (!atomic_read(&a52_p430_dma_armed) ||
+	    ctrl != READ_ONCE(a52_p430_dma_ctrl))
+		return;
+	a52_p430_dma_sample(ctrl, 1U);
+	udelay(1);
+	a52_p430_dma_sample(ctrl, 2U);
+	udelay(4);
+	a52_p430_dma_sample(ctrl, 3U);
+	udelay(15);
+	a52_p430_dma_sample(ctrl, 4U);
+	udelay(80);
+	a52_p430_dma_sample(ctrl, 5U);
+}
+EXPORT_SYMBOL_GPL(a52_p430_dma_triggered);
+'''
+    text = replace_function(text, "a52_p430_dma_triggered", triggered)
+
     # Event-only sampler callable from IRQ/wait paths.
     trig_a, trig_b = function_span(text, "a52_p430_dma_triggered")
     insert_at = trig_b
@@ -810,6 +839,11 @@ void a52_p430_dma_event(struct dsi_ctrl_hw *ctrl, u32 point)
 EXPORT_SYMBOL_GPL(a52_p430_dma_event);
 '''
     text = text[:insert_at] + "\n" + event_fn + text[insert_at:]
+
+    text = one(text,
+               "\ta52_p430_dma_sample(ctrl, 6U);\\n",
+               "\ta52_p430_dma_sample(ctrl, 10U);\\n",
+               "final sample point")
     text += "\n/* " + MARK + ": timer polling retired; active-path F0 state only. */\n"
     return text
 
@@ -837,7 +871,7 @@ def patch_dsi(text: str) -> str:
     text = one(
         text, anchor,
         "\tif (a52_p421_target_active())\n"
-        "\t\ta52_p430_dma_event(&dsi_ctrl->hw, 2U);\n" + anchor,
+        "\t\ta52_p430_dma_event(&dsi_ctrl->hw, 6U);\n" + anchor,
         "IRQ-entry sample",
     )
 
@@ -849,7 +883,7 @@ def patch_dsi(text: str) -> str:
         text, anchor,
         "\t\tatomic_set(&dsi_ctrl->dma_irq_trig, 1);\n"
         "\t\tif (a52_p421_target_active())\n"
-        "\t\t\ta52_p430_dma_event(&dsi_ctrl->hw, 3U);\n"
+        "\t\t\ta52_p430_dma_event(&dsi_ctrl->hw, 7U);\n"
         "\t\tif (a52_p421_target_active())\n",
         "DMA-done sample",
     )
@@ -863,7 +897,7 @@ def patch_dsi(text: str) -> str:
         text, anchor,
         anchor +
         "\tif (a52_p421_target_active())\n"
-        "\t\ta52_p430_dma_event(&dsi_ctrl->hw, 4U);\n",
+        "\t\ta52_p430_dma_event(&dsi_ctrl->hw, 8U);\n",
         "wait-return sample",
     )
 
@@ -872,7 +906,7 @@ def patch_dsi(text: str) -> str:
         text, anchor,
         anchor +
         "\t\tif (a52_p421_target_active())\n"
-        "\t\t\ta52_p430_dma_event(&dsi_ctrl->hw, 5U);\n",
+        "\t\t\ta52_p430_dma_event(&dsi_ctrl->hw, 9U);\n",
         "completion sample",
     )
     text += "\n/* " + MARK + ": event-driven F0 IRQ/completion/wait chronology. */\n"
@@ -1000,10 +1034,10 @@ def validate(root: Path) -> None:
         if token not in hw:
             die("F0 clean sampler missing: " + token)
     for token in (
-        "a52_p430_dma_event(&dsi_ctrl->hw, 2U)",
-        "a52_p430_dma_event(&dsi_ctrl->hw, 3U)",
-        "a52_p430_dma_event(&dsi_ctrl->hw, 4U)",
-        "a52_p430_dma_event(&dsi_ctrl->hw, 5U)",
+        "a52_p430_dma_event(&dsi_ctrl->hw, 6U)",
+        "a52_p430_dma_event(&dsi_ctrl->hw, 7U)",
+        "a52_p430_dma_event(&dsi_ctrl->hw, 8U)",
+        "a52_p430_dma_event(&dsi_ctrl->hw, 9U)",
     ):
         if token not in dsi:
             die("event-driven DSI hook missing: " + token)

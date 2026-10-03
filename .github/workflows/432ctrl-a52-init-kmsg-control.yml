@@ -307,6 +307,7 @@ jobs:
           grep -Fq 'A52_PHASE432_CTRL_INIT_KMSG_V1' "$ROOT/kernel/exit.c"
           grep -Fq 'A52_PHASE432_CTRL_INIT_KMSG_V1' "$ROOT/fs/coredump.c"
           grep -Fq 'A52_PHASE432_CTRL_INIT_KMSG_V1' "$ROOT/fs/exec.c"
+          grep -Fq 'A52_PHASE432_CTRL_INIT_KMSG_V1' "$ROOT/drivers/a52_secure/qseecom.c"
           grep -Fq 'a52_ackfr_p432c_record' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
 
       - name: Incremental compile Phase432-CTRL
@@ -325,10 +326,12 @@ jobs:
           python3 scripts/432ctrl_apply_init_kmsg_control.py --root "$ROOT" --check-only
 
           grep -aFq 'P432C K n=%u c=%.12s %.54s' "$IMAGE"
-          grep -aFq 'P432C SFEXEC p=%d t=%d' "$IMAGE"
-          grep -aFq 'P432C BAEXEC p=%d t=%d' "$IMAGE"
+          grep -aFq 'P432C EXE p=%d t=%d %.44s' "$IMAGE"
+          grep -aFq 'P432C EXR p=%d rc=%d c=%.15s' "$IMAGE"
           grep -aFq 'P432C EXIT t=%d p=%d code=%x st=%u sig=%u pf=%u c=%.15s' "$IMAGE"
           grep -aFq 'P432C CORE t=%d p=%d sig=%d c=%.15s' "$IMAGE"
+          grep -aFq 'P432C QE n=%u p=%d c=%.12s cmd=%x' "$IMAGE"
+          grep -aFq 'P432C QX n=%u p=%d cmd=%x dt=%llu rc=%ld' "$IMAGE"
           ! grep -aFq 'P432 SL id=%u nr=%u sf=%d cp=%d ba=%d ss=%d' "$IMAGE"
           ! grep -aFq 'P432 BA old=%d new=%d' "$IMAGE"
           grep -aFq 'P432 OWN n=%u p=%d t=%d c=%.15s idx=%d' "$IMAGE"
@@ -377,6 +380,7 @@ jobs:
           cp "$ROOT/kernel/exit.c" "$OUT/source/exit.c"
           cp "$ROOT/fs/coredump.c" "$OUT/source/coredump.c"
           cp "$ROOT/fs/exec.c" "$OUT/source/exec.c"
+          cp "$ROOT/drivers/a52_secure/qseecom.c" "$OUT/source/qseecom.c"
           cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
           cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
           cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
@@ -410,8 +414,11 @@ jobs:
           - Priority terms include odsign, odrefresh, init_user0, restorecon, fsverity, apexd,
             keystore, vold, keymaster/KeyMint, qseecom, bootanim, waits, exits, kills, and timing lines.
           - P432C records go directly to the sequential 3 MiB Samsung tier, not through the old R48 event path.
-          - SF and bootanimation exec milestones are passive; process-group EXIT and CORE request are recorded.
-          - QSEECOM ioctl timing is intentionally NOT included in this control build.
+          - Exec/exec-ret covers odsign, odrefresh, dex2oat*, keystore2, keymaster/KeyMint,
+            qseecomd, vdc, SurfaceFlinger and bootanimation; target process-group EXIT and CORE are recorded.
+          - QSEECOM ioctl entry/exit is paired by sequence number for calls entering in the first 150 s,
+            bounded to 1024 calls. The exit record includes duration and return value.
+          - No fs-verity/keyctl hook is added in this build; init KMSG plus exec/QSEECOM timing is the smaller probe set.
           - Recorder remains 2 MiB Samsung debug partition first, then 1 MiB persistent RAM.
           EOF
 
@@ -430,6 +437,7 @@ jobs:
             gki/common/kernel/exit.c
             gki/common/fs/coredump.c
             gki/common/fs/exec.c
+            gki/common/drivers/a52_secure/qseecom.c
             gki/common/drivers/a52_display/msm/msm_drv.c
             gki/common/drivers/scsi/ufs/ufshcd.c
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c

@@ -1,0 +1,94 @@
+name: 169 - A52 BPF Tethering Compatibility Audit
+
+on:
+  push:
+    branches:
+      - agent/a52-opt-p1-mglru-cass-uclamp-sugov
+    paths:
+      - .github/workflows/169-a52-bpf-tethering-compat-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit P168 BPF/JIT baseline for modern Tethering
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out phase branch
+        uses: actions/checkout@v4
+
+      - name: Install extraction tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zstd
+
+      - name: Compute exact P168 source cache identity
+        id: p168_identity
+        run: |
+          set -Eeuo pipefail
+          SHA="$(sha256sum scripts/168_apply_storage_memory_correctness_completion.py | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "P168 script sha256=$SHA"
+
+      - name: Restore exact P168 applied-source snapshot
+        id: p168_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p168-source.tar.zst
+          key: a52xq-p168-source-v1-r596125-${{ steps.p168_identity.outputs.sha }}
+
+      - name: Require cached P168 source
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.p168_source_cache.outputs.cache-hit }}" = "true"
+          test -s .phase-cache/p168-source.tar.zst
+          rm -rf workspace/touchgrass-a52xq artifacts
+          tar --zstd -xf .phase-cache/p168-source.tar.zst
+          test -d workspace/touchgrass-a52xq/.git
+
+      - name: Audit BPF and ARM64 JIT source
+        run: |
+          set -Eeuo pipefail
+          K=workspace/touchgrass-a52xq
+          mkdir -p artifacts/p169-bpf-source
+
+          {
+            echo "=== KERNEL VERSION ==="
+            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)[[:space:]]*=' "$K/Makefile" | head -4
+            echo
+            echo "=== BPF CONFIG IN DEFCONFIGS ==="
+            grep -R -nE 'CONFIG_(BPF|CGROUP_BPF|NET_CLS_BPF|NET_ACT_BPF|NET_CLS_MATCHALL|NET_ACT_POLICE|BPF_JIT|BPF_JIT_ALWAYS_ON|BPF_SYSCALL|BPF_EVENTS)'               "$K/arch/arm64/configs" 2>/dev/null || true
+            echo
+            echo "=== ARM64 JIT CAPABILITIES ==="
+            grep -nE 'bpf_int_jit_compile|bpf-to-bpf|BPF_PSEUDO_(CALL|FUNC)|emit_call|emit_addr_mov_i64|jited_len|prog->jited|multi-func JIT|bpf_jit_binary_alloc'               "$K/arch/arm64/net/bpf_jit_comp.c" || true
+            echo
+            echo "=== BPF INFO/JIT LENGTH PATH ==="
+            grep -R -nE 'jited_prog_len|jited_len|BPF_OBJ_GET_INFO_BY_FD|bpf_prog_get_info_by_fd'               "$K/kernel/bpf" "$K/include" 2>/dev/null | head -300 || true
+            echo
+            echo "=== BPF MAP/PROG TYPES IN UAPI ==="
+            grep -nE 'BPF_MAP_TYPE_|BPF_PROG_TYPE_|BPF_FUNC_' "$K/include/uapi/linux/bpf.h" | tail -240 || true
+          } | tee artifacts/p169-bpf-baseline-audit.txt
+
+          cp "$K/arch/arm64/net/bpf_jit_comp.c" artifacts/p169-bpf-source/
+          cp "$K/kernel/bpf/syscall.c" artifacts/p169-bpf-source/
+          cp "$K/kernel/bpf/verifier.c" artifacts/p169-bpf-source/
+          cp "$K/kernel/bpf/core.c" artifacts/p169-bpf-source/
+          cp "$K/include/uapi/linux/bpf.h" artifacts/p169-bpf-source/
+          cp "$K/include/linux/bpf.h" artifacts/p169-bpf-source/
+          cp "$K/include/linux/filter.h" artifacts/p169-bpf-source/
+          grep -R -l 'CONFIG_BPF_JIT_ALWAYS_ON' "$K/arch/arm64/configs" 2>/dev/null             | while read -r f; do cp "$f" artifacts/p169-bpf-source/; done || true
+
+          tar -C artifacts -czf artifacts/p169-bpf-source.tar.gz p169-bpf-source
+
+      - name: Upload P169 audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P169-BPF-TETHERING-COMPAT-AUDIT
+          path: |
+            artifacts/p169-bpf-baseline-audit.txt
+            artifacts/p169-bpf-source.tar.gz
+          retention-days: 14

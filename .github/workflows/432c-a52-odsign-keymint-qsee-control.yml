@@ -51,15 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare runner and ccache wrappers
+      - name: Validate Phase432-CTRL payload before setup
         run: |
           set -Eeuo pipefail
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
           python3 -m py_compile \
             scripts/430_apply_sf_dma_forensics.py \
             scripts/430_postapply_hardening.py \
@@ -72,7 +66,17 @@ jobs:
           python3 scripts/decode_phase432_chain.py --help >/dev/null
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --help >/dev/null
           python3 scripts/decode_phase432_ctrl.py --help >/dev/null
+          echo "Phase432-CTRL payload integrity: PASS"
 
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
           mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
           cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
           #!/bin/sh
@@ -223,7 +227,31 @@ jobs:
             phase429-gki-out
           key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-refresh-${{ github.run_id }}
 
+      - name: Restore latest Phase432-CTRL object cache
+        id: phase432ctrl-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-ctrl-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          restore-keys: |
+            a52xq-phase432-ctrl-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase432-ctrl-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect warm Phase432-CTRL object tree
+        id: phase432ctrl-warm
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Phase432-CTRL warm object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Phase432-CTRL warm object tree: MISS"
+          fi
+
       - name: Restore exact Phase431 object cache
+        if: steps.phase432ctrl-warm.outputs.hit != 'true'
         id: phase431-objects
         uses: actions/cache/restore@v4
         with:
@@ -231,6 +259,19 @@ jobs:
           key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
           restore-keys: |
             a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect any warm object tree
+        id: warm-objects
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Reusable kernel object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Reusable kernel object tree: MISS"
+          fi
 
       - name: Restore rolling clang ccache
         id: ccache
@@ -248,12 +289,14 @@ jobs:
           ccache -o compression=true
           ccache -o compression_level=6
           ccache -z
-          echo "Phase431 object cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "Phase432-CTRL cache match: ${{ steps.phase432ctrl-objects.outputs.cache-hit }}"
+          echo "Reusable object tree: ${{ steps.warm-objects.outputs.hit }}"
+          echo "Phase431 fallback cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
           echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
           ccache -s
 
       - name: Prepare build directory on object-cache miss
-        if: steps.phase431-objects.outputs.cache-hit != 'true'
+        if: steps.warm-objects.outputs.hit != 'true'
         run: |
           set -Eeuo pipefail
           BUILD="$PWD/workspace/gki-phase199-out"
@@ -303,6 +346,37 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
+
+          # Normalize two formatting-only Android common 5.10 source variants.
+          # This changes no behavior; it only gives the verified patch payload
+          # the canonical anchors it expects. Idempotent on retries/cached trees.
+          python3 - "$ROOT/security/keys/key.c" "$ROOT/fs/verity/signature.c" <<'PY'
+          import re, sys
+          from pathlib import Path
+
+          mark = "A52_PHASE432_CTRL_ODSIGN_KEYMINT_QSEE_V1"
+          key = Path(sys.argv[1])
+          fs = Path(sys.argv[2])
+
+          s = key.read_text()
+          if mark not in s:
+              pat = re.compile(r"(?m)^[ \t]+found_matching_key:")
+              n = len(pat.findall(s))
+              if n != 1:
+                  raise SystemExit(f"Phase432-CTRL key label normalization expected 1 anchor, found {n}")
+              s = pat.sub("found_matching_key:", s, count=1)
+              key.write_text(s)
+
+          s = fs.read_text()
+          if mark not in s:
+              pat = re.compile(r"(?m)^(?P<i>[ \t]*)\\.proc_handler[ \t]*=[ \t]*proc_dointvec_minmax,")
+              n = len(pat.findall(s))
+              if n != 1:
+                  raise SystemExit(f"Phase432-CTRL fs-verity normalization expected 1 anchor, found {n}")
+              s = pat.sub(r"\\g<i>.proc_handler = proc_dointvec_minmax,", s, count=1)
+              fs.write_text(s)
+          PY
+
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
 
@@ -355,7 +429,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase432-ctrl-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase432-ctrl-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
 
       - name: Save rolling clang ccache
         if: always() && steps.ccache.outcome != 'skipped'

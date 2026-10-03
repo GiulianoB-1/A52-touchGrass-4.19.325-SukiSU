@@ -459,6 +459,10 @@ def patch_msm(text: str) -> str:
 }
 '''
     text = replace_function(text, "a52_r269_record_uapi", stub)
+    text = text.replace(
+        "static atomic_t a52_r269_event_sequence = ATOMIC_INIT(0);\n",
+        "",
+    )
     anchor = "static long a52_r211_drm_ioctl(struct file *filp, unsigned int cmd,"
     pos = text.find(anchor)
     if pos < 0:
@@ -964,7 +968,6 @@ def patch_dsi_hw(text: str) -> str:
 	udelay(80);
 	a52_p430_dma_sample(ctrl, 5U);
 }
-EXPORT_SYMBOL_GPL(a52_p430_dma_triggered);
 '''
     text = replace_function(text, "a52_p430_dma_triggered", triggered)
 
@@ -1063,7 +1066,8 @@ def patch_recorder(text: str) -> str:
     if crit in text and 'return !strncmp(message, "P434 ", 5) ||' not in text:
         text = text.replace(
             crit,
-            'return !strncmp(message, "P434 ", 5) ||\n\t       ' + crit,
+            'return !strncmp(message, "P434 ", 5) ||\n'
+            '\t       !strncmp(message, "P432 ", 5) ||',
             1,
         )
     if 'strncmp(fmt, "P434", 4) &&' not in text:
@@ -1148,6 +1152,8 @@ def validate(root: Path) -> None:
     if 'A52_R269_REC("PROP ' in msm or 'A52_R269_REC("PVAL ' in msm:
         # The strings may remain only if the whole old function was not replaced.
         die("verbose P269 property dump remains")
+    if "a52_r269_event_sequence" in msm:
+        die("retired P269 event sequence remains")
     for token in (
         "P434 IO n=%u nr=%x rc=%ld",
         "P434 PROP n=%u obj=%u id=%u v=%llx",
@@ -1177,6 +1183,8 @@ def validate(root: Path) -> None:
 
     if "hrtimer_start(&a52_p430_dma_timer" in hw or "a52_p430_dma_timer_fn" in hw:
         die("timer-driven DMA sampler remains")
+    if hw.count("EXPORT_SYMBOL_GPL(a52_p430_dma_triggered);") != 1:
+        die("DMA-triggered export count mismatch")
     for token in (
         "a52_p430_dma_event",
         "pll_common_status_one",
@@ -1196,6 +1204,8 @@ def validate(root: Path) -> None:
 
     if 'strncmp(fmt, "P434", 4)' not in rec:
         die("P434 recorder admission missing")
+    if '||\n\t       return !strncmp(message, "P432 ", 5)' in rec:
+        die("malformed P434 critical admission")
     for token in (
         MARK,
         "P434 SF EXEC",

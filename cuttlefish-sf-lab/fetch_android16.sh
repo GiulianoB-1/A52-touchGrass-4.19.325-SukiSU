@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 LAB_ROOT="${CF_LAB_ROOT:-$HOME/cuttlefish-sf-q1}"
 INSTANCE="$LAB_ROOT/instance"
-BUILD="${CF_BUILD:-android16-release/aosp_cf_x86_64_only_phone-userdebug}"
+BUILD="${CF_BUILD:-android16-qpr2-release/aosp_cf_x86_64_only_phone-userdebug}"
 
 mkdir -p "$INSTANCE"
 
@@ -25,9 +25,9 @@ cvd fetch \
 rc=$?
 set -e
 
-if [[ $rc -ne 0 && "$BUILD" == "android16-release/aosp_cf_x86_64_only_phone-userdebug" ]]; then
-  echo "Current target fetch failed; retrying legacy target name..."
-  BUILD="android16-release/aosp_cf_x86_64_phone-userdebug"
+if [[ $rc -ne 0 && "$BUILD" == "android16-qpr2-release/aosp_cf_x86_64_only_phone-userdebug" ]]; then
+  echo "QPR2 current target fetch failed; retrying legacy target name..."
+  BUILD="android16-qpr2-release/aosp_cf_x86_64_phone-userdebug"
   set +e
   cvd fetch \
     --target_directory="$INSTANCE" \
@@ -52,7 +52,7 @@ if [[ $rc -ne 0 ]]; then
 
 Use the official Android CI fallback:
   1. Open https://ci.android.com/
-  2. Branch: android16-release
+  2. Branch: android16-qpr2-release
   3. Target: aosp_cf_x86_64_only_phone
   4. Variant: userdebug
   5. Download BOTH artifacts from the SAME build:

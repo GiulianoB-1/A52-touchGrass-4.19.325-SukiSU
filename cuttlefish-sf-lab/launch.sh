@@ -53,7 +53,16 @@ dump_boot_failure() {
   ps -ef | grep -E 'run_cvd|crosvm|qemu-system' | grep -v grep || true
   echo
   echo "Kernel/logcat sizes:"
-  ls -lh "$I/kernel.log" "$I/logs/logcat" 2>/dev/null || true
+  stat -Lc '  %n: %s bytes' "$I/kernel.log" "$I/logs/logcat" 2>/dev/null || true
+  echo
+  echo "Kernel log tail:"
+  tail -n 180 "$I/kernel.log" 2>/dev/null || true
+  echo
+  echo "Crosvm process state:"
+  for pid in $(pgrep -f "$INSTANCE/bin/x86_64-linux-gnu/crosvm" 2>/dev/null || true); do
+    ps -o pid,ppid,stat,wchan:32,etime,cmd -p "$pid" || true
+    printf '  wchan: '; cat "/proc/$pid/wchan" 2>/dev/null || true; echo
+  done
   echo
   echo "Launcher: first relevant failures:"
   grep -nEi 'Subprocess .* exited|crosvm has exited|Detected unexpected exit|boot.*fail|timed out|timeout|failed|fatal|panic|permission denied|No such device' \

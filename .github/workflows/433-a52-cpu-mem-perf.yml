@@ -640,7 +640,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE433-CPU-MEM-PERF-${{ github.run_number }}-BOOT-IMG
-          path: phase433-perf-gki-out/package/boot-phase432-ctrl-odsign-keymint-qsee-v1.img
+          path: phase433-perf-gki-out/package/boot-phase433-cpu-mem-perf-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

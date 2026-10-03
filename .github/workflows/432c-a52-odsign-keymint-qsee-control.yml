@@ -96,12 +96,27 @@ jobs:
           path: |
             gki/common
             phase429-gki-out
-          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
           restore-keys: |
+            a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
 
+      - name: Detect usable Phase429 source tree
+        id: phase429-warm
+        run: |
+          set -Eeuo pipefail
+          if test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img && \
+             test -d gki/common && \
+             python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only >/dev/null 2>&1; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Reusable Phase429 source tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Reusable Phase429 source tree: MISS"
+          fi
+
       - name: Restore Phase357 source fallback
-        if: steps.phase429-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true'
         id: phase357-source
         uses: actions/cache/restore@v4
         with:
@@ -111,7 +126,7 @@ jobs:
           key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
 
       - name: Restore pinned GKI source on complete baseline miss
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
         id: gki-source
         uses: actions/cache/restore@v4
         with:
@@ -119,7 +134,7 @@ jobs:
           key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
 
       - name: Sync exact pinned GKI on complete source miss
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           rm -rf gki
@@ -132,14 +147,14 @@ jobs:
           test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 
       - name: Save pinned GKI source cache
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: gki
           key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
 
       - name: Restore exact TouchGrass source
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
         id: touchgrass-source
         uses: actions/cache/restore@v4
         with:
@@ -147,7 +162,7 @@ jobs:
           key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
       - name: Clone TouchGrass on cache miss
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           rm -rf workspace/touchgrass-a52xq
@@ -158,14 +173,14 @@ jobs:
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
       - name: Save TouchGrass source cache
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
           key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
       - name: Cold reconstruct Phase357 only if both compact baselines vanished
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           echo "Phase429 and Phase357 compact caches both missing. Reconstructing Phase357 once; ccache will retain compiled units."
@@ -174,7 +189,7 @@ jobs:
           PHASE357_PREWARMED_PHASE346=1 bash scripts/357_ci_build_gki.sh
 
       - name: Validate Phase357 fallback
-        if: steps.phase429-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true'
         run: |
           set -Eeuo pipefail
           test -d gki/common
@@ -185,7 +200,7 @@ jobs:
           echo "Phase357 fallback: PASS"
 
       - name: Save compact Phase357 fallback
-        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -194,7 +209,7 @@ jobs:
           key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
 
       - name: Reconstruct Phase429 from Phase357
-        if: steps.phase429-source.outputs.cache-hit != 'true'
+        if: steps.phase429-warm.outputs.hit != 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p workspace/gki-phase199-out
@@ -218,14 +233,14 @@ jobs:
           python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
           echo "Phase429 reconstructed from Phase357: PASS"
 
-      - name: Save compact Phase429 source cache
+      - name: Save canonical Phase429 source cache
         if: steps.phase429-source.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             gki/common
             phase429-gki-out
-          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-refresh-${{ github.run_id }}
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
 
       - name: Restore latest Phase432-CTRL object cache
         id: phase432ctrl-objects
@@ -346,36 +361,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
-
-          # Normalize two formatting-only Android common 5.10 source variants.
-          # This changes no behavior; it only gives the verified patch payload
-          # the canonical anchors it expects. Idempotent on retries/cached trees.
-          python3 - "$ROOT/security/keys/key.c" "$ROOT/fs/verity/signature.c" <<'PY'
-          import re, sys
-          from pathlib import Path
-
-          mark = "A52_PHASE432_CTRL_ODSIGN_KEYMINT_QSEE_V1"
-          key = Path(sys.argv[1])
-          fs = Path(sys.argv[2])
-
-          s = key.read_text()
-          if mark not in s:
-              pat = re.compile(r"(?m)^[ \t]+found_matching_key:")
-              n = len(pat.findall(s))
-              if n != 1:
-                  raise SystemExit(f"Phase432-CTRL key label normalization expected 1 anchor, found {n}")
-              s = pat.sub("found_matching_key:", s, count=1)
-              key.write_text(s)
-
-          s = fs.read_text()
-          if mark not in s:
-              pat = re.compile(r"(?m)^(?P<i>[ \t]*)\\.proc_handler[ \t]*=[ \t]*proc_dointvec_minmax,")
-              n = len(pat.findall(s))
-              if n != 1:
-                  raise SystemExit(f"Phase432-CTRL fs-verity normalization expected 1 anchor, found {n}")
-              s = pat.sub(r"\\g<i>.proc_handler = proc_dointvec_minmax,", s, count=1)
-              fs.write_text(s)
-          PY
 
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only

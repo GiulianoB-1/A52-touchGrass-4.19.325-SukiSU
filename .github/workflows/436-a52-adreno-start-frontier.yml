@@ -300,8 +300,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/436_apply_adreno_start_frontier.py', 'scripts/436_apply_adreno_start_frontier.py.z64', 'scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
           restore-keys: |
+            a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase433-perf-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
@@ -510,7 +511,25 @@ jobs:
           grep -Fq 'P435_GIT_IOMMU_ATTACH' "$ROOT/include/linux/a52_phase435_race.h"
           echo "Phase435 terminal-race source audit: PASS"
 
-      - name: Incremental compile Phase435
+      - name: Apply Phase436 Adreno start frontier
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/436_apply_adreno_start_frontier.py \
+            --root "$ROOT" --overlap-report /tmp/p436-overlap.txt
+          python3 scripts/436_apply_adreno_start_frontier.py \
+            --root "$ROOT" --check-only --overlap-report /tmp/p436-overlap-check.txt
+
+          cmp -s /tmp/p436-overlap.txt /tmp/p436-overlap-check.txt
+          grep -Fq 'P414 RAM rollover         0xb1a00000-0xb1afbfff occupied/reserved' /tmp/p436-overlap.txt
+          grep -Fq 'Phase436 allocation       0xb1afc000-0xb1afffff NEW, dual fixed copies' /tmp/p436-overlap.txt
+          grep -Fq 'ramoops                   0xb1b00000-0xb1bfffff excluded entirely' /tmp/p436-overlap.txt
+          grep -Fq 'A52_PHASE436_ADRENO_START_FRONTIER_V1' "$ROOT/drivers/a52_secure/a52_phase436_frontier.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           (SZ_1M - SZ_16K)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          ! grep -Fq 'memremap(A52_P435_PHYS' "$ROOT/drivers/a52_secure/a52_phase435_race.c"
+          echo "Phase436 Adreno-start source audit: PASS"
+      - name: Incremental compile Phase436
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
@@ -527,7 +546,7 @@ jobs:
           python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
           python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
           python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
-          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --check-only --overlap-report /tmp/p435-overlap-compile.txt
+          python3 scripts/436_apply_adreno_start_frontier.py --root "$ROOT" --check-only --overlap-report /tmp/p436-overlap-compile.txt
 
           grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
           grep -aFq 'P432 C PR S k=%u n=%u p=%d t=%d c=%.15s ns=%llu' "$IMAGE"
@@ -546,14 +565,11 @@ jobs:
           grep -aFq 'P434 RLC off n=%.31s' "$IMAGE"
           grep -aFq 'P434 ART do_unlinkat rc=%ld p=%.63s' "$IMAGE"
           grep -aFq 'P434 ART fsverity_ioctl_enable rc=%d' "$IMAGE"
-          grep -aFq 'P435 BOOT id=%llx phys=%llx bytes=%x frq=%llu' "$IMAGE"
-          # The phase marker itself is a C comment and is intentionally not
-          # expected in the stripped Image. Runtime string + exported symbols
-          # prove the helper was linked.
-          grep -Fq ' a52_p435_boot_id' "$MAP"
-          grep -Fq ' a52_p435_mark' "$MAP"
-          grep -Fq ' a52_p435_target_current' "$MAP"
-          grep -Fq ' a52_p435_arm_target' "$MAP"
+          grep -aFq 'P436 BOOT id=%llx phys=%llx bytes=%x frq=%llu' "$IMAGE"
+          grep -Fq ' a52_p436_boot_id' "$MAP"
+          grep -Fq ' a52_p436_mark' "$MAP"
+          grep -Fq ' a52_p436_target_current' "$MAP"
+          grep -Fq ' a52_p436_arm_target' "$MAP"
 
           ! grep -Fq ' a52_p430_snapshot' "$MAP"
           ! grep -Fq ' a52_p430_sampler_fn' "$MAP"
@@ -574,12 +590,12 @@ jobs:
           grep -Fxq 'CONFIG_QCOM_DEVFREQ_DEVBW=y' "$BUILD/.config"
           ccache -s
 
-      - name: Save Phase435 TERMINAL-RACE object cache
+      - name: Save Phase436 ADRENO-START object cache
         if: always() && steps.phase429-source.outcome != 'skipped'
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+          key: a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/436_apply_adreno_start_frontier.py', 'scripts/436_apply_adreno_start_frontier.py.z64', 'scripts/435_apply_terminal_race.py', 'scripts/435_apply_terminal_race.py.z64', 'scripts/434_apply_clean_f0.py', 'scripts/433_apply_cpu_mem_perf.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
 
       - name: Save rolling clang ccache
         if: always() && steps.ccache.outcome != 'skipped'

@@ -1,0 +1,489 @@
+name: Phase432-CTRL - odsign KeyMint QSEECOM passive control
+run-name: Phase432-CTRL - odsign KeyMint QSEECOM passive control
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase432-ctrl-odsign-keymint-qsee-v1
+    paths:
+      - .github/workflows/432c-a52-odsign-keymint-qsee-control.yml
+      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
+      - scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
+      - scripts/decode_phase432_ctrl.py
+      - scripts/decode_phase432_ctrl.py.z64
+      - scripts/432_apply_sf_hwc_bootanim_chain.py
+      - scripts/decode_phase432_chain.py
+      - scripts/431_apply_safe_gap_forensics.py
+      - scripts/430_apply_sf_dma_forensics.py
+      - scripts/430_postapply_hardening.py
+      - scripts/430_parts/**
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
+
+concurrency:
+  group: a52-phase432-ctrl-odsign-keymint-qsee-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Phase432-CTRL odsign KeyMint QSEECOM passive control
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
+          python3 -m py_compile \
+            scripts/430_apply_sf_dma_forensics.py \
+            scripts/430_postapply_hardening.py \
+            scripts/431_apply_safe_gap_forensics.py \
+            scripts/432_apply_sf_hwc_bootanim_chain.py \
+            scripts/decode_phase432_chain.py \
+            scripts/432ctrl_apply_odsign_keymint_qsee_trace.py \
+            scripts/decode_phase432_ctrl.py
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --help >/dev/null
+          python3 scripts/decode_phase432_chain.py --help >/dev/null
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --help >/dev/null
+          python3 scripts/decode_phase432_ctrl.py --help >/dev/null
+
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore compact Phase429 source cache
+        id: phase429-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+          restore-keys: |
+            a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore Phase357 source fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        id: phase357-source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Restore pinned GKI source on complete baseline miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: gki-source
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync exact pinned GKI on complete source miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Save pinned GKI source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.gki-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        id: touchgrass-source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Save TouchGrass source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true' && steps.touchgrass-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Cold reconstruct Phase357 only if both compact baselines vanished
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Phase429 and Phase357 compact caches both missing. Reconstructing Phase357 once; ccache will retain compiled units."
+          bash scripts/345_ci_build_gki.sh
+          PHASE346_PREWARMED_PHASE345=1 bash scripts/346_ci_build_gki.sh
+          PHASE357_PREWARMED_PHASE346=1 bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common
+          test -s phase357-gki-out/package/boot.img
+          test -s phase357-gki-out/config/final.config
+          test "$(stat -c '%s' phase357-gki-out/package/boot.img)" -eq 100663296
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+          echo "Phase357 fallback: PASS"
+
+      - name: Save compact Phase357 fallback
+        if: steps.phase429-source.outputs.cache-hit != 'true' && steps.phase357-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase357-gki-out
+          key: a52xq-phase357-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-363c3290
+
+      - name: Reconstruct Phase429 from Phase357
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p workspace/gki-phase199-out
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+          def extract(name,out):
+              start=next(i for i,l in enumerate(src) if l.strip()==f"- name: {name}")
+              runline=next(i for i in range(start+1,len(src)) if src[i].strip()=="run: |")
+              end=next((i for i in range(runline+1,len(src)) if src[i].startswith("      - name:")),len(src))
+              body=[line[10:] if line.startswith("          ") else line for line in src[runline+1:end]]
+              Path(out).write_text("set -Eeuo pipefail\n"+"\n".join(body)+"\n")
+          extract("Reapply Phase358 and Phase359","/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts","/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image","/tmp/p429-boot.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 reconstructed from Phase357: PASS"
+
+      - name: Save compact Phase429 source cache
+        if: steps.phase429-source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432-refresh-${{ github.run_id }}
+
+      - name: Restore exact Phase431 object cache
+        id: phase431-objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-b73500e112ca8795aeff1f271b61ed3f0d897b6b849973022b66bc0158623f44
+          restore-keys: |
+            a52xq-phase431-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          echo "Phase431 object cache hit: ${{ steps.phase431-objects.outputs.cache-hit }}"
+          echo "clang ccache hit: ${{ steps.ccache.outputs.cache-hit }}"
+          ccache -s
+
+      - name: Prepare build directory on object-cache miss
+        if: steps.phase431-objects.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+      - name: Reapply exact Phase430 diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT" --check-only
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT" --check-only
+
+      - name: Reapply exact Phase431 safe-gap diagnostics
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT" --check-only
+
+      - name: Apply Phase432 SF HWC bootanimation chain
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+
+          # Recorder contract stays 2 MiB Samsung first, then 1 MiB RAM.
+          grep -Fq '#define A52_P414_DEBUG_OFFSET        0x00800000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_DISK_BYTES          (2U * SZ_1M)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_PHYS            0xB1A00000ULL' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P414_RAM_BYTES           SZ_1M' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          # UFS NoC trigger stays retired.
+          ! grep -Fq 'a52_p430_ufs_compact(snapshot_id);' "$ROOT/arch/arm64/kernel/syscall.c"
+          ! grep -Fq 'Phase430: retain HBA identity even though Phase378 sampler stays retired.' "$ROOT/drivers/scsi/ufs/ufshcd.c"
+
+          # Phase432 intentionally removes the heavy pre-atomic CPU7 busy witness.
+          ! grep -Fq 'kthread_run(a52_p431_exec_fn' "$ROOT/arch/arm64/kernel/syscall.c"
+
+      - name: Apply Phase432-CTRL odsign KeyMint QSEECOM passive trace
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+
+          grep -Fq 'a52_phase432_ctrl.o' "$ROOT/drivers/a52_secure/Makefile"
+          grep -Fq 'a52_p432ctrl_exec_result' "$ROOT/fs/exec.c"
+          grep -Fq 'a52_p432ctrl_task_exit' "$ROOT/kernel/exit.c"
+          grep -Fq 'a52_p432ctrl_qseecom_ioctl_inner' "$ROOT/drivers/a52_secure/qseecom.c"
+          grep -Fq '".fs-verity"' "$ROOT/security/keys/key.c"
+          grep -Fq 'a52_p432ctrl_fsverity_sysctl' "$ROOT/fs/verity/signature.c"
+
+      - name: Incremental compile Phase432-CTRL
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT" --check-only
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+
+          grep -aFq 'P432 SF0 p=%d ns=%llu' "$IMAGE"
+          grep -aFq 'P432 SL id=%u nr=%u sf=%d cp=%d ba=%d ss=%d' "$IMAGE"
+          grep -aFq 'P432 BA old=%d new=%d' "$IMAGE"
+          grep -aFq 'P432 OWN n=%u p=%d t=%d c=%.15s idx=%d' "$IMAGE"
+          grep -aFq 'P432 IO n=%u p=%d t=%d nr=0x%x' "$IMAGE"
+          grep -aFq 'P432 AT n=%u t=%d test=%u fl=%x objs=%u' "$IMAGE"
+          grep -aFq 'P431 RI e n=%d irq=%d st=%lx use=%u' "$IMAGE"
+          grep -aFq 'P430 PANIC_ARMED ctrl=%d irq=%u' "$IMAGE"
+          grep -aFq 'P432 C PR S k=%u n=%u p=%d t=%d c=%.15s ns=%llu' "$IMAGE"
+          grep -aFq 'P432 C PR X k=%u n=%u p=%d t=%d c=%.15s code=%ld ns=%llu' "$IMAGE"
+          grep -aFq 'P432 C QI E n=%u p=%d t=%d c=%.15s cmd=%08x ns=%llu' "$IMAGE"
+          grep -aFq 'P432 C QI X n=%u p=%d t=%d c=%.15s cmd=%08x rc=%ld ns=%llu' "$IMAGE"
+          grep -aFq 'P432 C KEY X p=%d t=%d c=%.15s rc=%ld serial=%ld ns=%llu' "$IMAGE"
+          grep -Fq ' a52_p432_frontier' "$MAP"
+          grep -Fq ' a52_ackfr_phase432_note_drm_owner' "$MAP"
+          grep -Fq ' a52_p430_dma_finalize' "$MAP"
+          grep -Fq ' a52_p430_smmu_forensic' "$MAP"
+          grep -Fq ' a52_p432ctrl_exec_result' "$MAP"
+          grep -Fq ' a52_p432ctrl_task_exit' "$MAP"
+          ccache -s
+
+      - name: Save Phase432-CTRL object cache
+        if: always() && steps.phase429-source.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase432-ctrl-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/432ctrl_apply_odsign_keymint_qsee_trace.py', 'scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64', 'scripts/432_apply_sf_hwc_bootanim_chain.py', 'scripts/431_apply_safe_gap_forensics.py', 'scripts/430_apply_sf_dma_forensics.py', 'scripts/430_postapply_hardening.py', 'scripts/430_parts/**') }}
+
+      - name: Save rolling clang ccache
+        if: always() && steps.ccache.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-${{ github.run_id }}
+
+      - name: Package Phase432-CTRL
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase432-ctrl-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase432-ctrl-odsign-keymint-qsee-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/syscall.c"
+          cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
+          cp "$ROOT/drivers/scsi/ufs/ufshcd.c" "$OUT/source/ufshcd.c"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$ROOT/drivers/soc/qcom/rpmh-rsc.c" "$OUT/source/rpmh-rsc.c"
+          cp "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$OUT/source/msm_bus_fabric_rpmh.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/source/arm-smmu.c"
+          cp "$ROOT/fs/exec.c" "$OUT/source/exec.c"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/exit.c"
+          cp "$ROOT/drivers/a52_secure/qseecom.c" "$OUT/source/qseecom.c"
+          cp "$ROOT/drivers/a52_secure/a52_phase432_ctrl.c" "$OUT/source/a52_phase432_ctrl.c"
+          cp "$ROOT/security/keys/key.c" "$OUT/source/key.c"
+          cp "$ROOT/fs/verity/signature.c" "$OUT/source/fsverity-signature.c"
+
+          mkdir -p "$OUT/audit"
+          cp scripts/430_apply_sf_dma_forensics.py scripts/430_postapply_hardening.py \
+             scripts/431_apply_safe_gap_forensics.py \
+             scripts/432_apply_sf_hwc_bootanim_chain.py scripts/decode_phase432_chain.py \
+             scripts/432ctrl_apply_odsign_keymint_qsee_trace.py \
+             scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64 \
+             scripts/decode_phase432_ctrl.py scripts/decode_phase432_ctrl.py.z64 \
+             "$OUT/audit/"
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase432-ctrl-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE432-CTRL-NOTES.txt" <<'EOF'
+          Phase432-CTRL odsign / KeyMint / QSEECOM passive control
+          =========================================================
+          - Keeps the exact Phase432 display/SF/HWC diagnostics and storage geometry.
+          - Adds process start/final-exit timing for odsign, odrefresh, dex2oat*, keystore2,
+            KeyMint/Keymaster HAL processes, qseecomd and vdc.
+          - Process exit is recorded only when the final thread of the process dies.
+          - Records QSEECOM ioctl metadata for calls entering during boot time <=150 s:
+            sequence, pid/tgid, comm, command, entry/exit timestamp and return value.
+          - Calls entering before the 150 s cutoff keep their paired exit record even if
+            the ioctl returns after 150 s.
+          - Records key_create_or_update only when the destination keyring is exactly
+            .fs-verity, with key type, return code and resulting serial only.
+          - Records access to fs.verity.require_signatures through a transparent sysctl
+            wrapper when that sysctl exists in this kernel configuration.
+          - No ioctl buffers, Binder payloads, argv, key payloads, certificates or private
+            key material are copied.
+          - No properties are written and no odsign, odrefresh, Keystore, KeyMint,
+            QSEECOM, fs-verity or ART return values are changed.
+          - Recorder remains 2 MiB Samsung debug partition first, then 1 MiB persistent RAM.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase432-CTRL failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-CTRL-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/arch/arm64/kernel/syscall.c
+            gki/common/drivers/a52_display/msm/msm_drv.c
+            gki/common/drivers/scsi/ufs/ufshcd.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/soc/qcom/rpmh-rsc.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            gki/common/fs/exec.c
+            gki/common/kernel/exit.c
+            gki/common/drivers/a52_secure/qseecom.c
+            gki/common/drivers/a52_secure/a52_phase432_ctrl.c
+            gki/common/security/keys/key.c
+            gki/common/fs/verity/signature.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            scripts/432_apply_sf_hwc_bootanim_chain.py
+            scripts/decode_phase432_chain.py
+            scripts/432ctrl_apply_odsign_keymint_qsee_trace.py
+            scripts/432ctrl_apply_odsign_keymint_qsee_trace.py.z64
+            scripts/decode_phase432_ctrl.py
+            scripts/decode_phase432_ctrl.py.z64
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase432-CTRL
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-CTRL-ODSIGN-KEYMINT-QSEE-${{ github.run_number }}
+          path: phase432-ctrl-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase432-CTRL boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE432-CTRL-ODSIGN-KEYMINT-QSEE-${{ github.run_number }}-BOOT-IMG
+          path: phase432-ctrl-gki-out/package/boot-phase432-ctrl-odsign-keymint-qsee-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

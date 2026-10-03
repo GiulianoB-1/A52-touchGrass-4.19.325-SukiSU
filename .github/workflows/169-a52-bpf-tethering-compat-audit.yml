@@ -39,14 +39,33 @@ jobs:
           path: .phase-cache/p168-source.tar.zst
           key: a52xq-p168-source-v1-r596125-${{ steps.p168_identity.outputs.sha }}
 
-      - name: Require cached P168 source
+      - name: Restore exact P167 source snapshot on P168 miss
+        if: steps.p168_source_cache.outputs.cache-hit != 'true'
+        id: p167_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p167-source.tar.zst
+          key: a52xq-p167-source-v1-r596125-4fdee4648b6492b7fb2c8b7ff5be9323720c15e02cdd23d93fe99177f7eda1c5
+
+      - name: Activate P168 or replay P168 from P167
         run: |
           set -Eeuo pipefail
-          test "${{ steps.p168_source_cache.outputs.cache-hit }}" = "true"
-          test -s .phase-cache/p168-source.tar.zst
           rm -rf workspace/touchgrass-a52xq artifacts
-          tar --zstd -xf .phase-cache/p168-source.tar.zst
+
+          if [ "${{ steps.p168_source_cache.outputs.cache-hit }}" = "true" ]; then
+            test -s .phase-cache/p168-source.tar.zst
+            tar --zstd -xf .phase-cache/p168-source.tar.zst
+          else
+            test "${{ steps.p167_source_cache.outputs.cache-hit }}" = "true"
+            test -s .phase-cache/p167-source.tar.zst
+            tar --zstd -xf .phase-cache/p167-source.tar.zst
+            mkdir -p artifacts
+            python3 scripts/168_apply_storage_memory_correctness_completion.py workspace/touchgrass-a52xq \
+              | tee artifacts/p168-replay-for-p169.txt
+          fi
+
           test -d workspace/touchgrass-a52xq/.git
+          git -C workspace/touchgrass-a52xq diff --check
 
       - name: Audit BPF and ARM64 JIT source
         run: |

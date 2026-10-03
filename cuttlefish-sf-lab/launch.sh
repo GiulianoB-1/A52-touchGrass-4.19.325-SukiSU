@@ -144,4 +144,4 @@ echo "SDK:     $(./bin/adb shell getprop ro.build.version.sdk | tr -d '\r')"
 echo "Build:   $(./bin/adb shell getprop ro.build.fingerprint | tr -d '\r')"
 echo "SF PID:  $(./bin/adb shell pidof surfaceflinger | tr -d '\r')"
 echo
-echo "Next: $(cd "$(dirname "$0")" && pwd)/collect_sf_baseline.sh"
+echo "Next: run ./collect_sf_baseline.sh from the cuttlefish-sf-lab directory"

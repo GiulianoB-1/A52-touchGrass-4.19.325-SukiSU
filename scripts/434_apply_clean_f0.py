@@ -482,45 +482,78 @@ def patch_exit(text: str) -> str:
 def patch_signal(text: str) -> str:
     if MARK in text:
         return text
-    a, b = function_span(text, "get_signal")
-    fn = text[a:b]
-    matches = list(re.finditer(r"(?m)^(\s*)return true;\s*$", fn))
-    if not matches:
-        die("get_signal return true anchor missing")
-    m = matches[-1]
-    indent = m.group(1)
-    block = r'''if (!strcmp(current->comm, "bootanimation")) {
-	struct task_struct *a52_p434_sender = NULL;
-	pid_t a52_p434_spid = ksig->info.si_pid;
-	pid_t a52_p434_stgid = a52_p434_spid;
-	char a52_p434_scomm[TASK_COMM_LEN] = "?";
 
-	if (a52_p434_spid > 0) {
+    anchor = "bool get_signal(struct ksignal *ksig)\n"
+    if anchor not in text:
+        die("get_signal function anchor missing")
+
+    helper = r'''/* A52_PHASE434_CLEAN_F0_V1: receiving-side bootanimation signal fate. */
+static void a52_p434_note_ba_signal(int signr, struct ksignal *ksig)
+{
+	struct task_struct *sender = NULL;
+	pid_t spid, stgid;
+	char scomm[TASK_COMM_LEN] = "?";
+
+	if (strcmp(current->comm, "bootanimation") || !ksig || signr <= 0)
+		return;
+
+	spid = ksig->info.si_pid;
+	stgid = spid;
+	if (spid > 0) {
 		rcu_read_lock();
-		a52_p434_sender = find_task_by_vpid(a52_p434_spid);
-		if (a52_p434_sender)
-			get_task_struct(a52_p434_sender);
+		sender = find_task_by_vpid(spid);
+		if (sender)
+			get_task_struct(sender);
 		rcu_read_unlock();
-		if (a52_p434_sender) {
-			a52_p434_stgid = task_tgid_nr(a52_p434_sender);
-			get_task_comm(a52_p434_scomm, a52_p434_sender);
-			put_task_struct(a52_p434_sender);
+		if (sender) {
+			stgid = task_tgid_nr(sender);
+			get_task_comm(scomm, sender);
+			put_task_struct(sender);
 		}
 	}
+
 	a52_ackfr_record(
 		"P434 BA SIG p=%d t=%d s=%d code=%d sp=%d st=%d sc=%.15s",
-		current->pid, current->tgid, ksig->sig, ksig->info.si_code,
-		a52_p434_spid, a52_p434_stgid, a52_p434_scomm);
-}'''
-    ins = "".join(indent + line + "\n" for line in block.splitlines())
-    fn = fn[:m.start()] + ins + fn[m.start():]
-    text = text[:a] + fn + text[b:]
-    # Avoid depending on include ordering in this very old common tree.
-    anchor = "#include <linux/signal.h>"
-    if anchor in text:
+		current->pid, current->tgid, signr, ksig->info.si_code,
+		spid, stgid, scomm);
+}
+
+'''
+    text = text.replace(anchor, helper + anchor, 1)
+
+    # Fatal default-action signals never reach the normal get_signal return.
+    fatal = '''fatal:
+		spin_unlock_irq(&sighand->siglock);
+		if (unlikely(cgroup_task_frozen(current)))
+'''
+    fatal_new = '''fatal:
+		spin_unlock_irq(&sighand->siglock);
+		a52_p434_note_ba_signal(signr, ksig);
+		if (unlikely(cgroup_task_frozen(current)))
+'''
+    text = one(text, fatal, fatal_new, "fatal receive-side signal hook")
+
+    # Handled signals reach the common out path.  By this point siglock is
+    # dropped, so sender task lookup cannot perturb signal lock ordering.
+    out = '''out:
+	ksig->sig = signr;
+
+	if (!(ksig->ka.sa.sa_flags & SA_EXPOSE_TAGBITS))
+'''
+    out_new = '''out:
+	ksig->sig = signr;
+	if (ksig->sig > 0)
+		a52_p434_note_ba_signal(ksig->sig, ksig);
+
+	if (!(ksig->ka.sa.sa_flags & SA_EXPOSE_TAGBITS))
+'''
+    text = one(text, out, out_new, "handled receive-side signal hook")
+
+    anchor_inc = "#include <linux/signal.h>"
+    if anchor_inc in text:
         text = text.replace(
-            anchor,
-            anchor + "\n#include <linux/a52_ack_secure_flight_recorder.h>",
+            anchor_inc,
+            anchor_inc + "\n#include <linux/a52_ack_secure_flight_recorder.h>",
             1,
         )
     else:

@@ -12,6 +12,7 @@ GPU_MODE="${CF_GPU_MODE:-$DEFAULT_GPU_MODE}"
 WEBRTC="${CF_WEBRTC:-false}"
 WIFI="${CF_WIFI:-false}"
 SANDBOX="${CF_SANDBOX:-false}"
+VM_MANAGER="${CF_VM_MANAGER:-qemu_cli}"
 BOOT_TIMEOUT="${CF_BOOT_TIMEOUT:-90}"
 
 test -x "$INSTANCE/bin/launch_cvd"
@@ -43,6 +44,7 @@ echo "Launching minimal SF-Q1 Cuttlefish:"
 echo "  gpu_mode=$GPU_MODE"
 echo "  webrtc=$WEBRTC"
 echo "  wifi=$WIFI"
+echo "  vm_manager=$VM_MANAGER"
 echo "  crosvm_sandbox=$SANDBOX"
 echo "  boot_timeout=${BOOT_TIMEOUT}s"
 echo
@@ -60,14 +62,14 @@ dump_boot_failure() {
   echo "Kernel log tail:"
   tail -n 180 "$I/kernel.log" 2>/dev/null || true
   echo
-  echo "Crosvm process state:"
-  for pid in $(pgrep -f "$INSTANCE/bin/x86_64-linux-gnu/crosvm" 2>/dev/null || true); do
+  echo "VM process state:"
+  for pid in $(pgrep -f "$INSTANCE/bin/x86_64-linux-gnu/(crosvm|qemu-system-x86_64)" 2>/dev/null || true); do
     ps -o pid,ppid,stat,wchan:32,etime,cmd -p "$pid" || true
     printf '  wchan: '; cat "/proc/$pid/wchan" 2>/dev/null || true; echo
   done
   echo
   echo "Generated VM config:"
-  grep -nE '"vm_manager"|"enable_sandbox"|"seccomp_policy_dir"' "$I/cuttlefish_config.json" 2>/dev/null | head -n 40 || true
+  grep -nE '"vm_manager"|"enable_sandbox"|"seccomp_policy_dir"|"qemu_binary_dir"|"crosvm_binary"' "$I/cuttlefish_config.json" 2>/dev/null | head -n 60 || true
   echo
   echo "Launcher: first relevant failures:"
   grep -nEi 'Subprocess .* exited|crosvm has exited|Detected unexpected exit|boot.*fail|timed out|timeout|failed|fatal|panic|permission denied|No such device' \
@@ -84,6 +86,7 @@ timeout --foreground "${BOOT_TIMEOUT}s" ./bin/launch_cvd \
   --daemon \
   --start_webrtc="$WEBRTC" \
   --enable_wifi="$WIFI" \
+  --vm_manager="$VM_MANAGER" \
   --enable_sandbox="$SANDBOX" \
   --gpu_mode="$GPU_MODE"
 launch_rc=$?

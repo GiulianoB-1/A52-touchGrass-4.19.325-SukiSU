@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 LAB_ROOT="${CF_LAB_ROOT:-$HOME/cuttlefish-sf-q1}"
 INSTANCE="$LAB_ROOT/instance"
-BUILD="${CF_BUILD:-android16-release/aosp_cf_x86_64_phone-userdebug}"
+BUILD="${CF_BUILD:-android16-release/aosp_cf_x86_64_only_phone-userdebug}"
 
 mkdir -p "$INSTANCE"
 
@@ -19,9 +19,22 @@ echo "  directory: $INSTANCE"
 echo
 
 set +e
-cvd fetch   --directory="$INSTANCE"   --default_build="$BUILD"
+cvd fetch \
+  --directory="$INSTANCE" \
+  --default_build="$BUILD"
 rc=$?
 set -e
+
+if [[ $rc -ne 0 && "$BUILD" == "android16-release/aosp_cf_x86_64_only_phone-userdebug" ]]; then
+  echo "Current target fetch failed; retrying legacy target name..."
+  BUILD="android16-release/aosp_cf_x86_64_phone-userdebug"
+  set +e
+  cvd fetch \
+    --directory="$INSTANCE" \
+    --default_build="$BUILD"
+  rc=$?
+  set -e
+fi
 
 if [[ $rc -ne 0 ]]; then
   cat <<EOF
@@ -31,10 +44,10 @@ Automatic public Build API fetch failed (rc=$rc).
 Use the official Android CI fallback:
   1. Open https://ci.android.com/
   2. Branch: android16-release
-  3. Target: aosp_cf_x86_64_phone
+  3. Target: aosp_cf_x86_64_only_phone
   4. Variant: userdebug
   5. Download BOTH artifacts from the SAME build:
-       - aosp_cf_x86_64_phone-img-<BUILD>.zip
+       - aosp_cf_x86_64_phone-img-<BUILD>.zip (artifact name may omit "_only")
        - cvd-host_package.tar.gz
   6. Run:
        ./prepare_instance.sh /path/to/cvd-host_package.tar.gz \

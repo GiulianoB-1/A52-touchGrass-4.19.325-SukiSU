@@ -40,6 +40,19 @@ for tool in launch_cvd run_cvd crosvm adb; do
 done
 echo
 
+if [[ "$VM_MANAGER" == "qemu_cli" ]]; then
+  QEMU="$INSTANCE/bin/x86_64-linux-gnu/qemu/qemu-system-x86_64"
+  test -x "$QEMU"
+  missing_libs="$(LD_LIBRARY_PATH="$INSTANCE/lib64:$INSTANCE/bin/x86_64-linux-gnu/qemu" ldd "$QEMU" 2>/dev/null | awk '/not found/{print $1}' | sort -u || true)"
+  if [[ -n "$missing_libs" ]]; then
+    echo "FAIL: QEMU has missing runtime libraries:"
+    printf '  %s\n' $missing_libs
+    echo "On Ubuntu/Debian, install the package(s) providing them before retrying."
+    exit 1
+  fi
+  echo "QEMU preflight: runtime libraries OK"
+fi
+
 echo "Launching minimal SF-Q1 Cuttlefish:"
 echo "  gpu_mode=$GPU_MODE"
 echo "  webrtc=$WEBRTC"

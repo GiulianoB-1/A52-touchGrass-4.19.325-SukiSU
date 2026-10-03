@@ -174,3 +174,21 @@ F0 5A 5A -> SW_TRIGGER -> BUSY -> missing DMA_DONE
 ```
 
 failure, because Cuttlefish does not emulate Qualcomm SDE/DSI hardware.
+
+
+## SF-Q1B: no-bootanimation / no-client control
+
+After SF-Q1, use this control to test whether a healthy SurfaceFlinger naturally
+avoids HWC present work when there are no drawable framework/app clients.
+
+The script sets `debug.sf.nobootanimation=1`, stops zygote temporarily, restarts
+SurfaceFlinger, observes a six-second no-client window, then starts zygote again
+while the same Perfetto trace continues.
+
+```bash
+./collect_sf_no_bootanim_control.sh
+```
+
+This is intentionally stronger than merely disabling bootanimation on an already
+booted system, because existing SystemUI/Launcher layers would otherwise keep
+giving SurfaceFlinger work to present.

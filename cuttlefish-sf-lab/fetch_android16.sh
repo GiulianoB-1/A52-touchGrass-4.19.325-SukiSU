@@ -129,8 +129,8 @@ if [[ $rc -ne 0 ]]; then
 
 Use the official Android CI fallback:
   1. Open https://ci.android.com/
-  2. Branch: android16-qpr2-release
-  3. Target: aosp_cf_x86_64_only_phone
+  2. Branch: aosp-android-latest-release
+  3. Find a historical Android 16 QPR2 build for aosp_cf_x86_64_only_phone
   4. Variant: userdebug
   5. Download BOTH artifacts from the SAME build:
        - aosp_cf_x86_64_phone-img-<BUILD>.zip

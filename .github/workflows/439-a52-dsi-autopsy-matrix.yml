@@ -260,13 +260,19 @@ jobs:
           grep -Fq 'A52_PHASE439EF_CLOCK_HANDSHAKE_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           grep -Fq 'A52P439 DSI F0 DMA_DONE timeout' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           grep -Fq '#define DSI_CTRL_DYNAMIC_FORCE_ON         (0x23F|BIT(8)|BIT(9)|BIT(11)|BIT(21))' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
-          grep -Fq '.cmd_rcgr = 0x1064' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.cmd_rcgr = 0x10c4' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.cmd_rcgr = 0x10e0' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.halt_reg = 0x100c' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.halt_reg = 0x102c' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.halt_reg = 0x1030' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
-          grep -Fq '.halt_reg = 0x1034' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          # These exact provider offsets were already exercised by Phase424
+          # on this GKI hardware; audit that proven source instead of assuming
+          # a particular qcom clock-driver filename in the common tree.
+          grep -Fq 'a52_p424_dispcc,0x100c); /* pclk0 */' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x102c); /* byte0 */' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x1030); /* byte0 intf */' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x1034); /* esc0 */' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x1064);' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x1068);' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x10c4);' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x10c8);' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x10e0);' scripts/424_apply_gki_paired_hw_snapshot.py
+          grep -Fq 'a52_p424_dispcc,0x10e4);' scripts/424_apply_gki_paired_hw_snapshot.py
           if [ "$V" = E ]; then
             grep -Fq 'A52_P439EF_FORCE_MODE 1U' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           else

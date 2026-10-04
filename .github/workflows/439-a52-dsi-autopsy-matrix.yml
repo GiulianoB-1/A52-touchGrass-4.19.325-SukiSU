@@ -1,5 +1,5 @@
 name: Phase439 - DSI autopsy matrix
-run-name: Phase439 - DSI autopsy A/B/C + Golden
+run-name: Phase439 - DSI autopsy A/B/C/D + Golden
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [A, B, C]
+        variant: [A, B, C, D]
     steps:
       - uses: actions/checkout@v4
 
@@ -243,16 +243,38 @@ jobs:
           python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "$V"
           python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "$V" --check-only
 
-          grep -Fq 'A52_PHASE439_DSI_AUTOPSY_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE439_DSI_AUTOPSY_V3' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           grep -Fq 'A52P439 DSI F0 DMA_DONE timeout' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
-          grep -Fq 'P439 S i=%u p=%u' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'P439 S i=%u e=%u p=%u' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           if [ "$V" = C ]; then
             grep -Fq 'MIPI_DSI_MSG_USE_LPM' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           fi
           if [ "$V" = B ]; then
-            grep -Fq 'early_unlock pre' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+            grep -Fq 'P439 E unlock pre' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          fi
+          if [ "$V" = D ]; then
+            grep -Fq 'P439 R pre' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+            grep -Fq 'dsi_ctrl->hw.base + 0x100' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+            grep -Fq 'dsi_ctrl->hw.base + 0x104' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           fi
           echo "Phase439$V source audit: PASS"
+
+      - name: Audit display clock sync_state contracts
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== Phase439 clock-provider sync_state audit ==="
+            echo "--- display clock controllers ---"
+            grep -Rns --include='*dispcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- gcc clock controllers ---"
+            grep -Rns --include='gcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- rpmh clocks ---"
+            grep -Rns --include='*rpmh*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- generic clk_sync_state references ---"
+            grep -Rns -E 'clk_sync_state|sync_state' "$ROOT/drivers/clk/qcom" | head -200 || true
+          } | tee /tmp/p439-sync-state.txt
+          test -s /tmp/p439-sync-state.txt
 
       - name: Incremental compile Phase439${{ matrix.variant }}
         run: |
@@ -274,7 +296,7 @@ jobs:
           python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "${{ matrix.variant }}" --check-only
           grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
           grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
           grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
           grep -Fq ' a52_p437_mark' "$MAP"
           grep -Fq ' a52_p437_target_current' "$MAP"
@@ -338,7 +360,7 @@ jobs:
              scripts/decode_phase436_frontier.py \
              scripts/decode_phase436_frontier.py.z64 \
              scripts/decode_phase414_sequential_3m.py "$OUT/audit/"
-          cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt "$OUT/audit/" 2>/dev/null || true
+          cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt "$OUT/audit/" 2>/dev/null || true
 
           gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
           python3 scripts/38_repack_a52_p1_boot.py \
@@ -353,11 +375,14 @@ jobs:
           Variant A: normal late HS F0, timed autopsy + timeout panic.
           Variant B: early normal-path HS unlock/relock, then normal late F0.
           Variant C: normal late F0 forced through semantic USE_LPM flag.
+          Variant D: later-Qualcomm DSI 2.2/2.3/2.4 trigger/schedule reset A/B.
           Timed points: PRE, +15 us, +35 us, +50 us, timeout.
           Timed evidence: controller state, real CLK_STATUS, debug bus 0x171,
+          schedule 0x100/0x104, TRIG_CTRL 0x84, DISP_CC_MISC_CMD,
           PLL_COMMON_STATUS_ONE and v3 PHY common/lane state.
-          Timeout evidence: six-selector DSI debug sweep, Qualcomm platform DSI
-          debug-bus dump when available, cached display rails, stack, panic.
+          Timeout evidence: full 256-selector DSI debug-bus sweep,
+          cached display rails, stack and deterministic panic.
+          Static audit: dispcc/gcc/rpmh clock-provider sync_state hooks.
           SMMU/IRQ are intentionally sanity-only: P426/P427 already established
           valid translation/routing and the hardware DMA_DONE bit never sets.
           EOF

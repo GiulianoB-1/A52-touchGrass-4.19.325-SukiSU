@@ -222,4 +222,138 @@ jobs:
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-          make -C "$ROOT" O<ˆ‘	U%1ˆI õ…É´ØÐp(€€€€€€€€€€€I=MM}=5A%1õ……É ØÐµ±¥¹Õàµ¹Ô´19}QI%A1õ……É ØÐµ±¥¹Õàµ¹Ô´p(€€€€€€€€€€€11Y4ôÄ11Y5}%LôÄ€µ¨ˆ¡¹ÁÉ½Œ¤ˆ%µ…”(€€€€€€€€€%5ôˆ‘	U%1½…É ½…É´ØÐ½‰½½Ð½%µ…”ˆ(€€€€€€€€€5@ôˆ‘	U%1½MåÍÑ•´¹µ…Àˆ(€€€€€€€€€Ñ•ÍÐ€µÌ€ˆ‘%5ˆ(€€€€€€€€€Ñ•ÍÐ€µÌ€ˆ‘5@ˆ(€€€€€€€€€ÁåÑ¡½¸ÌÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áä€´µÉ½½Ð€ˆ‘I==Pˆ€´µ¡•¬µ½¹±ä(€€€€€€€€€É•À€µ…Ä€ÔÉ}A!MÐÌÝ}-M1}=A9}=II%=I}XÄœ€ˆ‘%5ˆ(€€€€€€€€€É•À€µÄ€œ„ÔÉ}ÀÐÌÝ}µ…É¬œ€ˆ‘5@ˆ(€€€€€€€€€É•À€µÄ€œ„ÔÉ}ÀÐÌÝ}Ñ…É•Ñ}ÕÉÉ•¹Ðœ€ˆ‘5@ˆ(€€€€€€€€€É•À€µÄ€œ„ÔÉ}ÀÐÌÝ}…Éµ}Ñ…É•Ðœ€ˆ‘5@ˆ(€€€€€€€€€É•À€µÄ€œ„ÔÉ}ÀÐÌÙ}µ…É¬œ€ˆ‘5@ˆ(€€€€€€€€€É•À€µÄ€œ„ÔÉ}ÀÐÌÁ}‘µ…}•Ù•¹Ðœ€ˆ‘5@ˆ(€€€€€€€€€€„É•À€µÄ€œ„ÔÉ}ÀÐÌÁ}Í…µÁ±•É}™¸œ€ˆ‘5@ˆ(€€€€€€€€€…¡”€µÌ((€€€€€€´¹…µ”èM…Ù”A¡…Í”ÐÌÜ½‰©•Ð…¡”(€€€€€€€¥˜è…±Ý…åÌ ¤(€€€€€€€ÕÍ•Ìè…Ñ¥½¹Ì½…¡”½Í…Ù•ØÐ(€€€€€€€Ý¥Ñ è(€€€€€€€€€Á…Ñ èÝ½É­ÍÁ…”½­¤µÁ¡…Í”Äääµ½ÕÐ(€€€€€€€€€­•äè„ÔÉáÄµÁ¡…Í”ÐÌÜµ­Í°µ½Á•¸µ½‰©•ÑÌµØÄ´‘íìÉÕ¹¹•È¹½Ìõô´‘íì•¹Ø¹-%}=55=9}M!õô´‘íì¡…Í¡¥±•Ì ÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áäœ°€ÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áä¹èØÐœ¤õô((€€€€€€´¹…µ”èM…Ù”É½±±¥¹œ±…¹œ…¡”(€€€€€€€¥˜è…±Ý…åÌ ¤(€€€€€€€ÕÍ•Ìè…Ñ¥½¹Ì½…¡”½Í…Ù•ØÐ(€€€€€€€Ý¥Ñ è(€€€€€€€€€Á…Ñ è€¹…¡”(€€€€€€€€€­•äè„ÔÉáÄµ±…¹œµ…¡”µØÈ´‘íìÉÕ¹¹•È¹½Ìõô´‘íì•¹Ø¹-%}=55=9}M!õôµÁ¡…Í”ÐÌÜ´‘íì¥Ñ¡Õˆ¹ÉÕ¹}¥õô((€€€€€€´¹…µ”èA…­…”A¡…Í”ÐÌÜ(€€€€€€€¥˜èÍÕ•ÍÌ ¤(€€€€€€€ÉÕ¸èð(€€€€€€€€€Í•Ð€µ•Õ¼Á¥Á•™…¥°(€€€€€€€€€I==Pôˆ‘A]½­¤½½µµ½¸ˆ(€€€€€€€€€	U%1ôˆ‘A]½Ý½É­ÍÁ…”½­¤µÁ¡…Í”Äääµ½ÕÐˆ(€€€€€€€€€=UPôˆ‘A]½Á¡…Í”ÐÌÜµ­Í°µ½Á•¸µ­¤µ½ÕÐˆ(€€€€€€€€€M=UI}	==Pôˆ‘A]½Á¡…Í”ÐÈäµ­¤µ½ÕÐ½Á…­…”½‰½½ÐµÁ¡…Í”ÐÈäµ…Á•àµÍ˜µ™½ÕÍ•µ•¹ÍÕÌµØÄ¹¥µœˆ(€€€€€€€€€%90ôˆ‘=UP½Á…­…”½‰½½ÐµÁ¡…Í”ÐÌÜµ­Í°µ½Á•¸µ½ÉÉ¥‘½ÈµØÄ¹¥µœˆ(€€€€€€€€€É´€µÉ˜€ˆ‘=UPˆ(€€€€€€€€€À€µ„Á¡…Í”ÐÈäµ­¤µ½ÕÐ€ˆ‘=UPˆ(€€€€€€€€€À€ˆ‘	U%1½…É ½…É´ØÐ½‰½½Ð½%µ…”ˆ€ˆ‘=UP½½µÁ¥±”½%µ…”ˆ(€€€€€€€€€À€ˆ‘	U%1½MåÍÑ•´¹µ…Àˆ€ˆ‘=UP½½µÁ¥±”½MåÍÑ•´¹µ…Àˆ(€€€€€€€€€À€ˆ‘	U%1¼¹½¹™¥œˆ€ˆ‘=UP½½¹™¥œ½™¥¹…°¹½¹™¥œˆ(€€€€€€€€€µ­‘¥È€µÀ€ˆ‘=UP½Í½ÕÉ”ˆ€ˆ‘=UP½…Õ‘¥Ðˆ(€€€€€€€€€À€ˆ‘I==P½™Ì½½Á•¸¹Œˆ€ˆ‘I==P½™Ì½¹…µ•¤¹Œˆ€ˆ‘I==P½™Ì½¡…É}‘•Ø¹Œˆ€ˆ‘=UP½Í½ÕÉ”¼ˆ(€€€€€€€€€À€ˆ‘I==P½‘É¥Ù•ÉÌ½„ÔÉ}Í•ÕÉ”½„ÔÉ}Á¡…Í”ÐÌÝ}½Á•¸¹Œˆ€ˆ‘I==P½¥¹±Õ‘”½±¥¹Õà½„ÔÉ}Á¡…Í”ÐÌÝ}½Á•¸¹ ˆ€ˆ‘=UP½Í½ÕÉ”¼ˆ(€€€€€€€€€ÀÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹ÁäÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áä¹èØÐp(€€€€€€€€€€€€ÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÝ}½Á•¸¹ÁäÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÝ}½Á•¸¹Áä¹èØÐp(€€€€€€€€€€€€ÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÙ}™É½¹Ñ¥•È¹ÁäÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÙ}™É½¹Ñ¥•È¹Áä¹èØÐp(€€€€€€€€€€€€ÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÄÑ}Í•ÅÕ•¹Ñ¥…±|Í´¹Áä€ˆ‘=UP½…Õ‘¥Ð¼ˆ(€€€€€€€€€À€½ÑµÀ½ÀÐÌÔµ½Ù•É±…À¹ÑáÐ€½ÑµÀ½ÀÐÌØµ½Ù•É±…À¹ÑáÐ€ˆ‘=UP½…Õ‘¥Ð¼ˆ€Èø½‘•Ø½¹Õ±°ñðÑÉÕ”(€€€€€€€€€é¥À€µ¸€µŒ€ˆ‘	U%1½…É ½…É´ØÐ½‰½½Ð½%µ…”ˆ€ø€ˆ‘=UP½Á…­…”½%µ…”¹èˆ(€€€€€€€€€ÁåÑ¡½¸ÌÍÉ¥ÁÑÌ¼Ìá}É•Á…­}„ÔÉ}ÀÅ}‰½½Ð¹Áäp(€€€€€€€€€€€€´µÍ½ÕÉ”€ˆ‘M=UI}	==Pˆ€´µ­•É¹•°€ˆ‘=UP½Á…­…”½%µ…”¹èˆp(€€€€€€€€€€€€´µ½ÕÑÁÕÐ€ˆ‘%90ˆ€´µÉ•Á½ÉÐ€ˆ‘=UP½Á…­…”½Á¡…Í”ÐÌÜµÉ•Á…¬µÉ•Á½ÉÐ¹©Í½¸ˆ(€€€€€€€€€Ñ•ÍÐ€ˆ¡ÍÑ…Ð€µŒ€œ•Ìœ€ˆ‘%90ˆ¤ˆ€µ•Ä€ÄÀÀØØÌÈäØ(€€€€€€€€€…Ð€ø€ˆ‘=UP½A!MÐÌÜµ9=QL¹ÑáÐˆ€ðð=œ(€€€€€€€€€A¡…Í”ÐÌÜ-M0½Á•¸½ÉÉ¥‘½È(€€€€€€€€€€ôôôôôôôôôôôôôôôôôôôôôôôôôôô(€€€€€€€€€@ÐÌÜ™¥á•É•½É‘•Èè€ÁáÅÀÀÀ¸¸ÁáÅ	€ à-¥¤(€€€€€€€€€@ÐÌØ™¥á•É•½É‘•Èè€ÁáÅÀÀÀ¸¸ÁáÅ€ ÄØ-¥¤(€€€€€€€€€@ÐÄÐÉ½±±½Ù•È•¹‘Ì…Ð€ÁáÅå¸(€€€€€€€€€Q…É•Ð‘•Ñ•Ñ¥½¸ÕÍ•ÌMÕÉ™…•±¥¹•ÈÌÑ¡É•…µÉ½ÕÀ±•…‘•È¸(€€€€€€€€€@ÐÌÜ‰É…­•ÑÌÑ¡”±•…äÉ•½É‘•È…±°¥ÑÍ•±˜…¹Ñ¡”Íå¹¡É½¹½ÕÌ(€€€€€€€€€YL½¹…µ•¤½¡É‘•ØÁ…Ñ Ñ¼Ñ¡”-M0‘É¥Ù•È€´ù½Á•¸…±±‰…¬¸(€€€€€€€€€9¼M$½55%<‰•¡…Ù¥½È¥Ì¡…¹•¸(€€€€€€€€€=(€€€€€€€€€€¡€ˆ‘=UPˆ€˜˜™¥¹€¸€µÑåÁ”˜€„€µ¹…µ”M!ÈÔÙMU5L€µÁÉ¥¹ÐÀðÍ½ÉÐ€µèðá…ÉÌ€´ÀÍ¡„ÈÔÙÍÕ´€øM!ÈÔÙMU5L€˜˜Í¡„ÈÔÙÍÕ´€µŒM!ÈÔÙMU5L¤(€€€€€€€€€Í¡„ÈÔÙÍÕ´€ˆ‘%90ˆ((€€€€€€´¹…µ”èUÁ±½…A¡…Í”ÐÌÜ™…¥±ÕÉ”‘¥…¹½ÍÑ¥Ì(€€€€€€€¥˜è™…¥±ÕÉ” ¤(€€€€€€€ÕÍ•Ìè…Ñ¥½¹Ì½ÕÁ±½…µ…ÉÑ¥™…ÑØÐ(€€€€€€€Ý¥Ñ è(€€€€€€€€€¹…µ”èÔÉaDµA!MÐÌÜµ-M0µ=A8µ=II%=Hµ%0µ%´‘íì¥Ñ¡Õˆ¹ÉÕ¹}¹Õµ‰•Èõô(€€€€€€€€€Á…Ñ èð(€€€€€€€€€€€­¤½½µµ½¸½™Ì½½Á•¸¹Œ(€€€€€€€€€€€­¤½½µµ½¸½™Ì½¹…µ•¤¹Œ(€€€€€€€€€€€­¤½½µµ½¸½™Ì½¡…É}‘•Ø¹Œ(€€€€€€€€€€€­¤½½µµ½¸½‘É¥Ù•ÉÌ½„ÔÉ}Í•ÕÉ”½„ÔÉ}…­}Í•ÕÉ•}™±¥¡Ñ}É•½É‘•È¹Œ(€€€€€€€€€€€­¤½½µµ½¸½‘É¥Ù•ÉÌ½„ÔÉ}Í•ÕÉ”½„ÔÉ}Á¡…Í”ÐÌÙ}™É½¹Ñ¥•È¹Œ(€€€€€€€€€€€­¤½½µµ½¸½‘É¥Ù•ÉÌ½„ÔÉ}Í•ÕÉ”½„ÔÉ}Á¡…Í”ÐÌÝ}½Á•¸¹Œ(€€€€€€€€€€€­¤½½µµ½¸½¥¹±Õ‘”½±¥¹Õà½„ÔÉ}Á¡…Í”ÐÌÝ}½Á•¸¹ (€€€€€€€€€€€Ý½É­ÍÁ…”½­¤µÁ¡…Í”Äääµ½ÕÐ¼¹½¹™¥œ(€€€€€€€€€€€Ý½É­ÍÁ…”½­¤µÁ¡…Í”Äääµ½ÕÐ½MåÍÑ•´¹µ…À(€€€€€€€€€€€Ý½É­ÍÁ…”½­¤µÁ¡…Í”Äääµ½ÕÐ½…É ½…É´ØÐ½‰½½Ð½%µ…”(€€€€€€€€€€€ÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áä(€€€€€€€€€€€ÍÉ¥ÁÑÌ¼ÐÌÝ}…ÁÁ±å}­Í±}½Á•¹}½ÉÉ¥‘½È¹Áä¹èØÐ(€€€€€€€€€€€ÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÝ}½Á•¸¹Áä(€€€€€€€€€€€ÍÉ¥ÁÑÌ½‘•½‘•}Á¡…Í”ÐÌÝ}½Á•¸¹Áä¹èØÐ(€€€€€€€€€¥˜µ¹¼µ™¥±•Ìµ™½Õ¹èÝ…É¸(€€€€€€€€€½µÁÉ•ÍÍ¥½¸µ±•Ù•°è€Ä(€€€€€€€€€É•Ñ•¹Ñ¥½¸µ‘…åÌè€Ü((€€€€€€´¹…µ”èUÁ±½…A¡…Í”ÐÌÜ(€€€€€€€¥˜èÍÕ•ÍÌ ¤(€€€€€€€ÕÍ•Ìè…Ñ¥½¹Ì½ÕÁ±½…µ…ÉÑ¥™…ÑØÐ(€€€€€€€Ý¥Ñ è(€€€€€€€€€¹…µ”èÔÉaDµA!MÐÌÜµ-M0µ=A8µ=II%=H´‘íì¥Ñ¡Õˆ¹ÉÕ¹}¹Õµ‰•Èõô(€€€€€€€€€Á…Ñ èÁ¡…Í”ÐÌÜµ­Í°µ½Á•¸µ­¤µ½ÕÐ¼(€€€€€€€€€¥˜µ¹¼µ™¥±•Ìµ™½Õ¹è•ÉÉ½È(€€€€€€€€€½µÁÉ•ÍÍ¥½¸µ±•Ù•°è€Ä(€€€€€€€€€É•Ñ•¹Ñ¥½¸µ‘…åÌè€ÌÀ((€€€€€€´¹…µ”èUÁ±½…A¡…Í”ÐÌÜ‰½½Ð¹¥µœ(€€€€€€€¥˜èÍÕ•ÍÌ ¤(€€€€€€€ÕÍ•Ìè…Ñ¥½¹Ì½ÕÁ±½…µ…ÉÑ¥™…ÑØÐ(€€€€€€€Ý¥Ñ è(€€€€€€€€€¹…µ”èÔÉaDµA!MÐÌÜµ-M0µ=A8µ=II%=H´‘íì¥Ñ¡Õˆ¹ÉÕ¹}¹Õµ‰•Èõôµ	==Pµ%5(€€€€€€€€€Á…Ñ èÁ¡…Í”ÐÌÜµ­Í°µ½Á•¸µ­¤µ½ÕÐ½Á…­…”½‰½½ÐµÁ¡…Í”ÐÌÜµ­Í°µ½Á•¸µ½ÉÉ¥‘½ÈµØÄ¹¥µœ(€€€€€€€€€¥˜µ¹¼µ™¥±•Ìµ™½Õ¹è•ÉÉ½È(€€€€€€€€€½µÁÉ•ÍÍ¥½¸µ±•Ù•°è€À(€€€€€€€€€É•Ñ•¹Ñ¥½¸µ‘…åÌè€ÌÀ(
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
+          grep -Fq ' a52_p437_mark' "$MAP"
+          grep -Fq ' a52_p437_target_current' "$MAP"
+          grep -Fq ' a52_p437_arm_target' "$MAP"
+          grep -Fq ' a52_p436_mark' "$MAP"
+          grep -Fq ' a52_p430_dma_event' "$MAP"
+          ! grep -Fq ' a52_p430_sampler_fn' "$MAP"
+          ! grep -Fq ' a52_p430_dma_timer_fn' "$MAP"
+          ccache -s
+
+      - name: Save Phase437 object cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase437-kgsl-open-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/437_apply_kgsl_open_corridor.py', 'scripts/437_apply_kgsl_open_corridor.py.z64') }}
+
+      - name: Save rolling clang ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase437-${{ github.run_id }}
+
+      - name: Package Phase437
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase437-kgsl-open-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase437-kgsl-open-corridor-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          mkdir -p "$OUT/source" "$OUT/audit"
+          cp "$ROOT/fs/open.c" "$ROOT/fs/namei.c" "$ROOT/fs/char_dev.c" "$OUT/source/"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
+             "$ROOT/drivers/a52_secure/a52_phase436_frontier.c" \
+             "$ROOT/drivers/a52_secure/a52_phase437_open.c" "$OUT/source/"
+          cp "$ROOT/include/linux/a52_phase436_frontier.h" \
+             "$ROOT/include/linux/a52_phase437_open.h" "$OUT/source/"
+          cp scripts/437_apply_kgsl_open_corridor.py \
+             scripts/437_apply_kgsl_open_corridor.py.z64 \
+             scripts/decode_phase437_open.py \
+             scripts/decode_phase437_open.py.z64 \
+             scripts/decode_phase436_frontier.py \
+             scripts/decode_phase436_frontier.py.z64 \
+             scripts/decode_phase414_sequential_3m.py "$OUT/audit/"
+          cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt "$OUT/audit/" 2>/dev/null || true
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase437-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE437-NOTES.txt" <<'EOF'
+          Phase437 KGSL open corridor
+          ===========================
+          Phase436 baseline retained; Phase434 DSI diagnostics are unchanged.
+          P437 recorder: 0xB1AFA000..0xB1AFBFFF (8 KiB), dual fixed copies.
+          P436 recorder: 0xB1AFC000..0xB1AFFFFF (16 KiB), unchanged.
+          P414 rollover now ends at 0xB1AF9FFF.
+          SurfaceFlinger target recognition uses the thread-group leader.
+          P437 brackets the legacy recorder call, fd allocation, do_filp_open,
+          path_openat/do_open, vfs_open/do_dentry_open, security_file_open,
+          chrdev kobject/fops handoff and the final driver ->open callback.
+          No polling, remote-task inspection, DSI/MMIO reads or functional GPU changes.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase437 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE437-KGSL-OPEN-CORRIDOR-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/fs/open.c
+            gki/common/fs/namei.c
+            gki/common/fs/char_dev.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_secure/a52_phase436_frontier.c
+            gki/common/drivers/a52_secure/a52_phase437_open.c
+            gki/common/include/linux/a52_phase436_frontier.h
+            gki/common/include/linux/a52_phase437_open.h
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/437_apply_kgsl_open_corridor.py
+            scripts/437_apply_kgsl_open_corridor.py.z64
+            scripts/decode_phase437_open.py
+            scripts/decode_phase437_open.py.z64
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase437
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE437-KGSL-OPEN-CORRIDOR-${{ github.run_number }}
+          path: phase437-kgsl-open-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase437 boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE437-KGSL-OPEN-CORRIDOR-${{ github.run_number }}-BOOT-IMG
+          path: phase437-kgsl-open-gki-out/package/boot-phase437-kgsl-open-corridor-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

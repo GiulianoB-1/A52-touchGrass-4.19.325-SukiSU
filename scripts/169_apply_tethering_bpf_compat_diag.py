@@ -107,7 +107,7 @@ static bool a52_p169_bpf_loader_task(void)
     sig = "SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, size)"
     fn = block(s, sig)
     old = "\n\treturn err;\n}"
-    new = """\n\tif (err < 0 && a52_p169_bpf_loader_task()) {\n\t\tpr_err("A52_P169_BPF_SYSCALL_FAIL cmd=%d err=%d prog_type=%u attach=%u insns=%u map_type=%u key=%u value=%u max=%u map_flags=0x%x prog_flags=0x%x name=%.*s\\n",\n\t\t       cmd, err, attr.prog_type, attr.expected_attach_type, attr.insn_cnt,\n\t\t       attr.map_type, attr.key_size, attr.value_size, attr.max_entries,\n\t\t       attr.map_flags, attr.prog_flags, BPF_OBJ_NAME_LEN, attr.prog_name);\n\t}\n\n\treturn err;\n}"""
+    new = """\n\tif (err < 0 && a52_p169_bpf_loader_task()) {\n\t\tif (cmd == BPF_BTF_LOAD)\n\t\t\tpr_err("A52_P169_BPF_BTF_FAIL err=%d size=%u log_size=%u log_level=%u\\n",\n\t\t\t       err, attr.btf_size, attr.btf_log_size, attr.btf_log_level);\n\t\tpr_err("A52_P169_BPF_SYSCALL_FAIL cmd=%d err=%d prog_type=%u attach=%u insns=%u map_type=%u key=%u value=%u max=%u map_flags=0x%x prog_flags=0x%x name=%.*s\\n",\n\t\t       cmd, err, attr.prog_type, attr.expected_attach_type, attr.insn_cnt,\n\t\t       attr.map_type, attr.key_size, attr.value_size, attr.max_entries,\n\t\t       attr.map_flags, attr.prog_flags, BPF_OBJ_NAME_LEN, attr.prog_name);\n\t}\n\n\treturn err;\n}"""
     if fn.count(old) != 1:
         die(f"bpf syscall return anchor count {fn.count(old)}")
     fn = fn.replace(old, new, 1)
@@ -117,6 +117,58 @@ static bool a52_p169_bpf_loader_task(void)
     s = rep1(s, include_anchor, include_anchor + f"\n/* {MARK} */\n", "BPF syscall marker")
     wr(root, rel, s)
     out.append("BPF_SYSCALL_DIAG=patched")
+
+
+def patch_bpf_core_alloc(root, out):
+    rel = "kernel/bpf/core.c"
+    s = rd(root, rel)
+    if MARK in s:
+        out.append("BPF_JIT_ALLOC_DIAG=present")
+        return
+
+    inc = "#include <linux/perf_event.h>\n"
+    s = rep1(s, inc, inc + "#include <linux/sched.h>\n#include <linux/string.h>\n",
+             "core.c diagnostic includes")
+
+    helper_anchor = "long bpf_jit_limit   __read_mostly;\n"
+    helper = helper_anchor + """
+/* A52_P169_BPF_TETHERING_DIAG_V1 */
+static bool a52_p169_bpf_loader_task_core(void)
+{
+	return !strcmp(current->comm, "netbpfload") ||
+	       !strcmp(current->comm, "bpfloader");
+}
+"""
+    s = rep1(s, helper_anchor, helper, "core.c loader helper")
+
+    old = """	if (bpf_jit_charge_modmem(pages))
+		return NULL;
+	hdr = module_alloc(size);
+	if (!hdr) {
+		bpf_jit_uncharge_modmem(pages);
+		return NULL;
+	}
+"""
+    new = """	if (bpf_jit_charge_modmem(pages)) {
+		if (a52_p169_bpf_loader_task_core())
+			pr_err("A52_P169_JIT_ALLOC_FAIL stage=charge proglen=%u size=%u pages=%u current=%ld limit_pages=%ld\\n",
+			       proglen, size, pages, atomic_long_read(&bpf_jit_current),
+			       bpf_jit_limit >> PAGE_SHIFT);
+		return NULL;
+	}
+	hdr = module_alloc(size);
+	if (!hdr) {
+		if (a52_p169_bpf_loader_task_core())
+			pr_err("A52_P169_JIT_ALLOC_FAIL stage=module_alloc proglen=%u size=%u pages=%u current=%ld limit_pages=%ld\\n",
+			       proglen, size, pages, atomic_long_read(&bpf_jit_current),
+			       bpf_jit_limit >> PAGE_SHIFT);
+		bpf_jit_uncharge_modmem(pages);
+		return NULL;
+	}
+"""
+    s = rep1(s, old, new, "BPF JIT allocation path")
+    wr(root, rel, s)
+    out.append("BPF_JIT_ALLOC_DIAG=patched")
 
 
 def patch_access_trace(root, out):
@@ -300,6 +352,7 @@ static bool a52_p169_bpf_loader_task_jit(void)
 def audit(root, out):
     cfg = rd(root, "arch/arm64/configs/a52xq_defconfig")
     syscall = rd(root, "kernel/bpf/syscall.c")
+    core = rd(root, "kernel/bpf/core.c")
     jit = rd(root, "arch/arm64/net/bpf_jit_comp.c")
     open_c = rd(root, "fs/open.c")
 
@@ -318,6 +371,7 @@ def audit(root, out):
         "A52_P169_BPF_FAIL stage=verifier",
         "A52_P169_BPF_FAIL stage=runtime_jit",
         "A52_P169_BPF_SYSCALL_FAIL",
+        "A52_P169_BPF_BTF_FAIL",
     ]:
         if needle not in syscall:
             die(f"audit missing syscall diagnostic: {needle}")
@@ -332,6 +386,10 @@ def audit(root, out):
     ]:
         if needle not in jit:
             die(f"audit missing JIT diagnostic: {needle}")
+
+    for needle in [MARK, "A52_P169_JIT_ALLOC_FAIL"]:
+        if needle not in core:
+            die(f"audit missing core JIT diagnostic: {needle}")
 
     for needle in [MARK, "A52_P169_BPF_ACCESS"]:
         if needle not in open_c:
@@ -350,6 +408,7 @@ def main():
     out = []
     patch_config(root, out)
     patch_bpf_syscall(root, out)
+    patch_bpf_core_alloc(root, out)
     patch_access_trace(root, out)
     patch_arm64_jit(root, out)
     audit(root, out)

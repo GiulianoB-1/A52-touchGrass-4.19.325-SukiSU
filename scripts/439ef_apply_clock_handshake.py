@@ -53,7 +53,7 @@ static struct a52_p439ef_dense_sample a52_p439ef_dense[A52_P439EF_DENSE_MAX];
 static struct a52_p439ef_provider_sample a52_p439ef_provider[A52_P439EF_PROVIDER_MAX];
 static atomic_t a52_p439ef_dense_count = ATOMIC_INIT(0);
 static atomic_t a52_p439ef_provider_count = ATOMIC_INIT(0);
-static atomic_t a52_p439ef_force_active = ATOMIC_INIT(0);
+static atomic_t a52_p439ef_force_active __maybe_unused = ATOMIC_INIT(0);
 static atomic_t a52_p439ef_finished = ATOMIC_INIT(0);
 static u64 a52_p439ef_trigger_ns;
 static u32 a52_p439ef_saved_clk_ctrl;
@@ -117,7 +117,7 @@ static __always_inline void a52_p439ef_note_trigger(void)
 	WRITE_ONCE(a52_p439ef_trigger_ns, ktime_get_ns());
 }
 
-static void a52_p439ef_after_hot(struct dsi_ctrl_hw *ctrl)
+static __maybe_unused void a52_p439ef_after_hot(struct dsi_ctrl_hw *ctrl)
 {
 	if (!ctrl || !ctrl->base)
 		return;
@@ -125,7 +125,7 @@ static void a52_p439ef_after_hot(struct dsi_ctrl_hw *ctrl)
 		a52_p439ef_provider_capture(ctrl, 50U);
 }
 
-static void a52_p439ef_dense_run(struct dsi_ctrl_hw *ctrl)
+static __maybe_unused void a52_p439ef_dense_run(struct dsi_ctrl_hw *ctrl)
 {
 	u64 start = READ_ONCE(a52_p439ef_trigger_ns);
 	unsigned int i;
@@ -306,6 +306,16 @@ static int a52_p439_dbg_open'''
 
 static int a52_p439_dbg_open'''
     text = one(text, old, new, "debugfs dump hook")
+
+    if variant == "F":
+        old_unused = "static void a52_p439_post_trigger(struct dsi_ctrl_hw *ctrl)"
+        if old_unused not in text:
+            die("F baseline post-trigger helper anchor missing")
+        text = text.replace(
+            old_unused,
+            "static __maybe_unused void a52_p439_post_trigger(struct dsi_ctrl_hw *ctrl)",
+            1,
+        )
 
     if variant == "E":
         after1 = (

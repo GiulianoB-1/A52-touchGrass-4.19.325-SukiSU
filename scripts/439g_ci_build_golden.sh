@@ -71,10 +71,10 @@ for line in added:
 
 for token in (
     'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2',
-    'A52_G439_PHY_PHYS 0x0ae94000ULL',
-    'a52_g439_wait_until(start,15000ULL)',
-    'a52_g439_wait_until(start,35000ULL)',
-    'a52_g439_wait_until(start,50000ULL)',
+    'A52_G439_PHY_PHYS          0x0ae94000ULL',
+    'a52_g439_wait_until(start, 15000ULL)',
+    'a52_g439_wait_until(start, 35000ULL)',
+    'a52_g439_wait_until(start, 50000ULL)',
     'TG439 S i=%u p=%u ns=%llu',
     'TG439 D i=%u dc=%x',
     'TG439 Q i=%u s1=%x s2=%x dm=%x',

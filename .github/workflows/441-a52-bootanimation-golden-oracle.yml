@@ -3,8 +3,8 @@ run-name: Phase441 bootanimation crash + graphics ABI golden comparison
 
 on:
   workflow_dispatch:
-  push:
-    branches: [agent/a52-phase432-ctrl-cache-run-v1]
+  pull_request:
+    branches: [agent/a52-phase378-gki-ufs-completion-flight-recorder-v1]
     paths:
       - .github/workflows/441-a52-bootanimation-golden-oracle.yml
       - scripts/441_apply_bootanimation_oracle.py

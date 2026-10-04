@@ -27,6 +27,28 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def function_body(text: str, signature: str) -> tuple[int, int, str]:
+    start = text.find(signature)
+    if start < 0:
+        die("function missing: " + signature)
+    brace = text.find("{", start)
+    if brace < 0:
+        die("function brace missing: " + signature)
+    depth = 0
+    end = None
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        die("function end missing: " + signature)
+    return start, end, text[start:end]
+
+
 def add_include_and_extern(text: str, header: str = "") -> str:
     if MARK in text:
         return text
@@ -385,20 +407,26 @@ def patch_runtime(text: str) -> str:
         return text
     text = add_include_and_extern(text)
 
-    text = one(
-        text,
+    start, end, body = function_body(text, "static int rpm_suspend(")
+    body = one(
+        body,
         "\t__update_runtime_status(dev, RPM_SUSPENDED);\n",
         "\t__update_runtime_status(dev, RPM_SUSPENDED);\n"
         '\ta52_p440_event("RPM_SUSP", dev_name(dev), rpmflags, 0);\n',
-        "runtime suspended transition",
+        "rpm_suspend status transition",
     )
-    text = one(
-        text,
+    text = text[:start] + body + text[end:]
+
+    start, end, body = function_body(text, "static int rpm_resume(")
+    body = one(
+        body,
         "\t__update_runtime_status(dev, RPM_ACTIVE);\n",
         "\t__update_runtime_status(dev, RPM_ACTIVE);\n"
         '\ta52_p440_event("RPM_RESUME", dev_name(dev), rpmflags, 0);\n',
-        "runtime active transition",
+        "rpm_resume status transition",
     )
+    text = text[:start] + body + text[end:]
+
     return text + "\n/* " + MARK + ": relevant runtime-PM transitions captured. */\n"
 
 
@@ -407,6 +435,7 @@ def patch_domain(text: str) -> str:
         return text
     text = add_include_and_extern(text)
 
+    start, end, body = function_body(text, "static int genpd_power_off(")
     old = '''\tgenpd->status = GENPD_STATE_OFF;
 \tgenpd_update_accounting(genpd);
 \tgenpd->states[genpd->state_idx].usage++;
@@ -416,8 +445,10 @@ def patch_domain(text: str) -> str:
 \ta52_p440_event("GENPD_OFF", genpd->name, genpd->state_idx, 0);
 \tgenpd->states[genpd->state_idx].usage++;
 '''
-    text = one(text, old, new, "runtime genpd off")
+    body = one(body, old, new, "genpd_power_off transition")
+    text = text[:start] + body + text[end:]
 
+    start, end, body = function_body(text, "static int genpd_power_on(")
     old = '''\tgenpd->status = GENPD_STATE_ON;
 \tgenpd_update_accounting(genpd);
 '''
@@ -425,7 +456,9 @@ def patch_domain(text: str) -> str:
 \tgenpd_update_accounting(genpd);
 \ta52_p440_event("GENPD_ON", genpd->name, genpd->state_idx, 0);
 '''
-    text = one(text, old, new, "genpd on")
+    body = one(body, old, new, "genpd_power_on transition")
+    text = text[:start] + body + text[end:]
+
     return text + "\n/* " + MARK + ": genpd runtime on/off chronology captured. */\n"
 
 

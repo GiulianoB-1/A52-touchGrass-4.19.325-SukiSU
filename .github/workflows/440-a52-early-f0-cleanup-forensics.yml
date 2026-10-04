@@ -452,7 +452,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE440-EARLY-F0-CLEANUP-${{ github.run_number }}-BOOT-IMG
-          path: phase440-gki-out/package/boot-phase440-clock-isolation-v1.img
+          path: phase440-gki-out/package/boot-phase440-early-f0-cleanup-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

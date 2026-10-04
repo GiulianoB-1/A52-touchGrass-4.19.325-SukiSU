@@ -3,14 +3,6 @@ run-name: Phase439E/F clock handshake + Golden-F
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/a52-phase432-ctrl-cache-run-v1
-    paths:
-      - .github/workflows/439ef-a52-dsi-clock-handshake.yml
-      - scripts/439ef_apply_clock_handshake.py
-      - scripts/439fg_apply_golden_dense.py
-      - scripts/439fg_ci_build_golden.sh
 
 permissions:
   contents: read

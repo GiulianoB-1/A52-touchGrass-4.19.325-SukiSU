@@ -2,9 +2,9 @@ name: Phase439EF2 - DSI clock isolation
 run-name: Phase439E2/F2/P clock isolation
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/a52-phase432-ctrl-cache-run-v1
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
       - .github/workflows/439ef2-a52-dsi-clock-isolation.yml
       - scripts/439ef2_apply_clock_isolation.py

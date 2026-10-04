@@ -1104,6 +1104,7 @@ jobs:
 
           git -C "$KERNEL" diff --check
           grep -Fq 'A52_P169_BPF_TETHERING_DIAG_V1' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'A52_P169_BPF_TETHERING_DIAG_V1' "$KERNEL/kernel/bpf/core.c"
           grep -Fq 'A52_P169_BPF_TETHERING_DIAG_V1' "$KERNEL/arch/arm64/net/bpf_jit_comp.c"
           grep -Fq 'A52_P169_BPF_TETHERING_DIAG_V1' "$KERNEL/fs/open.c"
 
@@ -1586,13 +1587,17 @@ jobs:
 
           grep -Fq 'A52_P169_BPF_FAIL stage=verifier' "$KERNEL/kernel/bpf/syscall.c"
           grep -Fq 'A52_P169_BPF_FAIL stage=runtime_jit' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'A52_P169_BPF_BTF_FAIL' "$KERNEL/kernel/bpf/syscall.c"
           grep -Fq 'A52_P169_BPF_SYSCALL_FAIL' "$KERNEL/kernel/bpf/syscall.c"
+          grep -Fq 'A52_P169_JIT_ALLOC_FAIL' "$KERNEL/kernel/bpf/core.c"
           grep -Fq 'A52_P169_JIT_FAIL stage=build_body' "$KERNEL/arch/arm64/net/bpf_jit_comp.c"
           grep -Fq 'A52_P169_JIT_FAIL stage=multifunc_size' "$KERNEL/arch/arm64/net/bpf_jit_comp.c"
           grep -Fq 'A52_P169_BPF_ACCESS' "$KERNEL/fs/open.c"
 
           strings "$IMAGE_FILE" > artifacts/p169-image-strings.txt
           grep -Fq 'A52_P169_BPF_SYSCALL_FAIL' artifacts/p169-image-strings.txt
+          grep -Fq 'A52_P169_BPF_BTF_FAIL' artifacts/p169-image-strings.txt
+          grep -Fq 'A52_P169_JIT_ALLOC_FAIL' artifacts/p169-image-strings.txt
           grep -Fq 'A52_P169_JIT_FAIL stage=build_body' artifacts/p169-image-strings.txt
           grep -Fq 'A52_P169_BPF_ACCESS' artifacts/p169-image-strings.txt
 
@@ -1600,7 +1605,8 @@ jobs:
             echo 'P169 Tethering/BPF diagnostic audit: PASS'
             echo 'BPF JIT: enabled + always-on'
             echo 'Kernel config delta: none'
-            echo 'netbpfload/bpfloader verifier/JIT/syscall failure logging: present'
+            echo 'netbpfload/bpfloader BTF/verifier/JIT/syscall logging: present'
+            echo 'JIT executable-allocation tracing: present'
             echo 'bpffs access-path tracing: present'
           } | tee artifacts/p169-bpf-postbuild-audit.txt
 

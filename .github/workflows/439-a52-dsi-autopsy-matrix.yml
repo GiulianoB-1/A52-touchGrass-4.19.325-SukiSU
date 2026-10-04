@@ -364,8 +364,7 @@ jobs:
              "$ROOT/drivers/devfreq/devfreq_devbw.c" \
              "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" \
              "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" \
-             "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" \
-             "$ROOT/drivers/a52_display/msm/sde/sde_dbg.c" "$OUT/source/"
+             "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/"
           cp "$ROOT/include/linux/a52_phase436_frontier.h" \
              "$ROOT/include/linux/a52_phase437_open.h" "$OUT/source/"
           cp scripts/437_apply_kgsl_open_corridor.py \
@@ -424,7 +423,6 @@ jobs:
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
             gki/common/drivers/a52_display/msm/dsi/dsi_display.c
-            gki/common/drivers/a52_display/msm/sde/sde_dbg.c
             gki/common/include/linux/a52_phase436_frontier.h
             gki/common/include/linux/a52_phase437_open.h
             workspace/gki-phase199-out/.config

@@ -99,9 +99,12 @@ for marker in \
   'TG439 D i=%u dc=%x' \
   'TG439 Q i=%u s1=%x s2=%x dm=%x' \
   'TG439 P i=%u ps=%x' \
-  'A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1' \
-  'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1'; do
-  grep -aFq "$marker" "$IMAGE"
+  'TG344 S i=%u p=%u t=%llu st=%x fs=%x cc=%x ck=%x in=%x ln=%x' \
+  'TG424 D %x %x %x %x %x %x %x %x'; do
+  if ! grep -aFq "$marker" "$IMAGE"; then
+    echo "Phase439G compiled marker missing: $marker" >&2
+    exit 1
+  fi
 done
 
 stage "assemble Phase439G Golden evidence"

@@ -30,8 +30,8 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase439-dsi-autopsy-${{ github.sha }}
-  cancel-in-progress: false
+  group: a52-phase439-dsi-autopsy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gki:
@@ -461,7 +461,6 @@ jobs:
       JOBS: '4'
       CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
       CCACHE_MAXSIZE: 5G
-      A52_GOLDEN_REUSE_OUT: '1'
       GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
       PHASE315G_COMMIT: a82b49ec1c0227611d8dc9a26a7249dae0a8c938
       BOOT_SOURCE_ASSET_ID: '478920392'
@@ -509,54 +508,14 @@ jobs:
             golden-work/scripts/439g_apply_golden_dsi_autopsy.py
           bash -n golden-work/scripts/439g_ci_build_golden.sh
 
-      - name: Restore Golden object tree cache
-        uses: actions/cache/restore@v4
-        with:
-          path: golden-work/workspace/touchgrass-a52xq/out
-          key: a52xq-phase439g-golden-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ github.run_id }}
-          restore-keys: |
-            a52xq-phase439g-golden-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
-
-      - name: Enable incremental Golden object reuse
+      - name: Start fresh Golden compiler cache
         run: |
           set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          common = Path("golden-work/scripts/common.sh")
-          s = common.read_text()
-          old = '  configure_toolchain\n  rm -rf "$KERNEL_DIR/out"\n  mkdir -p "$KERNEL_DIR/out"\n'
-          new = '  configure_toolchain\n  if [ "${A52_GOLDEN_REUSE_OUT:-0}" != "1" ]; then\n    rm -rf "$KERNEL_DIR/out"\n  fi\n  mkdir -p "$KERNEL_DIR/out"\n'
-          if old not in s:
-              raise SystemExit("Golden common.sh build_kernel anchor missing")
-          common.write_text(s.replace(old, new, 1))
-
-          prep = Path("golden-work/scripts/01_prepare_source.sh")
-          s = prep.read_text()
-          old = 'rm -rf "$KERNEL_DIR"\nmkdir -p "$WORKSPACE"\n\ninfo "Fetching the exact touchGrass baseline commit"\n'
-          new = '_a52_saved_out=""\nif [ "${A52_GOLDEN_REUSE_OUT:-0}" = "1" ] && [ -d "$KERNEL_DIR/out" ]; then\n  _a52_saved_out="$WORKSPACE/.a52-golden-out-cache"\n  rm -rf "$_a52_saved_out"\n  mv "$KERNEL_DIR/out" "$_a52_saved_out"\nfi\n\nrm -rf "$KERNEL_DIR"\nmkdir -p "$WORKSPACE"\n\ninfo "Fetching the exact touchGrass baseline commit"\n'
-          if old not in s:
-              raise SystemExit("Golden 01_prepare_source.sh pre-clone anchor missing")
-          s = s.replace(old, new, 1)
-          old = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
-          new = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nif [ -n "$_a52_saved_out" ] && [ -d "$_a52_saved_out" ]; then\n  mv "$_a52_saved_out" "$KERNEL_DIR/out"\n  mkdir -p "$KERNEL_DIR/.git/info"\n  grep -qxF "/out/" "$KERNEL_DIR/.git/info/exclude" 2>/dev/null || printf "/out/\\n" >> "$KERNEL_DIR/.git/info/exclude"\nfi\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
-          if old not in s:
-              raise SystemExit("Golden 01_prepare_source.sh post-checkout anchor missing")
-          prep.write_text(s.replace(old, new, 1))
-          PY
-          grep -Fq 'A52_GOLDEN_REUSE_OUT' golden-work/scripts/common.sh
-          grep -Fq '_a52_saved_out' golden-work/scripts/01_prepare_source.sh
-
-      - name: Restore Golden compiler cache
-        uses: actions/cache@v4
-        with:
-          path: golden-work/.ccache
-          key: a52xq-phase439g-golden-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            a52xq-phase424g-golden-${{ runner.os }}-
-            a52xq-phase319-golden-${{ runner.os }}-
-            a52xq-phase315g-golden-${{ runner.os }}-
-            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+          rm -rf golden-work/.ccache
+          mkdir -p golden-work/.ccache
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -z
+          echo "Golden cache policy: fresh per run, no persisted object/source state"
 
       - name: Build Phase439G Golden oracle
         run: |
@@ -605,20 +564,6 @@ jobs:
           test "$(stat -c %s "$OUT/package/boot-phase439g-touchgrass-golden-v1.img")" -eq 100663296
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
-
-      - name: Save Golden object tree cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: golden-work/workspace/touchgrass-a52xq/out
-          key: a52xq-phase439g-golden-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ github.run_id }}
-
-      - name: Save Golden compiler cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: golden-work/.ccache
-          key: a52xq-phase439g-golden-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload Phase439G Golden failure diagnostics
         if: failure()

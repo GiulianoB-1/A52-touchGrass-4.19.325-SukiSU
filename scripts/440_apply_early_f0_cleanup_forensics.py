@@ -108,11 +108,13 @@ def patch_rec(text: str) -> str:
         '       !strncmp(message, "P439 ", 5) ||',
         "recorder critical admission",
     )
-    text = one(
-        text,
-        'strncmp(fmt, "P439", 4) &&',
-        'strncmp(fmt, "P440", 4) &&\n\t    strncmp(fmt, "P439", 4) &&',
-        "recorder format admission",
+    anchor = 'strncmp(fmt, "P439", 4) &&'
+    n = text.count(anchor)
+    if n < 1:
+        die("recorder format admission: P439 gate missing")
+    text = text.replace(
+        anchor,
+        'strncmp(fmt, "P440", 4) &&\n\t    ' + anchor,
     )
     return text + "\n" + REC_HELPER
 

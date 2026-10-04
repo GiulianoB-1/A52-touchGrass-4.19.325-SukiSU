@@ -1,0 +1,169 @@
+name: Phase441 - Bootanimation GKI vs TouchGrass oracle
+run-name: Phase441 bootanimation crash + graphics ABI golden comparison
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/a52-phase432-ctrl-cache-run-v1]
+    paths:
+      - .github/workflows/441-a52-bootanimation-golden-oracle.yml
+      - scripts/441_apply_bootanimation_oracle.py
+      - scripts/441_apply_bootanimation_oracle.py.z64
+      - scripts/441_graphics_uapi_audit.py
+      - scripts/441_graphics_uapi_audit.py.z64
+      - scripts/441_ci_build_gki.sh
+      - scripts/441g_ci_build_touchgrass.sh
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+  BOOT_SOURCE_ASSET_ID: '478920392'
+  BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+concurrency:
+  group: a52-phase441-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    name: Build Phase441G GKI oracle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git make gcc g++ python3 bc bison flex clang lld llvm ccache gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip jq
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          printf '#!/bin/sh\nexec ccache /usr/bin/clang "$@"\n' > "$RUNNER_TEMP/a52-ccache-bin/clang"
+          printf '#!/bin/sh\nexec ccache /usr/bin/clang++ "$@"\n' > "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+          ccache -M "$CCACHE_MAXSIZE"; ccache -o compression=true; ccache -o compression_level=6; ccache -z
+          python3 -m py_compile scripts/441_apply_bootanimation_oracle.py scripts/441_graphics_uapi_audit.py
+          bash -n scripts/441_ci_build_gki.sh
+      - name: Restore canonical Phase429 source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
+          restore-keys: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+      - name: Restore pinned TouchGrass
+        id: tg
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Clone TouchGrass on cache miss
+        if: steps.tg.outputs.cache-hit != 'true'
+        run: |
+          rm -rf workspace/touchgrass-a52xq; mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+      - name: Restore object tree
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase441-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/441_apply_bootanimation_oracle.py.z64') }}
+          restore-keys: |
+            a52xq-phase441-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase440-early-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase439-dsi-A-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase441-${{ github.run_id }}
+          restore-keys: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+      - name: Build Phase441G
+        run: bash scripts/441_ci_build_gki.sh
+      - name: Save object tree
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase441-objects-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/441_apply_bootanimation_oracle.py.z64') }}
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase441-${{ github.run_id }}
+      - name: Upload Phase441G evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE441G-BOOTANIMATION-ORACLE-${{ github.run_number }}
+          path: phase441-gki-out/
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Phase441G boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE441G-BOOTANIMATION-ORACLE-${{ github.run_number }}-BOOT-IMG
+          path: phase441-gki-out/package/boot-phase441g-bootanimation-oracle-v1.img
+          compression-level: 0
+          retention-days: 30
+
+  golden:
+    name: Build Phase441T TouchGrass golden oracle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: '4'
+      CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+      CCACHE_MAXSIZE: 5G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare runner and Golden workspace
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+          cp scripts/441_apply_bootanimation_oracle.py scripts/441_apply_bootanimation_oracle.py.z64 scripts/441g_ci_build_touchgrass.sh golden-work/scripts/
+          python3 -m py_compile golden-work/scripts/441_apply_bootanimation_oracle.py
+          bash -n golden-work/scripts/441g_ci_build_touchgrass.sh
+      - name: Restore Golden ccache
+        uses: actions/cache@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase441-golden-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase432ctrlg-golden-${{ runner.os }}-
+            a52xq-phase424g-golden-${{ runner.os }}-
+            a52xq-linux-4.19.200-ccache-${{ runner.os }}-
+      - name: Build and repack Phase441T
+        run: cd golden-work && bash scripts/441g_ci_build_touchgrass.sh
+      - name: Upload Phase441T evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE441T-GOLDEN-BOOTANIMATION-ORACLE-${{ github.run_number }}
+          path: golden-work/phase441-tg-golden-out/
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Phase441T boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE441T-GOLDEN-BOOTANIMATION-ORACLE-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase441-tg-golden-out/package/boot-phase441t-golden-bootanimation-oracle-v1.img
+          compression-level: 0
+          retention-days: 30

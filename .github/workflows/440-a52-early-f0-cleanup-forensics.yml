@@ -1,0 +1,455 @@
+name: Phase440 - early F0 and cleanup forensics
+run-name: Phase440 early-vs-late F0 + passive cleanup forensics
+
+on:
+  push:
+    branches:
+      - agent/a52-phase440-early-f0-cleanup-v1
+    paths:
+      - .github/workflows/440-a52-early-f0-cleanup-forensics.yml
+      - scripts/440_apply_early_f0_cleanup_forensics.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
+
+concurrency:
+  group: a52-phase440-early-f0-cleanup-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    if: true
+    name: Build Phase439${{ matrix.variant }} GKI clock isolation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Phase439 payload
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/437_apply_kgsl_open_corridor.py \
+            scripts/438_apply_devbw_semantic_parity.py \
+            scripts/439_apply_dsi_autopsy.py \
+             scripts/440_apply_early_f0_cleanup_forensics.py \
+            scripts/439ef2_apply_clock_isolation.py \
+            scripts/440_apply_early_f0_cleanup_forensics.py \
+            scripts/decode_phase439_dsi.py \
+            scripts/decode_phase437_open.py
+          python3 scripts/437_apply_kgsl_open_corridor.py --help >/dev/null
+          python3 scripts/438_apply_devbw_semantic_parity.py --help >/dev/null
+          python3 scripts/439_apply_dsi_autopsy.py --help >/dev/null
+          python3 scripts/439ef2_apply_clock_isolation.py --help >/dev/null
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --help >/dev/null
+          python3 scripts/decode_phase439_dsi.py --help >/dev/null
+          python3 scripts/decode_phase437_open.py --help >/dev/null
+          echo "Phase439 payload: PASS"
+
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore canonical Phase429 source
+        id: source
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            phase429-gki-out
+          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
+          restore-keys: |
+            a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Require cached Phase429 source
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          test -s phase429-gki-out/config/final.config
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 source cache: PASS"
+
+      - name: Restore TouchGrass source
+        id: tg
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on cache miss
+        if: steps.tg.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Restore Phase436 object tree
+        id: objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase440-early-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+          restore-keys: |
+            a52xq-phase440-early-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase439-dsi-A-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+            a52xq-phase438-devbw-parity-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase437-kgsl-open-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect reusable object tree
+        id: warm
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Phase436-compatible object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Phase436-compatible object tree: MISS"
+          fi
+
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          ccache -s
+
+      - name: Prepare build directory on object-cache miss
+        if: steps.warm.outputs.hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+      - name: Reapply Phase430 through Phase432-CTRL
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+
+      - name: Reapply Phase433 performance
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          TG="$PWD/workspace/touchgrass-a52xq"
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --touchgrass "$TG"
+          "$ROOT/scripts/config" --file "$BUILD/.config" \
+            -e ARM_QCOM_CPUFREQ_HW -e CPU_FREQ_DEFAULT_GOV_PERFORMANCE \
+            -d CPU_FREQ_DEFAULT_GOV_SCHEDUTIL -e CPU_FREQ_GOV_PERFORMANCE \
+            -e QCOM_BIMC_BWMON -e DEVFREQ_GOV_QCOM_BW_HWMON \
+            -e ARM_MEMLAT_MON -e DEVFREQ_GOV_MEMLAT \
+            -e ARM_QCOM_DEVFREQ_FW -e QCOM_DEVFREQ_DEVBW -e DUTVFREQ_SIMPLE_DEV
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
+
+      - name: Reapply Phase434 through Phase436
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT"
+          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --overlap-report /tmp/p435-overlap.txt
+          python3 scripts/436_apply_adreno_start_frontier.py --root "$ROOT" --overlap-report /tmp/p436-overlap.txt
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
+          python3 scripts/436_apply_adreno_start_frontier.py --root "$ROOT" --check-only --overlap-report /tmp/p436-overlap-check.txt
+          echo "Phase436 baseline reconstructed: PASS"
+
+      - name: Apply Phase437 KGSL open corridor
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          grep -Fq '#define A52_P414_RAM_BYTES           (SZ_1M - SZ_16K - SZ_8K)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P437_PHYS       0xB1AFA000ULL' "$ROOT/drivers/a52_secure/a52_phase437_open.c"
+          grep -Fq '#define A52_P436_PHYS       0xB1AFC000ULL' "$ROOT/drivers/a52_secure/a52_phase436_frontier.c"
+          ! grep -Fq 'P437_' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          ! grep -Fq 'P437_' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          echo "Phase437 source audit: PASS"
+
+      - name: Apply Phase438 DEVBW semantic parity
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT"
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+
+          grep -Fq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          grep -Fq 'if (count <= 0)' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          grep -Fq 'if (count > 0)' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          ! grep -Fq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$ROOT/drivers/devfreq/devfreq.c"
+          echo "Phase438 DEVBW source audit: PASS"
+
+      - name: Apply Phase439A baseline and Phase440 experiment
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --root "$ROOT"
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --root "$ROOT" --check-only
+
+          grep -Fq 'A52_PHASE439_DSI_AUTOPSY_V3' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq 'P440 EARLY start' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          grep -Fq 'BA_GROUP_EXIT' "$ROOT/kernel/exit.c"
+          grep -Fq 'BA_SYSCALL' "$ROOT/arch/arm64/kernel/syscall.c"
+          grep -Fq 'SYNC_PRE' "$ROOT/drivers/base/core.c"
+          grep -Fq 'RPM_SUSP' "$ROOT/drivers/base/power/runtime.c"
+          grep -Fq 'GENPD_OFF' "$ROOT/drivers/base/power/domain.c"
+          grep -Fq 'REG_LATE' "$ROOT/drivers/regulator/core.c"
+          echo "Phase440 source audit: PASS"
+
+      - name: Audit display clock sync_state contracts
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== Phase439 clock-provider sync_state audit ==="
+            echo "--- display clock controllers ---"
+            grep -Rns --include='*dispcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- gcc clock controllers ---"
+            grep -Rns --include='gcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- rpmh clocks ---"
+            grep -Rns --include='*rpmh*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- generic clk_sync_state references ---"
+            grep -Rns -E 'clk_sync_state|sync_state' "$ROOT/drivers/clk/qcom" | head -200 || true
+          } | tee /tmp/p439-sync-state.txt
+          test -s /tmp/p439-sync-state.txt
+
+      - name: Incremental compile Phase440
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --root "$ROOT" --check-only
+
+          grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
+          grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
+          grep -aFq 'P440 EARLY start' "$IMAGE"
+          grep -aFq 'P440 EV n=%u' "$IMAGE"
+          grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
+          grep -Fq ' a52_p437_mark' "$MAP"
+          grep -Fq ' a52_p439_allow_next' "$MAP"
+          grep -Fq ' a52_p440_event' "$MAP"
+          ccache -s
+
+      - name: Save Phase440 object cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase440-early-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+
+      - name: Save rolling clang ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
+
+      - name: Package Phase440
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          V="${{ matrix.variant }}"
+          OUT="$PWD/phase440-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase440-early-f0-cleanup-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          mkdir -p "$OUT/source" "$OUT/audit"
+          cp "$ROOT/fs/open.c" "$ROOT/fs/namei.c" "$ROOT/fs/char_dev.c" "$OUT/source/"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
+             "$ROOT/drivers/a52_secure/a52_phase436_frontier.c" \
+             "$ROOT/drivers/a52_secure/a52_phase437_open.c" \
+             "$ROOT/drivers/devfreq/devfreq_devbw.c" \
+             "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" \
+             "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" \
+             "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/"
+          cp "$ROOT/kernel/exit.c" "$ROOT/arch/arm64/kernel/syscall.c" \
+             "$ROOT/drivers/base/core.c" "$ROOT/drivers/base/power/runtime.c" \
+             "$ROOT/drivers/base/power/domain.c" "$ROOT/drivers/regulator/core.c" "$OUT/source/"
+          cp "$ROOT/include/linux/a52_phase436_frontier.h" \
+             "$ROOT/include/linux/a52_phase437_open.h" "$OUT/source/"
+          cp scripts/437_apply_kgsl_open_corridor.py \
+             scripts/437_apply_kgsl_open_corridor.py.z64 \
+             scripts/438_apply_devbw_semantic_parity.py \
+             scripts/439_apply_dsi_autopsy.py \
+             scripts/440_apply_early_f0_cleanup_forensics.py \
+             scripts/439ef2_apply_clock_isolation.py \
+             scripts/decode_phase439_dsi.py \
+             scripts/decode_phase437_open.py \
+             scripts/decode_phase437_open.py.z64 \
+             scripts/decode_phase436_frontier.py \
+             scripts/decode_phase436_frontier.py.z64 \
+             scripts/decode_phase414_sequential_3m.py "$OUT/audit/"
+          cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt "$OUT/audit/" 2>/dev/null || true
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase439-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE440-NOTES.txt" <<EOF
+          Phase440 early-vs-late F0 + cleanup forensics
+          ==============================================
+          Base: Phase438 + clean Phase439A exact-F0 autopsy.
+          One delayed-work injection sends F0 5A 5A at absolute ~12 s boottime,
+          then F0 A5 A5 relock. The natural Android F0 around ~60 s is untouched.
+          Successful early P439 samples are persisted before re-arm.
+          A 75 s flush preserves PASS->PASS evidence when no timeout occurs.
+          Passive P440 events record bootanimation group/thread exits and failed
+          syscalls, sync_state callbacks, relevant runtime-PM/genpd transitions,
+          and actual regulator_late_cleanup disable attempts.
+          P439 timeout behavior remains unchanged for a wedged early or late F0.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase440 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE440-EARLY-F0-CLEANUP-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/fs/open.c
+            gki/common/fs/namei.c
+            gki/common/fs/char_dev.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_secure/a52_phase436_frontier.c
+            gki/common/drivers/a52_secure/a52_phase437_open.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/include/linux/a52_phase436_frontier.h
+            gki/common/include/linux/a52_phase437_open.h
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/437_apply_kgsl_open_corridor.py
+            scripts/437_apply_kgsl_open_corridor.py.z64
+            scripts/438_apply_devbw_semantic_parity.py
+            scripts/439_apply_dsi_autopsy.py
+            scripts/439ef2_apply_clock_isolation.py
+            scripts/decode_phase439_dsi.py
+            scripts/decode_phase437_open.py
+            scripts/decode_phase437_open.py.z64
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase440
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE440-EARLY-F0-CLEANUP-${{ github.run_number }}
+          path: phase440-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase440 boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE440-EARLY-F0-CLEANUP-${{ github.run_number }}-BOOT-IMG
+          path: phase440-gki-out/package/boot-phase440-clock-isolation-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+

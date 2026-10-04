@@ -47,6 +47,7 @@ COMMON_HWC = r'''
 #define A52_P439_MAX               10U
 
 extern bool a52_p439_f0_active(void);
+extern void a52_ackfr_record(const char *fmt, ...);
 
 struct a52_p439_sample {
 	u64 ns;
@@ -519,11 +520,21 @@ a52_p439d_reset_schedule_state(struct dsi_ctrl *dsi_ctrl)
 \tu32 line_no = 0x1;
 \tstruct dsi_ctrl_hw_ops dsi_hw_ops = dsi_ctrl->hw.ops;
 \tbool a52_p439_f0 = a52_p411_exact_f0(dsi_ctrl, msg);
-
-\tif (a52_p439_f0)
-\t\tatomic_set(&a52_p439_f0_inflight, 1);
 '''
     text = one(text, old, new, "kickoff exact-F0 local")
+
+    samsung_decls = '''#if defined(CONFIG_DISPLAY_SAMSUNG)
+\tu8 *tx_buf = (u8 *)msg->tx_buf;
+#endif
+'''
+    text = one(
+        text,
+        samsung_decls,
+        samsung_decls +
+        "\tif (a52_p439_f0)\n"
+        "\t\tatomic_set(&a52_p439_f0_inflight, 1);\n\n",
+        "kickoff arm after declarations",
+    )
 
     old = '''\t}
 }

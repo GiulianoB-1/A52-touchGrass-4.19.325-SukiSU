@@ -39,8 +39,8 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase439-dsi-autopsy-${{ github.ref }}
-  cancel-in-progress: true
+  group: a52-phase439-dsi-autopsy-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   gki:
@@ -462,6 +462,7 @@ jobs:
           retention-days: 30
 
   golden:
+    if: github.event_name == 'workflow_dispatch'
     name: Build Phase439G TouchGrass Golden
     runs-on: ubuntu-22.04
     timeout-minutes: 300

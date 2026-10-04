@@ -3,6 +3,24 @@ run-name: Phase439 - DSI autopsy A/B/C/D + Golden
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/a52-phase432-ctrl-cache-run-v1
+    paths:
+      - .github/workflows/439-a52-dsi-autopsy-matrix.yml
+      - scripts/439_apply_dsi_autopsy.py
+      - scripts/decode_phase439_dsi.py
+      - scripts/439g_apply_golden_dsi_autopsy.py
+      - scripts/439g_ci_build_golden.sh
+  pull_request:
+    branches:
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
+    paths:
+      - .github/workflows/439-a52-dsi-autopsy-matrix.yml
+      - scripts/439_apply_dsi_autopsy.py
+      - scripts/decode_phase439_dsi.py
+      - scripts/439g_apply_golden_dsi_autopsy.py
+      - scripts/439g_ci_build_golden.sh
 
 permissions:
   contents: read

@@ -70,13 +70,14 @@ for line in added:
         raise SystemExit('Phase439G added non-debugbus DSI write: '+line)
 
 for token in (
-    'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V1',
+    'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2',
     'A52_G439_PHY_PHYS 0x0ae94000ULL',
     'a52_g439_wait_until(start,15000ULL)',
     'a52_g439_wait_until(start,35000ULL)',
     'a52_g439_wait_until(start,50000ULL)',
     'TG439 S i=%u p=%u ns=%llu',
     'TG439 D i=%u dc=%x',
+    'TG439 Q i=%u s1=%x s2=%x dm=%x',
     'TG439 P i=%u ps=%x',
 ):
     if token not in a+ac:
@@ -93,9 +94,10 @@ test -s "$IMAGE" -a -s "$CONFIG"
 
 stage "compiled marker audit"
 for marker in \
-  'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V1' \
+  'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' \
   'TG439 S i=%u p=%u ns=%llu' \
   'TG439 D i=%u dc=%x' \
+  'TG439 Q i=%u s1=%x s2=%x dm=%x' \
   'TG439 P i=%u ps=%x' \
   'A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1' \
   'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1'; do
@@ -113,13 +115,13 @@ cp scripts/439g_apply_golden_dsi_autopsy.py \
 cp /tmp/p439g-* "$OUT/audit/" 2>/dev/null || true
 cp "$CTRL" "$HWC" "$OUT/source/"
 cat > "$OUT/BUILD-IDENTITY.txt" <<'EOF'
-experiment=PHASE439G-GOLDEN-DSI-AUTOPSY-V1
+experiment=PHASE439G-GOLDEN-DSI-AUTOPSY-V2
 base=exact-Phase424G-known-working-TouchGrass-Golden
 target=controller0-exact-F05A5A
 timed_points=PRE,+15us,+35us,+50us
 timed_debug_selector=0x0171
-timed_fields=DSI_STATUS,FIFO,CLK_CTRL,CLK_STATUS,INT_CTRL,LANE_STATUS,LANE_CTRL,DMA_CTRL,DMA_OFFSET,DMA_LENGTH,SW_TRIGGER,TRIG_CTRL,ACK_ERR,TIMEOUT,PHY_ERR,AXI2AHB,DBG171,PLL_STATUS_ONE,PHY_PLL_CTRL,PHY_CTRL0,PHY_RBUF,PHY_CLK_CFG1,PHY_LANE0,PHY_LANE1
-sample_transport=normal-RAM-hot-path,/proc/a52_phase439g,post-success-printk
+timed_fields=DSI_STATUS,FIFO,CLK_CTRL,CLK_STATUS,INT_CTRL,LANE_STATUS,LANE_CTRL,DMA_CTRL,DMA_OFFSET,DMA_LENGTH,SW_TRIGGER,TRIG_CTRL,DMA_SCHEDULE_CTRL_0x100,DMA_SCHEDULE_CTRL2_0x104,DISP_CC_MISC_CMD,ACK_ERR,TIMEOUT,PHY_ERR,AXI2AHB,DBG171,PLL_STATUS_ONE,PHY_PLL_CTRL,PHY_CTRL0,PHY_RBUF,PHY_CLK_CFG1,PHY_LANE0,PHY_LANE1
+sample_transport=normal-RAM-hot-path,/proc/a52_phase439g,post-success-printk;debug_bus=0x0171-timed-plus-256-selector-post-success
 inherits=Phase319-six-selector-debugbus,Phase344G-DMA-transition,Phase424G-paired-hardware
 functional_dsi_write_added=debug-selector-only
 clock_phy_reset_regulator_policy_changes=none

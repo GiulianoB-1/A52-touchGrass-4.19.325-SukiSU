@@ -1,17 +1,15 @@
-name: Phase439 - DSI autopsy matrix
-run-name: Phase439 - DSI autopsy A/B/C/D + Golden
+name: Phase439EF - DSI clock handshake
+run-name: Phase439E/F clock handshake + Golden-F
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request:
     branches:
-      - agent/a52-phase432-ctrl-cache-run-v1
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
       - .github/workflows/439-a52-dsi-autopsy-matrix.yml
-      - scripts/439_apply_dsi_autopsy.py
-      - scripts/decode_phase439_dsi.py
-      - scripts/439g_apply_golden_dsi_autopsy.py
-      - scripts/439g_ci_build_golden.sh
+      - scripts/439ef_apply_clock_handshake.py
+      - scripts/439fg_apply_golden_dense.py
+      - scripts/439fg_ci_build_golden.sh
 
 permissions:
   contents: read
@@ -30,19 +28,19 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase439-dsi-autopsy-${{ github.ref }}
+  group: a52-phase439ef-clock-handshake-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[golden-only]')
-    name: Build Phase439${{ matrix.variant }} GKI
+    if: true
+    name: Build Phase439${{ matrix.variant }} GKI clock handshake
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        variant: [A, B, C, D]
+        variant: [E, F]
     steps:
       - uses: actions/checkout@v4
 
@@ -53,11 +51,13 @@ jobs:
             scripts/437_apply_kgsl_open_corridor.py \
             scripts/438_apply_devbw_semantic_parity.py \
             scripts/439_apply_dsi_autopsy.py \
+            scripts/439ef_apply_clock_handshake.py \
             scripts/decode_phase439_dsi.py \
             scripts/decode_phase437_open.py
           python3 scripts/437_apply_kgsl_open_corridor.py --help >/dev/null
           python3 scripts/438_apply_devbw_semantic_parity.py --help >/dev/null
           python3 scripts/439_apply_dsi_autopsy.py --help >/dev/null
+          python3 scripts/439ef_apply_clock_handshake.py --help >/dev/null
           python3 scripts/decode_phase439_dsi.py --help >/dev/null
           python3 scripts/decode_phase437_open.py --help >/dev/null
           echo "Phase439 payload: PASS"
@@ -126,9 +126,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase439-dsi-${{ matrix.variant }}-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+          key: a52xq-phase439-dsi-${{ matrix.variant }}-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/439_apply_dsi_autopsy.py', 'scripts/439ef_apply_clock_handshake.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
           restore-keys: |
             a52xq-phase439-dsi-${{ matrix.variant }}-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase439-dsi-A-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase438-devbw-parity-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase437-kgsl-open-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
             a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
@@ -250,11 +251,28 @@ jobs:
           ROOT="$PWD/gki/common"
           V="${{ matrix.variant }}"
 
-          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "$V"
-          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "$V" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/439ef_apply_clock_handshake.py --root "$ROOT" --variant "$V"
+          python3 scripts/439ef_apply_clock_handshake.py --root "$ROOT" --variant "$V" --check-only
 
           grep -Fq 'A52_PHASE439_DSI_AUTOPSY_V3' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE439EF_CLOCK_HANDSHAKE_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           grep -Fq 'A52P439 DSI F0 DMA_DONE timeout' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          grep -Fq '#define DSI_CTRL_DYNAMIC_FORCE_ON         (0x23F|BIT(8)|BIT(9)|BIT(11)|BIT(21))' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq '.cmd_rcgr = 0x1064' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.cmd_rcgr = 0x10c4' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.cmd_rcgr = 0x10e0' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.halt_reg = 0x100c' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.halt_reg = 0x102c' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.halt_reg = 0x1030' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          grep -Fq '.halt_reg = 0x1034' "$ROOT/drivers/clk/qcom/dispcc-sm6350.c"
+          if [ "$V" = E ]; then
+            grep -Fq 'A52_P439EF_FORCE_MODE 1U' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          else
+            grep -Fq 'A52_P439EF_FORCE_MODE 0U' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+            grep -Fq 'a52_p439ef_dense_run(ctrl);' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          fi
           grep -Fq 'P439 S i=%u e=%u p=%u' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           if [ "$V" = C ]; then
             grep -Fq 'MIPI_DSI_MSG_USE_LPM' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
@@ -303,10 +321,13 @@ jobs:
 
           python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
-          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant "${{ matrix.variant }}" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/439ef_apply_clock_handshake.py --root "$ROOT" --variant "${{ matrix.variant }}" --check-only
           grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
           grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
           grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
+          grep -aFq 'A52_PHASE439EF_CLOCK_HANDSHAKE_V1' "$IMAGE"
+          grep -aFq "A52_PHASE439EF_CLOCK_HANDSHAKE_V1:VARIANT_${{ matrix.variant }}" "$IMAGE"
           grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
           grep -Fq ' a52_p437_mark' "$MAP"
           grep -Fq ' a52_p437_target_current' "$MAP"
@@ -322,7 +343,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
-          key: a52xq-phase439-dsi-${{ matrix.variant }}-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+          key: a52xq-phase439-dsi-${{ matrix.variant }}-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/439_apply_dsi_autopsy.py', 'scripts/439ef_apply_clock_handshake.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
 
       - name: Save rolling clang ccache
         if: always()
@@ -340,7 +361,7 @@ jobs:
           V="${{ matrix.variant }}"
           OUT="$PWD/phase439-${V}-gki-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
-          FINAL="$OUT/package/boot-phase439-${V}-dsi-autopsy-v1.img"
+          FINAL="$OUT/package/boot-phase439-${V}-clock-handshake-v1.img"
 
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
@@ -363,6 +384,7 @@ jobs:
              scripts/437_apply_kgsl_open_corridor.py.z64 \
              scripts/438_apply_devbw_semantic_parity.py \
              scripts/439_apply_dsi_autopsy.py \
+             scripts/439ef_apply_clock_handshake.py \
              scripts/decode_phase439_dsi.py \
              scripts/decode_phase437_open.py \
              scripts/decode_phase437_open.py.z64 \
@@ -385,6 +407,10 @@ jobs:
           Variant B: early normal-path HS unlock/relock, then normal late F0.
           Variant C: normal late F0 forced through semantic USE_LPM flag.
           Variant D: later-Qualcomm DSI 2.2/2.3/2.4 trigger/schedule reset A/B.
+          Variant E: force Qualcomm DSI dynamic clocks before exact-F0 trigger,
+                     then restore original CLK_CTRL at completion/timeout.
+          Variant F: no functional clock change; 64 DSI-local samples at ~1 us
+                     cadence from the actual SW_TRIGGER.
           Timed points: PRE, +15 us, +35 us, +50 us, timeout.
           Timed evidence: controller state, real CLK_STATUS, debug bus 0x171,
           schedule 0x100/0x104, TRIG_CTRL 0x84, DISP_CC_MISC_CMD,
@@ -424,6 +450,7 @@ jobs:
             scripts/437_apply_kgsl_open_corridor.py.z64
             scripts/438_apply_devbw_semantic_parity.py
             scripts/439_apply_dsi_autopsy.py
+            scripts/439ef_apply_clock_handshake.py
             scripts/decode_phase439_dsi.py
             scripts/decode_phase437_open.py
             scripts/decode_phase437_open.py.z64
@@ -446,14 +473,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE439${{ matrix.variant }}-DSI-AUTOPSY-${{ github.run_number }}-BOOT-IMG
-          path: phase439-${{ matrix.variant }}-gki-out/package/boot-phase439-${{ matrix.variant }}-dsi-autopsy-v1.img
+          path: phase439-${{ matrix.variant }}-gki-out/package/boot-phase439-${{ matrix.variant }}-clock-handshake-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
 
   golden:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[golden-only]'))
-    name: Build Phase439G TouchGrass Golden
+    if: false
+    name: Build Phase439F TouchGrass Golden dense observer
     runs-on: ubuntu-22.04
     timeout-minutes: 300
     env:
@@ -499,14 +526,18 @@ jobs:
           cp scripts/424g_ci_build_golden.sh golden-work/scripts/
           cp scripts/439g_apply_golden_dsi_autopsy.py golden-work/scripts/
           cp scripts/439g_ci_build_golden.sh golden-work/scripts/
+          cp scripts/439fg_apply_golden_dense.py golden-work/scripts/
+          cp scripts/439fg_ci_build_golden.sh golden-work/scripts/
 
           python3 -m py_compile \
             golden-work/scripts/315g_apply_golden_f0_full_prestate_reference.py \
             golden-work/scripts/319_apply_dsi_sixpoint_temporal_observer.py \
             golden-work/scripts/344g_apply_golden_dma_transition_recorder.py \
             golden-work/scripts/424g_apply_golden_paired_hw_snapshot.py \
-            golden-work/scripts/439g_apply_golden_dsi_autopsy.py
+            golden-work/scripts/439g_apply_golden_dsi_autopsy.py \
+            golden-work/scripts/439fg_apply_golden_dense.py
           bash -n golden-work/scripts/439g_ci_build_golden.sh
+          bash -n golden-work/scripts/439fg_ci_build_golden.sh
 
       - name: Start fresh Golden compiler cache
         run: |
@@ -517,11 +548,11 @@ jobs:
           ccache -z
           echo "Golden cache policy: fresh per run, no persisted object/source state"
 
-      - name: Build Phase439G Golden oracle
+      - name: Build Phase439F Golden dense observer
         run: |
           set -Eeuo pipefail
           cd golden-work
-          bash scripts/439g_ci_build_golden.sh
+          bash scripts/439fg_ci_build_golden.sh
 
       - name: Hydrate Golden FDR repack helpers
         if: success()
@@ -545,7 +576,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd golden-work
-          OUT=phase439-golden-out
+          OUT=phase439f-golden-out
           mkdir -p intake "$OUT/package"
           gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
           curl --fail --location --retry 3 --silent --show-error \
@@ -559,9 +590,9 @@ jobs:
             --output "$OUT/package/source-validation.json"
           python3 scripts/38_repack_a52_p1_boot.py \
             --source intake/boot.img --kernel "$OUT/package/Image.gz" \
-            --output "$OUT/package/boot-phase439g-touchgrass-golden-v1.img" \
+            --output "$OUT/package/boot-phase439f-touchgrass-golden-dense-v1.img" \
             --report "$OUT/package/repack-report.json"
-          test "$(stat -c %s "$OUT/package/boot-phase439g-touchgrass-golden-v1.img")" -eq 100663296
+          test "$(stat -c %s "$OUT/package/boot-phase439f-touchgrass-golden-dense-v1.img")" -eq 100663296
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
 
@@ -569,8 +600,9 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE439G-GOLDEN-FAILED-${{ github.run_number }}
+          name: A52XQ-PHASE439F-GOLDEN-FAILED-${{ github.run_number }}
           path: |
+            golden-work/phase439f-golden-failure/
             golden-work/phase439-golden-failure/
             golden-work/phase424-golden-failure/
           if-no-files-found: warn
@@ -581,8 +613,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE439G-TOUCHGRASS-GOLDEN-${{ github.run_number }}
-          path: golden-work/phase439-golden-out/
+          name: A52XQ-PHASE439F-TOUCHGRASS-GOLDEN-${{ github.run_number }}
+          path: golden-work/phase439f-golden-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
@@ -591,8 +623,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE439G-TOUCHGRASS-GOLDEN-${{ github.run_number }}-BOOT-IMG
-          path: golden-work/phase439-golden-out/package/boot-phase439g-touchgrass-golden-v1.img
+          name: A52XQ-PHASE439F-TOUCHGRASS-GOLDEN-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase439f-golden-out/package/boot-phase439f-touchgrass-golden-dense-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

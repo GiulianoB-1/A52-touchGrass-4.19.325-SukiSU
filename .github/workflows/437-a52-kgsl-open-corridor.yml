@@ -3,15 +3,6 @@ run-name: Phase437 - KGSL open corridor
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
-    paths:
-      - .github/workflows/437-a52-kgsl-open-corridor.yml
-      - scripts/437_apply_kgsl_open_corridor.py
-      - scripts/437_apply_kgsl_open_corridor.py.z64
-      - scripts/decode_phase437_open.py
-      - scripts/decode_phase437_open.py.z64
 
 permissions:
   contents: read

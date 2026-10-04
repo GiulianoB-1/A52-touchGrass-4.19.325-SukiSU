@@ -84,4 +84,18 @@ if old_pid1_loop not in s:
     raise RuntimeError("Phase436 wrapper: PID1 loop repair anchor missing")
 s = s.replace(old_pid1_loop, new_pid1_loop, 1)
 
+# The Phase436 capture proved that exact current->comm matching is too fragile:
+# a SurfaceFlinger worker can enter KGSL with a thread-specific comm. Keep the
+# target narrow by keying on the thread-group leader (the process identity).
+old_arm = '''\tif (strcmp(current->comm, "surfaceflinger"))
+\t\treturn;
+'''
+new_arm = '''\tif (!current->group_leader ||
+\t    strcmp(current->group_leader->comm, "surfaceflinger"))
+\t\treturn;
+'''
+if old_arm not in s:
+    raise RuntimeError("Phase436 wrapper: target-arm anchor missing")
+s = s.replace(old_arm, new_arm, 1)
+
 exec(compile(s, str(p)[:-4], "exec"), globals(), globals())

@@ -159,19 +159,28 @@ def patch_hwc(s,variant):
 \t\t\ta52_p421_survival_record(7U, 0U, 0U, 0, 0U, 0);
 \t\t\ta52_p424_snapshot(ctrl);
 \t\t\ta52_p427_road_snapshot(ctrl, 0U);
+\t\t\ta52_p430_dma_arm(ctrl);
 \t\t}
 \t\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
+\t\tif (a52_p421_target_active()) {
+\t\t\ta52_p430_dma_triggered(ctrl);
+\t\t\ta52_p421_survival_record(8U, 0U, 0U, 0, 0U, 0);
+\t\t}
 '''
     new='''\tif (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER)) {
 \t\tif (a52_p421_target_active()) {
 \t\t\ta52_p421_survival_record(7U, 0U, 0U, 0, 0U, 0);
 \t\t\ta52_p424_snapshot(ctrl);
 \t\t\ta52_p427_road_snapshot(ctrl, 0U);
+\t\t\ta52_p430_dma_arm(ctrl);
 \t\t\ta52_p439_begin(ctrl);
 \t\t}
 \t\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
-\t\tif (a52_p421_target_active())
+\t\tif (a52_p421_target_active()) {
 \t\t\ta52_p439_post_trigger(ctrl);
+\t\t\ta52_p430_dma_triggered(ctrl);
+\t\t\ta52_p421_survival_record(8U, 0U, 0U, 0, 0U, 0);
+\t\t}
 '''
     s=one(s,old,new,'memory trigger')
     old2='''void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)
@@ -319,7 +328,7 @@ def validate(root,variant):
     for p in files:
         if not (root/p).is_file():die('missing '+str(p))
     alltxt='\n'.join((root/p).read_text(errors='replace') for p in files)
-    for tok in [MARK,'P439 S i=%u p=%u','P439 D i=%u','P439 P i=%u','P439 B i=%u c=%x v=%x','A52P439 DSI F0 DMA_DONE timeout','a52_p439_sde_dsi_full_dump','0x0ae94000ULL','0x0171']:
+    for tok in [MARK,'P439 S i=%u p=%u','P439 D i=%u','P439 P i=%u','P439 B i=%u c=%x v=%x','A52P439 DSI F0 DMA_DONE timeout','a52_p439_sde_dsi_full_dump','0x0ae94000ULL','0x0171','a52_p430_dma_arm(ctrl);','a52_p430_dma_triggered(ctrl);']:
         if tok not in alltxt:die('missing '+tok)
     if variant=='B':
         for tok in ['early_unlock pre','early_relock pre','dsi_host_transfer(&display->host,&msg)']:

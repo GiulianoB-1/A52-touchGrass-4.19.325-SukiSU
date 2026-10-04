@@ -22,6 +22,7 @@ fail_report(){
 trap 'rc=$?; [ "$rc" -eq 0 ] || fail_report; exit "$rc"' EXIT
 
 stage "reconstruct exact clean TouchGrass 4.19.200 Golden base"
+chmod +x scripts/*.sh 2>/dev/null || true
 ./scripts/01_prepare_source.sh
 ./scripts/03_apply_linux_4.19.153.sh
 ./scripts/04_apply_linux_4.19.154.sh

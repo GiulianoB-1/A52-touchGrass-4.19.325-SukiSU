@@ -470,6 +470,7 @@ jobs:
       JOBS: '4'
       CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
       CCACHE_MAXSIZE: 5G
+      A52_GOLDEN_REUSE_OUT: '1'
       GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
       PHASE315G_COMMIT: a82b49ec1c0227611d8dc9a26a7249dae0a8c938
       BOOT_SOURCE_ASSET_ID: '478920392'

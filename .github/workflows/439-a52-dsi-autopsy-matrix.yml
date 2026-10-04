@@ -12,15 +12,6 @@ on:
       - scripts/decode_phase439_dsi.py
       - scripts/439g_apply_golden_dsi_autopsy.py
       - scripts/439g_ci_build_golden.sh
-  pull_request:
-    branches:
-      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
-    paths:
-      - .github/workflows/439-a52-dsi-autopsy-matrix.yml
-      - scripts/439_apply_dsi_autopsy.py
-      - scripts/decode_phase439_dsi.py
-      - scripts/439g_apply_golden_dsi_autopsy.py
-      - scripts/439g_ci_build_golden.sh
 
 permissions:
   contents: read
@@ -548,7 +539,7 @@ jobs:
               raise SystemExit("Golden 01_prepare_source.sh pre-clone anchor missing")
           s = s.replace(old, new, 1)
           old = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
-          new = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nif [ -n "$_a52_saved_out" ] && [ -d "$_a52_saved_out" ]; then\n  mv "$_a52_saved_out" "$KERNEL_DIR/out"\nfi\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
+          new = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nif [ -n "$_a52_saved_out" ] && [ -d "$_a52_saved_out" ]; then\n  mv "$_a52_saved_out" "$KERNEL_DIR/out"\n  mkdir -p "$KERNEL_DIR/.git/info"\n  grep -qxF "/out/" "$KERNEL_DIR/.git/info/exclude" 2>/dev/null || printf "/out/\\n" >> "$KERNEL_DIR/.git/info/exclude"\nfi\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
           if old not in s:
               raise SystemExit("Golden 01_prepare_source.sh post-checkout anchor missing")
           prep.write_text(s.replace(old, new, 1))

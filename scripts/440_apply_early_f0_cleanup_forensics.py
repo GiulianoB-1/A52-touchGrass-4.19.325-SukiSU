@@ -28,12 +28,21 @@ def one(text: str, old: str, new: str, label: str) -> str:
 
 
 def function_body(text: str, signature: str) -> tuple[int, int, str]:
-    start = text.find(signature)
-    if start < 0:
-        die("function missing: " + signature)
-    brace = text.find("{", start)
-    if brace < 0:
-        die("function brace missing: " + signature)
+    search = 0
+    while True:
+        start = text.find(signature, search)
+        if start < 0:
+            die("function definition missing: " + signature)
+
+        brace = text.find("{", start)
+        semi = text.find(";", start)
+
+        # Skip forward declarations/prototypes. Android 5.10 has prototypes
+        # for rpm_suspend()/rpm_resume() before their real definitions.
+        if brace >= 0 and (semi < 0 or brace < semi):
+            break
+        search = start + len(signature)
+
     depth = 0
     end = None
     for i in range(brace, len(text)):

@@ -44,6 +44,7 @@ concurrency:
 
 jobs:
   gki:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[golden-only]')
     name: Build Phase439${{ matrix.variant }} GKI
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -460,7 +461,7 @@ jobs:
           retention-days: 30
 
   golden:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[golden-only]'))
     name: Build Phase439G TouchGrass Golden
     runs-on: ubuntu-22.04
     timeout-minutes: 300

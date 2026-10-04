@@ -12,7 +12,8 @@ stage(){ STAGE="$1"; echo "== Phase441-TG stage: $STAGE =="; }
 fail_report(){
   set +e
   rm -rf "$FAIL"; mkdir -p "$FAIL"/{logs,audit,source}
-  printf '%s\n' "$STAGE" > "$FAIL/FAILED-STAGE.txt"
+  printf '%s
+' "$STAGE" > "$FAIL/FAILED-STAGE.txt"
   cp phase441-tg-*.log "$FAIL/logs/" 2>/dev/null || true
   cp scripts/441_apply_bootanimation_oracle.py scripts/441_apply_bootanimation_oracle.py.z64 "$FAIL/audit/" 2>/dev/null || true
   [ -f "$KERNEL/arch/arm64/kernel/syscall.c" ] && cp "$KERNEL/arch/arm64/kernel/syscall.c" "$FAIL/source/" || true
@@ -48,8 +49,7 @@ grep -Fq 'a52_p441_fatal_signal(signr' "$KERNEL/kernel/signal.c"
 
 stage "build TouchGrass Golden"
 set -o pipefail
-bash -lc 'source scripts/common.sh; build_kernel "touchgrass-4.19.200-resukisu-v4.1.0-safe"' \
-  2>&1 | tee phase441-tg-build.log
+bash -lc 'source scripts/common.sh; build_kernel "touchgrass-4.19.200-resukisu-v4.1.0-safe"'   2>&1 | tee phase441-tg-build.log
 
 IMAGE="$ROOT/artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe"
 CONFIG="$ROOT/artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe"
@@ -82,6 +82,34 @@ ioctl_detail_bytes=32-pre-plus-32-post
 binder_ioctl_stream=excluded
 fatal=signal-si_code-si_addr-PC-LR-SP-plus-VMA-file-offset
 EOF
-sha256sum "$OUT/Image" "$OUT/config" > "$OUT/SHA256SUMS"
+
+stage "hydrate FDR repack helpers"
+mkdir -p scripts projects/a52-p1-boot-image intake "$OUT/package"
+fetch_file() {
+  local ref="$1" path="$2" out="$2"
+  gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq '.content' | tr -d '
+' | base64 --decode > "$out"
+  test -s "$out"
+}
+fetch_file main scripts/37_validate_a52_p1_boot_source.py
+fetch_file main scripts/38_repack_a52_p1_boot.py
+fetch_file main projects/a52-p1-boot-image/boot-source.lock
+chmod +x scripts/37_validate_a52_p1_boot_source.py scripts/38_repack_a52_p1_boot.py
+
+stage "repack Phase441 Golden"
+test -n "${GH_TOKEN:-}"
+test -n "${GITHUB_REPOSITORY:-}"
+test -n "${BOOT_SOURCE_ASSET_ID:-}"
+test -n "${BOOT_SOURCE_SHA256:-}"
+gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
+curl --fail --location --retry 3 --silent --show-error   -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream'   "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}"   --output intake/boot.img
+test "$(stat -c %s intake/boot.img)" = 100663296
+printf '%s  %s
+' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img   --lock projects/a52-p1-boot-image/boot-source.lock   --output "$OUT/package/source-validation.json"
+python3 scripts/38_repack_a52_p1_boot.py   --source intake/boot.img --kernel "$OUT/package/Image.gz"   --output "$OUT/package/boot-phase441t-golden-bootanimation-oracle-v1.img"   --report "$OUT/package/repack-report.json"
+test "$(stat -c %s "$OUT/package/boot-phase441t-golden-bootanimation-oracle-v1.img")" -eq 100663296
+
+(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
 stage complete
 echo "Phase441 TouchGrass Golden bootanimation oracle: PASS"

@@ -2,9 +2,9 @@ name: Phase440 - early F0 and cleanup forensics
 run-name: Phase440 early-vs-late F0 + passive cleanup forensics
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/a52-phase432-ctrl-cache-run-v1
+      - agent/a52-phase378-gki-ufs-completion-flight-recorder-v1
     paths:
       - .github/workflows/440-a52-early-f0-cleanup-forensics.yml
       - scripts/440_apply_early_f0_cleanup_forensics.py

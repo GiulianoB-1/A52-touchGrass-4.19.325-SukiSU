@@ -534,54 +534,21 @@ jobs:
 
           common = Path("golden-work/scripts/common.sh")
           s = common.read_text()
-          old = '''  configure_toolchain
-  rm -rf "$KERNEL_DIR/out"
-  mkdir -p "$KERNEL_DIR/out"
-'''
-          new = '''  configure_toolchain
-  if [ "${A52_GOLDEN_REUSE_OUT:-0}" != "1" ]; then
-    rm -rf "$KERNEL_DIR/out"
-  fi
-  mkdir -p "$KERNEL_DIR/out"
-'''
+          old = '  configure_toolchain\n  rm -rf "$KERNEL_DIR/out"\n  mkdir -p "$KERNEL_DIR/out"\n'
+          new = '  configure_toolchain\n  if [ "${A52_GOLDEN_REUSE_OUT:-0}" != "1" ]; then\n    rm -rf "$KERNEL_DIR/out"\n  fi\n  mkdir -p "$KERNEL_DIR/out"\n'
           if old not in s:
               raise SystemExit("Golden common.sh build_kernel anchor missing")
           common.write_text(s.replace(old, new, 1))
 
           prep = Path("golden-work/scripts/01_prepare_source.sh")
           s = prep.read_text()
-          old = '''rm -rf "$KERNEL_DIR"
-mkdir -p "$WORKSPACE"
-
-info "Fetching the exact touchGrass baseline commit"
-'''
-          new = '''_a52_saved_out=""
-if [ "${A52_GOLDEN_REUSE_OUT:-0}" = "1" ] && [ -d "$KERNEL_DIR/out" ]; then
-  _a52_saved_out="$WORKSPACE/.a52-golden-out-cache"
-  rm -rf "$_a52_saved_out"
-  mv "$KERNEL_DIR/out" "$_a52_saved_out"
-fi
-
-rm -rf "$KERNEL_DIR"
-mkdir -p "$WORKSPACE"
-
-info "Fetching the exact touchGrass baseline commit"
-'''
+          old = 'rm -rf "$KERNEL_DIR"\nmkdir -p "$WORKSPACE"\n\ninfo "Fetching the exact touchGrass baseline commit"\n'
+          new = '_a52_saved_out=""\nif [ "${A52_GOLDEN_REUSE_OUT:-0}" = "1" ] && [ -d "$KERNEL_DIR/out" ]; then\n  _a52_saved_out="$WORKSPACE/.a52-golden-out-cache"\n  rm -rf "$_a52_saved_out"\n  mv "$KERNEL_DIR/out" "$_a52_saved_out"\nfi\n\nrm -rf "$KERNEL_DIR"\nmkdir -p "$WORKSPACE"\n\ninfo "Fetching the exact touchGrass baseline commit"\n'
           if old not in s:
               raise SystemExit("Golden 01_prepare_source.sh pre-clone anchor missing")
           s = s.replace(old, new, 1)
-          old = '''git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD
-
-actual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)
-'''
-          new = '''git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD
-
-if [ -n "$_a52_saved_out" ] && [ -d "$_a52_saved_out" ]; then
-  mv "$_a52_saved_out" "$KERNEL_DIR/out"
-fi
-
-actual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)
-'''
+          old = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
+          new = 'git -C "$KERNEL_DIR" checkout --detach FETCH_HEAD\n\nif [ -n "$_a52_saved_out" ] && [ -d "$_a52_saved_out" ]; then\n  mv "$_a52_saved_out" "$KERNEL_DIR/out"\nfi\n\nactual_commit=$(git -C "$KERNEL_DIR" rev-parse HEAD)\n'
           if old not in s:
               raise SystemExit("Golden 01_prepare_source.sh post-checkout anchor missing")
           prep.write_text(s.replace(old, new, 1))

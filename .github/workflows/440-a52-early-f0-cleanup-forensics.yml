@@ -357,9 +357,14 @@ jobs:
              "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" \
              "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" \
              "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/"
-          cp "$ROOT/kernel/exit.c" "$ROOT/arch/arm64/kernel/syscall.c" \
-             "$ROOT/drivers/base/core.c" "$ROOT/drivers/base/power/runtime.c" \
-             "$ROOT/drivers/base/power/domain.c" "$ROOT/drivers/regulator/core.c" "$OUT/source/"
+          mkdir -p "$OUT/source/kernel" "$OUT/source/arch/arm64/kernel" \
+                   "$OUT/source/drivers/base/power" "$OUT/source/drivers/regulator"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/kernel/exit.c"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arch/arm64/kernel/syscall.c"
+          cp "$ROOT/drivers/base/core.c" "$OUT/source/drivers/base/core.c"
+          cp "$ROOT/drivers/base/power/runtime.c" "$OUT/source/drivers/base/power/runtime.c"
+          cp "$ROOT/drivers/base/power/domain.c" "$OUT/source/drivers/base/power/domain.c"
+          cp "$ROOT/drivers/regulator/core.c" "$OUT/source/drivers/regulator/core.c"
           cp "$ROOT/include/linux/a52_phase436_frontier.h" \
              "$ROOT/include/linux/a52_phase437_open.h" "$OUT/source/"
           cp scripts/437_apply_kgsl_open_corridor.py \

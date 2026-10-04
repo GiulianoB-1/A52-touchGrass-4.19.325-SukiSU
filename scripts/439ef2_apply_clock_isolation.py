@@ -49,7 +49,7 @@ static u32 a52_p439ef2_forced_clk_ctrl;
 static u32 a52_p439ef2_force_readback;
 static atomic_t a52_p439ef2_force_active = ATOMIC_INIT(0);
 static atomic_t a52_p439ef2_finished = ATOMIC_INIT(0);
-static void __iomem *a52_p439p_dispcc;
+static void __iomem *a52_p439p_dispcc __maybe_unused;
 
 static int __init a52_p439p_map_init(void)
 {
@@ -61,12 +61,12 @@ static int __init a52_p439p_map_init(void)
 }
 subsys_initcall(a52_p439p_map_init);
 
-static __always_inline void a52_p439ef2_note_trigger(void)
+static __always_inline __maybe_unused void a52_p439ef2_note_trigger(void)
 {
 	WRITE_ONCE(a52_p439ef2_trigger_ns, ktime_get_ns());
 }
 
-static void a52_p439e2_force_pre(struct dsi_ctrl_hw *ctrl)
+static __maybe_unused void a52_p439e2_force_pre(struct dsi_ctrl_hw *ctrl)
 {
 #if A52_P439EF2_FORCE_MODE
 	if (!ctrl || !ctrl->base)
@@ -85,7 +85,7 @@ static void a52_p439e2_force_pre(struct dsi_ctrl_hw *ctrl)
 #endif
 }
 
-static void a52_p439f2_dense_run(struct dsi_ctrl_hw *ctrl)
+static __maybe_unused void a52_p439f2_dense_run(struct dsi_ctrl_hw *ctrl)
 {
 #if A52_P439EF2_DENSE_MODE
 	u64 start = READ_ONCE(a52_p439ef2_trigger_ns);

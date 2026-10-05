@@ -116,15 +116,28 @@ def strip_phase440_active_f0(text: str) -> str:
     if helper_start < 0:
         die("Phase440 display helper start missing")
 
-    helper_tail = (
-        "schedule_delayed_work(&a52_p440_flush_work,\n"
-        "\t\t\t      a52_p440_delay_to(A52_P440_FLUSH_NS));\n"
-        "}\n"
-    )
-    tail_pos = text.find(helper_tail, helper_start)
-    if tail_pos < 0:
-        die("Phase440 display helper tail missing")
-    helper_end = tail_pos + len(helper_tail)
+    sched = text.find("static void a52_p440_schedule(", helper_start)
+    if sched < 0:
+        die("Phase440 schedule helper missing")
+    brace = text.find("{", sched)
+    if brace < 0:
+        die("Phase440 schedule helper opening brace missing")
+
+    depth = 0
+    helper_end = -1
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                helper_end = i + 1
+                while helper_end < len(text) and text[helper_end] in "\\r\\n":
+                    helper_end += 1
+                break
+    if helper_end < 0:
+        die("Phase440 schedule helper closing brace missing")
+
     text = text[:helper_start] + text[helper_end:]
 
     hook = (

@@ -143,16 +143,24 @@ jobs:
           python3 -m py_compile golden-work/scripts/441_apply_bootanimation_oracle.py
           bash -n golden-work/scripts/441g_ci_build_touchgrass.sh
       - name: Restore Golden ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: golden-work/.ccache
-          key: a52xq-phase441-golden-v2-${{ runner.os }}-${{ github.run_id }}
+          key: a52xq-phase441-golden-v3-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
+            a52xq-phase441-golden-v3-${{ runner.os }}-
+            a52xq-phase441-golden-v2-${{ runner.os }}-
             a52xq-phase432ctrlg-golden-${{ runner.os }}-
             a52xq-phase424g-golden-${{ runner.os }}-
             a52xq-linux-4.19.200-ccache-${{ runner.os }}-
       - name: Build and repack Phase441T
         run: cd golden-work && bash scripts/441g_ci_build_touchgrass.sh
+      - name: Save Golden ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase441-golden-v3-${{ runner.os }}-${{ github.run_id }}
       - name: Upload Phase441T evidence
         uses: actions/upload-artifact@v4
         with:

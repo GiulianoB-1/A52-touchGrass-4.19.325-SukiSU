@@ -4,8 +4,24 @@ import argparse
 from pathlib import Path
 
 MARK = "A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1"
-HWC = Path("drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c")
-CTRL = Path("drivers/a52_display/msm/dsi/dsi_ctrl.c")
+
+HWC_CANDIDATES = (
+    Path("dsi_ctrl_hw_cmn.c"),
+    Path("techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c"),
+    Path("drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"),
+)
+CTRL_CANDIDATES = (
+    Path("dsi_ctrl.c"),
+    Path("techpack/display/msm/dsi/dsi_ctrl.c"),
+    Path("drivers/a52_display/msm/dsi/dsi_ctrl.c"),
+)
+
+def resolve_source(root: Path, candidates: tuple[Path, ...], label: str) -> Path:
+    matches = [root / rel for rel in candidates if (root / rel).is_file()]
+    if len(matches) != 1:
+        die(f"{label}: expected exactly one source under {root}, found {len(matches)}: " +
+            ", ".join(str(p) for p in matches))
+    return matches[0]
 
 def die(msg: str) -> None:
     raise SystemExit("Phase439FG: " + msg)
@@ -240,8 +256,8 @@ def patch_ctrl(text: str) -> str:
     return text + f'\n/* {MARK}: terminal provider capture. */\n'
 
 def validate(root: Path) -> None:
-    hp = root / HWC
-    cp = root / CTRL
+    hp = resolve_source(root, HWC_CANDIDATES, "HWC")
+    cp = resolve_source(root, CTRL_CANDIDATES, "CTRL")
     text = hp.read_text(errors="replace") + "\n" + cp.read_text(errors="replace")
 
     for token in (
@@ -264,8 +280,8 @@ def main() -> int:
     root = ns.root.resolve()
 
     if not ns.check_only:
-        hp = root / HWC
-        cp = root / CTRL
+        hp = resolve_source(root, HWC_CANDIDATES, "HWC")
+        cp = resolve_source(root, CTRL_CANDIDATES, "CTRL")
         hp.write_text(patch_hwc(hp.read_text(errors="replace")))
         cp.write_text(patch_ctrl(cp.read_text(errors="replace")))
 

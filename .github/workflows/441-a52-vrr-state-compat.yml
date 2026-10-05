@@ -16,6 +16,8 @@ permissions:
   actions: read
 
 env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
@@ -36,7 +38,7 @@ jobs:
     if: true
     name: Build Phase441 GKI VRR state compatibility
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +72,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
           mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
@@ -85,25 +87,203 @@ jobs:
           chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
           echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
 
-      - name: Restore canonical Phase429 source
-        id: source
+      - name: Restore exact Phase429 reconstructed baseline
+        id: phase429-baseline-cache
         uses: actions/cache/restore@v4
         with:
           path: |
             gki/common
+            workspace/gki-phase199-out
             phase429-gki-out
-          key: a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase432ctrl-base
-          restore-keys: |
-            a52xq-phase429-source-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
-      - name: Require cached Phase429 source
+      - name: Restore exact Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Restore Phase346 baseline cache v2 on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1 on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source on baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on complete cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
-          test -d gki/common
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Restore exact TouchGrass source on baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on complete baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Build Phase345 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Build Phase346 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Build Phase357 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Phase357 cache hit: ${{ steps.phase357-cache.outputs.cache-hit }}"
+          test -d gki/common || { echo "missing gki/common"; exit 1; }
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image || { echo "missing cached Image"; exit 1; }
+          test -s phase357-gki-out/package/boot.img || { echo "missing cached Phase357 boot.img"; exit 1; }
+          test -s phase357-gki-out/config/final.config || { echo "missing cached Phase357 final.config"; exit 1; }
+          bytes="$(stat -c '%s' phase357-gki-out/package/boot.img)"
+          echo "Phase357 boot.img bytes=$bytes"
+          test "$bytes" -eq 100663296
+          test "$(make -s -C gki/common kernelversion)" = "5.10.252" || {
+            echo "unexpected cached kernel version"; exit 1;
+          }
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c || {
+            echo "missing Phase357 source marker"; exit 1;
+          }
+          echo "Phase357 cached baseline validation: PASS"
+
+      - name: Save exact Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      # If the exact Phase429 cache was evicted, rebuild the same lineage instead of aborting.
+      - name: Reconstruct exact Phase429 source lineage
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+
+          def extract(step_name, out):
+              start = next(i for i,l in enumerate(src)
+                           if l.strip() == f"- name: {step_name}")
+              runline = next(i for i in range(start + 1, len(src))
+                             if src[i].strip() == "run: |")
+              end = next((i for i in range(runline + 1, len(src))
+                          if src[i].startswith("      - name:")), len(src))
+              body = [
+                  line[10:] if line.startswith("          ") else line
+                  for line in src[runline + 1:end]
+              ]
+              Path(out).write_text("set -Eeuo pipefail\n" + "\n".join(body) + "\n")
+
+          extract("Reapply Phase358 and Phase359", "/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts", "/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image", "/tmp/p429-boot.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
           test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
-          test -s phase429-gki-out/config/final.config
+          python3 scripts/429_apply_apex_sf_focused_census.py             --root "$PWD/gki/common" --check-only
+
+      - name: Save exact Phase429 reconstructed baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+
+      - name: Validate exact Phase429 reconstructed baseline
+        run: |
+          set -Eeuo pipefail
+          echo "Phase429 reconstructed cache hit: ${{ steps.phase429-baseline-cache.outputs.cache-hit }}"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s workspace/gki-phase199-out/System.map
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          test "$(stat -c '%s' phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img)" -eq 100663296
+          grep -Fq 'A52_PHASE429_APEX_SF_FOCUSED_CENSUS_V1' gki/common/arch/arm64/kernel/syscall.c
           python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
-          echo "Phase429 source cache: PASS"
+          echo "Phase429 reconstructed baseline validation: PASS"
 
       - name: Restore TouchGrass source
         id: tg
@@ -112,10 +292,15 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
-      - name: Clone TouchGrass on cache miss
+      - name: Ensure TouchGrass source on cache miss
         if: steps.tg.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
+          if test -d workspace/touchgrass-a52xq/.git && \
+             test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD 2>/dev/null || true)" = "$TOUCHGRASS_COMMIT"; then
+            echo "TouchGrass source already present from Phase429 reconstruction"
+            exit 0
+          fi
           rm -rf workspace/touchgrass-a52xq
           mkdir -p workspace/touchgrass-a52xq
           git -C workspace/touchgrass-a52xq init

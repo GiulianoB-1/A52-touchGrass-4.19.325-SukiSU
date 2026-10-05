@@ -654,8 +654,8 @@ jobs:
           grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
           grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
           grep -aFq 'A52_PHASE442R_FIFO_IRQ_DENSE_V1' "$IMAGE"
-          grep -aFq 'P442R ARM leg=%u irq=%d sw=%x ref=%u hw=%x en=%u' "$IMAGE"
-          grep -aFq 'P442R D leg=%u i=%u us=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
+          grep -aFq 'P442R ARM l=%u v=%u irq=%d mask=%x ref=%u in=%x en=%u raw=%u' "$IMAGE"
+          grep -aFq 'P442R D l=%u i=%u dt=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
           grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
           grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
 
@@ -946,9 +946,9 @@ jobs:
           DSI="$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi"
           test -s "$IMAGE" -a -s "$CONFIG"
           grep -aFq 'A52_PHASE443_TOUCHGRASS_FIFO_ORACLE_V1' "$IMAGE"
-          grep -aFq 'P443 ARM leg=%u irq=%d sw=%x ref=%u hw=%x en=%u' "$IMAGE"
-          grep -aFq 'P443 TERM leg=%u wait=%d irq=%d st=%x in=%x ck=%x ln=%x tg=%x db=%x raw=%u en=%u' "$IMAGE"
-          grep -aFq 'P443 D leg=%u i=%u us=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
+          grep -aFq 'P443 ARM l=%u v=%u irq=%d mask=%x ref=%u in=%x en=%u raw=%u' "$IMAGE"
+          grep -aFq 'P443 TERM l=%u ret=%d irq=%u st=%x in=%x en=%u raw=%u ck=%x ln=%x tg=%x db=%x' "$IMAGE"
+          grep -aFq 'P443 D l=%u i=%u dt=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
 
           rm -rf "$OUT"
           mkdir -p "$OUT"/{audit,source,package}

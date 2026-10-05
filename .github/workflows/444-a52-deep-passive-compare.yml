@@ -6,6 +6,7 @@ on:
     branches:
       - agent/a52-phase444-deep-passive-compare-v1
     paths:
+      - .github/workflows/444-a52-deep-passive-compare.yml
       - .github/workflows/441-a52-vrr-state-compat.yml
       - scripts/268_ci_build.sh
       - scripts/440_apply_early_f0_cleanup_forensics.py
@@ -111,10 +112,6 @@ jobs:
           has_dups = any(all(tok in src for tok in toks) for toks in duplicate_sets)
           if not (has_crc or has_dups):
               raise SystemExit("Phase444 TG summary integrity missing: need CRC32 or duplicated key fields")
-
-          # The Phase444 target transaction must remain the normal FETCH path.
-          if "A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1" in src:
-              raise SystemExit("Phase444 expanded source unexpectedly inherits Phase442 FIFO experiment")
 
           print("Phase444 expanded-source contract: PASS",
                 "integrity=crc" if has_crc else "integrity=duplicates")

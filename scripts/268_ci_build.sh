@@ -77,28 +77,50 @@ test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 test -d workspace/touchgrass-a52xq/.git
 test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
 
-# Phase337 retention repair: the historical Phase227/206 artifacts expired.
-# Recreate the four seed inputs consumed by this one-compile path from the
-# still-retained successful Phase319 evidence plus the exact successful Phase209
-# Git patch. Kernel source is NOT taken from Phase319: it is regenerated below.
-PHASE319_RETAINED_ARTIFACT_ID=9966129085
-PHASE319_RETAINED_ZIP_SHA256=0a7f06e332d580b2b2548783685ecc28a10ee261109db189d446fca18b5ad423
+# Phase441 retention repair: the historical Phase319 carrier artifact expired.
+# A successful Phase346 artifact is still retained and carries the same config
+# lineage. After the rollback below, its final.config hashes to the exact same
+# historical pre-217 config expected by this reconstruction.
+#
+# Cache the extracted artifact in the workspace so later fallback builds do not
+# depend on the Actions artifact remaining online.
+PHASE346_RETAINED_ARTIFACT_ID=10344752313
+PHASE346_RETAINED_ZIP_SHA256=9c42a3ff550255807595a20d0dcf05ecc6f3210fc635cafe11ad7807af0267b1
+PHASE346_RETAINED_BOOT_SHA256=11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df
 PHASE209_PATCH_REF=b0b2c73eea4ce59abed7cf3b70d236613a9b5e85
-rm -rf "$SEED" /tmp/phase319-retained /tmp/phase319-retained.zip
-mkdir -p "$SEED"/{package,compile,config,stage} /tmp/phase319-retained
-curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
-  -H "Authorization: Bearer ${GH_TOKEN}" \
-  -H 'Accept: application/vnd.github+json' \
-  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE319_RETAINED_ARTIFACT_ID}/zip" \
-  --output /tmp/phase319-retained.zip
-printf '%s  %s\n' "$PHASE319_RETAINED_ZIP_SHA256" /tmp/phase319-retained.zip | sha256sum -c -
-unzip -q /tmp/phase319-retained.zip -d /tmp/phase319-retained
-(cd /tmp/phase319-retained && sha256sum -c SHA256SUMS)
-cp /tmp/phase319-retained/package/boot.img "$SEED/package/boot.img"
-cp /tmp/phase319-retained/compile/Image "$SEED/compile/Image"
-cp /tmp/phase319-retained/config/final.config "$SEED/config/before-phase216.config"
+RETAINED="$PWD/workspace/phase346-retained-seed"
+ZIP=/tmp/phase346-retained.zip
 
-# Phase337 retention repair: Phase319 final.config is a valid retained config
+rm -rf "$SEED"
+mkdir -p "$SEED"/{package,compile,config,stage} "$PWD/workspace"
+
+if [ -s "$RETAINED/SHA256SUMS" ] && \
+   [ -s "$RETAINED/package/boot.img" ] && \
+   [ -s "$RETAINED/compile/Image" ] && \
+   [ -s "$RETAINED/config/final.config" ] && \
+   (cd "$RETAINED" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
+  echo "Phase441 retained Phase346 seed cache: HIT"
+else
+  echo "Phase441 retained Phase346 seed cache: MISS"
+  rm -rf "$RETAINED" "$ZIP"
+  mkdir -p "$RETAINED"
+  curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+    -H "Authorization: Bearer ${GH_TOKEN}" \
+    -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE346_RETAINED_ARTIFACT_ID}/zip" \
+    --output "$ZIP"
+  printf '%s  %s\n' "$PHASE346_RETAINED_ZIP_SHA256" "$ZIP" | sha256sum -c -
+  unzip -q "$ZIP" -d "$RETAINED"
+  (cd "$RETAINED" && sha256sum -c SHA256SUMS)
+fi
+
+grep -Fq '"phase": "346"' "$RETAINED/BUILD-IDENTITY.json"
+printf '%s  %s\n' "$PHASE346_RETAINED_BOOT_SHA256" "$RETAINED/package/boot.img" | sha256sum -c -
+cp "$RETAINED/package/boot.img" "$SEED/package/boot.img"
+cp "$RETAINED/compile/Image" "$SEED/compile/Image"
+cp "$RETAINED/config/final.config" "$SEED/config/before-phase216.config"
+
+# Phase441 retention repair: Phase346 final.config is a valid retained config
 # carrier, but it contains ten options enabled much later than the historical
 # pre-217 boundary. The original successful Phase233 run proves that only
 # CAM_CC/GPU_CC/NPU_CC/QCOM_MDT_LOADER/VIDEO_CC changed across its final
@@ -180,10 +202,10 @@ for path in \
 done
 printf '%s  %s\n' d698dea506375ed96c0fc447151681268228b0494747f4cb5ad1a340b9362c2f \
   "$SEED/config/before-phase216.config" | sha256sum -c -
-printf '%s  %s\n' 3e9728e45bfcaaced602f93c15d25dc438131619ca7259a9352315d412979a69 \
+printf '%s  %s\n' "$PHASE346_RETAINED_BOOT_SHA256" \
   "$SEED/package/boot.img" | sha256sum -c -
 grep -Fq 'SPLCFG209 enter kms=%d' "$SEED/stage/phase209-splash-takeover-trace.patch"
-echo 'Phase337 retained seed bridge: PASS'
+echo 'Phase441 retained Phase346 seed bridge: PASS'
 
 python3 scripts/199_runtime_fix_crc_anchor_v2.py
 python3 scripts/199_runtime_fix_binary_audit.py

@@ -40,6 +40,37 @@ stage "apply mirrored Phase441 bootanimation oracle"
 python3 -m py_compile scripts/441_apply_bootanimation_oracle.py
 python3 scripts/441_apply_bootanimation_oracle.py --root "$KERNEL" --mode golden
 python3 scripts/441_apply_bootanimation_oracle.py --root "$KERNEL" --mode golden --check-only
+
+# Android-common 5.10 has ktime_get_boottime_ns(); this TouchGrass 4.19 tree
+# exposes the equivalent inline API as ktime_get_boot_ns().  Keep identical
+# boottime semantics while adapting only the Golden compile surface.
+python3 - <<'PY'
+from pathlib import Path
+root = Path("workspace/touchgrass-a52xq")
+old = "ktime_get_boottime_ns()"
+new = "ktime_get_boot_ns()"
+changed = 0
+for rel in ("arch/arm64/kernel/syscall.c", "kernel/signal.c"):
+    p = root / rel
+    s = p.read_text()
+    n = s.count(old)
+    if not n:
+        continue
+    if "#include <linux/timekeeping.h>" not in s:
+        first = s.find("#include ")
+        if first < 0:
+            raise SystemExit(f"{rel}: include anchor missing")
+        eol = s.find("\n", first)
+        s = s[:eol + 1] + "#include <linux/timekeeping.h>\n" + s[eol + 1:]
+    s = s.replace(old, new)
+    p.write_text(s)
+    changed += n
+if changed < 1:
+    raise SystemExit("Phase441T expected at least one ktime_get_boottime_ns() use")
+print(f"Phase441T 4.19 timekeeping compatibility: replaced {changed} call(s)")
+PY
+grep -Fq 'ktime_get_boot_ns()' "$KERNEL/arch/arm64/kernel/syscall.c"
+! grep -R -Fq 'ktime_get_boottime_ns()' "$KERNEL/arch/arm64/kernel/syscall.c" "$KERNEL/kernel/signal.c"
 git -C "$KERNEL" diff --check -- arch/arm64/kernel/syscall.c kernel/signal.c
 
 stage "strict passive-scope audit"

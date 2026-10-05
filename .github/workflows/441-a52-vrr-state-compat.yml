@@ -39,6 +39,8 @@ jobs:
     name: Build Phase441 GKI VRR state compatibility
     runs-on: ubuntu-22.04
     timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
     strategy:
       fail-fast: false
       matrix:
@@ -164,6 +166,13 @@ jobs:
           git -C common checkout --detach FETCH_HEAD
           test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 
+      - name: Cache pinned GKI source after sync
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
       - name: Restore exact TouchGrass source on baseline-cache miss
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         id: touchgrass-cache
@@ -183,15 +192,43 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
+      - name: Cache TouchGrass source after clone
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
       - name: Build Phase345 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         run: bash scripts/345_ci_build_gki.sh
+
+      - name: Cache Phase345 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
 
       - name: Build Phase346 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
         env:
           PHASE346_PREWARMED_PHASE345: '1'
         run: bash scripts/346_ci_build_gki.sh
+
+      - name: Cache Phase346 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
 
       - name: Build Phase357 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
@@ -307,6 +344,13 @@ jobs:
           git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Cache Phase441 TouchGrass source
+        if: steps.tg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
       - name: Restore clean pre-Phase440 object tree
         id: objects

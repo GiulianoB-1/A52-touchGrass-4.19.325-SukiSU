@@ -1,0 +1,1058 @@
+name: Phase443 - paired FIFO oracle
+run-name: Phase443 paired GKI + TouchGrass FIFO/DMA_DONE oracle
+
+on:
+  push:
+    branches:
+      - agent/a52-phase442-fifo-fetch-discriminator-v1
+    paths:
+      - .github/workflows/443-a52-paired-fifo-oracle.yml
+      - scripts/268_ci_build.sh
+      - scripts/440_apply_early_f0_cleanup_forensics.py
+      - scripts/441_apply_vrr_state_compat.py
+      - scripts/442_apply_fifo_fetch_discriminator.py
+      - scripts/442_apply_fifo_fetch_discriminator.py.z64
+      - scripts/442r_apply_fifo_irq_dense.py
+      - scripts/442r_apply_fifo_irq_dense.py.z64
+      - scripts/443_apply_touchgrass_fifo_oracle.py
+      - scripts/443_apply_touchgrass_fifo_oracle.py.z64
+      - scripts/439g_apply_golden_dsi_autopsy.py
+      - scripts/439fg_apply_golden_dense.py
+      - scripts/439g_ci_build_golden.sh
+      - scripts/439fg_ci_build_golden.sh
+      - scripts/decode_phase442_fifo_fetch.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
+  GKI_COMMON_TAG: android12-5.10-2026-04_r1
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: 'true'
+  CCACHE_COMPRESSLEVEL: '6'
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: 'true'
+  CCACHE_PATH: /usr/bin:/usr/local/bin
+
+concurrency:
+  group: a52-phase443-paired-fifo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gki:
+    if: true
+    name: Build Phase443 GKI paired FIFO oracle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Phase442 payload
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            scripts/437_apply_kgsl_open_corridor.py \
+            scripts/438_apply_devbw_semantic_parity.py \
+            scripts/439_apply_dsi_autopsy.py \
+            scripts/440_apply_early_f0_cleanup_forensics.py \
+            scripts/441_apply_vrr_state_compat.py \
+            scripts/442_apply_fifo_fetch_discriminator.py \
+            scripts/442r_apply_fifo_irq_dense.py \
+            scripts/443_apply_touchgrass_fifo_oracle.py \
+            scripts/decode_phase442_fifo_fetch.py \
+            scripts/decode_phase439_dsi.py \
+            scripts/decode_phase437_open.py
+          python3 scripts/437_apply_kgsl_open_corridor.py --help >/dev/null
+          python3 scripts/438_apply_devbw_semantic_parity.py --help >/dev/null
+          python3 scripts/439_apply_dsi_autopsy.py --help >/dev/null
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --help >/dev/null
+          python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
+          python3 scripts/442_apply_fifo_fetch_discriminator.py --help >/dev/null
+          python3 scripts/442r_apply_fifo_irq_dense.py --help >/dev/null
+          python3 scripts/443_apply_touchgrass_fifo_oracle.py --help >/dev/null
+          python3 scripts/decode_phase442_fifo_fetch.py --help >/dev/null
+          python3 scripts/decode_phase439_dsi.py --help >/dev/null
+          python3 scripts/decode_phase437_open.py --help >/dev/null
+          echo "Phase442 payload: PASS"
+
+      - name: Prepare runner and ccache wrappers
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl ca-certificates make gcc g++ python3 bc bison flex clang lld llvm ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev rsync cpio gzip lz4 zstd xz-utils file dwarves unzip
+          mkdir -p "$RUNNER_TEMP/a52-ccache-bin" "$CCACHE_DIR"
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang "$@"
+          EOF
+          cat > "$RUNNER_TEMP/a52-ccache-bin/clang++" <<'EOF'
+          #!/bin/sh
+          exec ccache /usr/bin/clang++ "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
+          echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+
+      - name: Restore exact Phase429 reconstructed baseline
+        id: phase429-baseline-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+
+      - name: Restore exact Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        id: phase357-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      - name: Restore Phase346 baseline cache v2 on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        id: phase346-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase346 baseline cache v1 on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true'
+        id: phase346-v1
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Restore Phase345 baseline cache on Phase357 miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        id: phase345-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Restore pinned GKI source on baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: gki-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Sync official pinned GKI source on complete cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf gki
+          mkdir -p gki
+          cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$GKI_MANIFEST_BRANCH" --depth=1
+          repo sync -c -j4 --no-tags --fail-fast
+          git -C common fetch --depth=1 https://android.googlesource.com/kernel/common "refs/tags/$GKI_COMMON_TAG"
+          git -C common checkout --detach FETCH_HEAD
+          test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+
+      - name: Cache pinned GKI source after sync
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gki
+          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+
+      - name: Restore exact TouchGrass source on baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: touchgrass-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Clone TouchGrass on complete baseline-cache miss
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Cache TouchGrass source after clone
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Restore retained Phase346 seed cache
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: phase346-seed-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/phase346-retained-seed
+          key: a52xq-phase346-retained-seed-v1-${{ runner.os }}-10344752313
+
+      - name: Build Phase345 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: bash scripts/345_ci_build_gki.sh
+
+      - name: Save retained Phase346 seed cache
+        if: always() && steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.phase346-seed-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/phase346-retained-seed
+          key: a52xq-phase346-retained-seed-v1-${{ runner.os }}-10344752313
+
+      - name: Cache Phase345 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+          key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
+
+      - name: Build Phase346 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        env:
+          PHASE346_PREWARMED_PHASE345: '1'
+        run: bash scripts/346_ci_build_gki.sh
+
+      - name: Cache Phase346 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase345-gki-out
+            phase346-gki-out
+          key: a52xq-phase346-baseline-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-445fe739
+
+      - name: Build Phase357 fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        env:
+          PHASE357_PREWARMED_PHASE346: '1'
+        run: bash scripts/357_ci_build_gki.sh
+
+      - name: Validate Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Phase357 cache hit: ${{ steps.phase357-cache.outputs.cache-hit }}"
+          test -d gki/common || { echo "missing gki/common"; exit 1; }
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image || { echo "missing cached Image"; exit 1; }
+          test -s phase357-gki-out/package/boot.img || { echo "missing cached Phase357 boot.img"; exit 1; }
+          test -s phase357-gki-out/config/final.config || { echo "missing cached Phase357 final.config"; exit 1; }
+          bytes="$(stat -c '%s' phase357-gki-out/package/boot.img)"
+          echo "Phase357 boot.img bytes=$bytes"
+          test "$bytes" -eq 100663296
+          test "$(make -s -C gki/common kernelversion)" = "5.10.252" || {
+            echo "unexpected cached kernel version"; exit 1;
+          }
+          grep -Fq 'A52_PHASE357_INIT_EXIT_CAUSE_V1' gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c || {
+            echo "missing Phase357 source marker"; exit 1;
+          }
+          echo "Phase357 cached baseline validation: PASS"
+
+      - name: Save exact Phase357 baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase357-gki-out
+          key: a52xq-phase357-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/357_ci_build_gki.sh', 'scripts/357_apply_init_exit_cause.py') }}
+
+      # If the exact Phase429 cache was evicted, rebuild the same lineage instead of aborting.
+      - name: Reconstruct exact Phase429 source lineage
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          src = Path(".github/workflows/429-a52-apex-sf-focused-census.yml").read_text().splitlines()
+
+          def extract(step_name, out):
+              start = next(i for i,l in enumerate(src)
+                           if l.strip() == f"- name: {step_name}")
+              runline = next(i for i in range(start + 1, len(src))
+                             if src[i].strip() == "run: |")
+              end = next((i for i in range(runline + 1, len(src))
+                          if src[i].startswith("      - name:")), len(src))
+              body = [
+                  line[10:] if line.startswith("          ") else line
+                  for line in src[runline + 1:end]
+              ]
+              Path(out).write_text("set -Eeuo pipefail\n" + "\n".join(body) + "\n")
+
+          extract("Reapply Phase358 and Phase359", "/tmp/p429-reapply.sh")
+          extract("Build Phase429 focused census lineage plus contracts", "/tmp/p429-build.sh")
+          extract("Build Phase429 focused-census boot image", "/tmp/p429-boot.sh")
+          PY
+          bash /tmp/p429-reapply.sh
+          bash /tmp/p429-build.sh
+          bash /tmp/p429-boot.sh
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          python3 scripts/429_apply_apex_sf_focused_census.py             --root "$PWD/gki/common" --check-only
+
+      - name: Save exact Phase429 reconstructed baseline
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+
+      - name: Validate exact Phase429 reconstructed baseline
+        run: |
+          set -Eeuo pipefail
+          echo "Phase429 reconstructed cache hit: ${{ steps.phase429-baseline-cache.outputs.cache-hit }}"
+          test -d gki/common
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s workspace/gki-phase199-out/System.map
+          test -s phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img
+          test "$(stat -c '%s' phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img)" -eq 100663296
+          grep -Fq 'A52_PHASE429_APEX_SF_FOCUSED_CENSUS_V1' gki/common/arch/arm64/kernel/syscall.c
+          python3 scripts/429_apply_apex_sf_focused_census.py --root "$PWD/gki/common" --check-only
+          echo "Phase429 reconstructed baseline validation: PASS"
+
+      - name: Restore TouchGrass source
+        id: tg
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Ensure TouchGrass source on cache miss
+        if: steps.tg.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          if test -d workspace/touchgrass-a52xq/.git && \
+             test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD 2>/dev/null || true)" = "$TOUCHGRASS_COMMIT"; then
+            echo "TouchGrass source already present from Phase429 reconstruction"
+            exit 0
+          fi
+          rm -rf workspace/touchgrass-a52xq
+          mkdir -p workspace/touchgrass-a52xq
+          git -C workspace/touchgrass-a52xq init
+          git -C workspace/touchgrass-a52xq remote add origin "$TOUCHGRASS_REPO"
+          git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
+          git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
+
+      - name: Cache Phase442 TouchGrass source
+        if: steps.tg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Restore warm Phase442 object tree for Phase443
+        id: objects
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase443-paired-fifo-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/442r_apply_fifo_irq_dense.py.z64', 'scripts/442_apply_fifo_fetch_discriminator.py.z64', 'scripts/441_apply_vrr_state_compat.py', 'scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+          restore-keys: |
+            a52xq-phase443-paired-fifo-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase442-fifo-fetch-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase441-vrr-state-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase439-dsi-A-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase438-devbw-parity-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase437-kgsl-open-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase436-adreno-start-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase435-terminal-race-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+            a52xq-phase434-clean-f0-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Detect reusable object tree
+        id: warm
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          if test -s "$BUILD/.config" && test -s "$BUILD/arch/arm64/boot/Image"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "Phase436-compatible object tree: HIT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Phase436-compatible object tree: MISS"
+          fi
+
+      - name: Restore rolling clang ccache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase443-${{ github.run_id }}
+          restore-keys: |
+            a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-
+
+      - name: Configure compiler cache
+        run: |
+          set -Eeuo pipefail
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          ccache -s
+
+      - name: Prepare build directory on object-cache miss
+        if: steps.warm.outputs.hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          mkdir -p "$BUILD"
+          cp phase429-gki-out/config/final.config "$BUILD/.config"
+          make -C "$PWD/gki/common" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+
+      - name: Reapply Phase430 through Phase432-CTRL
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/430_apply_sf_dma_forensics.py --root "$ROOT"
+          python3 scripts/430_postapply_hardening.py --root "$ROOT"
+          python3 scripts/431_apply_safe_gap_forensics.py --root "$ROOT"
+          python3 scripts/432_apply_sf_hwc_bootanim_chain.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT"
+          python3 scripts/432ctrl_apply_odsign_keymint_qsee_trace.py --root "$ROOT" --check-only
+
+      - name: Reapply Phase433 performance
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          TG="$PWD/workspace/touchgrass-a52xq"
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --touchgrass "$TG"
+          "$ROOT/scripts/config" --file "$BUILD/.config" \
+            -e ARM_QCOM_CPUFREQ_HW -e CPU_FREQ_DEFAULT_GOV_PERFORMANCE \
+            -d CPU_FREQ_DEFAULT_GOV_SCHEDUTIL -e CPU_FREQ_GOV_PERFORMANCE \
+            -e QCOM_BIMC_BWMON -e DEVFREQ_GOV_QCOM_BW_HWMON \
+            -e ARM_MEMLAT_MON -e DEVFREQ_GOV_MEMLAT \
+            -e ARM_QCOM_DEVFREQ_FW -e QCOM_DEVFREQ_DEVBW -e DUTVFREQ_SIMPLE_DEV
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 olddefconfig
+          python3 scripts/433_apply_cpu_mem_perf.py --root "$ROOT" --check-only
+
+      - name: Reapply Phase434 through Phase436
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT"
+          python3 scripts/435_apply_terminal_race.py --root "$ROOT" --overlap-report /tmp/p435-overlap.txt
+          python3 scripts/436_apply_adreno_start_frontier.py --root "$ROOT" --overlap-report /tmp/p436-overlap.txt
+          python3 scripts/434_apply_clean_f0.py --root "$ROOT" --check-only
+          python3 scripts/436_apply_adreno_start_frontier.py --root "$ROOT" --check-only --overlap-report /tmp/p436-overlap-check.txt
+          echo "Phase436 baseline reconstructed: PASS"
+
+      - name: Apply Phase437 KGSL open corridor
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          grep -Fq '#define A52_P414_RAM_BYTES           (SZ_1M - SZ_16K - SZ_8K)' "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          grep -Fq '#define A52_P437_PHYS       0xB1AFA000ULL' "$ROOT/drivers/a52_secure/a52_phase437_open.c"
+          grep -Fq '#define A52_P436_PHYS       0xB1AFC000ULL' "$ROOT/drivers/a52_secure/a52_phase436_frontier.c"
+          ! grep -Fq 'P437_' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          ! grep -Fq 'P437_' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          echo "Phase437 source audit: PASS"
+
+      - name: Apply Phase438 DEVBW semantic parity
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT"
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+
+          grep -Fq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          grep -Fq 'if (count <= 0)' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          grep -Fq 'if (count > 0)' "$ROOT/drivers/devfreq/devfreq_devbw.c"
+          ! grep -Fq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$ROOT/drivers/devfreq/devfreq.c"
+          echo "Phase438 DEVBW source audit: PASS"
+
+      - name: Apply Phase439A + passive Phase440 logging + Phase441 VRR fix
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+
+          # Phase440 supplies the useful bootanimation/power/cleanup event hooks.
+          # Phase441 then removes its scheduled 12 s F0 sender before compilation.
+          python3 scripts/440_apply_early_f0_cleanup_forensics.py --root "$ROOT"
+          python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT"
+          python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
+
+          SYSFS="$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c"
+          DISP="$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+
+          grep -Fq 'A52_PHASE439_DSI_AUTOPSY_V3' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$REC"
+          grep -Fq 'P440 EV n=%u' "$REC"
+          grep -Fq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$SYSFS"
+          grep -Fq 'char vrr_mode[16] = "";' "$SYSFS"
+          grep -Fq '"%dX%d:NOR"' "$SYSFS"
+          grep -Fq "memchr(vrr_mode, 'X', sizeof(vrr_mode))" "$SYSFS"
+          grep -Fq "memchr(vrr_mode, ':', sizeof(vrr_mode))" "$SYSFS"
+          ! grep -Fq 'a52_p440_early_workfn' "$DISP"
+          ! grep -Fq 'a52_p440_schedule(display);' "$DISP"
+          ! grep -Fq 'P440 EARLY start' "$DISP"
+          ! grep -Fq 'P440 EARLY unlock_rc' "$DISP"
+          ! grep -Fq 'P440 EARLY relock_rc' "$DISP"
+
+          {
+            echo "=== GKI CONFIG_SEC_PARAM ==="
+            grep -E '^CONFIG_SEC_PARAM(=| is not set)' "$PWD/workspace/gki-phase199-out/.config" || echo "CONFIG_SEC_PARAM absent"
+            echo
+            echo "=== patched vrr_state_show ==="
+            sed -n '/static ssize_t vrr_state_show/,/^static ssize_t /p' "$SYSFS" | head -120
+          } | tee /tmp/p441-vrr-audit.txt
+
+          echo "Phase441 source audit: PASS"
+
+      - name: Apply Phase442 FIFO-first discriminator
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/442_apply_fifo_fetch_discriminator.py --root "$ROOT"
+
+          # Retain an explicit Phase442 build tag in the linked Image. The
+          # functional Phase442 code can otherwise link correctly while the
+          # comment-only marker is discarded by the compiler.
+          HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          if ! grep -Fq 'a52_p442_hwc_marker[] __used' "$HWC"; then
+            printf '%s\n' \
+              '/* A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1: retained linked-image build tag. */' \
+              'static const char a52_p442_hwc_marker[] __used =' \
+              '    "A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1";' \
+              >> "$HWC"
+          fi
+
+          python3 scripts/442_apply_fifo_fetch_discriminator.py --root "$ROOT" --check-only
+
+          REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+          CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          SMMU="$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$REC"
+          grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$CTRL"
+          grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$HWC"
+          grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$SMMU"
+          grep -Fq 'P442 F1 STOP irq=0 fetch_skipped=1' "$CTRL"
+          grep -Fq 'a52_p442_fetch_timeout_forensics' "$CTRL"
+          grep -Fq '(resource_size_t)0x1518d000' "$SMMU"
+          grep -Fq 'a52_p442_survival_record(14U, 0);' "$HWC"
+          grep -Fq 'a52_p442_survival_record(15U, 1U);' "$HWC"
+          echo "Phase442 source audit: PASS"
+
+      - name: Apply Phase442R DMA_DONE arm + dense paired overlay
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          python3 scripts/442r_apply_fifo_irq_dense.py --root "$ROOT"
+          python3 scripts/442r_apply_fifo_irq_dense.py --root "$ROOT" --check-only
+
+          CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE442R_FIFO_IRQ_DENSE_V1' "$CTRL"
+          grep -Fq 'A52_PHASE442R_FIFO_IRQ_DENSE_V1' "$HWC"
+          grep -Fq 'a52_p442r_note_arm(dsi_ctrl);' "$CTRL"
+          grep -Fq 'a52_p442r_note_isr(dsi_ctrl, status);' "$CTRL"
+          grep -Fq 'a52_p442r_dense_run(ctrl);' "$HWC"
+          grep -Fq '3000ULL' "$HWC"
+          grep -Fq 'A52_P442R_DENSE_MAX 21U' "$HWC"
+          echo "Phase442R paired source audit: PASS"
+
+      - name: Audit display clock sync_state contracts
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          {
+            echo "=== Phase439 clock-provider sync_state audit ==="
+            echo "--- display clock controllers ---"
+            grep -Rns --include='*dispcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- gcc clock controllers ---"
+            grep -Rns --include='gcc*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- rpmh clocks ---"
+            grep -Rns --include='*rpmh*.c' -E '\.sync_state|sync_state[[:space:]]*=' "$ROOT/drivers/clk/qcom" || true
+            echo "--- generic clk_sync_state references ---"
+            grep -Rns -E 'clk_sync_state|sync_state' "$ROOT/drivers/clk/qcom" | head -200 || true
+          } | tee /tmp/p439-sync-state.txt
+          test -s /tmp/p439-sync-state.txt
+
+      - name: Incremental compile Phase443 GKI
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
+
+          IMAGE="$BUILD/arch/arm64/boot/Image"
+          MAP="$BUILD/System.map"
+          test -s "$IMAGE"
+          test -s "$MAP"
+
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
+          python3 scripts/442_apply_fifo_fetch_discriminator.py --root "$ROOT" --check-only
+          python3 scripts/442r_apply_fifo_irq_dense.py --root "$ROOT" --check-only
+
+          grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
+          grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE442R_FIFO_IRQ_DENSE_V1' "$IMAGE"
+          grep -aFq 'P442R ARM leg=%u irq=%d sw=%x ref=%u hw=%x en=%u' "$IMAGE"
+          grep -aFq 'P442R D leg=%u i=%u us=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
+          grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
+          grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
+
+          # Critical: no scheduled Phase440 F0 sender may survive in this Image.
+          ! grep -aFq 'P440 EARLY start' "$IMAGE"
+          ! grep -aFq 'P440 EARLY unlock_rc' "$IMAGE"
+          ! grep -aFq 'P440 EARLY relock_rc' "$IMAGE"
+
+          grep -Fq ' a52_p437_mark' "$MAP"
+          grep -Fq ' a52_p439_allow_next' "$MAP"
+          grep -Fq ' a52_p440_event' "$MAP"
+          grep -Fq ' a52_p442_fifo_active' "$MAP"
+          grep -Fq ' a52_p442_tbu_read' "$MAP"
+          grep -Fq ' a52_p442r_dense_dump' "$MAP"
+          ccache -s
+
+      - name: Save Phase443 GKI object cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/gki-phase199-out
+          key: a52xq-phase443-paired-fifo-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/442r_apply_fifo_irq_dense.py.z64', 'scripts/442_apply_fifo_fetch_discriminator.py.z64', 'scripts/441_apply_vrr_state_compat.py', 'scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
+
+      - name: Save rolling clang ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase442-${{ github.run_id }}
+
+      - name: Package Phase443 GKI
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          OUT="$PWD/phase443-gki-out"
+          SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
+          FINAL="$OUT/package/boot-phase443-gki-paired-fifo-oracle-v1.img"
+
+          rm -rf "$OUT"
+          cp -a phase429-gki-out "$OUT"
+          cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
+          cp "$BUILD/System.map" "$OUT/compile/System.map"
+          cp "$BUILD/.config" "$OUT/config/final.config"
+
+          mkdir -p "$OUT/source" "$OUT/audit"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/dsi_display.c"
+          cp "$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c" "$OUT/source/ss_dsi_panel_sysfs.c"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/kernel_exit.c"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arm64_syscall.c"
+          cp "$ROOT/drivers/base/core.c" "$OUT/source/base_core.c"
+          cp "$ROOT/drivers/base/power/runtime.c" "$OUT/source/runtime_pm.c"
+          cp "$ROOT/drivers/base/power/domain.c" "$OUT/source/genpd_domain.c"
+          cp "$ROOT/drivers/regulator/core.c" "$OUT/source/regulator_core.c"
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$OUT/source/arm_smmu.c"
+          cp scripts/437_apply_kgsl_open_corridor.py \
+             scripts/438_apply_devbw_semantic_parity.py \
+             scripts/439_apply_dsi_autopsy.py \
+             scripts/440_apply_early_f0_cleanup_forensics.py \
+             scripts/441_apply_vrr_state_compat.py \
+             scripts/442_apply_fifo_fetch_discriminator.py \
+             scripts/442_apply_fifo_fetch_discriminator.py.z64 \
+             scripts/442r_apply_fifo_irq_dense.py \
+             scripts/442r_apply_fifo_irq_dense.py.z64 \
+             scripts/decode_phase442_fifo_fetch.py \
+             scripts/decode_phase439_dsi.py \
+             scripts/decode_phase437_open.py "$OUT/audit/"
+          cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt /tmp/p441-vrr-audit.txt "$OUT/audit/" 2>/dev/null || true
+
+          gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/phase442-repack-report.json"
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+
+          cat > "$OUT/PHASE443-GKI-NOTES.txt" <<'EOF'
+          Phase442 FIFO/FETCH discriminator + Phase441 VRR compatibility
+          ==================================================
+          Root cause under test:
+            Samsung bootanimation parses /sys/class/lcd/panel/vrr_state.
+            TouchGrass returns 1080X2400:NOR.
+            GKI may build without CONFIG_SEC_PARAM, leaving vrr_mode uninitialized.
+
+          Runtime fix:
+            vrr_mode is zero initialized.
+            Valid SEC_PARAM content is preserved.
+            Empty or malformed content falls back to:
+              %dX%d:NOR
+            using display->modes->timing.h_active/v_active.
+
+          Test harness:
+            Phase439A F0 autopsy remains passive.
+            Phase440 bootanimation/power/cleanup event logging remains passive.
+            Phase440's scheduled ~12 s F0 sender is removed before compilation.
+            Therefore the first F0 must come naturally from Android/bootanimation.
+
+          Expected live sysfs value:
+            1080X2400:NOR
+
+          Phase442 discriminator:
+            F0 #1 is FIFO_STORE with durable before/after breadcrumbs around every
+            TPG register write and SW trigger. FETCH_MEMORY #2 is launched only
+            after a real DMA_DONE from #1, with reset_cmd_fifo() in between.
+            FIFO timeout skips #2 and does not panic.
+            FETCH timeout reads AXI2AHB, HF0 TBU +0/+0x20, CB2 FSR/FAR,
+            route/PTE state, and debug selector 0x0171 one operation at a time.
+
+          Interpretation:
+            FIFO hangs: memory fetch is very likely exonerated, allowing for a
+            possible TPG-FIFO-specific quirk.
+            FIFO passes / FETCH hangs: memory-fetch road is strongly implicated.
+            Both pass: investigate FIFO priming/order or nondeterminism.
+
+          Decoder:
+            python3 decode_phase442_fifo_fetch.py <phase389 reserved-RAM image>
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase443 GKI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-GKI-PAIRED-FIFO-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c
+            gki/common/drivers/iommu/arm/arm-smmu/arm-smmu.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/439_apply_dsi_autopsy.py
+            scripts/440_apply_early_f0_cleanup_forensics.py
+            scripts/441_apply_vrr_state_compat.py
+            scripts/442_apply_fifo_fetch_discriminator.py
+            scripts/442_apply_fifo_fetch_discriminator.py.z64
+            scripts/decode_phase442_fifo_fetch.py
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase443 GKI
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-GKI-PAIRED-FIFO-${{ github.run_number }}
+          path: phase443-gki-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase443 GKI boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-GKI-PAIRED-FIFO-${{ github.run_number }}-BOOT-IMG
+          path: phase443-gki-out/package/boot-phase443-gki-paired-fifo-oracle-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+touchgrass:
+    if: true
+    name: Build Phase443 TouchGrass paired FIFO oracle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: '4'
+      CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+      CCACHE_MAXSIZE: 5G
+      GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+      PHASE315G_COMMIT: a82b49ec1c0227611d8dc9a26a7249dae0a8c938
+      BOOT_SOURCE_ASSET_ID: '478920392'
+      BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Golden runner
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/439g_apply_golden_dsi_autopsy.py scripts/443_apply_touchgrass_fifo_oracle.py
+          python3 scripts/443_apply_touchgrass_fifo_oracle.py --help >/dev/null
+          bash -n scripts/439g_ci_build_golden.sh
+
+      - name: Create exact Golden-control workspace and hydrate observers
+        run: |
+          set -Eeuo pipefail
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- \
+            --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+
+          git -C golden-work fetch --depth=1 origin "$PHASE315G_COMMIT"
+          git -C golden-work show FETCH_HEAD:scripts/315g_apply_golden_f0_full_prestate_reference.py \
+            > golden-work/scripts/315g_apply_golden_f0_full_prestate_reference.py
+          git -C golden-work show FETCH_HEAD:scripts/315g_ci_build.sh \
+            > golden-work/scripts/315g_ci_build.sh
+
+          cp scripts/319_apply_dsi_sixpoint_temporal_observer.py golden-work/scripts/
+          cp scripts/319g_ci_build_golden.sh golden-work/scripts/
+          cp scripts/344g_apply_golden_dma_transition_recorder.py golden-work/scripts/
+          cp scripts/424g_apply_golden_paired_hw_snapshot.py golden-work/scripts/
+          cp scripts/424g_ci_build_golden.sh golden-work/scripts/
+          cp scripts/439g_apply_golden_dsi_autopsy.py golden-work/scripts/
+          cp scripts/439g_ci_build_golden.sh golden-work/scripts/
+          cp scripts/439fg_apply_golden_dense.py golden-work/scripts/
+          cp scripts/439fg_ci_build_golden.sh golden-work/scripts/
+          cp scripts/443_apply_touchgrass_fifo_oracle.py golden-work/scripts/
+          cp scripts/443_apply_touchgrass_fifo_oracle.py.z64 golden-work/scripts/
+
+          python3 -m py_compile \
+            golden-work/scripts/315g_apply_golden_f0_full_prestate_reference.py \
+            golden-work/scripts/319_apply_dsi_sixpoint_temporal_observer.py \
+            golden-work/scripts/344g_apply_golden_dma_transition_recorder.py \
+            golden-work/scripts/424g_apply_golden_paired_hw_snapshot.py \
+            golden-work/scripts/439g_apply_golden_dsi_autopsy.py \
+            golden-work/scripts/439fg_apply_golden_dense.py \
+            golden-work/scripts/443_apply_touchgrass_fifo_oracle.py
+          bash -n golden-work/scripts/439g_ci_build_golden.sh
+          bash -n golden-work/scripts/439fg_ci_build_golden.sh
+
+      - name: Restore TouchGrass Golden compiler cache
+        id: tgccache
+        uses: actions/cache/restore@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/443_apply_touchgrass_fifo_oracle.py.z64', 'scripts/439fg_apply_golden_dense.py', 'scripts/439g_apply_golden_dsi_autopsy.py') }}
+          restore-keys: |
+            a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
+
+      - name: Configure TouchGrass Golden compiler cache
+        run: |
+          set -Eeuo pipefail
+          mkdir -p golden-work/.ccache
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -z
+          ccache -s
+
+      - name: Build Phase439F Golden dense observer
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          bash scripts/439fg_ci_build_golden.sh
+
+      - name: Apply Phase443 TouchGrass paired FIFO oracle
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          DSI="$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi"
+          python3 scripts/443_apply_touchgrass_fifo_oracle.py --root "$DSI"
+          python3 scripts/443_apply_touchgrass_fifo_oracle.py --root "$DSI" --check-only
+          git -C workspace/touchgrass-a52xq diff --check -- \
+            techpack/display/msm/dsi/dsi_ctrl.c \
+            techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c
+          grep -Fq 'A52_PHASE443_TOUCHGRASS_FIFO_ORACLE_V1' "$DSI/dsi_ctrl.c"
+          grep -Fq 'A52_PHASE443_TOUCHGRASS_FIFO_ORACLE_V1' "$DSI/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'a52_p443_note_arm(dsi_ctrl);' "$DSI/dsi_ctrl.c"
+          grep -Fq 'a52_p443_note_isr(dsi_ctrl, status);' "$DSI/dsi_ctrl.c"
+          grep -Fq 'a52_p443_dense_run(ctrl);' "$DSI/dsi_ctrl_hw_cmn.c"
+
+      - name: Rebuild Phase443 TouchGrass oracle
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          set -o pipefail
+          bash -lc 'source scripts/common.sh; build_kernel "touchgrass-4.19.200-resukisu-v4.1.0-safe"' \
+            2>&1 | tee phase443-touchgrass-build.log
+
+          IMAGE="$PWD/artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe"
+          CONFIG="$PWD/artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe"
+          OUT="$PWD/phase443-touchgrass-out"
+          DSI="$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi"
+          test -s "$IMAGE" -a -s "$CONFIG"
+          grep -aFq 'A52_PHASE443_TOUCHGRASS_FIFO_ORACLE_V1' "$IMAGE"
+          grep -aFq 'P443 ARM leg=%u irq=%d sw=%x ref=%u hw=%x en=%u' "$IMAGE"
+          grep -aFq 'P443 TERM leg=%u wait=%d irq=%d st=%x in=%x ck=%x ln=%x tg=%x db=%x raw=%u en=%u' "$IMAGE"
+          grep -aFq 'P443 D leg=%u i=%u us=%llu st=%x ck=%x in=%x ln=%x db=%x' "$IMAGE"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"/{audit,source,package}
+          cp "$IMAGE" "$OUT/Image"
+          cp "$CONFIG" "$OUT/config"
+          cp phase443-touchgrass-build.log "$OUT/audit/"
+          cp scripts/443_apply_touchgrass_fifo_oracle.py \
+             scripts/443_apply_touchgrass_fifo_oracle.py.z64 \
+             scripts/439fg_apply_golden_dense.py \
+             scripts/439g_apply_golden_dsi_autopsy.py "$OUT/audit/"
+          cp "$DSI/dsi_ctrl.c" "$DSI/dsi_ctrl_hw_cmn.c" "$OUT/source/"
+          cat > "$OUT/BUILD-IDENTITY.txt" <<'EOF'
+          experiment=PHASE443-TOUCHGRASS-PAIRED-FIFO-ORACLE-V1
+          base=proven-Phase439F-Golden-dense-observer
+          target=controller0-first-natural-F05A5A
+          leg1=FIFO_STORE
+          leg2=FETCH_MEMORY-only-after-real-DMA_DONE-ISR
+          dma_done_enable=normal-driver-status-interrupt-path,INT_CTRL-bit1
+          dma_done_raw=INT_CTRL-bit0,latch-before-normal-clear
+          dense=21-samples,3us-spacing,0..60us
+          dense_fields=STATUS,CLK_STATUS,INT_CTRL,LANE_STATUS,DBG171
+          terminal_fields=STATUS,INT_CTRL,CLK_STATUS,LANE_STATUS,TPG_CTRL,DBG171
+          EOF
+          sha256sum "$OUT/Image" "$OUT/config" > "$OUT/SHA256SUMS"
+
+      - name: Save TouchGrass Golden compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/443_apply_touchgrass_fifo_oracle.py.z64', 'scripts/439fg_apply_golden_dense.py', 'scripts/439g_apply_golden_dsi_autopsy.py') }}
+
+      - name: Hydrate Golden FDR repack helpers
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          mkdir -p golden-work/scripts golden-work/projects/a52-p1-boot-image
+          fetch_file() {
+            local ref="$1" path="$2" out="golden-work/$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" \
+              --jq '.content' | tr -d '\n' | base64 --decode > "$out"
+            test -s "$out"
+          }
+          fetch_file main scripts/37_validate_a52_p1_boot_source.py
+          fetch_file main scripts/38_repack_a52_p1_boot.py
+          fetch_file main projects/a52-p1-boot-image/boot-source.lock
+          chmod +x golden-work/scripts/37_validate_a52_p1_boot_source.py \
+            golden-work/scripts/38_repack_a52_p1_boot.py
+
+      - name: Repack Phase443 TouchGrass with known-good Golden FDR container
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          OUT=phase443-touchgrass-out
+          mkdir -p intake "$OUT/package"
+          gzip -n -9 -c "$OUT/Image" > "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img --kernel "$OUT/package/Image.gz" \
+            --output "$OUT/package/boot-phase443-touchgrass-paired-fifo-oracle-v1.img" \
+            --report "$OUT/package/repack-report.json"
+          test "$(stat -c %s "$OUT/package/boot-phase443-touchgrass-paired-fifo-oracle-v1.img")" -eq 100663296
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+
+      - name: Upload Phase443 TouchGrass failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-TOUCHGRASS-FAILED-${{ github.run_number }}
+          path: |
+            golden-work/phase439f-golden-failure/
+            golden-work/phase439-golden-failure/
+            golden-work/phase424-golden-failure/
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase443 TouchGrass
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-TOUCHGRASS-PAIRED-${{ github.run_number }}
+          path: golden-work/phase443-touchgrass-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase443 TouchGrass boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE443-TOUCHGRASS-PAIRED-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase443-touchgrass-out/package/boot-phase443-touchgrass-paired-fifo-oracle-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+

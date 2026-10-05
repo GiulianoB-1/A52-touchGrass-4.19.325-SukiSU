@@ -43,7 +43,7 @@ env:
 
 concurrency:
   group: a52-phase443-paired-fifo-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   gki:
@@ -644,7 +644,8 @@ jobs:
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
           python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
           python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
-          python3 scripts/442_apply_fifo_fetch_discriminator.py --root "$ROOT" --check-only
+          # Phase442 was validated before 442R. 442R deliberately retires its
+          # hot fixed-slot stages 14/15/21/22 in favor of the RAM-only dense lane.
           python3 scripts/442r_apply_fifo_irq_dense.py --root "$ROOT" --check-only
 
           grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
@@ -827,7 +828,7 @@ jobs:
           retention-days: 30
 
   touchgrass:
-    if: true
+    if: false
     name: Build Phase443 TouchGrass paired FIFO oracle
     runs-on: ubuntu-22.04
     timeout-minutes: 300

@@ -27,6 +27,24 @@ def one(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_in_static_function(
+    text: str, func: str, old: str, new: str, label: str
+) -> str:
+    needle = f"static int {func}("
+    start = text.find(needle)
+    if start < 0:
+        die(f"{label}: function {func} missing")
+    end = text.find("\nstatic ", start + len(needle))
+    if end < 0:
+        end = len(text)
+    body = text[start:end]
+    n = body.count(old)
+    if n != 1:
+        die(f"{label}: expected one anchor inside {func}, found {n}")
+    body = body.replace(old, new, 1)
+    return text[:start] + body + text[end:]
+
+
 def add_include_and_extern(text: str, header: str = "") -> str:
     if MARK in text:
         return text
@@ -386,15 +404,17 @@ def patch_runtime(text: str) -> str:
         return text
     text = add_include_and_extern(text)
 
-    text = one(
+    text = replace_in_static_function(
         text,
+        "rpm_suspend",
         "\t__update_runtime_status(dev, RPM_SUSPENDED);\n",
         "\t__update_runtime_status(dev, RPM_SUSPENDED);\n"
         '\ta52_p440_event("RPM_SUSP", dev_name(dev), rpmflags, 0);\n',
         "runtime suspended transition",
     )
-    text = one(
+    text = replace_in_static_function(
         text,
+        "rpm_resume",
         "\t__update_runtime_status(dev, RPM_ACTIVE);\n",
         "\t__update_runtime_status(dev, RPM_ACTIVE);\n"
         '\ta52_p440_event("RPM_RESUME", dev_name(dev), rpmflags, 0);\n',

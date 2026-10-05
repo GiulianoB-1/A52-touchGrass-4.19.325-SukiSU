@@ -64,6 +64,17 @@ def _function_bounds(text: str) -> tuple[int, int]:
     raise SystemExit("Phase443 wrapper: timeout function closing brace missing")
 
 
+def _ensure_reg_header(path: Path) -> None:
+    text = path.read_text(errors="replace")
+    include = '#include "dsi_ctrl_reg.h"\n'
+    if include in text:
+        return
+    anchor = '#include "dsi_ctrl_hw.h"\n'
+    if anchor not in text:
+        raise SystemExit("Phase443 wrapper: dsi_ctrl_hw.h include anchor missing")
+    path.write_text(text.replace(anchor, anchor + include, 1))
+
+
 def _strip_golden_gap(path: Path) -> str | None:
     text = path.read_text(errors="replace")
     if MARK in text:
@@ -153,6 +164,7 @@ ctrl_path: Path | None = None
 golden_gap: str | None = None
 if apply_mode:
     ctrl_path = _resolve_ctrl(Path(root_arg).resolve())
+    _ensure_reg_header(ctrl_path)
     golden_gap = _strip_golden_gap(ctrl_path)
 
 try:

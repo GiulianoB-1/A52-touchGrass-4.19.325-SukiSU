@@ -7,6 +7,7 @@ on:
       - agent/a52-phase441-vrr-state-compat-v1
     paths:
       - .github/workflows/441-a52-vrr-state-compat.yml
+      - scripts/268_ci_build.sh
       - scripts/440_apply_early_f0_cleanup_forensics.py
       - scripts/441_apply_vrr_state_compat.py
   workflow_dispatch:
@@ -199,9 +200,24 @@ jobs:
           path: workspace/touchgrass-a52xq
           key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
 
+      - name: Restore retained Phase346 seed cache
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: phase346-seed-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/phase346-retained-seed
+          key: a52xq-phase346-retained-seed-v1-${{ runner.os }}-10344752313
+
       - name: Build Phase345 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         run: bash scripts/345_ci_build_gki.sh
+
+      - name: Save retained Phase346 seed cache
+        if: always() && steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.phase346-seed-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/phase346-retained-seed
+          key: a52xq-phase346-retained-seed-v1-${{ runner.os }}-10344752313
 
       - name: Cache Phase345 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'

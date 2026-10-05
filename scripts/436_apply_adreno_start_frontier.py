@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import base64
+import re
+import zlib
+
+p = Path(__file__).with_suffix(Path(__file__).suffix + '.z64')
+s = zlib.decompress(base64.b64decode(p.read_bytes())).decode()
+
+# The verified payload reached the source apply step, but two functions contain
+# multiple generic return anchors. For these named frontier exits, choose the
+# final occurrence rather than weakening any other source audit.
+old_one = '''def one(s: str, old: str, new: str, label: str) -> str:
+    n = s.count(old)
+    if n != 1:
+        die(f"{label}: expected exactly one anchor, found {n}")
+    return s.replace(old, new, 1)
+'''
+new_one = '''def one(s: str, old: str, new: str, label: str) -> str:
+    n = s.count(old)
+    if n != 1:
+        if n == 2 and label in {
+            "change state return",
+            "gmu normal return",
+            "gmu start return",
+            "gmu return",
+        }:
+            pos = s.rfind(old)
+            return s[:pos] + new + s[pos + len(old):]
+        die(f"{label}: expected exactly one anchor, found {n}")
+    return s.replace(old, new, 1)
+'''
+if old_one not in s:
+    raise RuntimeError("Phase436 wrapper: one() repair anchor missing")
+s = s.replace(old_one, new_one, 1)
+
+# GNU89: the old payload emitted a mark before a block-local 'int ret = ...'
+# declaration. Rewrite only that generator block so the declaration remains
+# first and the PRE/POST marks surround the actual call.
+start = s.find('        anchor = "\\t\\tint ret = gmu_core_start(device);\\n"\n')
+if start < 0:
+    raise RuntimeError("Phase436 wrapper: GMU-core declaration anchor missing")
+end_marker = '            "gmu core start")\n'
+end = s.find(end_marker, start)
+if end < 0:
+    raise RuntimeError("Phase436 wrapper: GMU-core block end missing")
+end += len(end_marker)
+fixed = '''        anchor = "\\t\\tint ret = gmu_core_start(device);\\n"
+        fn = one(fn, anchor,
+            "\\t\\tint ret;\\n\\n"
+            "\\t\\tif (a52_p436_target_current())\\n"
+            "\\t\\t\\ta52_p436_mark(P436_P3_GMU_CORE_START_PRE, device->state, 0, NULL);\\n"
+            "\\t\\tret = gmu_core_start(device);\\n"
+            "\\t\\tif (a52_p436_target_current())\\n"
+            "\\t\\t\\ta52_p436_mark(P436_P4_GMU_CORE_START_POST, (u64)(s64)ret,\\n"
+            "\\t\\t\\t\\tdevice->state, NULL);\\n",
+            "gmu core start")
+'''
+s = s[:start] + fixed + s[end:]
+
+# PID1 I1/I2/I3 inherit Phase435's single-statement guard:
+#     if (current->pid == 1)
+#         a52_p435_mark(...);
+# Appending a second statement without braces makes the P436 mark unconditional
+# and trips -Wmisleading-indentation. Rewrite the generator loop so the first
+# three PID1 stages wrap both generations in one explicit block. I4 already
+# lives inside the global-init panic block and does not need this guard.
+old_pid1_loop = '''    for old, add in pairs:
+        s = one(s, old, old + add, "PID1 exit stage")
+'''
+new_pid1_loop = '''    for idx, (old, add) in enumerate(pairs):
+        if idx < 3:
+            guard = "\\tif (current->pid == 1)\\n" + old
+            block = (
+                "\\tif (current->pid == 1) {\\n" +
+                old + add +
+                "\\t}\\n"
+            )
+            s = one(s, guard, block, "PID1 exit stage")
+        else:
+            s = one(s, old, old + add, "PID1 exit stage")
+'''
+if old_pid1_loop not in s:
+    raise RuntimeError("Phase436 wrapper: PID1 loop repair anchor missing")
+s = s.replace(old_pid1_loop, new_pid1_loop, 1)
+
+# The Phase436 capture proved that exact current->comm matching is too fragile:
+# a SurfaceFlinger worker can enter KGSL with a thread-specific comm. Keep the
+# target narrow by keying on the thread-group leader (the process identity).
+old_arm = '''\tif (strcmp(current->comm, "surfaceflinger"))
+\t\treturn;
+'''
+new_arm = '''\tif (!current->group_leader ||
+\t    strcmp(current->group_leader->comm, "surfaceflinger"))
+\t\treturn;
+'''
+if old_arm not in s:
+    raise RuntimeError("Phase436 wrapper: target-arm anchor missing")
+s = s.replace(old_arm, new_arm, 1)
+
+exec(compile(s, str(p)[:-4], "exec"), globals(), globals())

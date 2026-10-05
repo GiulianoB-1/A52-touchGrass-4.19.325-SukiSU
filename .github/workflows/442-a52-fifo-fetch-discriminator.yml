@@ -560,7 +560,7 @@ jobs:
           grep -Fq 'P442 F1 STOP irq=0 fetch_skipped=1' "$CTRL"
           grep -Fq 'a52_p442_fetch_timeout_forensics' "$CTRL"
           grep -Fq '(resource_size_t)0x1518d000' "$SMMU"
-          grep -Fq 'a52_p442_survival_record(14U, 0U);' "$HWC"
+          grep -Fq 'a52_p442_survival_record(14U, 0);' "$HWC"
           grep -Fq 'a52_p442_survival_record(15U, 1U);' "$HWC"
           echo "Phase442 source audit: PASS"
 
@@ -681,11 +681,11 @@ jobs:
           gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
           python3 scripts/38_repack_a52_p1_boot.py \
             --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
-            --output "$FINAL" --report "$OUT/package/phase442-repack-report.json
+            --output "$FINAL" --report "$OUT/package/phase442-repack-report.json"
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
 
           cat > "$OUT/PHASE442-NOTES.txt" <<'EOF'
-          Phase441 VRR state compatibility + natural F0 test
+          Phase442 FIFO/FETCH discriminator + Phase441 VRR compatibility
           ==================================================
           Root cause under test:
             Samsung bootanimation parses /sys/class/lcd/panel/vrr_state.

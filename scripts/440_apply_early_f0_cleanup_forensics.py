@@ -31,7 +31,9 @@ def replace_in_static_function(
     text: str, func: str, old: str, new: str, label: str
 ) -> str:
     needle = f"static int {func}("
-    start = text.find(needle)
+    # Some runtime-PM functions have forward declarations near the top of
+    # the file. Use the last occurrence so we patch the actual definition.
+    start = text.rfind(needle)
     if start < 0:
         die(f"{label}: function {func} missing")
     end = text.find("\nstatic ", start + len(needle))

@@ -892,6 +892,17 @@ jobs:
           bash -n golden-work/scripts/439g_ci_build_golden.sh
           bash -n golden-work/scripts/439fg_ci_build_golden.sh
 
+      - name: Restore completed Phase439F Golden baseline
+        id: goldenbase
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            golden-work/workspace/touchgrass-a52xq
+            golden-work/artifacts
+            golden-work/phase439-golden-out
+            golden-work/phase439f-golden-out
+          key: a52xq-phase439f-golden-built-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-e93abaaa
+
       - name: Restore TouchGrass Golden compiler cache
         id: tgccache
         uses: actions/cache/restore@v4
@@ -912,10 +923,33 @@ jobs:
           ccache -s
 
       - name: Build Phase439F Golden dense observer
+        if: steps.goldenbase.outputs.cache-hit != 'true'
         run: |
           set -Eeuo pipefail
           cd golden-work
           bash scripts/439fg_ci_build_golden.sh
+
+      - name: Save completed Phase439F Golden baseline
+        if: steps.goldenbase.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            golden-work/workspace/touchgrass-a52xq
+            golden-work/artifacts
+            golden-work/phase439-golden-out
+            golden-work/phase439f-golden-out
+          key: a52xq-phase439f-golden-built-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-e93abaaa
+
+      - name: Validate restored Phase439F Golden baseline
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          test -s artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          test -s artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          DSI="$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi"
+          grep -Fq 'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' "$DSI/dsi_ctrl_hw_cmn.c"
+          grep -Fq 'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1' "$DSI/dsi_ctrl_hw_cmn.c"
+          echo "Phase439F Golden baseline ready: cache=${{ steps.goldenbase.outputs.cache-hit }}"
 
       - name: Apply Phase443 TouchGrass paired FIFO oracle
         run: |

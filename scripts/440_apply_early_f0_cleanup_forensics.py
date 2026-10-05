@@ -45,6 +45,23 @@ def replace_in_static_function(
     return text[:start] + body + text[end:]
 
 
+def replace_in_function_region(
+    text: str, start_needle: str, old: str, new: str, label: str
+) -> str:
+    start = text.find(start_needle)
+    if start < 0:
+        die(f"{label}: function anchor missing: {start_needle}")
+    end = text.find("\nstatic ", start + len(start_needle))
+    if end < 0:
+        end = len(text)
+    body = text[start:end]
+    n = body.count(old)
+    if n != 1:
+        die(f"{label}: expected one anchor in target function, found {n}")
+    body = body.replace(old, new, 1)
+    return text[:start] + body + text[end:]
+
+
 def add_include_and_extern(text: str, header: str = "") -> str:
     if MARK in text:
         return text
@@ -395,7 +412,13 @@ def patch_core(text: str) -> str:
 \t\t\tdev->driver->sync_state(dev);
 \t\ta52_p440_event("SYNC_POST", dev_name(dev), 0, 0);
 '''
-    text = one(text, old, new, "sync_state callback")
+    text = replace_in_function_region(
+        text,
+        "static void device_links_flush_sync_list(",
+        old,
+        new,
+        "sync_state callback",
+    )
     return text + "\n/* " + MARK + ": sync_state chronology captured. */\n"
 
 
@@ -437,7 +460,9 @@ def patch_domain(text: str) -> str:
 \ta52_p440_event("GENPD_OFF", genpd->name, genpd->state_idx, 0);
 \tgenpd->states[genpd->state_idx].usage++;
 '''
-    text = one(text, old, new, "runtime genpd off")
+    text = replace_in_static_function(
+        text, "genpd_power_off", old, new, "runtime genpd off"
+    )
 
     old = '''\tgenpd->status = GENPD_STATE_ON;
 \tgenpd_update_accounting(genpd);
@@ -446,7 +471,9 @@ def patch_domain(text: str) -> str:
 \tgenpd_update_accounting(genpd);
 \ta52_p440_event("GENPD_ON", genpd->name, genpd->state_idx, 0);
 '''
-    text = one(text, old, new, "genpd on")
+    text = replace_in_static_function(
+        text, "genpd_power_on", old, new, "genpd on"
+    )
     return text + "\n/* " + MARK + ": genpd runtime on/off chronology captured. */\n"
 
 

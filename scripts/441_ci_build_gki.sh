@@ -61,6 +61,21 @@ cat "$AUDIT/graphics-uapi-audit.json" | jq '{files,kgsl_layout_identical}'
 stage "apply Phase441G"
 python3 scripts/441_apply_bootanimation_oracle.py --root "$ROOT" --mode gki
 python3 scripts/441_apply_bootanimation_oracle.py --root "$ROOT" --mode gki --check-only
+
+# Phase441 parks the Phase440 synthetic early-F0 call.  Mark the now-dead
+# helper explicitly unused so the 5.10 -Werror build does not reject it.
+python3 - <<'PY'
+from pathlib import Path
+p = Path("gki/common/drivers/a52_display/msm/dsi/dsi_display.c")
+s = p.read_text()
+old = "static void a52_p440_schedule(struct dsi_display *display)"
+new = "static __maybe_unused void a52_p440_schedule(struct dsi_display *display)"
+n = s.count(old)
+if n != 1:
+    raise SystemExit(f"Phase441G expected one parked Phase440 helper, found {n}")
+p.write_text(s.replace(old, new, 1))
+PY
+grep -Fq 'static __maybe_unused void a52_p440_schedule' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
 grep -Fq 'A52_PHASE441_BOOTANIMATION_GOLDEN_ORACLE_V1:gki' "$ROOT/arch/arm64/kernel/syscall.c"
 grep -Fq 'Phase441: synthetic early F0 parked' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
 ! grep -Fq $'	a52_p440_schedule(display);' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"

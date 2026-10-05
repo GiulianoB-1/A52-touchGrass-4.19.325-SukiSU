@@ -5,7 +5,10 @@ import argparse
 from pathlib import Path
 
 MARK = "A52_PHASE441_VRR_STATE_COMPAT_V1"
+P440 = "A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1"
 SYSFS = Path("drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c")
+DISP = Path("drivers/a52_display/msm/dsi/dsi_display.c")
+REC = Path("drivers/a52_secure/a52_ack_secure_flight_recorder.c")
 
 
 def die(msg: str) -> None:
@@ -56,10 +59,9 @@ NEW_FN = r'''static ssize_t vrr_state_show(struct device *dev,
 #endif
 
 	/*
-	 * Samsung bootanimation expects exactly an ordered W X H : mode string.
-	 * On GKI, CONFIG_SEC_PARAM may be absent, leaving the legacy downstream
-	 * buffer untouched. Always terminate it, then reject empty or malformed
-	 * contents before exposing them to userspace.
+	 * Samsung bootanimation expects an ordered W X H : mode string.
+	 * On GKI, CONFIG_SEC_PARAM may be absent, so the legacy downstream
+	 * buffer must never be exposed unless it is initialized and parseable.
 	 */
 	vrr_mode[sizeof(vrr_mode) - 1] = '\0';
 	x = memchr(vrr_mode, 'X', sizeof(vrr_mode));
@@ -78,7 +80,7 @@ NEW_FN = r'''static ssize_t vrr_state_show(struct device *dev,
 }
 
 /* A52_PHASE441_VRR_STATE_COMPAT_V1
- * Keep /sys/class/lcd/panel/vrr_state safe when SEC_PARAM is not available.
+ * Keep /sys/class/lcd/panel/vrr_state safe when SEC_PARAM is unavailable.
  */
 static const char a52_p441_vrr_state_build_tag[] __used =
 	"A52_PHASE441_VRR_STATE_COMPAT_V1";
@@ -91,29 +93,69 @@ def patch_sysfs(text: str) -> str:
         return text
 
     start, end, old = extract_vrr_state(text)
-
-    required = (
+    for token in (
         "char vrr_mode[16];",
         "sec_get_param(param_index_VrrStatus, &vrr_mode);",
         'return snprintf(buf, sizeof(vrr_mode), "%s\\n", vrr_mode);',
-    )
-    for token in required:
+    ):
         if token not in old:
             die("legacy vrr_state_show anchor missing: " + token)
 
     return text[:start] + NEW_FN + text[end:]
 
 
-def validate(root: Path) -> None:
-    p = root / SYSFS
-    if not p.is_file():
-        die("missing " + str(SYSFS))
+def strip_phase440_active_f0(text: str) -> str:
+    """Keep Phase440 passive event hooks, remove its scheduled F0 sender."""
+    if "a52_p440_early_workfn" not in text and "a52_p440_schedule(display);" not in text:
+        return text
 
-    text = p.read_text(errors="replace")
+    helper_start = text.find(
+        "/* A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1 */\n"
+        "extern void a52_p439_allow_next(void);"
+    )
+    if helper_start < 0:
+        die("Phase440 display helper start missing")
+
+    helper_tail = (
+        "schedule_delayed_work(&a52_p440_flush_work,\n"
+        "\t\t\t      a52_p440_delay_to(A52_P440_FLUSH_NS));\n"
+        "}\n"
+    )
+    tail_pos = text.find(helper_tail, helper_start)
+    if tail_pos < 0:
+        die("Phase440 display helper tail missing")
+    helper_end = tail_pos + len(helper_tail)
+    text = text[:helper_start] + text[helper_end:]
+
+    hook = (
+        "\t/* Phase440: schedule one absolute-boottime early F0, leave natural late F0 untouched. */\n"
+        "\ta52_p440_schedule(display);\n\n"
+    )
+    if text.count(hook) != 1:
+        die(f"Phase440 early scheduling hook count = {text.count(hook)}")
+    text = text.replace(hook, "", 1)
+
+    trailer = (
+        "\n/* A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1: "
+        "absolute ~12 s early F0 + 75 s PASS/PASS flush. */\n"
+    )
+    text = text.replace(trailer, "\n", 1)
+
+    return text
+
+
+def validate(root: Path) -> None:
+    sysfs = root / SYSFS
+    disp = root / DISP
+    rec = root / REC
+    for p in (sysfs, disp, rec):
+        if not p.is_file():
+            die("missing " + str(p.relative_to(root)))
+
+    text = sysfs.read_text(errors="replace")
     _, _, fn = extract_vrr_state(text)
 
     for token in (
-        MARK,
         'char vrr_mode[16] = "";',
         "vrr_mode[sizeof(vrr_mode) - 1] = '\\0';",
         "memchr(vrr_mode, 'X', sizeof(vrr_mode))",
@@ -125,17 +167,33 @@ def validate(root: Path) -> None:
         'return snprintf(buf, sizeof(default_mode), "%s\\n", default_mode);',
         'return snprintf(buf, sizeof(vrr_mode), "%s\\n", vrr_mode);',
     ):
-        if token not in fn and token != MARK:
+        if token not in fn:
             die("missing patched token: " + token)
 
     if MARK not in text:
-        die("build marker missing")
+        die("Phase441 build marker missing")
     if "char vrr_mode[16];" in fn:
         die("uninitialized vrr_mode declaration remains")
     if "sec_set_param(param_index_VrrStatus" in fn:
         die("unexpected persistent param write remains")
 
-    print("Phase441 VRR state compatibility: PASS")
+    dtext = disp.read_text(errors="replace")
+    for forbidden in (
+        "a52_p440_early_workfn",
+        "a52_p440_schedule(display);",
+        "P440 EARLY start",
+        "P440 EARLY unlock_rc",
+        "P440 EARLY relock_rc",
+    ):
+        if forbidden in dtext:
+            die("active Phase440 F0 injector remains: " + forbidden)
+
+    rtext = rec.read_text(errors="replace")
+    for token in (P440, "P440 EV n=%u", "a52_p440_event"):
+        if token not in rtext:
+            die("passive Phase440 event logging missing: " + token)
+
+    print("Phase441 VRR state compatibility + passive-only forensics: PASS")
 
 
 def main() -> int:
@@ -146,10 +204,14 @@ def main() -> int:
     root = ns.root.resolve()
 
     if not ns.check_only:
-        p = root / SYSFS
-        if not p.is_file():
+        sysfs = root / SYSFS
+        disp = root / DISP
+        if not sysfs.is_file():
             die("missing " + str(SYSFS))
-        p.write_text(patch_sysfs(p.read_text(errors="replace")))
+        if not disp.is_file():
+            die("missing " + str(DISP))
+        sysfs.write_text(patch_sysfs(sysfs.read_text(errors="replace")))
+        disp.write_text(strip_phase440_active_f0(disp.read_text(errors="replace")))
 
     validate(root)
     return 0

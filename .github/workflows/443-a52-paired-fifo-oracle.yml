@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   gki:
-    if: true
+    if: false
     name: Build Phase443 GKI paired FIFO oracle
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -828,7 +828,7 @@ jobs:
           retention-days: 30
 
   touchgrass:
-    if: false
+    if: true
     name: Build Phase443 TouchGrass paired FIFO oracle
     runs-on: ubuntu-22.04
     timeout-minutes: 300

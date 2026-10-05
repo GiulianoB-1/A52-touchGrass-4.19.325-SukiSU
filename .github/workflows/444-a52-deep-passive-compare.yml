@@ -75,6 +75,50 @@ jobs:
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/decode_phase439_dsi.py --help >/dev/null
           python3 scripts/decode_phase437_open.py --help >/dev/null
+
+          # Cheap contract audit before apt/source reconstruction/compilation.
+          python3 - <<'PY'
+          import base64, zlib
+          from pathlib import Path
+
+          src = zlib.decompress(base64.b64decode(
+              Path("scripts/444_apply_deep_passive_compare.py.z64").read_text().strip()
+          )).decode("utf-8", "replace")
+
+          required = (
+              "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1",
+              "PRE_DEEP",
+              "PRE_TRIGGER",
+              "HOT_0_75US",
+              "DSI_KONA_BUS",
+              "MMC_MAJOR179",
+              "a52_p444_sde_capture",
+              "a52_p444_store_section",
+              "P444 TERM ret=%d/%d irq=%u/%u",
+          )
+          missing = [x for x in required if x not in src]
+          if missing:
+              raise SystemExit("Phase444 expanded-source contract missing: " + ", ".join(missing))
+
+          # TG ramoops text is known to suffer clear-bit corruption. Require
+          # either CRC-tagged summary records or duplicated key hex fields.
+          has_crc = ("crc=%" in src.lower()) or ("crc32" in src.lower())
+          duplicate_sets = (
+              ("st=%x/%x", "ck=%x/%x", "in=%x/%x", "ln=%x/%x", "db=%x/%x"),
+              ("st=%08x/%08x", "ck=%08x/%08x", "in=%08x/%08x",
+               "ln=%08x/%08x", "db=%08x/%08x"),
+          )
+          has_dups = any(all(tok in src for tok in toks) for toks in duplicate_sets)
+          if not (has_crc or has_dups):
+              raise SystemExit("Phase444 TG summary integrity missing: need CRC32 or duplicated key fields")
+
+          # The Phase444 target transaction must remain the normal FETCH path.
+          if "A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1" in src:
+              raise SystemExit("Phase444 expanded source unexpectedly inherits Phase442 FIFO experiment")
+
+          print("Phase444 expanded-source contract: PASS",
+                "integrity=crc" if has_crc else "integrity=duplicates")
+          PY
           echo "Phase441 payload: PASS"
 
       - name: Prepare runner and ccache wrappers
@@ -617,7 +661,12 @@ jobs:
           grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
           grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
           grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
-          grep -aFq 'A52P439 DSI F0 DMA_DONE timeout' "$IMAGE"
+          # Phase444 must never panic on the target F0 timeout. The inherited
+          # Phase439 panic helper may remain dead code in source, but the active
+          # Samsung timeout dump/panic path must be bypassed for the P444 target.
+          grep -aFq 'P444 TERM ret=%d/%d irq=%u/%u' "$IMAGE"
+          grep -aFq 'PRE_DEEP' "$IMAGE"
+          grep -aFq 'PRE_TRIGGER' "$IMAGE"
 
           # Critical: no scheduled Phase440 F0 sender may survive in this Image.
           ! grep -aFq 'P440 EARLY start' "$IMAGE"
@@ -798,6 +847,28 @@ jobs:
           python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/decode_phase444.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
+          python3 - <<'PY'
+          import base64, zlib
+          from pathlib import Path
+          src = zlib.decompress(base64.b64decode(
+              Path("scripts/444_apply_deep_passive_compare.py.z64").read_text().strip()
+          )).decode("utf-8", "replace")
+          for token in ("PRE_DEEP", "PRE_TRIGGER", "HOT_0_75US",
+                        "P444 TERM ret=%d/%d irq=%u/%u"):
+              if token not in src:
+                  raise SystemExit("Phase444 TG contract missing: " + token)
+          low = src.lower()
+          has_crc = ("crc=%" in low) or ("crc32" in low)
+          has_dups = all(tok in src for tok in
+              ("st=%x/%x", "ck=%x/%x", "in=%x/%x", "ln=%x/%x", "db=%x/%x"))
+          has_dups |= all(tok in src for tok in
+              ("st=%08x/%08x", "ck=%08x/%08x", "in=%08x/%08x",
+               "ln=%08x/%08x", "db=%08x/%08x"))
+          if not (has_crc or has_dups):
+              raise SystemExit("Phase444 TG integrity contract missing")
+          print("Phase444 TG preflight: PASS",
+                "integrity=crc" if has_crc else "integrity=duplicates")
+          PY
 
       - name: Restore warm TouchGrass tree
         id: tgwarm

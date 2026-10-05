@@ -620,14 +620,17 @@ jobs:
           cp "$BUILD/.config" "$OUT/config/final.config"
 
           mkdir -p "$OUT/source" "$OUT/audit"
-          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" \
-             "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" \
-             "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" \
-             "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" \
-             "$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c" \
-             "$ROOT/kernel/exit.c" "$ROOT/arch/arm64/kernel/syscall.c" \
-             "$ROOT/drivers/base/core.c" "$ROOT/drivers/base/power/runtime.c" \
-             "$ROOT/drivers/base/power/domain.c" "$ROOT/drivers/regulator/core.c" "$OUT/source/"
+          cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/dsi_display.c"
+          cp "$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c" "$OUT/source/ss_dsi_panel_sysfs.c"
+          cp "$ROOT/kernel/exit.c" "$OUT/source/kernel_exit.c"
+          cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arm64_syscall.c"
+          cp "$ROOT/drivers/base/core.c" "$OUT/source/base_core.c"
+          cp "$ROOT/drivers/base/power/runtime.c" "$OUT/source/runtime_pm.c"
+          cp "$ROOT/drivers/base/power/domain.c" "$OUT/source/genpd_domain.c"
+          cp "$ROOT/drivers/regulator/core.c" "$OUT/source/regulator_core.c"
           cp scripts/437_apply_kgsl_open_corridor.py \
              scripts/438_apply_devbw_semantic_parity.py \
              scripts/439_apply_dsi_autopsy.py \

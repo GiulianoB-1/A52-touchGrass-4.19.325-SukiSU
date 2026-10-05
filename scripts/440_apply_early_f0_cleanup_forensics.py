@@ -108,12 +108,15 @@ def patch_rec(text: str) -> str:
         '       !strncmp(message, "P439 ", 5) ||',
         "recorder critical admission",
     )
-    text = one(
-        text,
-        'strncmp(fmt, "P439", 4) &&',
-        'strncmp(fmt, "P440", 4) &&\n\t    strncmp(fmt, "P439", 4) &&',
-        "recorder format admission",
-    )
+    # Modern reconstructed lineage has three independent P439 format gates:
+    # post-retention admission, normal recorder admission, and the Phase402
+    # suppression gate. P440 must pass every one of them.
+    old = 'strncmp(fmt, "P439", 4) &&'
+    new = 'strncmp(fmt, "P440", 4) &&\n\t    strncmp(fmt, "P439", 4) &&'
+    n = text.count(old)
+    if n < 1:
+        die("recorder format admission: P439 anchors missing")
+    text = text.replace(old, new)
     return text + "\n" + REC_HELPER
 
 

@@ -66,13 +66,27 @@ def _function_bounds(text: str) -> tuple[int, int]:
 
 def _ensure_reg_header(path: Path) -> None:
     text = path.read_text(errors="replace")
-    include = '#include "dsi_ctrl_reg.h"\n'
-    if include in text:
-        return
     anchor = '#include "dsi_ctrl_hw.h"\n'
     if anchor not in text:
         raise SystemExit("Phase443 wrapper: dsi_ctrl_hw.h include anchor missing")
-    path.write_text(text.replace(anchor, anchor + include, 1))
+
+    # Phase443's dsi_ctrl.c observer performs raw MMIO reads. TouchGrass keeps
+    # the register offsets in dsi_ctrl_reg.h and DSI_R32/DSI_W32 in dsi_hw.h;
+    # dsi_ctrl.c normally includes neither because raw access usually lives in
+    # dsi_ctrl_hw_cmn.c. Make the dependency explicit for this experiment.
+    needed = (
+        '#include "dsi_ctrl_reg.h"\n',
+        '#include "dsi_hw.h"\n',
+    )
+    missing = [inc for inc in needed if inc not in text]
+    if missing:
+        text = text.replace(anchor, anchor + "".join(missing), 1)
+        path.write_text(text)
+
+    verify = path.read_text(errors="replace")
+    for inc in needed:
+        if inc not in verify:
+            raise SystemExit("Phase443 wrapper: failed to install " + inc.strip())
 
 
 def _strip_golden_gap(path: Path) -> str | None:

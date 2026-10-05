@@ -553,11 +553,11 @@ jobs:
           # comment-only marker is discarded by the compiler.
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           if ! grep -Fq 'a52_p442_hwc_marker[] __used' "$HWC"; then
-            cat >> "$HWC" <<'EOF'
-/* A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1: retained linked-image build tag. */
-static const char a52_p442_hwc_marker[] __used =
-	"A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1";
-EOF
+            printf '%s\n' \
+              '/* A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1: retained linked-image build tag. */' \
+              'static const char a52_p442_hwc_marker[] __used =' \
+              '    "A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1";' \
+              >> "$HWC"
           fi
 
           python3 scripts/442_apply_fifo_fetch_discriminator.py --root "$ROOT" --check-only

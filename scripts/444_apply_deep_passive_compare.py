@@ -9,12 +9,19 @@ payload_path = Path(__file__).with_name(Path(__file__).name + ".z64")
 payload = base64.b64decode(payload_path.read_text().strip())
 source = zlib.decompress(payload).decode("utf-8")
 
-# Recover the single semantic scar left by the damaged compressed byte.
+# The verified payload already contains the intended disk-written
+# declaration. Keep compatibility with the earlier damaged stream, but never
+# require corruption to be present.
 _bad_decl = "static atomic_t p444_disk_on, dis = ATOMIC_INIT(0);"
 _good_decl = "static atomic_t p444_disk_written = ATOMIC_INIT(0);"
-if source.count(_bad_decl) != 1:
-    raise SystemExit("Phase444 payload repair declaration count=" + str(source.count(_bad_decl)))
-source = source.replace(_bad_decl, _good_decl, 1)
+_bad_n = source.count(_bad_decl)
+_good_n = source.count(_good_decl)
+if _bad_n == 1 and _good_n == 0:
+    source = source.replace(_bad_decl, _good_decl, 1)
+elif not (_bad_n == 0 and _good_n == 1):
+    raise SystemExit(
+        "Phase444 disk declaration state bad=%d good=%d" % (_bad_n, _good_n)
+    )
 
 # Storage safety: Phase441/P414 owns debug partition [0x00800000,0x00a00000),
 # exactly the 2 MiB extent the first Phase444 scaffold selected. Do not issue
@@ -30,26 +37,28 @@ _new_checkpoint = """static void p444_checkpoint(void)
     /* P444 v1: disk tier disabled; P414 already owns 8-10 MiB of debug. */
     p444_sync_header();
 }"""
-if source.count(_old_checkpoint) != 1:
-    raise SystemExit("Phase444 disk checkpoint anchor count=" + str(source.count(_old_checkpoint)))
-source = source.replace(_old_checkpoint, _new_checkpoint, 1)
+_old_n = source.count(_old_checkpoint)
+_new_n = source.count(_new_checkpoint)
+if _old_n == 1 and _new_n == 0:
+    source = source.replace(_old_checkpoint, _new_checkpoint, 1)
+elif not (_old_n == 0 and _new_n == 1):
+    raise SystemExit(
+        "Phase444 disk checkpoint state old=%d new=%d" % (_old_n, _new_n)
+    )
 
 _flag_anchor = "#define P444_F_DISK_OK BIT(3)"
+_disabled_flag = "#define P444_F_DISK_DISABLED_OVERLAP BIT(4)"
 if source.count(_flag_anchor) != 1:
     raise SystemExit("Phase444 disk flag anchor count=" + str(source.count(_flag_anchor)))
-source = source.replace(
-    _flag_anchor,
-    _flag_anchor + "\n#define P444_F_DISK_DISABLED_OVERLAP BIT(4)",
-    1,
-)
+if _disabled_flag not in source:
+    source = source.replace(_flag_anchor, _flag_anchor + "\n" + _disabled_flag, 1)
+
 _init_anchor = "h=p444_hdr(); h->magic=P444_MAGIC; h->version=P444_VERSION; h->kind=P444_KIND;"
+_init_patch = _init_anchor + "\n#if P444_KIND == 1\n    h->flags |= P444_F_DISK_DISABLED_OVERLAP;\n#endif"
 if source.count(_init_anchor) != 1:
     raise SystemExit("Phase444 init header anchor count=" + str(source.count(_init_anchor)))
-source = source.replace(
-    _init_anchor,
-    _init_anchor + "\n#if P444_KIND == 1\n    h->flags |= P444_F_DISK_DISABLED_OVERLAP;\n#endif",
-    1,
-)
+if "h->flags |= P444_F_DISK_DISABLED_OVERLAP;" not in source:
+    source = source.replace(_init_anchor, _init_patch, 1)
 
 # Fail before source reconstruction/compilation if the compressed experiment
 # payload lost one of the locked Phase444 contracts.

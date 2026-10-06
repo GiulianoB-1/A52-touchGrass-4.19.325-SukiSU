@@ -1,5 +1,5 @@
-name: Phase446 SMMU anchor inspect
-run-name: Phase446 SMMU anchor inspect
+name: Phase446 source bundle
+run-name: Phase446 source bundle
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
@@ -7,7 +7,7 @@ on:
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
 jobs:
-  inspect:
+  bundle:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -20,14 +20,39 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Inspect exact SMMU / earlymap anchors
+      - name: Bundle exact Phase446 source anchors
         run: |
           set -Eeuo pipefail
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           R="$PWD/gki/common"
-          echo '=== EARLYMAP ==='
-          grep -Rns -A140 -B40 -E 'EARLY_MAP|early_map|earlymap|DOMAIN_ATTR_EARLY|iommu_map.*splash|splash.*iommu|splash_buf_base' "$R/drivers/a52_display" "$R/drivers/iommu" 2>/dev/null | head -2800 || true
-          echo '=== SID800 / PHASE426 CURRENT SOURCE ==='
-          grep -Rns -A160 -B40 -E 'A52_PHASE426|sid800|SID 0x800|0x800|pinned|arm_smmu_alloc_context_bank|arm_smmu_domain_add_master' "$R/drivers/iommu/arm/arm-smmu" 2>/dev/null | head -3600 || true
-          echo '=== DISPLAY SMMU CHILD / PHASE201 ==='
-          grep -Rns -A120 -B40 -E 'smmu_sde_unsec|qcom,smmu_sde_unsec|component.*match|component.*add|populate.*smmu|child.*smmu|msm_smmu' "$R/drivers/a52_display/msm" "$R/drivers/iommu" 2>/dev/null | head -2800 || true
+          O="$PWD/p446-source"
+          mkdir -p "$O"
+          cp "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c" "$O/"
+          cp "$R/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c" "$O/" 2>/dev/null || true
+          cp "$R/drivers/iommu/arm/arm-smmu/arm-smmu.h" "$O/"
+          cp "$R/drivers/a52_display/msm/msm_drv.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_kms.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde_power_handle.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde_io_util.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_intf.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_pingpong.c" "$O/"
+          cp "$R/drivers/a52_display/msm/dsi/dsi_display.c" "$O/"
+          cp "$R/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$O/"
+          cp "$R/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$O/"
+          cp "$R/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c" "$O/" 2>/dev/null || true
+          cp "$R/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$O/" 2>/dev/null || true
+          cp "$R/drivers/devfreq/devfreq_devbw.c" "$O/" 2>/dev/null || true
+          cp "$R/arch/arm64/boot/dts/qcom/lagoon-sde.dtsi" "$O/"
+          cp "$R/arch/arm64/boot/dts/qcom/lagoon-regulators.dtsi" "$O/"
+          cp "$R/drivers/clk/qcom/dispcc-lagoon.c" "$O/"
+          cp "$R/drivers/clk/qcom/gcc-lagoon.c" "$O/"
+          cp "$R/drivers/regulator/refgen.c" "$O/"
+          cp "$R/drivers/a52_display/msm/Makefile" "$O/msm-Makefile"
+          grep -Rns -E 'EARLY_MAP|earlymap|smmu_sde_unsec|bus-proxy|handoff|mdp0-mem|mdss_sde'             "$R/drivers/a52_display" "$R/drivers/iommu" "$R/drivers/soc/qcom"             > "$O/anchors.txt" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446-SOURCE-BUNDLE
+          path: p446-source/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7

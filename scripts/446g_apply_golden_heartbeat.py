@@ -372,12 +372,38 @@ def patch_core_irq(s: str) -> str:
         "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */",
         "core irq",
     )
-    return one(
-        s,
-        "\tsde_clear_all_irqs(sde_kms);\n",
-        "\tsde_clear_all_irqs(sde_kms);\n\ta52_p446_mark(15U,1U,0U);\n",
-        "after irq clear",
+
+    # 4.19 has more than one sde_clear_all_irqs() call in this file.
+    # Instrument only the one inside sde_core_irq_preinstall().
+    start = s.find(anchor)
+    if start < 0:
+        die("core irq: preinstall definition missing after extern insertion")
+    brace = s.find("{", start)
+    if brace < 0:
+        die("core irq: preinstall opening brace missing")
+    depth = 0
+    end = -1
+    for i in range(brace, len(s)):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end < 0:
+        die("core irq: preinstall closing brace missing")
+
+    block = s[start:end]
+    old = "\tsde_clear_all_irqs(sde_kms);\n"
+    if block.count(old) != 1:
+        die(f"after irq clear in preinstall: expected 1 anchor, found {block.count(old)}")
+    block = block.replace(
+        old,
+        old + "\ta52_p446_mark(15U,1U,0U);\n",
+        1,
     )
+    return s[:start] + block + s[end:]
 
 
 def patch_dsi_display(s: str) -> str:

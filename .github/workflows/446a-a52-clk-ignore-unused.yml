@@ -1,0 +1,81 @@
+name: Phase446A - GKI clk_ignore_unused cmdline A/B
+run-name: Phase446A GKI Phase444-r14 + clk_ignore_unused
+
+on:
+  push:
+    branches:
+      - agent/a52-phase445-recovery-ladder-v1
+    paths:
+      - .github/workflows/446a-a52-clk-ignore-unused.yml
+      - scripts/446_append_boot_cmdline.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repack:
+    name: Patch exact Phase444 run14 boot cmdline
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact Phase444 GKI run14 boot image
+        uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-PHASE444-GKI-DEEP-PASSIVE-14-BOOT-IMG
+          path: intake
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 37440953195
+
+      - name: Audit baseline and append only clk_ignore_unused
+        run: |
+          set -Eeuo pipefail
+          SRC="intake/boot-phase444-gki-deep-passive-compare-v1.img"
+          OUT="phase446a-clk-ignore-unused/boot-phase446a-gki-p444r14-clk-ignore-unused.img"
+          REPORT="phase446a-clk-ignore-unused/cmdline-patch-report.json"
+
+          test -s "$SRC"
+          test "$(stat -c '%s' "$SRC")" -eq 100663296
+          printf '%s  %s\n'             '7bf90c1be5edc5b3f92e30cf39c026e25d0b2cc5f89f437fe1862f588e117665'             "$SRC" | sha256sum -c -
+
+          python3 scripts/446_append_boot_cmdline.py             --source "$SRC"             --output "$OUT"             --report "$REPORT"             --append clk_ignore_unused             --expect-source-sha256 7bf90c1be5edc5b3f92e30cf39c026e25d0b2cc5f89f437fe1862f588e117665
+
+          test "$(stat -c '%s' "$OUT")" -eq 100663296
+          grep -Fq '"all_bytes_outside_extra_cmdline_unchanged": true' "$REPORT"
+          grep -Fq '"primary_cmdline_unchanged": true' "$REPORT"
+          grep -Fq '"boot_id_unchanged": true' "$REPORT"
+          grep -Fq 'clk_ignore_unused' "$REPORT"
+
+          cat > phase446a-clk-ignore-unused/README.txt <<'EOF'
+          Phase446A clock-cleanup A/B
+          ==========================
+          Baseline: exact Phase444 GKI run #14 boot image.
+          Only change: append kernel cmdline token "clk_ignore_unused".
+          Kernel payload and Phase444 recorder are byte-identical to the baseline.
+
+          Readout:
+            - visual: frozen splash vs bootanimation / display progress
+            - Phase444 natural-F0 result
+            - terminal R:intf_1 FRAME_COUNT (+0x0AC)
+            - terminal R:top_0 MDP interrupt state, including CTL_0_START
+
+          Do NOT combine this test with pd_ignore_unused.
+          EOF
+
+          sha256sum "$SRC" "$OUT" | tee phase446a-clk-ignore-unused/SHA256SUMS
+
+      - name: Upload Phase446A boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446A-GKI-P444R14-CLK-IGNORE-UNUSED-BOOT-IMG
+          path: |
+            phase446a-clk-ignore-unused/boot-phase446a-gki-p444r14-clk-ignore-unused.img
+            phase446a-clk-ignore-unused/cmdline-patch-report.json
+            phase446a-clk-ignore-unused/README.txt
+            phase446a-clk-ignore-unused/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

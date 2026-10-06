@@ -124,6 +124,47 @@ if _write < 0:
     raise SystemExit("Phase445 wrapper: patch_central write anchor missing")
 
 _hardening = r'''
+    # Keep p445_power() below the kernel's 2 KiB stack-frame limit.
+    # The 32-entry supply census is scratch storage only, so allocate it
+    # temporarily instead of placing ~1.7 KiB on the kernel stack.
+    ps = s.find("static void p445_power(")
+    pe = s.find("\n}\n\nvoid a52_p445_runtime_census", ps)
+    if ps < 0 or pe < 0:
+        die("p445_power bounds missing")
+    pe += 2
+    pf = s[ps:pe]
+    pf = one(pf,
+        "    struct p445_supply_rec r[32];",
+        "    struct p445_supply_rec *r;",
+        "p445_power supply pointer")
+    pf = one(pf,
+        "    memset(r,0,sizeof(r));\n",
+        "",
+        "p445_power stack memset")
+    meta_anchor = "    a52_p445_store_section(stage,P445_TYPE_META,secname,tag,0,&m,sizeof(m));"
+    pf = one(pf, meta_anchor,
+        meta_anchor + "\n    r=kcalloc(32U,sizeof(*r),GFP_KERNEL);\n    if (!r) return;",
+        "p445_power supply alloc")
+    if pf.count("p445_collect_regs(r,ARRAY_SIZE(r),") != 5:
+        die("p445_power collect count mismatch")
+    pf = pf.replace("p445_collect_regs(r,ARRAY_SIZE(r),",
+                    "p445_collect_regs(r,32U,")
+    tail = """    if (n) {
+        char sn[24];
+        snprintf(sn,sizeof(sn),"SUPPLY_%u",tag);
+        a52_p445_store_section(stage,P445_TYPE_META,sn,n,0,r,n*sizeof(r[0]));
+    }
+}"""
+    tail_new = """    if (n) {
+        char sn[24];
+        snprintf(sn,sizeof(sn),"SUPPLY_%u",tag);
+        a52_p445_store_section(stage,P445_TYPE_META,sn,n,0,r,n*sizeof(r[0]));
+    }
+    kfree(r);
+}"""
+    pf = one(pf, tail, tail_new, "p445_power supply free")
+    s = s[:ps] + pf + s[pe:]
+
     # The recovery ladder no longer calls the inherited giant deep-dump helper.
     # Mark the generated C helper maybe-unused so -Werror remains clean.
     if "static void p445_deep(" in s:

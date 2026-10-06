@@ -644,8 +644,10 @@ jobs:
 
           IMAGE="$BUILD/arch/arm64/boot/Image"
           MAP="$BUILD/System.map"
+          P444="$ROOT/drivers/a52_display/msm/a52_phase444.c"
           test -s "$IMAGE"
           test -s "$MAP"
+          test -s "$P444"
 
           python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
@@ -658,12 +660,17 @@ jobs:
           grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
           grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
           grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
-          # Phase444 must never panic on the target F0 timeout. The inherited
-          # Phase439 panic helper may remain dead code in source, but the active
-          # Samsung timeout dump/panic path must be bypassed for the P444 target.
-          grep -aFq 'P444 TERM ret=%d/%d irq=%u/%u' "$IMAGE"
-          grep -aFq 'PRE_DEEP' "$IMAGE"
-          grep -aFq 'PRE_TRIGGER' "$IMAGE"
+          # Phase444's matched-moment names and TG console format are
+          # source-level contracts. In the GKI build some are compiled out or
+          # string-folded, so validate them in the generated source rather than
+          # requiring fragile literals to survive in Image.
+          grep -Fq 'P444 TERM ret=%d/%d irq=%u/%u' "$P444"
+          grep -Fq 'PRE_DEEP' "$P444"
+          grep -Fq 'PRE_TRIGGER' "$P444"
+
+          # Require a GKI runtime summary string that is actually emitted by the
+          # compiled recorder, plus the durable binary section names below.
+          grep -aFq 'P444 kind=%u boot=%llx flags=%x state=%u sec=%u used=%u term_ret=%d term_irq=%u hdr_crc=%08x' "$IMAGE"
 
           # Critical: no scheduled Phase440 F0 sender may survive in this Image.
           ! grep -aFq 'P440 EARLY start' "$IMAGE"
@@ -674,7 +681,7 @@ jobs:
           grep -Fq ' a52_p439_allow_next' "$MAP"
           grep -Fq ' a52_p440_event' "$MAP"
           python3 scripts/444_apply_deep_passive_compare.py --root "$ROOT" --kind gki --check-only
-          grep -aFq 'P444 TERM ret=%d/%d irq=%u/%u' "$IMAGE"
+          grep -Fq 'P444 TERM ret=%d/%d irq=%u/%u' "$P444"
           grep -aFq 'HOT_0_75US' "$IMAGE"
           grep -aFq 'DSI_KONA_BUS' "$IMAGE"
           grep -aFq 'MMC_MAJOR179' "$IMAGE"

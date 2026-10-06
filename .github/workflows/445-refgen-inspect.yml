@@ -1,4 +1,4 @@
-name: Phase445 power inspect
+name: Phase445 rail-vote inspect
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
@@ -15,7 +15,7 @@ jobs:
           from pathlib import Path
           s=zlib.decompress(base64.b64decode(Path("scripts/445_apply_recovery_ladder.py.z64").read_text().strip())).decode()
           lines=s.splitlines()
-          for needle in ("static void p445_power","POWER_CENSUS","refgen_pwrdwn","last_sent","mx","l22","a52_p445_store_section","section_count >= P445_MAX_SECTIONS"):
+          for needle in ("last_sent","last_level","L22","l22","MX","rpmh","RPMH","refgen_pwrdwn","p445_power"):
               for i,l in enumerate(lines):
                   if needle in l:
                       print("\n###",needle,"line",i+1)

@@ -27,8 +27,11 @@ jobs:
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           ROOT="$PWD/gki/common"
 
+          echo '=== DISPCC/GCC DT BASES ==='
+          grep -Rns -A18 -B8 -E 'compatible = "qcom,lagoon-(gcc|dispcc)"|clock-controller@' "$ROOT/arch/arm64/boot/dts/qcom/lagoon"* 2>/dev/null | head -700 || true
+
           echo '=== DISPCC MDSS CLOCK/GDSC OFFSETS ==='
-          grep -n -A36 -B10 -E 'disp_cc_mdss_ahb_clk|mdss_gdsc|GDSCR|disp_cc_mdss_mdp_clk' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" | head -500
+          grep -n -A36 -B10 -E 'disp_cc_mdss_ahb_clk|mdss_gdsc|GDSCR|disp_cc_mdss_mdp_clk' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" | head -500 || true
 
           echo '=== GCC DISP CLOCK OFFSETS ==='
           grep -n -A28 -B8 -E 'gcc_disp_(ahb|axi)_clk' "$ROOT/drivers/clk/qcom/gcc-lagoon.c"
@@ -46,13 +49,13 @@ jobs:
           grep -Rns -A25 -B15 -E 'XIN_HALT|PENDING|PND|VBIF.*HALT|VBIF.*PEND' "$ROOT/drivers/a52_display/msm/sde" "$ROOT/drivers/a52_display/msm" 2>/dev/null | head -1400 || true
 
           echo '=== IOMMU CORE DEFAULT DOMAIN / PROBE DEVICE ==='
-          grep -n -A100 -B40 -E 'iommu_probe_device|iommu_alloc_default_domain|iommu_group_add_device|iommu_attach_device|default_domain|bus_iommu_probe' "$ROOT/drivers/iommu/iommu.c" | head -1800
+          grep -n -A120 -B50 -E 'iommu_probe_device|iommu_alloc_default_domain|iommu_group_add_device|iommu_attach_device|default_domain|bus_iommu_probe' "$ROOT/drivers/iommu/iommu.c" | head -2200 || true
 
           echo '=== DRIVER CORE IOMMU HOOK ORDER ==='
-          grep -n -A100 -B40 -E 'iommu_probe_device|really_probe|driver_probe_device|device_add' "$ROOT/drivers/base/dd.c" "$ROOT/drivers/base/core.c" | head -1800
+          grep -n -A120 -B50 -E 'iommu_probe_device|really_probe|driver_probe_device|device_add' "$ROOT/drivers/base/dd.c" "$ROOT/drivers/base/core.c" | head -2200 || true
 
           echo '=== ARM SMMU DISPLAY PROBE/ATTACH ==='
-          grep -n -A90 -B40 -E 'arm_smmu_probe_device|arm_smmu_attach_dev|a52_p427|SID 0x800|sid == 0x800' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" | head -2200
+          grep -n -A110 -B50 -E 'arm_smmu_probe_device|arm_smmu_attach_dev|a52_p427|SID 0x800|sid == 0x800' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" | head -2600 || true
 
           echo '=== MSM DRM BIND ==='
           sed -n '1030,1215p' "$ROOT/drivers/a52_display/msm/msm_drv.c"

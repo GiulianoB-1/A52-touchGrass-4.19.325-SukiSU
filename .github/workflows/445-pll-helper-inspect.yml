@@ -1,14 +1,11 @@
-name: Phase446 exact anchor inspect
-run-name: Phase446 exact anchor inspect
-
+name: Phase446 SMMU anchor inspect
+run-name: Phase446 SMMU anchor inspect
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
     paths: [.github/workflows/445-pll-helper-inspect.yml]
-
 env:
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
-
 jobs:
   inspect:
     runs-on: ubuntu-22.04
@@ -23,14 +20,14 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Exact DSI and SMMU symbols for Phase446
+      - name: Inspect exact SMMU / earlymap anchors
         run: |
           set -Eeuo pipefail
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           R="$PWD/gki/common"
-          echo '=== DSI REGISTER OFFSETS ==='
-          grep -Rns -E '^#define[[:space:]]+DSI_(STATUS|LANE_STATUS|CLK_STATUS|INT_CTRL|FIFO_STATUS)[[:space:]]' "$R/drivers/a52_display/msm/dsi" | head -100
-          echo '=== SMMU TRANSITION ANCHORS ==='
-          sed -n '1640,1870p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"
-          sed -n '2200,2260p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"
-          sed -n '3080,3220p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          echo '=== EARLYMAP ==='
+          grep -Rns -A140 -B40 -E 'EARLY_MAP|early_map|earlymap|DOMAIN_ATTR_EARLY|iommu_map.*splash|splash.*iommu|splash_buf_base' "$R/drivers/a52_display" "$R/drivers/iommu" 2>/dev/null | head -2800 || true
+          echo '=== SID800 / PHASE426 CURRENT SOURCE ==='
+          grep -Rns -A160 -B40 -E 'A52_PHASE426|sid800|SID 0x800|0x800|pinned|arm_smmu_alloc_context_bank|arm_smmu_domain_add_master' "$R/drivers/iommu/arm/arm-smmu" 2>/dev/null | head -3600 || true
+          echo '=== DISPLAY SMMU CHILD / PHASE201 ==='
+          grep -Rns -A120 -B40 -E 'smmu_sde_unsec|qcom,smmu_sde_unsec|component.*match|component.*add|populate.*smmu|child.*smmu|msm_smmu' "$R/drivers/a52_display/msm" "$R/drivers/iommu" 2>/dev/null | head -2800 || true

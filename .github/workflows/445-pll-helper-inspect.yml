@@ -3,23 +3,35 @@ on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
     paths: [.github/workflows/445-pll-helper-inspect.yml]
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
 jobs:
   inspect:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect PLL helper patch
+      - name: Restore reconstructed GKI tree
+        id: p429
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+      - name: Inspect active refgen and Lagoon display clock sources
         run: |
-          python3 - <<'PY'
-          import base64,zlib
-          from pathlib import Path
-          s=zlib.decompress(base64.b64decode(Path("scripts/445_apply_recovery_ladder.py.z64").read_text().strip())).decode()
-          lines=s.splitlines()
-          for needle in ("def pll_10nm_path","def patch_pll","a52_p445_pll10_snapshot"):
-              for i,l in enumerate(lines):
-                  if needle in l:
-                      print("\n###",needle,"line",i+1)
-                      for j in range(max(0,i-35),min(len(lines),i+150)):
-                          print(f"{j+1:04d}: {lines[j]}")
-                      break
-          PY
+          set -Eeuo pipefail
+          echo "cache-hit=${{ steps.p429.outputs.cache-hit }}"
+          test "${{ steps.p429.outputs.cache-hit }}" = "true"
+          ROOT="$PWD/gki/common"
+          echo '=== REFGEN MATCH/OPS ==='
+          grep -n -A18 -B8 -E 'refgen_match_table|refgen_kona_ops|refgen_ops|refgen_probe' "$ROOT/drivers/regulator/refgen.c"
+          echo '=== REFGEN RELEVANT ==='
+          sed -n '1,220p' "$ROOT/drivers/regulator/refgen.c"
+          echo '=== LAGOON GCC DISPLAY CLOCKS ==='
+          grep -n -A24 -B8 -E 'gcc_disp_(ahb|axi|cc_sleep|cc_xo|gpll0|throttle_axi|xo)_clk|gcc_lagoon_driver' "$ROOT/drivers/clk/qcom/gcc-lagoon.c"
+          echo '=== LAGOON DISPCC DRIVER ==='
+          grep -n -A20 -B8 -E 'disp_cc_lagoon_driver|sync_state' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" || true
+          echo '=== DT / DISPLAY BUS CLOCK REFERENCES ==='
+          grep -Rns -E 'gcc_bus|gcc_disp_axi|GCC_DISP_AXI' "$ROOT/arch/arm64/boot/dts" "$ROOT/drivers/a52_display" 2>/dev/null | head -250 || true

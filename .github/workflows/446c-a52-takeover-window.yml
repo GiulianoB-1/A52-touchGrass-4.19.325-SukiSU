@@ -7,33 +7,6 @@ on:
   push:
     branches:
       - agent/a52-phase446c-takeover-window-v1
-    paths:
-      - .github/workflows/445-a52-recovery-ladder.yml
-      - .github/workflows/446b-a52-heartbeat-gate-fix.yml
-      - .github/workflows/446c-a52-takeover-window.yml
-      - scripts/446b_apply_heartbeat_fixes.py
-      - scripts/446c_apply_takeover_window.py
-      - scripts/446_apply_heartbeat_cb2.py
-      - scripts/446_apply_heartbeat_cb2.py.z64
-      - scripts/decode_phase446.py
-      - scripts/decode_phase446_pair.py
-      - scripts/decode_phase446.py.z64
-      - scripts/446_append_boot_cmdline.py
-      - .github/workflows/441-a52-vrr-state-compat.yml
-      - scripts/268_ci_build.sh
-      - scripts/437_apply_kgsl_open_corridor.py
-      - scripts/438_apply_devbw_semantic_parity.py
-      - scripts/439_apply_dsi_autopsy.py
-      - scripts/440_apply_early_f0_cleanup_forensics.py
-      - scripts/441_apply_vrr_state_compat.py
-      - scripts/444_apply_deep_passive_compare.py
-      - scripts/444_apply_deep_passive_compare.py.z64
-      - scripts/445_apply_recovery_ladder.py
-      - scripts/445_apply_recovery_ladder.py.z64
-      - scripts/decode_phase445.py
-      - scripts/decode_phase445.py.z64
-      - scripts/decode_phase444.py
-      - scripts/decode_phase444.py.z64
   workflow_dispatch:
 
 permissions:

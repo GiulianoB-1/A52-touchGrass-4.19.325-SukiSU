@@ -608,9 +608,9 @@ jobs:
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
           REC="$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c"
-          P444="$ROOT/drivers/a52_display/msm/a52_phase444.c"
+          P445="$ROOT/drivers/a52_display/msm/a52_phase445.c"
 
-          grep -Fq 'A52_PHASE444_DEEP_PASSIVE_COMPARE_V1' "$P444"
+          grep -Fq 'A52_PHASE445_RECOVERY_LADDER_V1' "$P445"
           grep -Fq 'bool a52_p439_f0 = false;' "$CTRL"
           grep -Fq 'a52_p421_f0 = false;' "$CTRL"
           grep -Fq 'A52_PHASE444_RESERVED_PARTITION_V2' "$REC"
@@ -619,7 +619,7 @@ jobs:
           ! grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR' "$HWC"
 
           rm -f \
-            "$BUILD/drivers/a52_display/msm/a52_phase444.o" \
+            "$BUILD/drivers/a52_display/msm/a52_phase445.o" \
             "$BUILD/drivers/a52_display/msm/sde_dbg.o" \
             "$BUILD/drivers/a52_display/msm/dsi/dsi_ctrl.o" \
             "$BUILD/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.o" \

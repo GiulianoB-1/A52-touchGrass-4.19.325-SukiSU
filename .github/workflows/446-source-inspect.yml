@@ -21,18 +21,35 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Inspect active refgen and Lagoon display clock sources
+      - name: Inspect Phase446 safe heartbeat anchors
         run: |
           set -Eeuo pipefail
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           ROOT="$PWD/gki/common"
-          echo '=== REFGEN MATCH/OPS ==='
-          grep -n -A18 -B8 -E 'refgen_match_table|refgen_kona_ops|refgen_ops|refgen_probe' "$ROOT/drivers/regulator/refgen.c"
-          echo '=== REFGEN FULL RELEVANT ==='
-          sed -n '1,220p' "$ROOT/drivers/regulator/refgen.c"
-          echo '=== LAGOON GCC DISPLAY CLOCKS ==='
-          grep -n -A24 -B8 -E 'gcc_disp_(ahb|axi|cc_sleep|cc_xo|gpll0|throttle_axi|xo)_clk|gcc_lagoon_driver' "$ROOT/drivers/clk/qcom/gcc-lagoon.c"
-          echo '=== LAGOON DISPCC DRIVER ==='
-          grep -n -A20 -B8 -E 'disp_cc_lagoon_driver|sync_state' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" || true
-          echo '=== GKI DT DISPLAY BUS CLOCK REFERENCES ==='
-          grep -Rns -E 'gcc_bus|gcc_disp_axi|GCC_DISP_AXI' "$ROOT/arch/arm64/boot/dts" "$ROOT/drivers/a52_display" 2>/dev/null | head -200 || true
+
+          echo '=== DISPCC MDSS CLOCK/GDSC OFFSETS ==='
+          grep -n -A36 -B10 -E 'disp_cc_mdss_ahb_clk|mdss_gdsc|GDSCR|disp_cc_mdss_mdp_clk' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" | head -500
+
+          echo '=== GCC DISP CLOCK OFFSETS ==='
+          grep -n -A28 -B8 -E 'gcc_disp_(ahb|axi)_clk' "$ROOT/drivers/clk/qcom/gcc-lagoon.c"
+
+          echo '=== SDE POWER PARSE/GET/ENABLE ==='
+          grep -n -A80 -B20 -E 'sde_power_parse_dt_clock|sde_power_resource_init|sde_power_resource_enable|msm_dss_enable_clk' "$ROOT/drivers/a52_display/msm/sde_power_handle.c" | head -900
+
+          echo '=== SDE KMS HW INIT / MMU / VBIF / RSC ==='
+          grep -n -A80 -B30 -E '_sde_kms_mmu_init|sde_kms_hw_init|sde_vbif|vbif|sde_rsc|cont_splash|splash' "$ROOT/drivers/a52_display/msm/sde_kms.c" | head -1800
+
+          echo '=== IOMMU CORE DEFAULT DOMAIN / PROBE DEVICE ==='
+          grep -n -A100 -B40 -E 'iommu_probe_device|iommu_alloc_default_domain|iommu_group_add_device|iommu_attach_device|default_domain|bus_iommu_probe' "$ROOT/drivers/iommu/iommu.c" | head -1800
+
+          echo '=== DRIVER CORE IOMMU HOOK ORDER ==='
+          grep -n -A100 -B40 -E 'iommu_probe_device|really_probe|driver_probe_device|device_add' "$ROOT/drivers/base/dd.c" "$ROOT/drivers/base/core.c" | head -1800
+
+          echo '=== ARM SMMU DISPLAY PROBE/ATTACH ==='
+          grep -n -A90 -B40 -E 'arm_smmu_probe_device|arm_smmu_attach_dev|a52_p427|SID 0x800|sid == 0x800' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" | head -2200
+
+          echo '=== MSM DRM BIND ==='
+          sed -n '1030,1215p' "$ROOT/drivers/a52_display/msm/msm_drv.c"
+
+          echo '=== DSI SPLASH CONFIG ==='
+          grep -n -A100 -B40 -E 'cont_splash|splash' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" | head -1600

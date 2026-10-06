@@ -129,7 +129,7 @@ def parse(path: Path) -> tuple[Header, list[Rec]]:
     capacity = u32(b, 16)
     count = u32(b, 20)
     dropped = u32(b, 24)
-    init_ns = u64(b, 40)
+    init_ns = u64(b, 36)
     hdr_commit = u32(b, 76)
 
     if record_bytes != REC_BYTES:

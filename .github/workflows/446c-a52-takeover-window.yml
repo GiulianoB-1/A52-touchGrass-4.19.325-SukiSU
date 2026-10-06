@@ -891,14 +891,30 @@ jobs:
 
           Phase446c adds full-record event marks for:
             0x130..0x13e KMS block setup around MMU/regdma/RM/IRQ/VBIF/SID/DRM objects.
+            0x152..0x155 debug-bus init and sde_rm_get_mdp pre/post.
             0x141..0x14f each POST_ENABLE operation.
             0x150 keep-EARLY_MAP treatment taken.
             0x151 initial POST_ENABLE treatment taken.
+
+          Source-order correction from exact successful Phase446b source:
+            sde_kms_handle_power_event(POST_ENABLE) and callback registration both
+            occur only after _sde_kms_hw_init_blocks() returns. Therefore the
+            ~1.46 s frame-303 freeze before/at the VBIF-init corridor cannot be
+            caused by the initial POST_ENABLE body. VBIF +0x550 changing before
+            that point does not prove POST_ENABLE ran. sde_hw_vbif_init() itself
+            only allocates/populates the software block and initializes a mutex.
 
           Boot images use the same compiled Image:
             control: a52.cb2_reuse=1 only
             keep-earlymap: control + a52.keep_earlymap=1
             skip-post-enable: control + a52.skip_post_enable_init=1
+
+          Primary causal A/B:
+            keep-earlymap tests whether the M=0->1 translation takeover only
+            breaks on the next fetch/frame even though SRC0=0xA0000000 is mapped.
+          Negative control:
+            skip-post-enable should not rescue the early freeze if source order
+            is obeyed, because that handler runs later.
 
           Flash only one treatment image per boot.
           Corrections from Phase446:
@@ -928,17 +944,10 @@ jobs:
             Phase414 text transport did not persist the P446 records on-device.
             Collection is reserved RAM / proc only; no SD mirror.
 
-          Root cause under test:
-            Samsung bootanimation parses /sys/class/lcd/panel/vrr_state.
-            TouchGrass returns 1080X2400:NOR.
-            GKI may build without CONFIG_SEC_PARAM, leaving vrr_mode uninitialized.
-
-          Runtime fix:
-            vrr_mode is zero initialized.
-            Valid SEC_PARAM content is preserved.
-            Empty or malformed content falls back to:
-              %dX%d:NOR
-            using display->modes->timing.h_active/v_active.
+          Earlier bootanimation compatibility work remains in the lineage:
+            vrr_state fallback is retained only so userspace can progress far
+            enough to expose the display takeover failure. It is not the
+            Phase446c root-cause hypothesis.
 
           Test harness:
             Phase439A F0 autopsy remains passive.

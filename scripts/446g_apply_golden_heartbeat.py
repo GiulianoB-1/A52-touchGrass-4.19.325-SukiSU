@@ -396,8 +396,11 @@ def patch_core_irq(s: str) -> str:
 
     block = s[start:end]
     old = "\tsde_clear_all_irqs(sde_kms);\n"
-    if block.count(old) != 1:
-        die(f"after irq clear in preinstall: expected 1 anchor, found {block.count(old)}")
+    if block.count(old) < 1:
+        die("after irq clear in preinstall: anchor missing")
+    # The reconstructed 4.19.200 Golden tree can contain more than one matching
+    # clear in this function after stable/vendor replay. The checkpoint is the
+    # first preinstall clear, so instrument that one only.
     block = block.replace(
         old,
         old + "\ta52_p446_mark(15U,1U,0U);\n",

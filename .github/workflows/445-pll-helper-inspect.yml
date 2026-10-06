@@ -1,59 +1,28 @@
-name: Phase446 canonical patch fix
-run-name: Phase446 fix bus marker placement
+name: Phase446 decoder inspect
+run-name: Phase446 decoder composition audit
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
     paths: [.github/workflows/445-pll-helper-inspect.yml]
-permissions:
-  contents: write
 jobs:
-  fix:
+  inspect:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/a52-phase445-recovery-ladder-v1
-          fetch-depth: 0
-      - name: Patch canonical compressed Phase446 source
+      - name: Audit decoder fields
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
           import base64,zlib
           from pathlib import Path
-          p=Path("scripts/446_apply_heartbeat_cb2.py.z64")
-          s=zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
-          old="""    s=one(s,anchor+'{\\n',anchor+'{\\n\\ta52_p446_mark(0x50U,0U,0U);\\n','handoff entry')
-          """
-          new="""    old_head='''int bcm_remove_handoff_req(struct device *dev, void *data)
-          {
-          \\tstruct msm_bus_node_device_type *bus_dev = NULL;
-          \\tstruct msm_bus_node_device_type *cur_bcm = NULL;
-          \\tstruct msm_bus_node_device_type *cur_rsc = NULL;
-          \\tint ret = 0;
-          '''
-              new_head=old_head+'\\ta52_p446_mark(0x50U,0U,0U);\\n'
-              s=one(s,old_head,new_head,'handoff entry after declarations')
-          """
-          if old not in s:
-              raise SystemExit("canonical bus marker patch source anchor missing")
-          s=s.replace(old,new,1)
-          # Contract: composition microscope requested by the user is already present.
-          for tok in (
-              'u32 sspp[4][6];','u32 ctl[7];','u32 lm[3];',
-              'sspp_off[4]={0x5000,0x25000,0x27000,0x29000}',
-              '0x2000+0x070','0x45000+0x000','0x71000+0x030',
-              'a52_p446_emit_smmu(smmu,8U','a52_p446_emit_smmu(smmu,9U',
-          ):
-              if tok not in s: raise SystemExit("Phase446 contract missing: "+tok)
-          raw=zlib.compress(s.encode(),9)
-          p.write_text(base64.b64encode(raw).decode()+"\n")
-          print("expanded_bytes",len(s),"compressed_bytes",len(raw))
+          s=zlib.decompress(base64.b64decode(Path("scripts/decode_phase446.py.z64").read_text().strip())).decode()
+          print("bytes",len(s))
+          for k in ["sspp","ctl","lm","frame","event","S2CR","cb2","bus"]:
+            print("\n###",k)
+            p=0;n=0
+            while True:
+              i=s.lower().find(k.lower(),p)
+              if i<0 or n>=8:break
+              print(s[max(0,i-1000):min(len(s),i+2600)])
+              p=i+len(k);n+=1
           PY
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py
-          git diff --check
-          git diff --stat
-          git config user.name "phase446-ci"
-          git config user.email "phase446-ci@users.noreply.github.com"
-          git add scripts/446_apply_heartbeat_cb2.py.z64
-          git commit -m "Phase446: place bus handoff marker after declarations"
-          git push origin HEAD:agent/a52-phase445-recovery-ladder-v1

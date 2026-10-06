@@ -186,7 +186,14 @@ def patch_hw_blocks(s: str) -> str:
 	struct msm_drm_private *priv)
 {
 '''
-    s = one(s, anchor, anchor + '\t/* A52_PHASE446C_KMS_BLOCK_SUBSTEPS */\n\ta52_p446_mark(0x130U, 0U, 0U);\n', "block-entry")
+    s = one(s, anchor, anchor + '\t/* A52_PHASE446C_KMS_BLOCK_SUBSTEPS */\n', "block-entry")
+    decl = "\tint i, rc = -EINVAL;\n"
+    p = s.find(anchor)
+    q = s.find(decl, p)
+    if q < 0:
+        die("block declaration anchor missing")
+    q += len(decl)
+    s = s[:q] + "\n\ta52_p446_mark(0x130U, 0U, 0U);\n" + s[q:]
 
     pairs = [
         ("\trc = _sde_kms_mmu_init(sde_kms);\n",
@@ -213,6 +220,20 @@ def patch_hw_blocks(s: str) -> str:
             "\ta52_p446_mark(0x137U, 0U, 0U);\n" + old +
             "\ta52_p446_mark(0x138U, IS_ERR_OR_NULL(sde_kms->hw_intr) ? 1U : 0U, 0U);\n",
             "hw-intr")
+
+    old = '''	sde_dbg_init_dbg_buses(sde_kms->core_rev);
+'''
+    s = one(s, old,
+            "\ta52_p446_mark(0x152U, 0U, 0U);\n" + old +
+            "\ta52_p446_mark(0x153U, 0U, 0U);\n",
+            "debug-bus-init")
+
+    old = '''	sde_kms->hw_mdp = sde_rm_get_mdp(&sde_kms->rm);
+'''
+    s = one(s, old,
+            "\ta52_p446_mark(0x154U, 0U, 0U);\n" + old +
+            "\ta52_p446_mark(0x155U, IS_ERR_OR_NULL(sde_kms->hw_mdp) ? 1U : 0U, 0U);\n",
+            "get-mdp")
 
     old = '''		sde_kms->hw_vbif[i] = sde_hw_vbif_init(vbif_idx,
 				sde_kms->vbif[vbif_idx], sde_kms->catalog);
@@ -298,6 +319,10 @@ def check(path: Path) -> None:
         'a52_p446_mark(0x14aU',
         'a52_p446_mark(0x14bU',
         'a52_p446_mark(0x14fU',
+        'a52_p446_mark(0x152U',
+        'a52_p446_mark(0x153U',
+        'a52_p446_mark(0x154U',
+        'a52_p446_mark(0x155U',
     )
     missing = [x for x in required if x not in s]
     if missing:

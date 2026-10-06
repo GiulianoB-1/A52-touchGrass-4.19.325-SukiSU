@@ -97,4 +97,59 @@ source = source.replace(
 )
 
 
+# Phase445 recorder hardening. 120 section slots already come from the retained
+# payload; add explicit dropped-section accounting without moving the section
+# table (two u32s consume eight bytes from the existing reserved area).
+source = source.replace(
+    """    u32 r2_flags;
+    u8 reserved[64];
+    struct p445_section sec[P445_MAX_SECTIONS];""",
+    """    u32 r2_flags;
+    u32 dropped_sections, section_capacity;
+    u8 reserved[56];
+    struct p445_section sec[P445_MAX_SECTIONS];"""
+)
+source = source.replace(
+    "static atomic_t p445_rung = ATOMIC_INIT(0);",
+    "static atomic_t p445_rung = ATOMIC_INIT(0);\\nstatic atomic_t p445_dropped = ATOMIC_INIT(0);"
+)
+
+_pc0 = source.find("def patch_central(root: Path, kind: str) -> None:")
+_pc1 = source.find("\\ndef patch_ctrl(", _pc0)
+if _pc0 < 0 or _pc1 < 0:
+    raise SystemExit("Phase445 wrapper: patch_central bounds missing")
+_pc = source[_pc0:_pc1]
+_write = _pc.rfind("    p.write_text(s)")
+if _write < 0:
+    raise SystemExit("Phase445 wrapper: patch_central write anchor missing")
+
+_hardening = r'''
+    # Explicitly expose recorder capacity and count every dropped section.
+    sync_old = """    h->section_count = (u32)atomic_read(&p445_sections);
+    h->used_bytes = (u32)atomic_read(&p445_used);"""
+    sync_new = """    h->section_count = (u32)atomic_read(&p445_sections);
+    h->used_bytes = (u32)atomic_read(&p445_used);
+    h->dropped_sections = (u32)atomic_read(&p445_dropped);
+    h->section_capacity = P445_MAX_SECTIONS;"""
+    s = one(s, sync_old, sync_new, "recorder drop sync")
+
+    overflow_old = """        p445_hdr()->flags |= P445_F_OVERFLOW;
+        p445_sync_header();
+        return -ENOSPC;"""
+    overflow_new = """        atomic_inc(&p445_dropped);
+        p445_hdr()->flags |= P445_F_OVERFLOW;
+        p445_hdr()->dropped_sections = (u32)atomic_read(&p445_dropped);
+        p445_hdr()->section_capacity = P445_MAX_SECTIONS;
+        pr_err("P445 DROP section idx=%u cap=%u off=%x len=%x dropped=%u\\n",
+            idx, P445_MAX_SECTIONS, off, aligned,
+            (u32)atomic_read(&p445_dropped));
+        p445_sync_header();
+        return -ENOSPC;"""
+    s = one(s, overflow_old, overflow_new, "recorder drop path")
+'''
+_pc = _pc[:_write] + _hardening + _pc[_write:]
+source = source[:_pc0] + _pc + source[_pc1:]
+
+
+
 exec(compile(source, str(Path(__file__).with_suffix(".expanded.py")), "exec"), globals())

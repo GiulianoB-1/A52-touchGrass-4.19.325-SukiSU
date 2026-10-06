@@ -1,5 +1,6 @@
 name: Phase446A - GKI clk_ignore_unused cmdline A/B
 run-name: Phase446A GKI Phase444-r14 + clk_ignore_unused
+# Exact cmdline-only A/B against successful Phase444 run #14.
 
 on:
   push:

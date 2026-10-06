@@ -36,8 +36,14 @@ jobs:
           echo '=== SDE POWER PARSE/GET/ENABLE ==='
           grep -n -A80 -B20 -E 'sde_power_parse_dt_clock|sde_power_resource_init|sde_power_resource_enable|msm_dss_enable_clk' "$ROOT/drivers/a52_display/msm/sde_power_handle.c" | head -900
 
+          echo '=== MDSS GDSC DEFINITIONS ==='
+          grep -Rns -A28 -B16 -E 'mdss_gdsc|MDSS_GDSC|qcom,.*gdsc|0xae.*gdsc' "$ROOT/drivers/clk/qcom" "$ROOT/drivers/regulator" "$ROOT/arch/arm64/boot/dts/qcom" 2>/dev/null | head -1200 || true
+
           echo '=== SDE KMS HW INIT / MMU / VBIF / RSC ==='
-          grep -n -A80 -B30 -E '_sde_kms_mmu_init|sde_kms_hw_init|sde_vbif|vbif|sde_rsc|cont_splash|splash' "$ROOT/drivers/a52_display/msm/sde_kms.c" | head -1800
+          grep -n -A100 -B40 -E '_sde_kms_mmu_init|sde_kms_hw_init|sde_vbif|vbif|sde_rsc|cont_splash|splash' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" | head -2200 || true
+
+          echo '=== VBIF REGISTER OFFSETS ==='
+          grep -Rns -A25 -B15 -E 'XIN_HALT|PENDING|PND|VBIF.*HALT|VBIF.*PEND' "$ROOT/drivers/a52_display/msm/sde" "$ROOT/drivers/a52_display/msm" 2>/dev/null | head -1400 || true
 
           echo '=== IOMMU CORE DEFAULT DOMAIN / PROBE DEVICE ==='
           grep -n -A100 -B40 -E 'iommu_probe_device|iommu_alloc_default_domain|iommu_group_add_device|iommu_attach_device|default_domain|bus_iommu_probe' "$ROOT/drivers/iommu/iommu.c" | head -1800

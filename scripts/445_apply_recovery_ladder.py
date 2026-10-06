@@ -76,9 +76,7 @@ int a52_p445_refgen_snapshot(u32 *registered, u32 *enabled,
     if (registered) *registered=!!v;
     if (!v || !v->rdev || !v->addr) return -ENODEV;
     if (enabled) *enabled=refgen_kona_is_enabled(v->rdev);
-    mutex_lock(&v->rdev->mutex);
-    if (use_count) *use_count=v->rdev->use_count;
-    mutex_unlock(&v->rdev->mutex);
+    if (use_count) *use_count=READ_ONCE(v->rdev->use_count);
     if (pwrdwn) *pwrdwn=readl_relaxed(v->addr+REFGEN_REG_PWRDWN_CTRL5);
     return 0;
 }
@@ -88,4 +86,15 @@ EXPORT_SYMBOL_GPL(a52_p445_refgen_snapshot);
 '''
 
 source = source[:_start] + _refgen + source[_end:]
+# Regulator use_count is diagnostic only. On 5.10 rdev->mutex is a ww_mutex,
+# while downstream 4.19 used a plain mutex. Avoid taking either lock and use
+# a one-shot READ_ONCE snapshot, which is sufficient for PRE/R2 comparison.
+source = source.replace(
+    """    mutex_lock(&rdev->mutex);
+    if (use_count) *use_count=(int)rdev->use_count;
+    mutex_unlock(&rdev->mutex);""",
+    """    if (use_count) *use_count=(int)READ_ONCE(rdev->use_count);"""
+)
+
+
 exec(compile(source, str(Path(__file__).with_suffix(".expanded.py")), "exec"), globals())

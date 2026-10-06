@@ -28,6 +28,58 @@ if source.count(_tg_time_old) != 1:
     raise SystemExit("Phase444 boot-time API anchor count=" + str(source.count(_tg_time_old)))
 source = source.replace(_tg_time_old, _tg_time_new, 1)
 
+# Keep the passive SD inventory off the kernel stack. 64 packed records are
+# ~2.5 KiB, above GKI's 2048-byte frame limit. Workqueue context may sleep, so
+# a temporary GFP_KERNEL allocation is appropriate and preserves the on-disk/
+# /proc section schema exactly.
+_slab_anchor = "#include <linux/string.h>\n"
+if source.count(_slab_anchor) != 1:
+    raise SystemExit("Phase444 slab include anchor count=" + str(source.count(_slab_anchor)))
+if "#include <linux/slab.h>\n" not in source:
+    source = source.replace(_slab_anchor, '#include <linux/slab.h>\n' + _slab_anchor, 1)
+
+_sd_old = """static void p444_sd_workfn(struct work_struct *work)
+{
+    struct p444_sdrec r[64]; unsigned int n=0, minor; int partno; struct gendisk *gd;
+    (void)work; memset(r,0,sizeof(r));
+    for (minor=0; minor<256 && n<ARRAY_SIZE(r); minor++) {
+        gd=get_gendisk(MKDEV(MMC_BLOCK_MAJOR,minor),&partno);
+        if (!gd) continue;
+        r[n].minor=minor; r[n].partno=partno; r[n].sectors=get_capacity(gd);
+        strlcpy(r[n].name,gd->disk_name,sizeof(r[n].name)); n++;
+        put_disk(gd);
+    }
+    if (n) a52_p444_store_section(P444_STAGE_SD,P444_TYPE_SD,"MMC_MAJOR179",n,0,r,n*sizeof(r[0]));
+#if P444_KIND == 1
+    p444_checkpoint();
+#endif
+}"""
+_sd_new = """static void p444_sd_workfn(struct work_struct *work)
+{
+    struct p444_sdrec *r;
+    unsigned int n=0, minor;
+    int partno;
+    struct gendisk *gd;
+    (void)work;
+    r=kcalloc(64U,sizeof(*r),GFP_KERNEL);
+    if (!r) return;
+    for (minor=0; minor<256 && n<64U; minor++) {
+        gd=get_gendisk(MKDEV(MMC_BLOCK_MAJOR,minor),&partno);
+        if (!gd) continue;
+        r[n].minor=minor; r[n].partno=partno; r[n].sectors=get_capacity(gd);
+        strlcpy(r[n].name,gd->disk_name,sizeof(r[n].name)); n++;
+        put_disk(gd);
+    }
+    if (n) a52_p444_store_section(P444_STAGE_SD,P444_TYPE_SD,"MMC_MAJOR179",n,0,r,n*sizeof(r[0]));
+    kfree(r);
+#if P444_KIND == 1
+    p444_checkpoint();
+#endif
+}"""
+if source.count(_sd_old) != 1:
+    raise SystemExit("Phase444 SD stack buffer anchor count=" + str(source.count(_sd_old)))
+source = source.replace(_sd_old, _sd_new, 1)
+
 # The verified payload already contains the intended disk-written
 # declaration. Keep compatibility with the earlier damaged stream, but never
 # require corruption to be present.

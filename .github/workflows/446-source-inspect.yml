@@ -42,7 +42,7 @@ jobs:
           ROOT="$PWD/gki/common"
           mkdir -p p446-src
           cp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" p446-src/
-          cp "$ROOT/drivers/a52_display/msm/sde/sde_power_handle.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/sde_power_handle.c" p446-src/
           cp "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.c" p446-src/
           cp "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.h" p446-src/
           cp "$ROOT/drivers/a52_display/msm/msm_drv.c" p446-src/

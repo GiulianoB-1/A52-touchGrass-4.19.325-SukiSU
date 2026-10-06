@@ -1,75 +1,45 @@
-name: Phase446A cmdline A/B builder
-run-name: Phase446A exact P444-r14 + clk_ignore_unused
+name: Phase446 source microscope
+run-name: Phase446 source microscope
 
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
-    paths:
-      - .github/workflows/445-pll-helper-inspect.yml
-      - scripts/446_append_boot_cmdline.py
+    paths: [.github/workflows/445-pll-helper-inspect.yml]
 
-permissions:
-  contents: read
-  actions: read
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
 
 jobs:
-  repack:
+  inspect:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download exact successful Phase444 GKI run14 boot
-        uses: actions/download-artifact@v4
+      - name: Restore reconstructed GKI tree
+        id: p429
+        uses: actions/cache/restore@v4
         with:
-          name: A52XQ-PHASE444-GKI-DEEP-PASSIVE-14-BOOT-IMG
-          path: intake
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: 37440953195
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
 
-      - name: Append clk_ignore_unused and audit one-variable delta
+      - name: Inspect Phase446 anchors
         run: |
           set -Eeuo pipefail
-          SRC="intake/boot-phase444-gki-deep-passive-compare-v1.img"
-          OUTDIR="phase446a-clk-ignore-unused"
-          OUT="$OUTDIR/boot-phase446a-gki-p444r14-clk-ignore-unused.img"
-          REPORT="$OUTDIR/cmdline-patch-report.json"
-          mkdir -p "$OUTDIR"
-
-          test -s "$SRC"
-          test "$(stat -c '%s' "$SRC")" -eq 100663296
-          printf '%s  %s\n'             '7bf90c1be5edc5b3f92e30cf39c026e25d0b2cc5f89f437fe1862f588e117665'             "$SRC" | sha256sum -c -
-
-          python3 scripts/446_append_boot_cmdline.py             --source "$SRC"             --output "$OUT"             --report "$REPORT"             --append clk_ignore_unused             --expect-source-sha256 7bf90c1be5edc5b3f92e30cf39c026e25d0b2cc5f89f437fe1862f588e117665
-
-          test "$(stat -c '%s' "$OUT")" -eq 100663296
-          grep -Fq '"all_bytes_outside_extra_cmdline_unchanged": true' "$REPORT"
-          grep -Fq '"primary_cmdline_unchanged": true' "$REPORT"
-          grep -Fq '"boot_id_unchanged": true' "$REPORT"
-          grep -Fq 'clk_ignore_unused' "$REPORT"
-
-          cat > "$OUTDIR/README.txt" <<'EOF'
-          Phase446A: clk_disable_unused A/B
-          =================================
-          Exact baseline: Phase444 GKI run #14 boot image.
-          Only modification: boot-header token "clk_ignore_unused".
-          Kernel/ramdisk/DTB/recorder are unchanged.
-
-          Phase444 terminal snapshot retains:
-            R:intf_1 -> INTF1 FRAME_COUNT at +0x0AC
-            R:top_0  -> MDP interrupt registers including CTL_0_START state
-
-          Interpretation:
-            F0 success and/or FRAME_COUNT substantially above ~310 supports
-            clk_disable_unused as the early destructive event.
-          EOF
-          sha256sum "$SRC" "$OUT" | tee "$OUTDIR/SHA256SUMS"
-
-      - name: Upload Phase446A
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE446A-GKI-P444R14-CLK-IGNORE-UNUSED-BOOT-IMG
-          path: phase446a-clk-ignore-unused/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
+          test "${{ steps.p429.outputs.cache-hit }}" = "true"
+          R="$PWD/gki/common"
+          echo '=== MSM DRM BIND ==='
+          grep -Rns -A180 -B30 -E 'static int msm_drm_bind|int msm_drm_init|msm_component_bind_all|drm_irq_install|cont_splash' "$R/drivers/a52_display/msm" 2>/dev/null | head -1200 || true
+          echo '=== SDE KMS HW INIT / IRQ / VBIF / RSC ==='
+          grep -Rns -A160 -B30 -E 'sde_kms_hw_init|_sde_kms_mmu_init|sde_core_irq_preinstall|irq_preinstall|vbif|sde_rsc_init|sde_power_resource_init' "$R/drivers/a52_display/msm" 2>/dev/null | head -1800 || true
+          echo '=== SMMU DEFAULT DOMAIN / ATTACH ==='
+          grep -Rns -A100 -B25 -E 'iommu_probe_device|iommu_group_add_device|attach_dev|default_domain|arm_smmu.*probe|skip_init|handoff' "$R/drivers/iommu" 2>/dev/null | head -2200 || true
+          echo '=== A52 PORT SMMU / EARLYMAP ==='
+          grep -Rns -A120 -B30 -E 'earlymap|0x800|handoff_cbs|a52.*smmu|splash.*map|cont.*splash' "$R/drivers" 2>/dev/null | head -1800 || true
+          echo '=== GDSC / GCC / DISPCC ADDRESSES ==='
+          grep -Rns -A40 -B20 -E 'disp.*gdsc|mdss.*gdsc|GDSCR|gcc_disp_(ahb|axi)_clk|dispcc.*reg' "$R/drivers/clk/qcom" "$R/arch/arm64/boot/dts/qcom/lagoon"* 2>/dev/null | head -1500 || true
+          echo '=== PP / INTF REGISTER DEFINES ==='
+          grep -Rns -A80 -B20 -E 'AUTOREFRESH|FRAME_COUNT|TEAR_INT_COUNT|LINE_COUNT|PP_.*LINE|PINGPONG.*AUTO' "$R/drivers/a52_display/msm" 2>/dev/null | head -1600 || true
+          echo '=== EXISTING ACK RECORDER API ==='
+          grep -Rns -A80 -B20 -E 'a52_ackfr_record|A52_PHASE440|a52_p440_event' "$R/include" "$R/drivers/a52_secure" "$R/drivers/a52_display/msm" 2>/dev/null | head -1600 || true

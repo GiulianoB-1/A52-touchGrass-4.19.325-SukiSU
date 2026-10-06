@@ -55,6 +55,20 @@ jobs:
           cp "$ROOT/drivers/clk/qcom/gcc-lagoon.c" p446-src/
           cp "$ROOT/arch/arm64/boot/dts/qcom/lagoon-sde.dtsi" p446-src/
           cp "$ROOT/arch/arm64/boot/dts/qcom/lagoon-gdsc.dtsi" p446-src/
+      - name: Audit decoded Phase446 draft
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          p=Path("scripts/446_apply_early_heartbeat.py.z64")
+          s=zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
+          print("=== PHASE446 DRAFT HEAD ===")
+          print(s[:60000])
+          print("=== PHASE446 DRAFT KEY TOKENS ===")
+          for n in ["H00","H15","keep_boot_bw","bus_proxy","handoff","SDE_POWER_HANDLE_CONT_SPLASH_BUS","sde_power_data_bus_set_quota","arm_smmu","earlymap","SCTLR","TLBI","CB2","CB4"]:
+              print(n, s.count(n))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: phase446-exact-source-inputs

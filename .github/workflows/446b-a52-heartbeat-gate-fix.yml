@@ -665,7 +665,7 @@ jobs:
           grep -Fq 'A52_PHASE446B_LIVE_CB_API' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
           ! grep -Fq 'safe_mdp=!(gcc_ahb & BIT(31))' "$P445"
           ! grep -Fq 'a52_ackfr_record("P446 q=%u' "$P445"
-          echo "Phase446 GKI source and stale-object audit: PASS"
+          echo "Phase446b GKI source and stale-object audit: PASS"
       - name: Audit display clock sync_state contracts
         run: |
           set -Eeuo pipefail
@@ -741,7 +741,6 @@ jobs:
           grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
           grep -Fq ' a52_p446_read_cb2' "$MAP"
-          grep -aFq 'P446 q=%u e=%x' "$IMAGE"
           grep -Fq ' a52_p446_mark' "$MAP"
           grep -Fq ' a52_p446_note_smmu' "$MAP"
           grep -Fq ' a52_p446_note_iova' "$MAP"

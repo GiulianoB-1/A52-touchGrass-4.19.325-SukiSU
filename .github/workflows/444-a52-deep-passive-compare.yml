@@ -837,6 +837,8 @@ jobs:
       JOBS: '4'
       BOOT_SOURCE_ASSET_ID: '478920392'
       BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+      TG_CCACHE_DIR: ${{ github.workspace }}/.ccache-touchgrass
+      CCACHE_MAXSIZE: 5G
     steps:
       - uses: actions/checkout@v4
 
@@ -879,11 +881,35 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-phase444-tg-objects-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py.z64') }}
+          key: a52xq-phase444-tg-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py', 'scripts/444_apply_deep_passive_compare.py.z64') }}
           restore-keys: |
+            a52xq-phase444-tg-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
             a52xq-phase444-tg-objects-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
             a52xq-phase439f-golden-built-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-e93abaaa
             a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+
+      - name: Restore TouchGrass compiler cache
+        id: tgccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache-touchgrass
+          key: a52xq-phase444-tg-ccache-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py', 'scripts/444_apply_deep_passive_compare.py.z64') }}
+          restore-keys: |
+            a52xq-phase444-tg-ccache-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
+            a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
+
+      - name: Configure TouchGrass compiler cache
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$TG_CCACHE_DIR"
+          export CCACHE_DIR="$TG_CCACHE_DIR"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -o compression=true
+          ccache -o compression_level=6
+          ccache -o base_dir="$GITHUB_WORKSPACE"
+          ccache -o hash_dir=false
+          ccache -z
+          ccache -s
 
       - name: Ensure clean pinned TouchGrass source
         run: |
@@ -928,34 +954,61 @@ jobs:
           LABEL="touchgrass-4.19.200-resukisu-v4.1.0-safe"
           source scripts/common.sh
           configure_toolchain
-          mkdir -p artifacts
+
+          # configure_toolchain points CC directly at the bundled clang. Route
+          # that exact compiler through ccache without changing the compiler
+          # identity recorded in Kbuild command files.
+          REAL_CC="$CC"
+          WRAP="$RUNNER_TEMP/tg-ccache-clang"
+          cat > "$WRAP" <<EOF
+          #!/bin/sh
+          export CCACHE_DIR="$TG_CCACHE_DIR"
+          exec ccache "$REAL_CC" "\$@"
+          EOF
+          chmod +x "$WRAP"
+          export CC="$WRAP"
+          export CCACHE_DIR="$TG_CCACHE_DIR"
+
+          mkdir -p artifacts "$K/out"
           if test -s "$K/out/.config"; then
             echo 'TouchGrass object tree: WARM'
-            set -o pipefail
+          else
+            echo 'TouchGrass object tree: COLD'
             make -C "$K" O="$K/out" \
               DTC_EXT="$K/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
               KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-              -j"$JOBS" 2>&1 | tee artifacts/phase444-tg-build.log
-            cp "$K/out/arch/arm64/boot/Image" "artifacts/Image-$LABEL"
-            cp "$K/out/.config" "artifacts/config-$LABEL"
-          else
-            echo 'TouchGrass object tree: COLD'
-            build_kernel "$LABEL"
-            cp "artifacts/logs/build-$LABEL.log" artifacts/phase444-tg-build.log
+              a52xq_defconfig
           fi
+
+          set -o pipefail
+          make -C "$K" O="$K/out" \
+            DTC_EXT="$K/tools/dtc" CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+            -j"$JOBS" Image 2>&1 | tee artifacts/phase444-tg-build.log
+
+          cp "$K/out/arch/arm64/boot/Image" "artifacts/Image-$LABEL"
+          cp "$K/out/.config" "artifacts/config-$LABEL"
           IMAGE="$PWD/artifacts/Image-$LABEL"
           test -s "$IMAGE"
           grep -aFq 'P444 TERM ret=%d/%d irq=%u/%u' "$IMAGE"
           grep -aFq 'P444 S i=%d p=%u dt=%llu' "$IMAGE"
           grep -aFq 'HOT_0_75US' "$IMAGE"
           ! grep -aFq 'a52_g439f_provider_capture' "$IMAGE"
+          ccache -s
 
       - name: Save Phase444 TouchGrass object tree
         if: always()
         uses: actions/cache/save@v4
         with:
           path: workspace/touchgrass-a52xq
-          key: a52xq-phase444-tg-objects-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py.z64') }}
+          key: a52xq-phase444-tg-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py', 'scripts/444_apply_deep_passive_compare.py.z64') }}
+
+      - name: Save TouchGrass compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache-touchgrass
+          key: a52xq-phase444-tg-ccache-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ hashFiles('scripts/444_apply_deep_passive_compare.py', 'scripts/444_apply_deep_passive_compare.py.z64') }}
 
       - name: Package Phase444 TouchGrass
         if: success()

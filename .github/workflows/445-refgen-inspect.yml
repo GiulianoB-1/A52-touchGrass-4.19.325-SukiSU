@@ -1,4 +1,4 @@
-name: Phase445 recorder inspect
+name: Phase445 power inspect
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
@@ -15,7 +15,7 @@ jobs:
           from pathlib import Path
           s=zlib.decompress(base64.b64decode(Path("scripts/445_apply_recovery_ladder.py.z64").read_text().strip())).decode()
           lines=s.splitlines()
-          for needle in ("P445_MAX_SECTIONS","P445_HEADER_BYTES","a52_p445_store_section","def patch_regulator","a52_p445_regulator_state","p445_power_meta","P445_TYPE_POWER","dropped"):
+          for needle in ("static void p445_power","POWER_CENSUS","refgen_pwrdwn","last_sent","mx","l22","a52_p445_store_section","section_count >= P445_MAX_SECTIONS"):
               for i,l in enumerate(lines):
                   if needle in l:
                       print("\n###",needle,"line",i+1)

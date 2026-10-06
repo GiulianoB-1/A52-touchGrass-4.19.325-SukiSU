@@ -19,21 +19,18 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Exact Phase446 safety and takeover source
+      - name: Exact Lagoon display GDSC and VBIF inspection
         run: |
+          set -u
           ROOT="$PWD/gki/common"
           echo "cache-hit=${{ steps.p429.outputs.cache-hit }}"
-          echo '=== CLK_OFF / BRANCH STATUS CONTRACT ==='
-          grep -Rns -A35 -B15 -E '#define.*CLK_OFF|CLK_OFF|clk_branch.*is_enabled|clk_branch2.*is_enabled' "$ROOT/drivers/clk/qcom" "$ROOT/include" 2>/dev/null | head -1200 || true
-          echo '=== DISPLAY GDSC REFERENCES ==='
-          grep -Rns -A40 -B20 -Ei 'mdss.*gdsc|gdsc.*mdss|display.*gdsc|sde.*gdsc|gdscr'             "$ROOT/arch/arm64/boot/dts/qcom/lagoon"*             "$ROOT/drivers/a52_display/msm" "$ROOT/drivers/regulator" "$ROOT/drivers/clk/qcom" 2>/dev/null | head -2400 || true
-          echo '=== EXACT SDE POWER RESOURCE INIT ==='
-          sed -n '180,430p' "$ROOT/drivers/a52_display/msm/sde_power_handle.c" 2>/dev/null || true
-          echo '=== EXACT SDE KMS MMU / HW INIT SYMBOLS ==='
-          grep -n -A130 -B50 -E '_sde_kms_mmu_init|static int sde_kms_hw_init|sde_kms_hw_init\(|sde_vbif|sde_rsc|irq_preinstall|cont_splash_config'             "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" 2>/dev/null | head -3200 || true
-          echo '=== PP AUTOREFRESH / LINE REG OFFSETS ==='
-          grep -Rns -A50 -B20 -E 'AUTOREFRESH|AUTO_REFRESH|LINE_COUNT|TEAR.*COUNT'             "$ROOT/drivers/a52_display/msm/sde" 2>/dev/null | head -2200 || true
-          echo '=== VBIF HALT/PENDING OFFSETS ==='
-          grep -Rns -A45 -B20 -Ei 'xin.*halt|halt.*xin|pending|pnd'             "$ROOT/drivers/a52_display/msm/sde" 2>/dev/null | head -2200 || true
-          echo '=== SDE DRM BIND CALL ORDER ==='
-          sed -n '1000,1205p' "$ROOT/drivers/a52_display/msm/msm_drv.c" 2>/dev/null || true
+          echo '=== SDE NODE POWER SUPPLIES ==='
+          grep -Rns -A80 -B20 -E 'mdss_mdp:|compatible = "qcom,sde-kms"' "$ROOT/arch/arm64/boot/dts/qcom" 2>/dev/null | head -1800 || true
+          echo '=== ALL LAGOON LEGACY GDSC NODES ==='
+          grep -Rns -A45 -B20 -Ei 'gdsc|gdscr|power-domain|domain-supply' "$ROOT/arch/arm64/boot/dts/qcom/lagoon"* 2>/dev/null | head -2600 || true
+          echo '=== LEGACY GDSC DRIVER STATE SEMANTICS ==='
+          grep -n -A90 -B45 -E 'is_enabled|GDSCR|SW_COLLAPSE|PWR_ON|POWER_ON|gdscr|enable\(|disable\(' "$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c" | head -2600 || true
+          echo '=== VBIF HW DEFS ==='
+          grep -Rns -A55 -B30 -Ei 'xin.*halt|halt.*xin|pending|pnd|halt_ctrl|xin_halt'             "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.c"             "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.h"             "$ROOT/drivers/a52_display/msm/sde/sde_hw_catalog.c" 2>/dev/null | head -2400 || true
+          echo '=== KMS MMU/RSC/VBIF EXACT CALL ORDER ==='
+          grep -n -A180 -B70 -E '_sde_kms_mmu_init|sde_kms_hw_init|sde_rsc|sde_vbif|_sde_kms_hw_init_blocks'             "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" 2>/dev/null | head -4200 || true

@@ -34,3 +34,29 @@ jobs:
           grep -Rns -A55 -B30 -Ei 'xin.*halt|halt.*xin|pending|pnd|halt_ctrl|xin_halt'             "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.c"             "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.h"             "$ROOT/drivers/a52_display/msm/sde/sde_hw_catalog.c" 2>/dev/null | head -2400 || true
           echo '=== KMS MMU/RSC/VBIF EXACT CALL ORDER ==='
           grep -n -A180 -B70 -E '_sde_kms_mmu_init|sde_kms_hw_init|sde_rsc|sde_vbif|_sde_kms_hw_init_blocks'             "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" 2>/dev/null | head -4200 || true
+
+      - name: Stage exact Phase446 source inputs
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          mkdir -p p446-src
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_power_handle.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_hw_vbif.h" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/msm_drv.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" p446-src/
+          cp "$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c" p446-src/
+          cp "$ROOT/drivers/iommu/iommu.c" p446-src/
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c" p446-src/
+          cp "$ROOT/drivers/regulator/a52-legacy-gdsc-regulator.c" p446-src/
+          cp "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" p446-src/
+          cp "$ROOT/drivers/clk/qcom/gcc-lagoon.c" p446-src/
+          cp "$ROOT/arch/arm64/boot/dts/qcom/lagoon-sde.dtsi" p446-src/
+          cp "$ROOT/arch/arm64/boot/dts/qcom/lagoon-gdsc.dtsi" p446-src/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase446-exact-source-inputs
+          path: p446-src/
+          compression-level: 0
+          retention-days: 7

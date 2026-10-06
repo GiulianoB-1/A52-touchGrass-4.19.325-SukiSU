@@ -1,46 +1,36 @@
-name: Phase446 TG source bundle
-run-name: Phase446 TG source bundle
+name: Phase446 canonical patch inspect
+run-name: Phase446 canonical patch inspect
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
     paths: [.github/workflows/445-pll-helper-inspect.yml]
-env:
-  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
-  TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
 jobs:
-  bundle:
+  inspect:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Restore TouchGrass source
-        id: tg
-        uses: actions/cache/restore@v4
-        with:
-          path: workspace/touchgrass-a52xq
-          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
-          restore-keys: |
-            a52xq-phase444-tg-objects-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
-            a52xq-touchgrass-source-v3-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
-      - name: Clone on miss
-        if: steps.tg.outputs.cache-hit != 'true'
+      - name: Expand and inspect canonical Phase446 patch
         run: |
           set -Eeuo pipefail
-          rm -rf workspace/touchgrass-a52xq
-          git clone --no-checkout "$TOUCHGRASS_REPO" workspace/touchgrass-a52xq
-          git -C workspace/touchgrass-a52xq checkout "$TOUCHGRASS_COMMIT"
-      - name: Bundle exact TG anchors
-        run: |
-          set -Eeuo pipefail
-          K="$PWD/workspace/touchgrass-a52xq"
-          git -C "$K" reset --hard "$TOUCHGRASS_COMMIT"
-          O="$PWD/p446-tg-source"; mkdir -p "$O"
-          for f in             techpack/display/msm/msm_drv.c             techpack/display/msm/sde/sde_kms.c             techpack/display/msm/sde_power_handle.c             techpack/display/msm/msm_smmu.c             techpack/display/msm/dsi/dsi_ctrl.c             techpack/display/msm/dsi/dsi_display.c             drivers/iommu/arm-smmu.c             drivers/iommu/arm-smmu.h             drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c             drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c             arch/arm64/boot/dts/qcom/lagoon-sde.dtsi; do
-              if test -f "$K/$f"; then cp "$K/$f" "$O/$(echo "$f"|tr / _)"; fi
-          done
-          grep -Rns -E 'arm_smmu_handoff_cbs|smmu_sde_unsec|msm_irq_preinstall|cont_splash_config|sde_power_data_bus_set_quota|msm_bus_device_late_init' "$K/techpack/display" "$K/drivers/iommu" "$K/drivers/soc/qcom/msm_bus" > "$O/anchors.txt" || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-PHASE446-TG-SOURCE-BUNDLE
-          path: p446-tg-source/
-          if-no-files-found: error
-          retention-days: 7
+          python3 - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          p=Path("scripts/446_apply_heartbeat_cb2.py.z64")
+          s=zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
+          Path("/tmp/p446.py").write_text(s)
+          print("bytes",len(s))
+          for k in [
+            "msm_bus_node_device_type *bus_dev",
+            "P446_RAM_PHYS","struct p446_rec","a52_p446_note_smmu",
+            "F446-08","SSPP","SRC0_ADDR","LAYER_EXT2","lm_op",
+            "FRAME_COUNT","A52_PHASE446_BUS_LATE_HANDOFF",
+            "A52_PHASE446_CB2_SWITCH"
+          ]:
+            print("\n====",k,"====")
+            pos=0; n=0
+            while True:
+              i=s.find(k,pos)
+              if i<0 or n>=6: break
+              print(s[max(0,i-1800):min(len(s),i+4200)])
+              pos=i+len(k); n+=1
+          PY

@@ -97,6 +97,10 @@ source = source.replace(
 )
 
 
+# The recovery ladder no longer uses the inherited giant deep-dump helper at
+# runtime. Keep it available for source parity/audit without tripping Werror.
+source = source.replace("static void p445_deep(", "static void __maybe_unused p445_deep(", 1)
+
 # Phase445 recorder hardening. 120 section slots already come from the retained
 # payload; add explicit dropped-section accounting without moving the section
 # table (two u32s consume eight bytes from the existing reserved area).

@@ -47,6 +47,7 @@ def add_boot_switches(s: str) -> str:
  * initial POST_ENABLE call in sde_kms_hw_init; registered later callbacks
  * remain untouched.
  */
+static const char a52_p446c_marker[] __used = "A52_PHASE446C_TAKEOVER_WINDOW_V1";
 static bool a52_p446c_keep_earlymap;
 static bool a52_p446c_skip_post_enable_init;
 

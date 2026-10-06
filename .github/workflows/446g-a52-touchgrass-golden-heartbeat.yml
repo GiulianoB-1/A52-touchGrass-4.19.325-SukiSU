@@ -1,5 +1,5 @@
-name: Phase446G - TouchGrass Golden heartbeat twin
-run-name: Phase446G TouchGrass Golden ReSukiSU matched heartbeat
+name: Phase446bG - TouchGrass Golden heartbeat twin
+run-name: Phase446bG TouchGrass Golden ReSukiSU matched heartbeat
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/446g-a52-touchgrass-golden-heartbeat.yml
       - scripts/446g_apply_golden_heartbeat.py
+      - scripts/446b_apply_heartbeat_fixes.py
       - scripts/decode_phase446_pair.py
       - scripts/446_apply_heartbeat_cb2.py.z64
       - scripts/decode_phase446.py
@@ -25,12 +26,12 @@ env:
   RESUKISU_VERSION: v4.1.0-2206a7dd-dirty@ReSukiSU
 
 concurrency:
-  group: a52-phase446g-touchgrass-golden-heartbeat
+  group: a52-phase446bg-touchgrass-golden-heartbeat
   cancel-in-progress: true
 
 jobs:
   golden:
-    name: Build Phase446G TouchGrass Golden heartbeat + ReSukiSU
+    name: Build Phase446bG TouchGrass Golden heartbeat + ReSukiSU
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
@@ -52,12 +53,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
-          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446_pair.py
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446_pair.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/446g_apply_golden_heartbeat.py --help >/dev/null
+          python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/decode_phase446_pair.py --help >/dev/null
-          echo "Phase446G payload preflight: PASS"
+          echo "Phase446bG payload preflight: PASS"
 
       - name: Create clean proven Golden-control workspace
         run: |
@@ -73,6 +75,7 @@ jobs:
              scripts/decode_phase444.py.z64 \
              scripts/445g_apply_golden_sync_pre.py \
              scripts/446g_apply_golden_heartbeat.py \
+             scripts/446b_apply_heartbeat_fixes.py \
              scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/decode_phase446.py \
              scripts/decode_phase446.py.z64 \
@@ -90,6 +93,7 @@ jobs:
             golden-work/scripts/444_apply_deep_passive_compare.py \
             golden-work/scripts/445g_apply_golden_sync_pre.py \
             golden-work/scripts/446g_apply_golden_heartbeat.py \
+            golden-work/scripts/446b_apply_heartbeat_fixes.py \
             golden-work/scripts/decode_phase444.py \
             golden-work/scripts/decode_phase446.py \
             golden-work/scripts/decode_phase446_pair.py
@@ -101,9 +105,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: golden-work/.ccache
-          key: a52xq-phase446g-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
+          key: a52xq-phase446bg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
           restore-keys: |
-            a52xq-phase446g-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-
+            a52xq-phase446bg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-
             a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
 
       - name: Reconstruct clean TouchGrass 4.19.200 Golden
@@ -160,6 +164,8 @@ jobs:
           python3 scripts/445g_apply_golden_sync_pre.py --root "$K" --check-only
           python3 scripts/446g_apply_golden_heartbeat.py --root "$K" --repo-root "$PWD/.." 
           python3 scripts/446g_apply_golden_heartbeat.py --root "$K" --repo-root "$PWD/.." --check-only
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg --check-only
 
           git -C "$K" diff --check -- \
             techpack/display/msm/Makefile \
@@ -167,7 +173,7 @@ jobs:
             techpack/display/msm/dsi/dsi_ctrl.c \
             techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c \
             techpack/display/msm/dsi/dsi_display.c \
-            techpack/display/msm/a52_phase446g.c \
+            techpack/display/msm/a52_phase446bg.c \
             techpack/display/msm/msm_drv.c \
             techpack/display/msm/msm_smmu.c \
             techpack/display/msm/sde/sde_kms.c \
@@ -186,23 +192,23 @@ jobs:
           ! grep -Rqs 'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1' "$DSI"
           ! grep -Rqs 'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' "$DSI"
           ! grep -Rqs 'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1' "$DSI"
-          grep -Fq "P446_MAX_REC 2048U" "$K/techpack/display/msm/a52_phase446g.c"
-          grep -Fq 'proc_create("a52_phase446_raw",0444' "$K/techpack/display/msm/a52_phase446g.c"
-          grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "P446_MAX_REC 2048U" "$K/techpack/display/msm/a52_phase446bg.c"
+          grep -Fq 'proc_create("a52_phase446_raw",0444' "$K/techpack/display/msm/a52_phase446bg.c"
+          grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446bg.c"
           grep -Fq "A52_PHASE446_TG_ARM_SMMU" "$K/drivers/iommu/arm-smmu.c"
           ! grep -Fq "a52.cb2_reuse" "$K/drivers/iommu/arm-smmu.c"
           ! grep -Fq "A52_PHASE446_CB2_SWITCH" "$K/drivers/iommu/arm-smmu.c"
           grep -Fq "P444_MAX_SECTIONS 120U" "$K/techpack/display/msm/a52_phase444.c"
-          echo "Phase446G observation-only heartbeat scope: PASS"
+          echo "Phase446bG observation-only heartbeat scope: PASS"
 
-      - name: Build Phase446G Golden ReSukiSU Image
+      - name: Build Phase446bG Golden ReSukiSU Image
         run: |
           set -Eeuo pipefail
           cd golden-work
-          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446g
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446bg
           set -o pipefail
           bash -lc "source scripts/common.sh; build_kernel '$LABEL'" \
-            2>&1 | tee phase446g-touchgrass-build.log
+            2>&1 | tee phase446bg-touchgrass-build.log
 
           IMAGE="$PWD/artifacts/Image-$LABEL"
           CONFIG="$PWD/artifacts/config-$LABEL"
@@ -213,6 +219,7 @@ jobs:
           grep -aFq 'P444 S i=%d p=%u dt=%llu' "$IMAGE"
           grep -aFq 'HOT_0_75US' "$IMAGE"
           grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'P446 q=%u e=%x' "$IMAGE"
           grep -aFq 'a52_phase446_raw' "$IMAGE"
@@ -229,25 +236,25 @@ jobs:
             ! grep -aFq "$marker" "$IMAGE"
           done
 
-          echo "Phase446G Golden ReSukiSU compiled-image audit: PASS"
+          echo "Phase446bG Golden ReSukiSU compiled-image audit: PASS"
           ccache -s || true
 
-      - name: Package Phase446G Golden ReSukiSU
+      - name: Package Phase446bG Golden ReSukiSU
         run: |
           set -Eeuo pipefail
           cd golden-work
-          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446g
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446bg
           IMAGE="$PWD/artifacts/Image-$LABEL"
           CONFIG="$PWD/artifacts/config-$LABEL"
           K="$PWD/workspace/touchgrass-a52xq"
-          OUT="$PWD/phase446g-touchgrass-out"
-          FINAL="$OUT/package/boot-phase446g-touchgrass-golden-heartbeat-v1.img"
+          OUT="$PWD/phase446bg-touchgrass-out"
+          FINAL="$OUT/package/boot-phase446bg-touchgrass-golden-heartbeat-v1.img"
 
           rm -rf "$OUT" intake
           mkdir -p "$OUT"/{audit,source,package} intake
           cp "$IMAGE" "$OUT/Image"
           cp "$CONFIG" "$OUT/config"
-          cp phase446g-touchgrass-build.log "$OUT/audit/"
+          cp phase446bg-touchgrass-build.log "$OUT/audit/"
           cp artifacts/linux-4.19.200-resukisu-safe.txt "$OUT/audit/" 2>/dev/null || true
           cp artifacts/resukisu-v4.1.0-exec-hook.txt "$OUT/audit/" 2>/dev/null || true
           cp scripts/444_apply_deep_passive_compare.py \
@@ -256,12 +263,13 @@ jobs:
              scripts/decode_phase444.py.z64 \
              scripts/445g_apply_golden_sync_pre.py \
              scripts/446g_apply_golden_heartbeat.py \
+             scripts/446b_apply_heartbeat_fixes.py \
              scripts/decode_phase446.py \
              scripts/decode_phase446.py.z64 \
              scripts/decode_phase446_pair.py "$OUT/audit/"
 
           cp "$K/techpack/display/msm/a52_phase444.c" "$OUT/source/"
-          cp "$K/techpack/display/msm/a52_phase446g.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/a52_phase446bg.c" "$OUT/source/"
           cp "$K/drivers/iommu/arm-smmu.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_drv.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_smmu.c" "$OUT/source/"
@@ -278,7 +286,7 @@ jobs:
           cp "$K/techpack/display/msm/dsi/dsi_display.c" "$OUT/source/"
 
           cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-          experiment=PHASE446G-TOUCHGRASS-GOLDEN-HEARTBEAT-V1
+          experiment=PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-V1
           base=clean-proven-TouchGrass-4.19.200-Golden-lineage
           touchgrass_commit=$TOUCHGRASS_COMMIT
           resukisu_commit=$RESUKISU_COMMIT
@@ -288,6 +296,9 @@ jobs:
           phase444_observer=yes
           phase445_twin=yes
           phase446_heartbeat_twin=yes
+          phase446b_gate_fix=yes
+          phase446b_live_cb_per_record=yes
+          phase446b_debug_partition_mirror=dropped
           phase446_behavior_changes=no
           phase446_record_phys=0xB1800000
           phase446_record_bytes=0x00100000
@@ -323,18 +334,18 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: golden-work/.ccache
-          key: a52xq-phase446g-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
+          key: a52xq-phase446bg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
 
-      - name: Upload Phase446G Golden failure diagnostics
+      - name: Upload Phase446bG Golden failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446G-TOUCHGRASS-GOLDEN-HEARTBEAT-FAIL-${{ github.run_number }}
+          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-FAIL-${{ github.run_number }}
           path: |
             golden-work/artifacts/logs/
-            golden-work/phase446g-touchgrass-build.log
+            golden-work/phase446bg-touchgrass-build.log
             golden-work/workspace/touchgrass-a52xq/techpack/display/msm/a52_phase444.c
-            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/a52_phase446g.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/a52_phase446bg.c
             golden-work/workspace/touchgrass-a52xq/drivers/iommu/arm-smmu.c
             golden-work/workspace/touchgrass-a52xq/techpack/display/msm/msm_drv.c
             golden-work/workspace/touchgrass-a52xq/techpack/display/msm/sde/sde_kms.c
@@ -345,22 +356,22 @@ jobs:
           compression-level: 1
           retention-days: 7
 
-      - name: Upload Phase446G Golden ReSukiSU bundle
+      - name: Upload Phase446bG Golden ReSukiSU bundle
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446G-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}
-          path: golden-work/phase446g-touchgrass-out/
+          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}
+          path: golden-work/phase446bg-touchgrass-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446G Golden ReSukiSU boot.img
+      - name: Upload Phase446bG Golden ReSukiSU boot.img
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446G-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}-BOOT-IMG
-          path: golden-work/phase446g-touchgrass-out/package/boot-phase446g-touchgrass-golden-heartbeat-v1.img
+          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase446bg-touchgrass-out/package/boot-phase446bg-touchgrass-golden-heartbeat-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

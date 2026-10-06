@@ -36,6 +36,12 @@ jobs:
           cp "$R/drivers/a52_display/msm/sde_io_util.c" "$O/"
           cp "$R/drivers/a52_display/msm/sde/sde_hw_intf.c" "$O/"
           cp "$R/drivers/a52_display/msm/sde/sde_hw_pingpong.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_sspp.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_ctl.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_lm.c" "$O/"
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_catalog.c" "$O/" 2>/dev/null || true
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_catalog_format.h" "$O/" 2>/dev/null || true
+          cp "$R/drivers/a52_display/msm/sde/sde_hw_catalog_format.c" "$O/" 2>/dev/null || true
           cp "$R/drivers/a52_display/msm/dsi/dsi_display.c" "$O/"
           cp "$R/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$O/"
           cp "$R/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$O/"

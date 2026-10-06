@@ -1,0 +1,38 @@
+name: Phase446 source inspect
+on:
+  push:
+    branches: [agent/a52-phase445-recovery-ladder-v1]
+    paths: [.github/workflows/446-source-inspect.yml]
+permissions:
+  contents: read
+env:
+  GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore reconstructed GKI tree
+        id: p429
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+      - name: Inspect active refgen and Lagoon display clock sources
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.p429.outputs.cache-hit }}" = "true"
+          ROOT="$PWD/gki/common"
+          echo '=== REFGEN MATCH/OPS ==='
+          grep -n -A18 -B8 -E 'refgen_match_table|refgen_kona_ops|refgen_ops|refgen_probe' "$ROOT/drivers/regulator/refgen.c"
+          echo '=== REFGEN FULL RELEVANT ==='
+          sed -n '1,220p' "$ROOT/drivers/regulator/refgen.c"
+          echo '=== LAGOON GCC DISPLAY CLOCKS ==='
+          grep -n -A24 -B8 -E 'gcc_disp_(ahb|axi|cc_sleep|cc_xo|gpll0|throttle_axi|xo)_clk|gcc_lagoon_driver' "$ROOT/drivers/clk/qcom/gcc-lagoon.c"
+          echo '=== LAGOON DISPCC DRIVER ==='
+          grep -n -A20 -B8 -E 'disp_cc_lagoon_driver|sync_state' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" || true
+          echo '=== GKI DT DISPLAY BUS CLOCK REFERENCES ==='
+          grep -Rns -E 'gcc_bus|gcc_disp_axi|GCC_DISP_AXI' "$ROOT/arch/arm64/boot/dts" "$ROOT/drivers/a52_display" 2>/dev/null | head -200 || true

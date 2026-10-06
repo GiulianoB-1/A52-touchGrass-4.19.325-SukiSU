@@ -1,0 +1,27 @@
+name: Phase445 payload inspect
+on:
+  push:
+    branches: [agent/a52-phase445-recovery-ladder-v1]
+    paths: [.github/workflows/445-inspect-payload.yml]
+  workflow_dispatch:
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand and inspect Phase445 patcher
+        run: |
+          python3 - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          s=zlib.decompress(base64.b64decode(Path("scripts/445_apply_recovery_ladder.py.z64").read_text().strip())).decode()
+          Path("/tmp/p445.py").write_text(s)
+          lines=s.splitlines()
+          for needle in ("ctrl physical gate","physical gate","P445_GATE","kind == \"tg\"","kind == 'tg'","a52_p445_try_arm"):
+              print("\n###",needle)
+              for i,l in enumerate(lines):
+                  if needle in l:
+                      for j in range(max(0,i-18),min(len(lines),i+35)):
+                          print(f"{j+1:04d}: {lines[j]}")
+                      print()
+          PY

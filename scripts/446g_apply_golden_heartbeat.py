@@ -601,7 +601,7 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
         "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\\n"
         "                               int sme, u32 cb, u32 aux);\\n"
     )
-    include_matches = list(re.finditer(r"(?m)^#include[^\\n]*\\n", s))
+    include_matches = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
     if not include_matches:
         die("a52_p446g_emit_smmu include block missing")
     proto_pos = include_matches[-1].end()

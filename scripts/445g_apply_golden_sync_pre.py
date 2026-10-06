@@ -338,8 +338,6 @@ void a52_p445g_power_pre(struct dsi_display *display)
     if (n)
         a52_p444_store_section(P444_STAGE_PRE_DEEP, P444_TYPE_META,
             "SUPPLY_PRE", n, 0U, r, n * sizeof(r[0]));
-
-    p444_checkpoint();
 }
 EXPORT_SYMBOL_GPL(a52_p445g_power_pre);
 

@@ -47,11 +47,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
-          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445_apply_recovery_ladder.py scripts/decode_phase444.py scripts/decode_phase445.py
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/decode_phase444.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
-          python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
-          python3 scripts/decode_phase445.py --help >/dev/null
           echo "Phase444 payload preflight: PASS"
 
       - name: Create clean proven Golden-control workspace
@@ -66,10 +64,7 @@ jobs:
              scripts/444_apply_deep_passive_compare.py.z64 \
              scripts/decode_phase444.py \
              scripts/decode_phase444.py.z64 \
-             scripts/445_apply_recovery_ladder.py \
-             scripts/445_apply_recovery_ladder.py.z64 \
-             scripts/decode_phase445.py \
-             scripts/decode_phase445.py.z64 \
+             scripts/445g_apply_golden_sync_pre.py \
              scripts/37_validate_a52_p1_boot_source.py \
              scripts/38_repack_a52_p1_boot.py \
              golden-work/scripts/
@@ -81,9 +76,8 @@ jobs:
           grep -Fxq "RESUKISU_VERSION_FULL=$RESUKISU_VERSION" golden-work/sources.lock
           python3 -m py_compile \
             golden-work/scripts/444_apply_deep_passive_compare.py \
-            golden-work/scripts/445_apply_recovery_ladder.py \
-            golden-work/scripts/decode_phase444.py \
-            golden-work/scripts/decode_phase445.py
+            golden-work/scripts/445g_apply_golden_sync_pre.py \
+            golden-work/scripts/decode_phase444.py
           chmod +x golden-work/scripts/*.sh golden-work/scripts/*.py
           echo "Golden control + exact ReSukiSU identity: PASS"
 
@@ -147,8 +141,8 @@ jobs:
           K="$PWD/workspace/touchgrass-a52xq"
           python3 scripts/444_apply_deep_passive_compare.py --root "$K" --kind tg
           python3 scripts/444_apply_deep_passive_compare.py --root "$K" --kind tg --check-only
-          python3 scripts/445_apply_recovery_ladder.py --root "$K" --kind tg
-          python3 scripts/445_apply_recovery_ladder.py --root "$K" --kind tg --check-only
+          python3 scripts/445g_apply_golden_sync_pre.py --root "$K"
+          python3 scripts/445g_apply_golden_sync_pre.py --root "$K" --check-only
 
           git -C "$K" diff --check -- \
             techpack/display/msm/Makefile \
@@ -221,10 +215,7 @@ jobs:
              scripts/444_apply_deep_passive_compare.py.z64 \
              scripts/decode_phase444.py \
              scripts/decode_phase444.py.z64 \
-             scripts/445_apply_recovery_ladder.py \
-             scripts/445_apply_recovery_ladder.py.z64 \
-             scripts/decode_phase445.py \
-             scripts/decode_phase445.py.z64 "$OUT/audit/"
+             scripts/445g_apply_golden_sync_pre.py "$OUT/audit/"
 
           cp "$K/techpack/display/msm/a52_phase444.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde_dbg.c" "$OUT/source/"

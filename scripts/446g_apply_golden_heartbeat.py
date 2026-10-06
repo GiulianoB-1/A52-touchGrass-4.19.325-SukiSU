@@ -595,16 +595,16 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
     s = s[:helper_pos] + helper + s[helper_pos:]
 
     # arm_smmu_handoff_cbs() appears before the helper definition in this 4.19
-    # tree, so provide a file-scope prototype in the stable include area.
+    # tree, so provide a file-scope prototype immediately after the include
+    # block. Do not depend on a vendor-specific header being present.
     proto = (
         "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\\n"
         "                               int sme, u32 cb, u32 aux);\\n"
     )
-    proto_anchor = "#include <linux/sec_debug.h>\\n"
-    proto_pos = s.find(proto_anchor)
-    if proto_pos < 0:
-        die("a52_p446g_emit_smmu include anchor missing")
-    proto_pos += len(proto_anchor)
+    include_matches = list(re.finditer(r"(?m)^#include[^\\n]*\\n", s))
+    if not include_matches:
+        die("a52_p446g_emit_smmu include block missing")
+    proto_pos = include_matches[-1].end()
     s = s[:proto_pos] + "\\n" + proto + s[proto_pos:]
 
     # Earliest apps-SMMU probe and native firmware handoff checkpoint.

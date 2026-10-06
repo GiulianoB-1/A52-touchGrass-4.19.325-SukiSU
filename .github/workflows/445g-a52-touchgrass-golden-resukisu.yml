@@ -1,5 +1,5 @@
-name: Phase445G - TouchGrass Golden ReSukiSU
-run-name: Phase445G TouchGrass Golden ReSukiSU PRE + R0 twin
+name: Phase445G v3 - TouchGrass Golden Power Control
+run-name: Phase445G v3 TouchGrass Golden PRE + power + R0
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - agent/a52-phase445-recovery-ladder-v1
     paths:
       - .github/workflows/445g-a52-touchgrass-golden-resukisu.yml
+      - scripts/445g_apply_golden_sync_pre.py
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ env:
   RESUKISU_VERSION: v4.1.0-2206a7dd-dirty@ReSukiSU
 
 concurrency:
-  group: a52-phase445g-touchgrass-golden-resukisu
+  group: a52-phase445g-v3-touchgrass-golden-power
   cancel-in-progress: true
 
 jobs:
@@ -202,7 +203,7 @@ jobs:
           CONFIG="$PWD/artifacts/config-$LABEL"
           K="$PWD/workspace/touchgrass-a52xq"
           OUT="$PWD/phase445g-touchgrass-out"
-          FINAL="$OUT/package/boot-phase445g-touchgrass-golden-resukisu-v1.img"
+          FINAL="$OUT/package/boot-phase445g-v3-touchgrass-golden-power.img"
 
           rm -rf "$OUT" intake
           mkdir -p "$OUT"/{audit,source,package} intake
@@ -224,7 +225,7 @@ jobs:
           cp "$K/techpack/display/msm/dsi/dsi_display.c" "$OUT/source/"
 
           cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-          experiment=PHASE445G-TOUCHGRASS-GOLDEN-RESUKISU-V1
+          experiment=PHASE445G-V3-TOUCHGRASS-GOLDEN-POWER-V1
           base=clean-proven-TouchGrass-4.19.200-Golden-lineage
           touchgrass_commit=$TOUCHGRASS_COMMIT
           resukisu_commit=$RESUKISU_COMMIT
@@ -269,7 +270,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE445G-TOUCHGRASS-GOLDEN-RESUKISU-FAIL-${{ github.run_number }}
+          name: A52XQ-PHASE445G-V3-TOUCHGRASS-GOLDEN-POWER-FAIL-${{ github.run_number }}
           path: |
             golden-work/artifacts/logs/
             golden-work/phase445g-touchgrass-build.log
@@ -284,7 +285,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE445G-TOUCHGRASS-GOLDEN-RESUKISU-${{ github.run_number }}
+          name: A52XQ-PHASE445G-V3-TOUCHGRASS-GOLDEN-POWER-${{ github.run_number }}
           path: golden-work/phase445g-touchgrass-out/
           if-no-files-found: error
           compression-level: 1
@@ -294,8 +295,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE445G-TOUCHGRASS-GOLDEN-RESUKISU-${{ github.run_number }}-BOOT-IMG
-          path: golden-work/phase445g-touchgrass-out/package/boot-phase445g-touchgrass-golden-resukisu-v1.img
+          name: A52XQ-PHASE445G-V3-TOUCHGRASS-GOLDEN-POWER-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase445g-touchgrass-out/package/boot-phase445g-v3-touchgrass-golden-power.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

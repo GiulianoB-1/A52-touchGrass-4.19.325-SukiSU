@@ -66,6 +66,13 @@ EVENTS = {
     0x090: "TG_SPLASH_PANEL_PRE",
     0x091: "TG_F0_TERMINAL",
     0x100: "PERIODIC",
+    0x120: "H00_FIRST_SAFE", 0x121: "H01_CONT_SPLASH_RES_PRE",
+    0x122: "H02_CONT_SPLASH_RES_POST", 0x123: "H03_IOMMU_ATTACH_PRE",
+    0x124: "H04_IOMMU_ATTACH_POST", 0x125: "H05_SPLASH_MAP_POST",
+    0x126: "H06_EARLY_MAP_M_POST", 0x127: "H07_DRM_BIND_EXIT",
+    0x128: "H08_PLANE_ATOMIC_UPDATE", 0x129: "H09_SET_SCANOUT",
+    0x12A: "H10_CLEAR_BLENDSTAGES", 0x12B: "H11_SETUP_BLENDSTAGE",
+    0x12C: "H12_BRIDGE_PRE_ENABLE", 0x12D: "H13_PANEL_ENABLE_PRE",
 }
 
 
@@ -91,12 +98,24 @@ class Rec:
     event: int
     ns: int
     flags: int
+    aux0: int
+    aux1: int
     frame: int
+    pp_auto: int
+    pp_line: int
+    pp_out_line: int
     s2cr: int
     cb: int
     sctlr: int
+    sspp10_size: int
+    sspp10_src2: int
     sspp10_addr: int
+    sspp10_fmt: int
+    sspp10_stride: int
+    sspp10_op: int
     ctl_ext2: int
+    ctl_start: int
+    lm_op: int
     commit: int
 
     @property
@@ -152,13 +171,25 @@ def parse(path: Path) -> tuple[Header, list[Rec]]:
             seq=u32(r, 16),
             event=u32(r, 20),
             flags=u32(r, 24),
+            aux0=u32(r, 28),
+            aux1=u32(r, 32),
             ns=u64(r, 8),
             frame=u32(r, 36),
+            pp_auto=u32(r, 160),
+            pp_line=u32(r, 164),
+            pp_out_line=u32(r, 172),
             s2cr=u32(r, 444),
             cb=u32(r, 448),
             sctlr=u32(r, 452),
+            sspp10_size=u32(r, 376),
+            sspp10_src2=u32(r, 380),
             sspp10_addr=u32(r, 384),
+            sspp10_fmt=u32(r, 388),
+            sspp10_stride=u32(r, 392),
+            sspp10_op=u32(r, 396),
             ctl_ext2=u32(r, 408),
+            ctl_start=u32(r, 420),
+            lm_op=u32(r, 428),
             commit=commit,
         ))
 
@@ -232,8 +263,8 @@ def main() -> None:
     print(f"GKI: records={len(gr)}/{gh.count} dropped={gh.dropped}  TG: records={len(tr)}/{th.count} dropped={th.dropped}")
     print(
         "EVENT                    # | GKI_ms    TG_ms | "
-        "GKI_FRAME TG_FRAME | GKI_CB TG_CB | GKI_M TG_M | "
-        "GKI_SSPP10_ADDR TG_SSPP10_ADDR | GKI_EXT2 TG_EXT2"
+        "GKI_AUX0/AUX1 TG_AUX0/AUX1 | GKI_FRAME TG_FRAME | GKI_CB TG_CB | GKI_M TG_M | "
+        "GKI_S10_SRC0 TG_S10_SRC0 | GKI_S10_SRC2 TG_S10_SRC2 | GKI_EXT2 TG_EXT2 | GKI_START TG_START"
     )
     print("-" * 176)
 
@@ -245,11 +276,14 @@ def main() -> None:
         tm = t.m_bit if t else None
         print(
             f"{name:<22} {occ:3d} | {fmt_time(g, gh)} {fmt_time(t, th)} | "
+            f"{(f'{g.aux0:08x}/{g.aux1:08x}' if g else '-'):>17} {(f'{t.aux0:08x}/{t.aux1:08x}' if t else '-'):>17} | "
             f"{fmt_frame(g):>9} {fmt_frame(t):>9} | "
             f"{str(gcb) if gcb is not None else '-':>6} {str(tcb) if tcb is not None else '-':>5} | "
             f"{str(gm) if gm is not None else '-':>5} {str(tm) if tm is not None else '-':>4} | "
-            f"{fmt_addr(g):>15} {fmt_addr(t):>14} | "
-            f"{fmt_ext2(g):>8} {fmt_ext2(t):>8}"
+            f"{fmt_addr(g):>12} {fmt_addr(t):>12} | "
+            f"{(f'{g.sspp10_src2:08x}' if g and g.safe_mdp else 'UNSAFE'):>12} {(f'{t.sspp10_src2:08x}' if t and t.safe_mdp else 'UNSAFE'):>12} | "
+            f"{fmt_ext2(g):>8} {fmt_ext2(t):>8} | "
+            f"{(f'{g.ctl_start:08x}' if g and g.safe_mdp else 'UNSAFE'):>8} {(f'{t.ctl_start:08x}' if t and t.safe_mdp else 'UNSAFE'):>8}"
         )
 
 

@@ -649,6 +649,9 @@ jobs:
             "$BUILD/drivers/a52_display/msm/msm_drv.o" \
             "$BUILD/drivers/a52_display/msm/msm_smmu.o" \
             "$BUILD/drivers/a52_display/msm/sde/sde_kms.o" \
+            "$BUILD/drivers/a52_display/msm/sde/sde_plane.o" \
+            "$BUILD/drivers/a52_display/msm/sde/sde_crtc.o" \
+            "$BUILD/drivers/a52_display/msm/msm_atomic.o" \
             "$BUILD/drivers/a52_display/msm/sde_power_handle.o" \
             "$BUILD/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.o" \
             "$BUILD/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.o" \
@@ -663,6 +666,11 @@ jobs:
           grep -Fq 'A52_PHASE446_POWER_BUS_MARKERS' "$ROOT/drivers/a52_display/msm/sde_power_handle.c"
           grep -Fq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$P445"
           grep -Fq 'A52_PHASE446B_LIVE_CB_API' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1' "$P445"
+          grep -Fq 'A52_PHASE446B_PLANE_H08_H09' "$ROOT/drivers/a52_display/msm/sde/sde_plane.c"
+          grep -Fq 'A52_PHASE446B_CRTC_H10_H11' "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c"
+          grep -Fq 'A52_PHASE446B_H12_BRIDGE_PRE_ENABLE' "$ROOT/drivers/a52_display/msm/msm_atomic.c"
+          grep -Fq 'A52_PHASE446B_H13_PANEL_ENABLE' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           ! grep -Fq 'safe_mdp=!(gcc_ahb & BIT(31))' "$P445"
           ! grep -Fq 'a52_ackfr_record("P446 q=%u' "$P445"
           echo "Phase446b GKI source and stale-object audit: PASS"
@@ -791,6 +799,9 @@ jobs:
           cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
           cp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$OUT/source/msm_smmu.c"
           cp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$OUT/source/sde_kms.c"
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_plane.c" "$OUT/source/sde_plane.c"
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c" "$OUT/source/sde_crtc.c"
+          cp "$ROOT/drivers/a52_display/msm/msm_atomic.c" "$OUT/source/msm_atomic.c"
           cp "$ROOT/drivers/a52_display/msm/sde_power_handle.c" "$OUT/source/sde_power_handle.c"
           cp "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c" "$OUT/source/msm_bus_arb_rpmh.c"
           cp "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$OUT/source/msm_bus_fabric_rpmh.c"
@@ -824,6 +835,7 @@ jobs:
              scripts/446_apply_heartbeat_cb2.py scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/446b_apply_heartbeat_fixes.py \
              scripts/decode_phase446.py scripts/decode_phase446.py.z64 \
+             scripts/decode_phase446_pair.py \
              scripts/446_append_boot_cmdline.py "$OUT/audit/"
           cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt /tmp/p441-vrr-audit.txt "$OUT/audit/" 2>/dev/null || true
 
@@ -847,6 +859,10 @@ jobs:
             - Read DISPCC unconditionally; gate MDP on GDSC + DISPCC AHB/MDP.
             - Re-read live SID 0x800 S2CR and current CB registers every record.
             - Drop the ineffective debug-partition P446 text mirror.
+            - Add H00-H13 first-commit checkpoints through plane scanout,
+              CTL/LM staging, bridge pre-enable and panel enable.
+            - Reuse the 508-byte record: SSPP adds SRC2/stride and CTL adds START;
+              P446_MAX_REC remains 2048.
 
           Diagnostic goal:
             Bracket the deterministic ~310-frame continuous-splash stop.

@@ -176,7 +176,10 @@ jobs:
             techpack/display/msm/a52_phase446g.c \
             techpack/display/msm/msm_drv.c \
             techpack/display/msm/msm_smmu.c \
+            techpack/display/msm/msm_atomic.c \
             techpack/display/msm/sde/sde_kms.c \
+            techpack/display/msm/sde/sde_plane.c \
+            techpack/display/msm/sde/sde_crtc.c \
             techpack/display/msm/sde/sde_power_handle.c \
             techpack/display/msm/sde/sde_core_irq.c \
             drivers/iommu/arm-smmu.c \
@@ -196,6 +199,11 @@ jobs:
           grep -Fq 'proc_create("a52_phase446_raw",0444' "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq "A52_PHASE446_TG_ARM_SMMU" "$K/drivers/iommu/arm-smmu.c"
+          grep -Fq "A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "A52_PHASE446B_PLANE_H08_H09" "$K/techpack/display/msm/sde/sde_plane.c"
+          grep -Fq "A52_PHASE446B_CRTC_H10_H11" "$K/techpack/display/msm/sde/sde_crtc.c"
+          grep -Fq "A52_PHASE446B_H12_BRIDGE_PRE_ENABLE" "$K/techpack/display/msm/msm_atomic.c"
+          grep -Fq "A52_PHASE446B_H13_PANEL_ENABLE" "$K/techpack/display/msm/dsi/dsi_display.c"
           ! grep -Fq "a52.cb2_reuse" "$K/drivers/iommu/arm-smmu.c"
           ! grep -Fq "A52_PHASE446_CB2_SWITCH" "$K/drivers/iommu/arm-smmu.c"
           grep -Fq "P444_MAX_SECTIONS 120U" "$K/techpack/display/msm/a52_phase444.c"
@@ -220,6 +228,7 @@ jobs:
           grep -aFq 'HOT_0_75US' "$IMAGE"
           grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'a52_phase446_raw' "$IMAGE"
           grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
@@ -272,7 +281,10 @@ jobs:
           cp "$K/drivers/iommu/arm-smmu.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_drv.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_smmu.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/msm_atomic.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_kms.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_plane.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_crtc.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_power_handle.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_core_irq.c" "$OUT/source/"
           cp "$K/drivers/clk/clk.c" "$OUT/source/"
@@ -297,6 +309,9 @@ jobs:
           phase446_heartbeat_twin=yes
           phase446b_gate_fix=yes
           phase446b_live_cb_per_record=yes
+          phase446b_first_commit_microscope=H00-H13
+          phase446b_record_schema_bytes=508
+          phase446b_record_capacity=2048
           phase446b_debug_partition_mirror=dropped
           phase446_behavior_changes=no
           phase446_record_phys=0xB1800000

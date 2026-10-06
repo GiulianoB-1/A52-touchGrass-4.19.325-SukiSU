@@ -1,5 +1,5 @@
-name: Phase446 canonical patch inspect
-run-name: Phase446 canonical patch inspect
+name: Phase446 canonical field inspect
+run-name: Phase446 canonical field inspect
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]
@@ -9,28 +9,19 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Expand and inspect canonical Phase446 patch
+      - name: Inspect exact fields and bus patch
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
           import base64,zlib
           from pathlib import Path
-          p=Path("scripts/446_apply_heartbeat_cb2.py.z64")
-          s=zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
-          Path("/tmp/p446.py").write_text(s)
-          print("bytes",len(s))
-          for k in [
-            "msm_bus_node_device_type *bus_dev",
-            "P446_RAM_PHYS","struct p446_rec","a52_p446_note_smmu",
-            "F446-08","SSPP","SRC0_ADDR","LAYER_EXT2","lm_op",
-            "FRAME_COUNT","A52_PHASE446_BUS_LATE_HANDOFF",
-            "A52_PHASE446_CB2_SWITCH"
-          ]:
-            print("\n====",k,"====")
-            pos=0; n=0
+          s=zlib.decompress(base64.b64decode(Path("scripts/446_apply_heartbeat_cb2.py.z64").read_text().strip())).decode()
+          for k in ["sspp_off","struct p446_rec","ctl_","lm_","0x29000","0x45000","0x2000","bcm_remove_handoff_req","bus_dev = NULL","def patch_central"]:
+            print("\n########",k,"########")
+            p=0; n=0
             while True:
-              i=s.find(k,pos)
-              if i<0 or n>=6: break
-              print(s[max(0,i-1800):min(len(s),i+4200)])
-              pos=i+len(k); n+=1
+              i=s.find(k,p)
+              if i<0 or n>=8: break
+              print(s[max(0,i-2600):min(len(s),i+6500)])
+              p=i+len(k); n+=1
           PY

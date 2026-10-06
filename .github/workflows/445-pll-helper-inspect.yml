@@ -35,3 +35,9 @@ jobs:
           grep -n -A20 -B8 -E 'disp_cc_lagoon_driver|sync_state' "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" || true
           echo '=== DT / DISPLAY BUS CLOCK REFERENCES ==='
           grep -Rns -E 'gcc_bus|gcc_disp_axi|GCC_DISP_AXI' "$ROOT/arch/arm64/boot/dts" "$ROOT/drivers/a52_display" 2>/dev/null | head -250 || true
+          echo '=== LAGOON SDE DT CLOCK LIST ==='
+          sed -n '1,90p' "$ROOT/arch/arm64/boot/dts/qcom/lagoon-sde.dtsi"
+          echo '=== REFGEN DT NODES ==='
+          grep -Rns -A18 -B8 -E 'refgen-kona-regulator|refgen-supply|refgen@|refgen_regulator' "$ROOT/arch/arm64/boot/dts/qcom" 2>/dev/null | head -300 || true
+          echo '=== DISPLAY CLOCK PARSE/CLAIM PATHS ==='
+          grep -Rns -A12 -B8 -E 'clock-names|parse.*clock|clk_get|clk_prepare_enable|gcc_bus' "$ROOT/drivers/a52_display/msm" 2>/dev/null | head -500 || true

@@ -1,5 +1,5 @@
-name: Phase446 bus handoff microscope
-run-name: Phase446 bus handoff microscope
+name: Phase446 exact anchor inspect
+run-name: Phase446 exact anchor inspect
 
 on:
   push:
@@ -23,31 +23,36 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Inspect actual bus-vote/handoff path
+      - name: Exact Phase446 anchors
         run: |
           set -Eeuo pipefail
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           R="$PWD/gki/common"
-          B="$PWD/workspace/gki-phase199-out"
-          echo '=== CONFIG ==='
-          grep -E '^CONFIG_(QCOM_BUS_SCALING|INTERCONNECT|INTERCONNECT_QCOM|INTERCONNECT_QCOM_RPMH|INTERCONNECT_QCOM_SM6350)=' "$B/.config" || true
 
-          echo '=== SDE POWER BUS BRANCH ==='
-          grep -n -A320 -B30 -E '^#ifdef CONFIG_QCOM_BUS_SCALING|^#else|^#endif|_sde_power_data_bus_set_quota|sde_power_data_bus_set_quota|sde_power_data_bus_parse|sde_power_data_bus_state_update|sde_power_reg_bus_parse' "$R/drivers/a52_display/msm/sde_power_handle.c" | head -1500
+          echo '=== ACTIVE DISPCC LAGOON BRANCH OFFSETS ==='
+          grep -n -A36 -B8 -E 'static struct clk_branch disp_cc_mdss_(ahb|mdp|byte0|pclk0|non_gdsc_ahb|rscc_ahb)_clk|static struct gdsc mdss_gdsc|\.gdscr'             "$R/drivers/clk/qcom/dispcc-lagoon.c" || true
+          grep -n -A12 -B8 -E 'regmap_config|\.max_register|platform_get_resource|qcom_cc_map'             "$R/drivers/clk/qcom/dispcc-lagoon.c" || true
 
-          echo '=== BUILT IMAGE PROVES REAL BRANCH ==='
-          for s in 'invalid bus handle %d' 'data_bus_client register failed' 'msm_bus_scale_req'; do
-            echo "-- $s"; grep -aobF "$s" "$B/arch/arm64/boot/Image" | head || true
-          done
+          echo '=== GCC LAGOON DISPLAY BRANCH OFFSETS ==='
+          grep -n -A20 -B8 -E 'static struct clk_branch gcc_disp_(ahb|axi)_clk'             "$R/drivers/clk/qcom/gcc-lagoon.c"
 
-          echo '=== MDSS SDE BUS DT ==='
-          grep -Rns -A80 -B30 -E 'mdss_sde|qcom,msm-bus,num-cases|qcom,msm-bus,num-paths|qcom,sde-data-bus|qcom,sde-reg-bus|bus-vector' "$R/arch/arm64/boot/dts/qcom/lagoon"* "$R/arch/arm64/boot/dts/qcom" 2>/dev/null | head -2600 || true
+          echo '=== SDE BUS VOTE CALLS ==='
+          grep -Rns -A28 -B18 -E 'sde_power_data_bus_set_quota\(|_sde_power_data_bus_set_quota\(|sde_power_data_bus_state_update\('             "$R/drivers/a52_display/msm" | head -1600 || true
 
-          echo '=== BUS PROXY CLIENT SOURCES/DT ==='
-          grep -Rns -A100 -B30 -E 'bus-proxy-client|bus_proxy|proxy.*bus|msm_bus.*proxy|proxy.*msm_bus|Remove handoff bw requests|msm_bus_device_late_init|commit_late_init_data' "$R/drivers" "$R/arch/arm64/boot/dts/qcom" 2>/dev/null | head -2800 || true
+          echo '=== SDE RESOURCE ENABLE FULL ==='
+          sed -n '/int sde_power_resource_enable/,/^}/p' "$R/drivers/a52_display/msm/sde_power_handle.c" | head -500
 
-          echo '=== MDP0 MEM / ICC / MNOC FLOOR ==='
-          grep -Rns -A80 -B30 -Ei 'mdp0[-_]mem|mdss.*mem|display.*mnoc|mnoc.*display|floor.*display|floor.*mdp|400000000|5000000000|5000000000ULL|5000000000L|5000000' "$R/drivers/interconnect" "$R/drivers/soc/qcom" "$R/arch/arm64/boot/dts/qcom" 2>/dev/null | head -2600 || true
+          echo '=== CONT SPLASH / PERF VOTE ==='
+          grep -Rns -A70 -B30 -E 'cont_splash|CONT_SPLASH|bw_control|update_bus|calc_bw|data_bus_set_quota'             "$R/drivers/a52_display/msm/sde" "$R/drivers/a52_display/msm/msm_drv.c" | head -2600 || true
 
-          echo '=== MSM BUS LATE HANDOFF EXACT ==='
-          grep -Rns -A120 -B50 -E 'int __init msm_bus_device_late_init|bcm_remove_handoff_req|commit_late_init_data|init_time' "$R/drivers" 2>/dev/null | head -1800 || true
+          echo '=== DRM BIND FUNCTION ==='
+          grep -n -A300 -B30 -E 'static int msm_drm_bind|static int msm_drm_unbind'             "$R/drivers/a52_display/msm/msm_drv.c" | head -1200 || true
+
+          echo '=== SDE KMS HW INIT FUNCTION ==='
+          grep -Rns -A420 -B30 -E 'static int _sde_kms_hw_init|static int sde_kms_hw_init|sde_kms_hw_init\('             "$R/drivers/a52_display/msm/sde" | head -1800 || true
+
+          echo '=== PP AUTOREFRESH DEFINES ==='
+          grep -Rns -A50 -B20 -E 'AUTOREFRESH_CONFIG|AUTOREFRESH_STATUS|TEAR_INT_COUNT_VAL|FRAME_COUNT|FRAME_LINE_COUNT_EN'             "$R/drivers/a52_display/msm/sde" | head -1200 || true
+
+          echo '=== SMMU DISPLAY EARLYMAP / ATTACH ==='
+          grep -Rns -A90 -B30 -E 'iommu-earlymap|earlymap|smmu_sde|MSM_SMMU_DOMAIN_ATTR_EARLY_MAP|DOMAIN_ATTR_EARLY_MAP|attach_dev\('             "$R/drivers/a52_display" "$R/drivers/iommu" | head -2200 || true

@@ -32,15 +32,36 @@ _refgen = r'''def patch_refgen(root: Path) -> None:
     struct_end += len("\n};")
     s=s[:struct_end] + "\n\n/* A52_PHASE445_REFGEN_SNAPSHOT */\nstatic struct refgen *a52_p445_refgen;" + s[struct_end:]
 
-    # Install the pointer only after devm_regulator_register succeeded.
-    reg_anchor="vreg->rdev = devm_regulator_register(dev, rdesc, &config);"
-    regpos=s.find(reg_anchor)
-    if regpos < 0:
-        die("refgen register anchor missing")
-    retpos=s.find("return 0;",regpos)
-    if retpos < 0:
+    # Install the pointer at the successful end of refgen_probe().
+    # Do not depend on the exact regulator-registration API used by this tree.
+    probe_start=s.find("static int refgen_probe(")
+    if probe_start < 0:
+        probe_start=s.find("static int qcom_refgen_probe(")
+    if probe_start < 0:
+        die("refgen probe start missing")
+
+    brace=s.find("{",probe_start)
+    if brace < 0:
+        die("refgen probe opening brace missing")
+    depth=0
+    probe_end=-1
+    for i in range(brace,len(s)):
+        if s[i]=="{":
+            depth+=1
+        elif s[i]=="}":
+            depth-=1
+            if depth==0:
+                probe_end=i
+                break
+    if probe_end < 0:
+        die("refgen probe end missing")
+
+    body=s[brace:probe_end]
+    rel=body.rfind("return 0;")
+    if rel < 0:
         die("refgen probe success return missing")
-    line_start=s.rfind("\n",regpos,retpos)+1
+    retpos=brace+rel
+    line_start=s.rfind("\n",brace,retpos)+1
     indent=s[line_start:retpos]
     if indent.strip():
         indent="\t"

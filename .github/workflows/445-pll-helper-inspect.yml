@@ -23,36 +23,14 @@ jobs:
             workspace/gki-phase199-out
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
-      - name: Exact Phase446 anchors
+      - name: Exact DSI and SMMU symbols for Phase446
         run: |
           set -Eeuo pipefail
           test "${{ steps.p429.outputs.cache-hit }}" = "true"
           R="$PWD/gki/common"
-
-          echo '=== ACTIVE DISPCC LAGOON BRANCH OFFSETS ==='
-          grep -n -A36 -B8 -E 'static struct clk_branch disp_cc_mdss_(ahb|mdp|byte0|pclk0|non_gdsc_ahb|rscc_ahb)_clk|static struct gdsc mdss_gdsc|\.gdscr'             "$R/drivers/clk/qcom/dispcc-lagoon.c" || true
-          grep -n -A12 -B8 -E 'regmap_config|\.max_register|platform_get_resource|qcom_cc_map'             "$R/drivers/clk/qcom/dispcc-lagoon.c" || true
-
-          echo '=== GCC LAGOON DISPLAY BRANCH OFFSETS ==='
-          grep -n -A20 -B8 -E 'static struct clk_branch gcc_disp_(ahb|axi)_clk'             "$R/drivers/clk/qcom/gcc-lagoon.c"
-
-          echo '=== SDE BUS VOTE CALLS ==='
-          grep -Rns -A28 -B18 -E 'sde_power_data_bus_set_quota\(|_sde_power_data_bus_set_quota\(|sde_power_data_bus_state_update\('             "$R/drivers/a52_display/msm" | head -1600 || true
-
-          echo '=== SDE RESOURCE ENABLE FULL ==='
-          sed -n '/int sde_power_resource_enable/,/^}/p' "$R/drivers/a52_display/msm/sde_power_handle.c" | head -500
-
-          echo '=== CONT SPLASH / PERF VOTE ==='
-          grep -Rns -A70 -B30 -E 'cont_splash|CONT_SPLASH|bw_control|update_bus|calc_bw|data_bus_set_quota'             "$R/drivers/a52_display/msm/sde" "$R/drivers/a52_display/msm/msm_drv.c" | head -2600 || true
-
-          echo '=== DRM BIND FUNCTION ==='
-          grep -n -A300 -B30 -E 'static int msm_drm_bind|static int msm_drm_unbind'             "$R/drivers/a52_display/msm/msm_drv.c" | head -1200 || true
-
-          echo '=== SDE KMS HW INIT FUNCTION ==='
-          grep -Rns -A420 -B30 -E 'static int _sde_kms_hw_init|static int sde_kms_hw_init|sde_kms_hw_init\('             "$R/drivers/a52_display/msm/sde" | head -1800 || true
-
-          echo '=== PP AUTOREFRESH DEFINES ==='
-          grep -Rns -A50 -B20 -E 'AUTOREFRESH_CONFIG|AUTOREFRESH_STATUS|TEAR_INT_COUNT_VAL|FRAME_COUNT|FRAME_LINE_COUNT_EN'             "$R/drivers/a52_display/msm/sde" | head -1200 || true
-
-          echo '=== SMMU DISPLAY EARLYMAP / ATTACH ==='
-          grep -Rns -A90 -B30 -E 'iommu-earlymap|earlymap|smmu_sde|MSM_SMMU_DOMAIN_ATTR_EARLY_MAP|DOMAIN_ATTR_EARLY_MAP|attach_dev\('             "$R/drivers/a52_display" "$R/drivers/iommu" | head -2200 || true
+          echo '=== DSI REGISTER OFFSETS ==='
+          grep -Rns -E '^#define[[:space:]]+DSI_(STATUS|LANE_STATUS|CLK_STATUS|INT_CTRL|FIFO_STATUS)[[:space:]]' "$R/drivers/a52_display/msm/dsi" | head -100
+          echo '=== SMMU TRANSITION ANCHORS ==='
+          sed -n '1640,1870p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          sed -n '2200,2260p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          sed -n '3080,3220p' "$R/drivers/iommu/arm/arm-smmu/arm-smmu.c"

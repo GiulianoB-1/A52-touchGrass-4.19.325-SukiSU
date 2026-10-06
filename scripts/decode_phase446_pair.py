@@ -73,6 +73,26 @@ EVENTS = {
     0x128: "H08_PLANE_ATOMIC_UPDATE", 0x129: "H09_SET_SCANOUT",
     0x12A: "H10_CLEAR_BLENDSTAGES", 0x12B: "H11_SETUP_BLENDSTAGE",
     0x12C: "H12_BRIDGE_PRE_ENABLE", 0x12D: "H13_PANEL_ENABLE_PRE",
+    0x130: "C_KMS_BLOCKS_ENTER",
+    0x131: "C_MMU_INIT_PRE", 0x132: "C_MMU_INIT_POST",
+    0x133: "C_REGDMA_PRE", 0x134: "C_REGDMA_POST",
+    0x135: "C_RM_INIT_PRE", 0x136: "C_RM_INIT_POST",
+    0x137: "C_HW_INTR_PRE", 0x138: "C_HW_INTR_POST",
+    0x139: "C_VBIF_INIT_PRE", 0x13A: "C_VBIF_INIT_POST",
+    0x13B: "C_SID_INIT_PRE", 0x13C: "C_SID_INIT_POST",
+    0x13D: "C_DRM_OBJ_PRE", 0x13E: "C_DRM_OBJ_POST",
+    0x140: "C_HW_BLOCKS_DONE",
+    0x141: "C_POST_ENABLE_ENTER",
+    0x142: "C_IRQ_UPDATE_PRE", 0x143: "C_IRQ_UPDATE_POST",
+    0x144: "C_MEMTYPE_PRE", 0x145: "C_MEMTYPE_POST",
+    0x146: "C_UBWC_RESET_PRE", 0x147: "C_UBWC_RESET_POST",
+    0x148: "C_SID_ROT_PRE", 0x149: "C_SID_ROT_POST",
+    0x14A: "C_LUTDMA_REMAP_PRE", 0x14B: "C_LUTDMA_REMAP_POST",
+    0x14C: "C_FIRST_KICKOFF_SET",
+    0x14D: "C_PM_QOS_PRE", 0x14E: "C_PM_QOS_POST",
+    0x14F: "C_POST_ENABLE_EXIT",
+    0x150: "C_KEEP_EARLYMAP",
+    0x151: "C_SKIP_INITIAL_POST_ENABLE",
 }
 
 
@@ -107,6 +127,12 @@ class Rec:
     s2cr: int
     cb: int
     sctlr: int
+    vig0_size: int
+    vig0_src2: int
+    vig0_addr: int
+    vig0_fmt: int
+    vig0_stride: int
+    vig0_op: int
     sspp10_size: int
     sspp10_src2: int
     sspp10_addr: int
@@ -181,6 +207,14 @@ def parse(path: Path) -> tuple[Header, list[Rec]]:
             s2cr=u32(r, 444),
             cb=u32(r, 448),
             sctlr=u32(r, 452),
+            # sspp[] is catalog order for lagoon:
+            # [VIG0@0x5000, DMA0@0x25000, DMA1@0x27000, DMA2/SSPP10@0x29000].
+            vig0_size=u32(r, 304),
+            vig0_src2=u32(r, 308),
+            vig0_addr=u32(r, 312),
+            vig0_fmt=u32(r, 316),
+            vig0_stride=u32(r, 320),
+            vig0_op=u32(r, 324),
             sspp10_size=u32(r, 376),
             sspp10_src2=u32(r, 380),
             sspp10_addr=u32(r, 384),
@@ -212,7 +246,13 @@ def fmt_frame(r: Rec | None) -> str:
     return fmt_hex(r.frame) if r.safe_mdp else "UNSAFE"
 
 
-def fmt_addr(r: Rec | None) -> str:
+def fmt_vig0_addr(r: Rec | None) -> str:
+    if r is None:
+        return "-"
+    return fmt_hex(r.vig0_addr) if r.safe_mdp else "UNSAFE"
+
+
+def fmt_s10_addr(r: Rec | None) -> str:
     if r is None:
         return "-"
     return fmt_hex(r.sspp10_addr) if r.safe_mdp else "UNSAFE"
@@ -264,7 +304,7 @@ def main() -> None:
     print(
         "EVENT                    # | GKI_ms    TG_ms | "
         "GKI_AUX0/AUX1 TG_AUX0/AUX1 | GKI_FRAME TG_FRAME | GKI_CB TG_CB | GKI_M TG_M | "
-        "GKI_S10_SRC0 TG_S10_SRC0 | GKI_S10_SRC2 TG_S10_SRC2 | GKI_EXT2 TG_EXT2 | GKI_START TG_START"
+        "GKI_VIG0_SRC0 TG_VIG0_SRC0 | GKI_S10_SRC0 TG_S10_SRC0 | GKI_EXT2 TG_EXT2 | GKI_START TG_START"
     )
     print("-" * 176)
 
@@ -280,8 +320,8 @@ def main() -> None:
             f"{fmt_frame(g):>9} {fmt_frame(t):>9} | "
             f"{str(gcb) if gcb is not None else '-':>6} {str(tcb) if tcb is not None else '-':>5} | "
             f"{str(gm) if gm is not None else '-':>5} {str(tm) if tm is not None else '-':>4} | "
-            f"{fmt_addr(g):>12} {fmt_addr(t):>12} | "
-            f"{(f'{g.sspp10_src2:08x}' if g and g.safe_mdp else 'UNSAFE'):>12} {(f'{t.sspp10_src2:08x}' if t and t.safe_mdp else 'UNSAFE'):>12} | "
+            f"{fmt_vig0_addr(g):>13} {fmt_vig0_addr(t):>13} | "
+            f"{fmt_s10_addr(g):>12} {fmt_s10_addr(t):>12} | "
             f"{fmt_ext2(g):>8} {fmt_ext2(t):>8} | "
             f"{(f'{g.ctl_start:08x}' if g and g.safe_mdp else 'UNSAFE'):>8} {(f'{t.ctl_start:08x}' if t and t.safe_mdp else 'UNSAFE'):>8}"
         )

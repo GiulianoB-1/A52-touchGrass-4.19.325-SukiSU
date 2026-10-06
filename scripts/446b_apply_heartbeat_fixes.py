@@ -465,7 +465,9 @@ def patch_dsi_micro(s: str) -> str:
     s=_micro_decl(s,anchor,marker)
     start=s.find(anchor); splash=s.find("if (display->is_cont_splash_enabled)",start); call=s.find("dsi_panel_enable(display->panel);",splash)
     if start<0 or splash<0 or call<0:die("continuous-splash panel-enable anchor missing")
-    line=s.rfind("\n",0,call)+1; ind=s[line:call]
+    line=s.rfind("\n",0,call)+1
+    prefix=s[line:call]
+    ind=prefix[:len(prefix)-len(prefix.lstrip())]
     return s[:line]+ind+"a52_p446_mark(0x12dU,1U,(u32)display->ctrl_count);\n"+s[line:]
 
 def main() -> None:

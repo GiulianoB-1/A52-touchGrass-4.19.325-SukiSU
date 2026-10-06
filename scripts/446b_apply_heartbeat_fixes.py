@@ -176,7 +176,7 @@ int a52_p446_read_cb2(u32 *smr,u32 *s2cr,u32 *cb,u32 *sctlr,
     *smr=sr; *s2cr=s2; *cb=c;
     *sctlr=arm_smmu_cb_read(smmu,c,ARM_SMMU_CB_SCTLR);
     *ttbr0=arm_smmu_cb_readq(smmu,c,ARM_SMMU_CB_TTBR0);
-    *tcr=arm_smmu_cb_read(smmu,c,ARM_SMMU_CB_TTBCR);
+    *tcr=arm_smmu_cb_read(smmu,c,ARM_SMMU_CB_TCR);
     *fsr=arm_smmu_cb_read(smmu,c,ARM_SMMU_CB_FSR);
     arm_smmu_rpm_put(smmu);
     return 0;
@@ -194,7 +194,7 @@ static void a52_p446_emit_smmu(struct arm_smmu_device *smmu,u32 event,int sme,u3
         WRITE_ONCE(a52_p446b_sample_smmu,smmu);
         WRITE_ONCE(a52_p446b_sample_sme,sme);
     }
-    sctlr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_SCTLR); tcr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_TTBCR); fsr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_FSR); ttbr=arm_smmu_cb_readq(smmu,cb,ARM_SMMU_CB_TTBR0);
+    sctlr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_SCTLR); tcr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_TCR); fsr=arm_smmu_cb_read(smmu,cb,ARM_SMMU_CB_FSR); ttbr=arm_smmu_cb_readq(smmu,cb,ARM_SMMU_CB_TTBR0);
     arm_smmu_rpm_put(smmu); a52_p446_set_cb2_state(a52_p446_cb2_reuse ? 1U:0U,cb); a52_p446_note_smmu(event,smr,s2cr,cb,sctlr,ttbr,tcr,fsr,aux);
 }'''
     return replace_c_function(s, "static void a52_p446_emit_smmu(", replacement)

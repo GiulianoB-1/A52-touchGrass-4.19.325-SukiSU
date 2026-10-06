@@ -6,6 +6,35 @@ from pathlib import Path
 payload_path = Path(__file__).with_name(Path(__file__).name + ".z64")
 source = zlib.decompress(base64.b64decode(payload_path.read_text().strip())).decode("utf-8")
 
+# Phase445 PLL fixup: GKI carries both a retained techpack PLL source and the
+# active drivers/a52_display copy. Select the source that belongs to the tree
+# actually compiled for each kind; otherwise the helper can be added to an
+# unused file and fail at final vmlinux link.
+_pll0 = source.find("def pll_10nm_path(root: Path, kind: str) -> Path:")
+_pll1 = source.find("\ndef ensure_phase444(", _pll0)
+if _pll0 < 0 or _pll1 < 0:
+    raise SystemExit("Phase445 wrapper: pll_10nm_path bounds missing")
+_pll_resolver = r'''def pll_10nm_path(root: Path, kind: str) -> Path:
+    if kind == "gki":
+        candidates = [
+            root / "drivers/a52_display/pll/dsi_pll_10nm.c",
+            root / "techpack/display/pll/dsi_pll_10nm.c",
+            root / "drivers/gpu/drm/msm/dsi/pll/dsi_pll_10nm.c",
+        ]
+    else:
+        candidates = [
+            root / "techpack/display/pll/dsi_pll_10nm.c",
+            root / "drivers/a52_display/pll/dsi_pll_10nm.c",
+            root / "drivers/gpu/drm/msm/dsi/pll/dsi_pll_10nm.c",
+        ]
+    for p in candidates:
+        if p.exists() and "handoff_resources" in p.read_text(errors="replace"):
+            return p
+    die("10nm DSI PLL source with handoff_resources missing; tried: " +
+        ", ".join(str(x) for x in candidates))
+'''
+source = source[:_pll0] + _pll_resolver + source[_pll1:]
+
 # Phase445 fixup: the reconstructed GKI refgen.c is semantically the same as
 # TouchGrass but its struct whitespace is not byte-identical. Replace only the
 # refgen patch helper with a structural implementation; all recovery-ladder

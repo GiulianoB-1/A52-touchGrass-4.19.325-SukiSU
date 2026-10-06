@@ -15,7 +15,7 @@ jobs:
           from pathlib import Path
           s=zlib.decompress(base64.b64decode(Path("scripts/445_apply_recovery_ladder.py.z64").read_text().strip())).decode()
           lines=s.splitlines()
-          for needle in ("def patch_pll","a52_p445_pll10_snapshot"):
+          for needle in ("def pll_10nm_path","def patch_pll","a52_p445_pll10_snapshot"):
               for i,l in enumerate(lines):
                   if needle in l:
                       print("\n###",needle,"line",i+1)

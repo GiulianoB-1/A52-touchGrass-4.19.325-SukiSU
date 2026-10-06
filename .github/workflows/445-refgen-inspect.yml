@@ -1,4 +1,4 @@
-name: Phase445 refgen inspect
+name: Phase445 refgen inspect v2
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]

@@ -514,11 +514,10 @@ def patch_arm_smmu(s: str) -> str:
     if marker in s:
         return s
 
-    anchor = "static int arm_smmu_alloc_cb(struct iommu_domain *domain,\n"
-    first = s.find(anchor)
-    second = s.find(anchor, first + 1)
-    if second < 0:
-        die("arm_smmu_alloc_cb definition missing")
+    helper_anchor = "static void arm_smmu_write_s2cr"
+    helper_pos = s.find(helper_anchor)
+    if helper_pos < 0:
+        die("arm_smmu_write_s2cr missing")
 
     helper = r'''
 /* A52_PHASE446_TG_ARM_SMMU
@@ -562,7 +561,7 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
 }
 
 '''
-    s = s[:second] + helper + s[second:]
+    s = s[:helper_pos] + helper + s[helper_pos:]
 
     # Earliest apps-SMMU probe and native firmware handoff checkpoint.
     s = one(

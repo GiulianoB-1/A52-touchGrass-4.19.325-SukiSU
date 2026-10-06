@@ -9,6 +9,25 @@ payload_path = Path(__file__).with_name(Path(__file__).name + ".z64")
 payload = base64.b64decode(payload_path.read_text().strip())
 source = zlib.decompress(payload).decode("utf-8")
 
+# Cross-kernel C portability fixes.  The Phase444 C body is shared by GKI
+# 5.10 and TouchGrass 4.19, so keep it valid under both toolchains before the
+# expanded patcher is executed.
+_c90_old = """    struct task_struct *g;
+    (void)work;
+    bool found=false;"""
+_c90_new = """    struct task_struct *g;
+    bool found=false;
+    (void)work;"""
+if source.count(_c90_old) != 1:
+    raise SystemExit("Phase444 C90 declaration anchor count=" + str(source.count(_c90_old)))
+source = source.replace(_c90_old, _c90_new, 1)
+
+_tg_time_old = "h->init_ns=ktime_get_boottime_ns();"
+_tg_time_new = "h->init_ns=ktime_get_ns();"
+if source.count(_tg_time_old) != 1:
+    raise SystemExit("Phase444 boot-time API anchor count=" + str(source.count(_tg_time_old)))
+source = source.replace(_tg_time_old, _tg_time_new, 1)
+
 # The verified payload already contains the intended disk-written
 # declaration. Keep compatibility with the earlier damaged stream, but never
 # require corruption to be present.

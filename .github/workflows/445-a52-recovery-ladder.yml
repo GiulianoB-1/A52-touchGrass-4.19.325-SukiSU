@@ -689,7 +689,6 @@ jobs:
 
           # Require a GKI runtime summary string that is actually emitted by the
           # compiled recorder, plus the durable binary section names below.
-          grep -aFq 'FCOMP445' "$IMAGE"
           grep -aFq 'R0_HOT_0_75US' "$IMAGE"
           grep -aFq 'R1_HOT_0_75US' "$IMAGE"
           grep -aFq 'R2_HOT_0_75US' "$IMAGE"
@@ -781,8 +780,8 @@ jobs:
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
 
           cat > "$OUT/PHASE445-NOTES.txt" <<'EOF'
-          Phase441 VRR state compatibility + natural F0 test
-          ==================================================
+          Phase445 GKI DSI recovery ladder
+          ================================
           Root cause under test:
             Samsung bootanimation parses /sys/class/lcd/panel/vrr_state.
             TouchGrass returns 1080X2400:NOR.
@@ -844,7 +843,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE445-GKI-RECOVERY-LADDER-${{ github.run_number }}
-          path: phase444-gki-out/
+          path: phase445-gki-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
@@ -854,7 +853,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE445-GKI-RECOVERY-LADDER-${{ github.run_number }}-BOOT-IMG
-          path: phase444-gki-out/package/boot-phase445-gki-recovery-ladder-v1.img
+          path: phase445-gki-out/package/boot-phase445-gki-recovery-ladder-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

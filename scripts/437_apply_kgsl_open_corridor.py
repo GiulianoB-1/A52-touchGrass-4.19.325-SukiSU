@@ -246,7 +246,12 @@ def apply(root):
 
 def validate(root):
     rec=(root/REC).read_text(errors='replace'); op=(root/OPEN).read_text(errors='replace'); na=(root/NAMEI).read_text(errors='replace'); ch=(root/CHAR).read_text(errors='replace'); he=(root/HELPER).read_text(errors='replace'); hd=(root/HDR).read_text(errors='replace')
-    for tok in ['(SZ_1M - SZ_16K - SZ_8K)','P437_O1_ACK_PRE','P437_O2_ACK_POST','current->group_leader','a52_p436_arm_target();','P437_O5_FILP_PRE','P437_O6_FILP_POST']:
+    old_p414='(SZ_1M - SZ_16K - SZ_8K)'
+    p444_p414=('#define A52_P414_RAM_BYTES           0x00062000U' in rec and
+               'A52_PHASE444_RESERVED_PARTITION_V2' in rec)
+    if old_p414 not in rec and not p444_p414:
+        die('open/rec P414 carve missing')
+    for tok in ['P437_O1_ACK_PRE','P437_O2_ACK_POST','current->group_leader','a52_p436_arm_target();','P437_O5_FILP_PRE','P437_O6_FILP_POST']:
         if tok not in rec+op:die('open/rec token missing '+tok)
     for tok in ['P437_N0_DO_FILP_ENTRY','P437_N1_PATH_OPENAT_ENTRY','P437_N7_VFS_PRE']:
         if tok not in na:die('namei token missing '+tok)

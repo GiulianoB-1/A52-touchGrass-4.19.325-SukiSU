@@ -97,10 +97,6 @@ source = source.replace(
 )
 
 
-# The recovery ladder no longer uses the inherited giant deep-dump helper at
-# runtime. Keep it available for source parity/audit without tripping Werror.
-source = source.replace("static void p445_deep(", "static void __maybe_unused p445_deep(", 1)
-
 # Phase445 recorder hardening. 120 section slots already come from the retained
 # payload; add explicit dropped-section accounting without moving the section
 # table (two u32s consume eight bytes from the existing reserved area).
@@ -128,6 +124,12 @@ if _write < 0:
     raise SystemExit("Phase445 wrapper: patch_central write anchor missing")
 
 _hardening = r'''
+    # The recovery ladder no longer calls the inherited giant deep-dump helper.
+    # Mark the generated C helper maybe-unused so -Werror remains clean.
+    if "static void p445_deep(" in s:
+        s = s.replace("static void p445_deep(",
+                      "static void __maybe_unused p445_deep(", 1)
+
     # Explicitly expose recorder capacity and count every dropped section.
     sync_old = """    h->section_count = (u32)atomic_read(&p445_sections);
     h->used_bytes = (u32)atomic_read(&p445_used);"""

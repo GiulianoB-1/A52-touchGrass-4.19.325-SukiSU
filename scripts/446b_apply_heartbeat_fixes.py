@@ -85,7 +85,12 @@ def patch_central(s: str) -> str:
     {
         u32 l_smr=~0U,l_s2cr=~0U,l_cb=~0U,l_sctlr=~0U,l_tcr=~0U,l_fsr=~0U;
         u64 l_ttbr0=~0ULL;
-        int lrc=a52_p446_read_cb2(&l_smr,&l_s2cr,&l_cb,&l_sctlr,&l_ttbr0,&l_tcr,&l_fsr);
+        int lrc=-1;
+        bool smmu_internal=(event==1U || event==8U || event==9U ||
+                            event==0x70U || event==0x71U ||
+                            event==0x74U || event==0x75U);
+        if(!smmu_internal)
+            lrc=a52_p446_read_cb2(&l_smr,&l_s2cr,&l_cb,&l_sctlr,&l_ttbr0,&l_tcr,&l_fsr);
         if(!lrc){
             r.flags|=P446_F_SMMU_VALID; r.smr=l_smr; r.s2cr=l_s2cr; r.cb=l_cb;
             r.sctlr=l_sctlr; r.ttbr0=l_ttbr0; r.tcr=l_tcr; r.fsr=l_fsr;
@@ -263,7 +268,29 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
 			WRITE_ONCE(a52_p446b_sample_sme,(int)i);
 			a52_p446g_emit_smmu(smmu,1U,i,s2cr.cbndx,0U);
 		}"""
-    return one(s, old, new, "TG SID 0x800 live-cache")
+    s = one(s, old, new, "TG SID 0x800 live-cache")
+
+    # Phase446G had duplicate 12/13 marks inside arm_smmu_enable_s1_translations.
+    # Phase446b keeps only the shared KMS EARLY_MAP pre/post markers, so those
+    # external checkpoints can safely invoke the live CB read without re-entering
+    # SMMU runtime-PM from inside the SMMU driver.
+    inner = """\treg = readl_relaxed(cb_base + ARM_SMMU_CB_SCTLR);
+\tif (cfg->cbndx == 2)
+\t\ta52_p446_mark(12U,cfg->cbndx,reg);
+\treg |= SCTLR_M;
+
+\twritel_relaxed(reg, cb_base + ARM_SMMU_CB_SCTLR);
+\tif (cfg->cbndx == 2) {
+\t\tu32 now = readl_relaxed(cb_base + ARM_SMMU_CB_SCTLR);
+\t\ta52_p446_mark(13U,cfg->cbndx,now);
+\t}"""
+    original = """\treg = readl_relaxed(cb_base + ARM_SMMU_CB_SCTLR);
+\treg |= SCTLR_M;
+
+\twritel_relaxed(reg, cb_base + ARM_SMMU_CB_SCTLR);"""
+    if inner in s:
+        s = s.replace(inner, original, 1)
+    return s
 
 
 def main() -> None:

@@ -600,7 +600,8 @@ jobs:
           grep -Fq 'A52_PHASE444_DEEP_PASSIVE_COMPARE_V1' "$P444"
           grep -Fq 'bool a52_p439_f0 = false;' "$CTRL"
           grep -Fq 'a52_p421_f0 = false;' "$CTRL"
-          grep -Fq 'A52_PHASE444_RESERVED_EXCLUSIVE_V1' "$REC"
+          grep -Fq 'A52_PHASE444_RESERVED_PARTITION_V2' "$REC"
+          ! grep -Fq 'A52_PHASE444_RESERVED_EXCLUSIVE_V1' "$REC"
           ! grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR' "$CTRL"
           ! grep -Fq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR' "$HWC"
 

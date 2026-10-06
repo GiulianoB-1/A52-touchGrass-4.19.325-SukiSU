@@ -9,6 +9,98 @@ payload_path = Path(__file__).with_name(Path(__file__).name + ".z64")
 payload = base64.b64decode(payload_path.read_text().strip())
 source = zlib.decompress(payload).decode("utf-8")
 
+# Phase444 storage v2. The first scaffold incorrectly took all of B1900000-
+# B1AFFFFF, disabling the proven P392/P414 witnesses. Keep those recorders
+# alive and carve only a documented 608 KiB slice from the upper P414 RAM
+# window. Samsung debug-partition persistence is disabled: its 10 MiB map has
+# no spare 2 MiB extent (1-3 MiB klog, 3-5 MiB summary, 6-8 MiB LPM klog,
+# 8-10 MiB P414).
+_storage_old = """#define P444_IMAGE_BYTES (2U * SZ_1M)
+#define P444_HEADER_BYTES SZ_4K
+#define P444_MAX_SECTIONS 56U
+#define P444_MAX_HOT 27U
+#define P444_RAM_PHYS 0xB1900000ULL
+#define P444_RAM_BYTES (2U * SZ_1M)
+#define P444_DEBUG_OFFSET 0x00800000ULL"""
+_storage_new = """#define P444_IMAGE_BYTES 0x00098000U
+#define P444_HEADER_BYTES SZ_4K
+#define P444_MAX_SECTIONS 56U
+#define P444_MAX_HOT 27U
+#define P444_RAM_PHYS 0xB1A62000ULL
+#define P444_RAM_BYTES 0x00098000U
+#define P444_DEBUG_OFFSET 0x00000000ULL
+#define P444_DISK_ENABLED 0
+#define P444_STORAGE_V2 1"""
+if source.count(_storage_old) != 1:
+    raise SystemExit("Phase444 storage macro block count=" + str(source.count(_storage_old)))
+source = source.replace(_storage_old, _storage_new, 1)
+
+_disk_block_old = "#if P444_KIND == 1\\nstatic int p444_submit_page"
+_disk_block_new = "#if P444_KIND == 1 && P444_DISK_ENABLED\\nstatic int p444_submit_page"
+if source.count(_disk_block_old) != 1:
+    raise SystemExit("Phase444 disk compile gate count=" + str(source.count(_disk_block_old)))
+source = source.replace(_disk_block_old, _disk_block_new, 1)
+
+# Map DSI PHY only in PRE_DEEP, while the display is known powered. Do not add
+# an MMIO mapping operation to early init and never map it for the first time
+# from a wedged terminal path.
+_phy_init_old = "    p444_phy=ioremap(0x0ae94000ULL,0x1000U);\\n    p444_sync_header();"
+_phy_init_new = "    p444_sync_header();"
+if source.count(_phy_init_old) != 1:
+    raise SystemExit("Phase444 early PHY map anchor count=" + str(source.count(_phy_init_old)))
+source = source.replace(_phy_init_old, _phy_init_new, 1)
+_predeep_anchor = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\\n    p444_hdr()->predeep_ns = ktime_get_ns();"
+_predeep_new = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\\n    if (!p444_phy) p444_phy=ioremap(0x0ae94000ULL,0x1000U);\\n    p444_hdr()->predeep_ns = ktime_get_ns();"
+if source.count(_predeep_anchor) != 1:
+    raise SystemExit("Phase444 PRE_DEEP PHY map anchor count=" + str(source.count(_predeep_anchor)))
+source = source.replace(_predeep_anchor, _predeep_new, 1)
+
+# Match the proven persistent-recorder ordering: complete the cache clean to
+# DRAM before the experiment advances or a warm reset can occur.
+_flush_old = "    __flush_dcache_area((void __force *)p, n);\\n    wmb();"
+_flush_new = "    __flush_dcache_area((void __force *)p, n);\\n    dsb(sy);"
+if source.count(_flush_old) != 1:
+    raise SystemExit("Phase444 RAM flush anchor count=" + str(source.count(_flush_old)))
+source = source.replace(_flush_old, _flush_new, 1)
+
+# Replace the original destructive GKI ownership helper with a partitioning
+# helper. P392, P414, P436 and P437 all remain live; only P414's RAM capacity
+# is reduced to end exactly where the Phase444 slice starts.
+_fn_a = source.find("def retire_gki_reserved(root: Path) -> None:\\n")
+_fn_b = source.find("\\ndef validate(root: Path, kind: str) -> None:\\n", _fn_a)
+if _fn_a < 0 or _fn_b < 0:
+    raise SystemExit("Phase444 reserved helper bounds missing")
+_partition_helper = r'''def partition_gki_reserved(root: Path) -> None:
+    rec=root/"drivers/a52_secure/a52_ack_secure_flight_recorder.c"
+    s=rec.read_text(errors="replace")
+    old="#define A52_P414_RAM_BYTES           (SZ_1M - SZ_16K - SZ_8K)"
+    new="#define A52_P414_RAM_BYTES           0x00062000U /* A52_PHASE444_RESERVED_PARTITION_V2 */"
+    if new not in s:
+        if s.count(old)!=1: die("P414 RAM partition anchor count="+str(s.count(old)))
+        s=s.replace(old,new,1)
+        s += "\\n/* A52_PHASE444_RESERVED_PARTITION_V2: P414 B1A00000-B1A61FFF; P444 B1A62000-B1AF9FFF; P437/P436 upper tail preserved. */\\n"
+        rec.write_text(s)
+    if "A52_PHASE444_RESERVED_EXCLUSIVE_V1" in s:
+        die("old destructive Phase444 reserved ownership marker present")
+'''
+source = source[:_fn_a] + _partition_helper + source[_fn_b:]
+source = source.replace('if kind=="gki": retire_gki_reserved(root)', 'if kind=="gki": partition_gki_reserved(root)', 1)
+
+# Retarget the expanded patcher's own validation to the v2 layout and make
+# preservation of the old witnesses a hard contract.
+source = source.replace('"P444_DEBUG_OFFSET 0x00800000ULL","P444_RAM_PHYS 0xB1900000ULL"', '"P444_DISK_ENABLED 0","P444_RAM_PHYS 0xB1A62000ULL","P444_IMAGE_BYTES 0x00098000U"', 1)
+_old_validate = '''        if "A52_PHASE444_RESERVED_EXCLUSIVE_V1" not in rec: die("GKI reserved ownership retirement missing")
+        if "bool a52_p439_f0 = false;" not in alltxt or "a52_p421_f0 = false;" not in alltxt: die("legacy GKI F0 probes not suppressed")'''
+_new_validate = '''        if "A52_PHASE444_RESERVED_PARTITION_V2" not in rec: die("GKI reserved partition marker missing")
+        if "A52_PHASE444_RESERVED_EXCLUSIVE_V1" in rec: die("destructive reserved ownership marker leaked")
+        if "a52_p392_base = NULL" in rec or "a52_p414_ram = NULL" in rec: die("P392/P414 witness disabled")
+        if "a52_p392_base = ioremap_cache(A52_P392_PHYS, A52_P392_BYTES);" not in rec: die("P392 mapping not preserved")
+        if "a52_p414_ram = ioremap_cache(A52_P414_RAM_PHYS, A52_P414_RAM_BYTES);" not in rec: die("P414 mapping not preserved")
+        if "bool a52_p439_f0 = false;" not in alltxt or "a52_p421_f0 = false;" not in alltxt: die("legacy GKI F0 probes not suppressed")'''
+if source.count(_old_validate) != 1:
+    raise SystemExit("Phase444 expanded validation anchor count=" + str(source.count(_old_validate)))
+source = source.replace(_old_validate, _new_validate, 1)
+
 # Cross-kernel C portability fixes.  The Phase444 C body is shared by GKI
 # 5.10 and TouchGrass 4.19, so keep it valid under both toolchains before the
 # expanded patcher is executed.

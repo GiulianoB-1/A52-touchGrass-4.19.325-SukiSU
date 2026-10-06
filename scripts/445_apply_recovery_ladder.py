@@ -114,8 +114,8 @@ source = source.replace(
     "static atomic_t p445_rung = ATOMIC_INIT(0);\\nstatic atomic_t p445_dropped = ATOMIC_INIT(0);"
 )
 
-_pc0 = source.find("def patch_central(root: Path, kind: str) -> None:")
-_pc1 = source.find("\\ndef patch_ctrl(", _pc0)
+_pc0 = source.find("def patch_central(")
+_pc1 = source.find("\\ndef ", _pc0 + 1)
 if _pc0 < 0 or _pc1 < 0:
     raise SystemExit("Phase445 wrapper: patch_central bounds missing")
 _pc = source[_pc0:_pc1]

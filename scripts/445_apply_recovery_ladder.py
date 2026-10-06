@@ -115,7 +115,7 @@ source = source.replace(
 )
 
 _pc0 = source.find("def patch_central(")
-_pc1 = source.find("\\ndef ", _pc0 + 1)
+_pc1 = source.find("\ndef ", _pc0 + 1)
 if _pc0 < 0 or _pc1 < 0:
     raise SystemExit("Phase445 wrapper: patch_central bounds missing")
 _pc = source[_pc0:_pc1]

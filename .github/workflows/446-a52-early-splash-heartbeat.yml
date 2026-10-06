@@ -1,5 +1,6 @@
 name: Phase446 - early splash heartbeat + CB2 switch
 run-name: Phase446 GKI early splash heartbeat + CB2 reuse
+# Canonical combined early-frame/SMMU/bus/composition microscope.
 
 on:
   push:

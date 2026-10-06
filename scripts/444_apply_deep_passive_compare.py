@@ -35,8 +35,8 @@ if source.count(_storage_old) != 1:
     raise SystemExit("Phase444 storage macro block count=" + str(source.count(_storage_old)))
 source = source.replace(_storage_old, _storage_new, 1)
 
-_disk_block_old = "#if P444_KIND == 1\\nstatic int p444_submit_page"
-_disk_block_new = "#if P444_KIND == 1 && P444_DISK_ENABLED\\nstatic int p444_submit_page"
+_disk_block_old = "#if P444_KIND == 1\nstatic int p444_submit_page"
+_disk_block_new = "#if P444_KIND == 1 && P444_DISK_ENABLED\nstatic int p444_submit_page"
 if source.count(_disk_block_old) != 1:
     raise SystemExit("Phase444 disk compile gate count=" + str(source.count(_disk_block_old)))
 source = source.replace(_disk_block_old, _disk_block_new, 1)
@@ -44,21 +44,21 @@ source = source.replace(_disk_block_old, _disk_block_new, 1)
 # Map DSI PHY only in PRE_DEEP, while the display is known powered. Do not add
 # an MMIO mapping operation to early init and never map it for the first time
 # from a wedged terminal path.
-_phy_init_old = "    p444_phy=ioremap(0x0ae94000ULL,0x1000U);\\n    p444_sync_header();"
+_phy_init_old = "    p444_phy=ioremap(0x0ae94000ULL,0x1000U);\n    p444_sync_header();"
 _phy_init_new = "    p444_sync_header();"
 if source.count(_phy_init_old) != 1:
     raise SystemExit("Phase444 early PHY map anchor count=" + str(source.count(_phy_init_old)))
 source = source.replace(_phy_init_old, _phy_init_new, 1)
-_predeep_anchor = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\\n    p444_hdr()->predeep_ns = ktime_get_ns();"
-_predeep_new = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\\n    if (!p444_phy) p444_phy=ioremap(0x0ae94000ULL,0x1000U);\\n    p444_hdr()->predeep_ns = ktime_get_ns();"
+_predeep_anchor = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\n    p444_hdr()->predeep_ns = ktime_get_ns();"
+_predeep_new = "    if (!p444_ctrl || atomic_read(&p444_state) != 0) return;\n    if (!p444_phy) p444_phy=ioremap(0x0ae94000ULL,0x1000U);\n    p444_hdr()->predeep_ns = ktime_get_ns();"
 if source.count(_predeep_anchor) != 1:
     raise SystemExit("Phase444 PRE_DEEP PHY map anchor count=" + str(source.count(_predeep_anchor)))
 source = source.replace(_predeep_anchor, _predeep_new, 1)
 
 # Match the proven persistent-recorder ordering: complete the cache clean to
 # DRAM before the experiment advances or a warm reset can occur.
-_flush_old = "    __flush_dcache_area((void __force *)p, n);\\n    wmb();"
-_flush_new = "    __flush_dcache_area((void __force *)p, n);\\n    dsb(sy);"
+_flush_old = "    __flush_dcache_area((void __force *)p, n);\n    wmb();"
+_flush_new = "    __flush_dcache_area((void __force *)p, n);\n    dsb(sy);"
 if source.count(_flush_old) != 1:
     raise SystemExit("Phase444 RAM flush anchor count=" + str(source.count(_flush_old)))
 source = source.replace(_flush_old, _flush_new, 1)
@@ -66,8 +66,8 @@ source = source.replace(_flush_old, _flush_new, 1)
 # Replace the original destructive GKI ownership helper with a partitioning
 # helper. P392, P414, P436 and P437 all remain live; only P414's RAM capacity
 # is reduced to end exactly where the Phase444 slice starts.
-_fn_a = source.find("def retire_gki_reserved(root: Path) -> None:\\n")
-_fn_b = source.find("\\ndef validate(root: Path, kind: str) -> None:\\n", _fn_a)
+_fn_a = source.find("def retire_gki_reserved(root: Path) -> None:\n")
+_fn_b = source.find("\ndef validate(root: Path, kind: str) -> None:\n", _fn_a)
 if _fn_a < 0 or _fn_b < 0:
     raise SystemExit("Phase444 reserved helper bounds missing")
 _partition_helper = r'''def partition_gki_reserved(root: Path) -> None:
@@ -78,7 +78,7 @@ _partition_helper = r'''def partition_gki_reserved(root: Path) -> None:
     if new not in s:
         if s.count(old)!=1: die("P414 RAM partition anchor count="+str(s.count(old)))
         s=s.replace(old,new,1)
-        s += "\\n/* A52_PHASE444_RESERVED_PARTITION_V2: P414 B1A00000-B1A61FFF; P444 B1A62000-B1AF9FFF; P437/P436 upper tail preserved. */\\n"
+        s += "\n/* A52_PHASE444_RESERVED_PARTITION_V2: P414 B1A00000-B1A61FFF; P444 B1A62000-B1AF9FFF; P437/P436 upper tail preserved. */\n"
         rec.write_text(s)
     if "A52_PHASE444_RESERVED_EXCLUSIVE_V1" in s:
         die("old destructive Phase444 reserved ownership marker present")

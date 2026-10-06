@@ -1,4 +1,5 @@
 name: Phase446 source inspect
+# exports exact source inputs for heartbeat patching
 on:
   push:
     branches: [agent/a52-phase445-recovery-ladder-v1]

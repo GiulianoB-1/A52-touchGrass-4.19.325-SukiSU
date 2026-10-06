@@ -9,6 +9,9 @@ on:
       - .github/workflows/444-a52-deep-passive-compare.yml
       - .github/workflows/441-a52-vrr-state-compat.yml
       - scripts/268_ci_build.sh
+      - scripts/437_apply_kgsl_open_corridor.py
+      - scripts/438_apply_devbw_semantic_parity.py
+      - scripts/439_apply_dsi_autopsy.py
       - scripts/440_apply_early_f0_cleanup_forensics.py
       - scripts/441_apply_vrr_state_compat.py
       - scripts/444_apply_deep_passive_compare.py
@@ -798,6 +801,7 @@ jobs:
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
             gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/drivers/a52_display/msm/a52_phase444.c
             gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c
             workspace/gki-phase199-out/.config
             workspace/gki-phase199-out/System.map

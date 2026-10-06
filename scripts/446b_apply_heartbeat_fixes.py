@@ -19,12 +19,22 @@ def one(s: str, old: str, new: str, label: str) -> str:
 
 
 def replace_c_function(s: str, needle: str, replacement: str) -> str:
-    start = s.find(needle)
-    if start < 0:
-        die(f"function not found: {needle}")
-    brace = s.find("{", start)
-    if brace < 0:
-        die(f"opening brace missing: {needle}")
+    pos = 0
+    start = -1
+    brace = -1
+    while True:
+        cand = s.find(needle, pos)
+        if cand < 0:
+            break
+        cand_brace = s.find("{", cand)
+        cand_semi = s.find(";", cand)
+        if cand_brace >= 0 and (cand_semi < 0 or cand_brace < cand_semi):
+            start = cand
+            brace = cand_brace
+            break
+        pos = cand + len(needle)
+    if start < 0 or brace < 0:
+        die(f"function definition not found: {needle}")
     depth = 0
     i = brace
     while i < len(s):

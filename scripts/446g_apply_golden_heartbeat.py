@@ -323,7 +323,9 @@ def patch_power(s: str) -> str:
     marker = "A52_PHASE446_TG_POWER_MARKERS"
     if marker in s:
         return s
-    anchor = "int sde_power_resource_init(struct platform_device *pdev,\n"
+    # Quota hooks occur before sde_power_resource_init() in downstream 4.19,
+    # so the prototype must live with the includes, before every call.
+    anchor = '#include "sde_dbg.h"\n'
     s = add_extern(
         s, anchor,
         "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */",
@@ -578,7 +580,7 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
     s2cr = readl_relaxed(ARM_SMMU_GR0(smmu) + ARM_SMMU_GR0_S2CR(sme));
     cb_base = ARM_SMMU_CB(smmu, cb);
     sctlr = readl_relaxed(cb_base + ARM_SMMU_CB_SCTLR);
-    tcr = readl_relaxed(cb_base + ARM_SMMU_CB_TCR);
+    tcr = readl_relaxed(cb_base + ARM_SMMU_CB_TTBCR);
     fsr = readl_relaxed(cb_base + ARM_SMMU_CB_FSR);
 #ifdef readq_relaxed
     ttbr0 = readq_relaxed(cb_base + ARM_SMMU_CB_TTBR0);
@@ -591,6 +593,18 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
 
 '''
     s = s[:helper_pos] + helper + s[helper_pos:]
+
+    # arm_smmu_handoff_cbs() appears before the helper definition in this 4.19
+    # tree, so provide a file-scope prototype before the first possible call.
+    proto = (
+        "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\\n"
+        "                               int sme, u32 cb, u32 aux);\\n"
+    )
+    proto_anchor = "static int arm_smmu_alloc_cb(struct iommu_domain *domain,\\n"
+    proto_pos = s.find(proto_anchor)
+    if proto_pos < 0:
+        die("a52_p446g_emit_smmu prototype anchor missing")
+    s = s[:proto_pos] + proto + s[proto_pos:]
 
     # Earliest apps-SMMU probe and native firmware handoff checkpoint.
     s = one(

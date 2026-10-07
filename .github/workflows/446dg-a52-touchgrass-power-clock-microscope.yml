@@ -335,7 +335,7 @@ jobs:
           cp "$K/techpack/display/msm/sde/sde_kms.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_plane.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_crtc.c" "$OUT/source/"
-          cp "$K/techpack/display/msm/sde/sde_power_handle.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde_power_handle.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_core_irq.c" "$OUT/source/"
           cp "$K/drivers/clk/clk.c" "$OUT/source/"
           cp "$K/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c" "$OUT/source/"

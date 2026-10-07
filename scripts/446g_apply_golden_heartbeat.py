@@ -121,22 +121,17 @@ EXPORT_SYMBOL_GPL(a52_p446_terminal);
         "static const struct file_operations p446_ops={.owner=THIS_MODULE,.open=p446_open,.read=seq_read,.llseek=seq_lseek,.release=single_release};",
     )
 
-    old_live_cb = """        bool smmu_internal=(event==1U || event==8U || event==9U ||
-                            event==0x70U || event==0x71U ||
-                            event==0x74U || event==0x75U);
-        if(!smmu_internal)
-            lrc=a52_p446_read_cb2(&l_smr,&l_s2cr,&l_cb,&l_sctlr,&l_ttbr0,&l_tcr,&l_fsr);
-"""
-    new_live_cb = """        /* A52_PHASE446G_NO_LIVE_CB_POWER_VOTE
-         * Golden must stay passive: a52_p446_read_cb2() power-votes the SMMU,
-         * which can recurse into msm_bus while bus late-init locks are held.
-         * Use the SMMU cache populated by the arm-smmu hooks instead.
-         */
-        lrc=-1;
-"""
-    if old_live_cb not in c:
-        die("canonical live-CB block changed")
-    c = c.replace(old_live_cb, new_live_cb, 1)
+    live_cb_pat = re.compile(
+        r"(?m)^(?P<indent>[ \\t]*)lrc\\s*=\\s*a52_p446_read_cb2\\s*\\([^;\\n]*\\);[ \\t]*$"
+    )
+    c, live_cb_n = live_cb_pat.subn(
+        r'\\g<indent>/* A52_PHASE446G_NO_LIVE_CB_POWER_VOTE: use cached SMMU state */\\n'
+        r'\\g<indent>lrc=-1;',
+        c,
+        count=1,
+    )
+    if live_cb_n != 1:
+        die(f"canonical live-CB call count changed: {live_cb_n}")
 
     if "struct proc_ops" in c:
         die("4.19 proc_ops adaptation incomplete")

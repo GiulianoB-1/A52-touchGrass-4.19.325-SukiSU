@@ -77,6 +77,37 @@ payload = zlib.decompress(
 _check_only = "--check-only" in sys.argv[1:]
 _target = _phase446_msm_drv_path()
 
+def _phase446d_capacity_compat_begin():
+    if not _check_only:
+        return None
+    root = _arg_value("--root")
+    if not root:
+        return None
+    p = Path(root) / "drivers/a52_display/msm/a52_phase445.c"
+    if not p.is_file():
+        return None
+    text = p.read_text()
+    if (
+        "#define P446_MAX_REC 1536U" in text
+        and "A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1" in text
+    ):
+        p.write_text(text.replace("#define P446_MAX_REC 1536U",
+                                  "#define P446_MAX_REC 2048U", 1))
+        return p
+    return None
+
+def _phase446d_capacity_compat_end(path):
+    if path is None or not path.is_file():
+        return
+    text = path.read_text()
+    if (
+        "#define P446_MAX_REC 2048U" in text
+        and "A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1" in text
+    ):
+        path.write_text(text.replace("#define P446_MAX_REC 2048U",
+                                     "#define P446_MAX_REC 1536U", 1))
+
+_capacity_compat = _phase446d_capacity_compat_begin()
 try:
     exec(
         compile(
@@ -87,6 +118,7 @@ try:
         globals(),
     )
 finally:
+    _phase446d_capacity_compat_end(_capacity_compat)
     if _target is not None:
         if not _check_only:
             _fix_phase446_mark_decl_order(_target)

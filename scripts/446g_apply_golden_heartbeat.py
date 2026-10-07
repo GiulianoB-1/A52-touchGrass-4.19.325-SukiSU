@@ -104,6 +104,7 @@ def build_tg_c(repo_root: Path) -> str:
     c = c.replace("ktime_get_boottime_ns()", "ktime_get_boot_ns()")
 
     marker = 'static const char p446_marker[] __used = "A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1";'
+    c = c.replace(marker, marker + '\nstatic const char p446g_marker[] __used = "A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1";', 1)
     terminal = r'''
 void a52_p446_terminal(u32 event,u32 aux0,u32 aux1)
 {

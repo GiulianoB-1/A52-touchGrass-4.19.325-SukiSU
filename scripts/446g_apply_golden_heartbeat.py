@@ -151,7 +151,7 @@ EXPORT_SYMBOL_GPL(a52_p446_terminal);
 #include "dsi/dsi_ctrl_reg.h"
 
 '''
-    c = 'static const char p446_tg_golden_marker[] __used = "A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1";\\n\\n' + c
+    c = 'static const char p446_tg_golden_marker[] __used = "A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1";\n\n' + c
     return inc + c
 
 

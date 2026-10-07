@@ -551,7 +551,18 @@ def main() -> None:
     for key, toks in micro.items():
         body = roots[key].read_text(errors="replace")
         missing.extend(f"{key}:{tok}" for tok in toks if tok not in body)
-    if "#define P446_MAX_REC 2048U" not in cs:
+    # Phase446b owns the original 2048-record layout. Phase446d appends
+    # 156 bytes per record and deliberately lowers capacity to 1536 so the
+    # fixed 1 MiB reserved region still fits. Accept 1536 only when the
+    # Phase446d central marker is present, so this does not weaken the
+    # standalone Phase446b contract.
+    p446_capacity_ok = "#define P446_MAX_REC 2048U" in cs
+    if not p446_capacity_ok:
+        p446_capacity_ok = (
+            "#define P446_MAX_REC 1536U" in cs
+            and "A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1" in cs
+        )
+    if not p446_capacity_ok:
         missing.append("P446_MAX_REC")
     if missing:
         die("contract missing: " + ", ".join(missing))

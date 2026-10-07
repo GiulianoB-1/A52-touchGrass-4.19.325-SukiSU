@@ -33,8 +33,22 @@ def patch_central(s):
 
     old="(void)w; a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boottime_ns()-p446_start_ns;"
     new="(void)w; if (!atomic_read(&p446_burst)) a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boottime_ns()-p446_start_ns;"
-    if old not in s: die("periodic work anchor missing")
-    s=s.replace(old,new,1)
+    if old in s:
+        s=s.replace(old,new,1)
+    else:
+        old='''    (void)w;
+    if (atomic_read(&p446_terminal_seen))
+        return;
+    a52_p446_mark(P446_EVT_PERIODIC,0,0);
+'''
+        new='''    (void)w;
+    if (atomic_read(&p446_terminal_seen))
+        return;
+    if (!atomic_read(&p446_burst))
+        a52_p446_mark(P446_EVT_PERIODIC,0,0);
+'''
+        if old not in s: die("periodic work anchor missing")
+        s=s.replace(old,new,1)
 
     anchor="static int __init p446_sampler_init(void){ mod_delayed_work(system_unbound_wq,&p446_work,0); return 0; }"
     if anchor not in s: die("sampler init anchor missing")

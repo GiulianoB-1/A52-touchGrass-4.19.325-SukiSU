@@ -1,7 +1,7 @@
-name: Phase446d - power clock microscope
-run-name: Phase446d GKI passive power/clock microscope
-# Phase446d extends Phase446c with passive runtime-PM/power markers and per-record DISPCC RCG/PLL snapshots.
-# One control image only. No Phase446d behavior switch.
+name: Phase446e - GKI built-in keep EARLY_MAP discriminator
+run-name: Phase446e GKI keep display EARLY_MAP built in
+# Phase446e reuses the Phase446d recorder and changes one variable only:
+# the existing Phase446c keep_earlymap gate is compiled ON for the unsecure display domain.
 
 on:
   push:
@@ -68,10 +68,11 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446e_apply_builtin_keep_earlymap.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
+          python3 scripts/446e_apply_builtin_keep_earlymap.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/446d_apply_extra_observers.py --help >/dev/null
@@ -604,10 +605,12 @@ jobs:
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki
+          python3 scripts/446e_apply_builtin_keep_earlymap.py --root "$ROOT"
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446e_apply_builtin_keep_earlymap.py --root "$ROOT" --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki --check-only
@@ -667,6 +670,8 @@ jobs:
           grep -Fq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'A52_PHASE446C_POST_ENABLE_SUBSTEPS' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'A52_PHASE446C_INITIAL_POST_ENABLE_GATE' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
+          grep -Fq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
+          grep -Fq 'static bool a52_p446c_keep_earlymap = true;' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$P445"
           grep -Fq 'a52_p446_set_burst(1U)' "$ROOT/drivers/a52_display/msm/msm_drv.c"
           ! grep -Fq 'safe_mdp=!(gcc_ahb & BIT(31))' "$P445"
@@ -745,9 +750,11 @@ jobs:
           python3 scripts/446_apply_heartbeat_cb2.py --root "$ROOT" --check-only
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446e_apply_builtin_keep_earlymap.py --root "$ROOT" --check-only
           grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
           grep -Fq ' a52_p446_read_cb2' "$MAP"
           grep -Fq ' a52_p446_mark' "$MAP"
@@ -778,15 +785,15 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446d GKI
+      - name: Package Phase446e GKI keep-EARLY_MAP
         if: success()
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-          OUT="$PWD/phase446d-gki-out"
+          OUT="$PWD/phase446e-gki-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
-          FINAL="$OUT/package/boot-phase446d-gki-control-v1.img"
+          FINAL="$OUT/package/boot-phase446e-gki-keep-earlymap-v1.img"
 
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
@@ -841,6 +848,7 @@ jobs:
              scripts/decode_phase437_open.py \
              scripts/446_apply_heartbeat_cb2.py scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py \
+             scripts/446e_apply_builtin_keep_earlymap.py \
              scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
              scripts/446d_apply_extra_observers.py \
@@ -863,7 +871,7 @@ jobs:
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
 
-          # Phase446d is observation-only. Keep the established control boot only.
+          # Phase446e changes one variable only: keep unsecure display EARLY_MAP enabled.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
           cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
@@ -871,15 +879,21 @@ jobs:
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
-          Phase446d GKI passive power/clock microscope
-          ==============================================
+          Phase446e GKI built-in keep-EARLY_MAP discriminator
+          ====================================================
           Evidence basis:
-            - Phase446c control and early boots lose the next splash frame before
-              SCTLR.M becomes 1 and before POST_ENABLE.
-            - the common remaining corridor is component completion through
-              sde_kms_init/sde_kms_hw_init and runtime-PM display power-up.
+            - clean Golden Phase446d measures ~16.35 ms per splash frame.
+            - with corrected timing, the GKI frame already in flight can finish
+              around SCTLR.M=1, while the first frame that must start translated
+              does not.
+            - the prior keep_earlymap cmdline switch never reached the kernel.
 
-          Observation-only additions:
+          One-variable behavior change:
+            - compile a52_p446c_keep_earlymap=true.
+            - for MSM_SMMU_DOMAIN_UNSECURE, skip only the EARLY_MAP clear.
+            - runtime proof is event 0x150 and SCTLR.M remaining 0.
+
+          Recorder retained from Phase446d:
             - 0x15e saved_command_line FNV1a hash.
             - 0x15f parsed keep_earlymap/skip_post_enable bits.
             - 0x160/0x161 each component bind, aux0=dev_name FNV1a.
@@ -895,7 +909,7 @@ jobs:
             - 0x186..0x189 bracket DISPCC PLL configure/clock registration; 0x18a/0x18b are added only if a sync_state callback exists.
             - package includes EXPECTED-BOOT-SHA256.txt and a recovery identity helper.
 
-          Package exactly one GKI control boot. No Phase446d behavior switch.
+          Package exactly one GKI keep-EARLY_MAP boot. Do not treat it as a passive control.
 
           EOF
 
@@ -903,11 +917,11 @@ jobs:
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
 
-      - name: Upload Phase446d GKI failure diagnostics
+      - name: Upload Phase446e GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446E-GKI-KEEP-EARLYMAP-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -915,6 +929,7 @@ jobs:
             gki/common/drivers/a52_display/msm/dsi/dsi_display.c
             gki/common/drivers/a52_display/msm/sde/sde_kms.c
             scripts/446c_apply_takeover_window.py
+            scripts/446e_apply_builtin_keep_earlymap.py
             gki/common/drivers/a52_display/msm/a52_phase445.c
             gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
             gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
@@ -934,22 +949,22 @@ jobs:
           compression-level: 1
           retention-days: 7
 
-      - name: Upload Phase446d GKI
+      - name: Upload Phase446e GKI
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-${{ github.run_number }}
-          path: phase446d-gki-out/
+          name: A52XQ-PHASE446E-GKI-KEEP-EARLYMAP-${{ github.run_number }}
+          path: phase446e-gki-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446d GKI boot image
+      - name: Upload Phase446e GKI boot image
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-${{ github.run_number }}-BOOT
-          path: phase446d-gki-out/package/boot-phase446d-gki-control-v1.img
+          name: A52XQ-PHASE446E-GKI-KEEP-EARLYMAP-${{ github.run_number }}-BOOT
+          path: phase446e-gki-out/package/boot-phase446e-gki-keep-earlymap-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

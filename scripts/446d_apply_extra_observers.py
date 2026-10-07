@@ -38,7 +38,7 @@ def patch_central(s):
 
     anchor="static int __init p446_sampler_init(void){ mod_delayed_work(system_unbound_wq,&p446_work,0); return 0; }"
     if anchor not in s: die("sampler init anchor missing")
-    block='''static int p446_burst_threadfn(void *unused)\n{\n    (void)unused;\n    while (!kthread_should_stop()) {\n        wait_event_interruptible(p446_burst_wq,\n            kthread_should_stop() || atomic_read(&p446_burst));\n        while (!kthread_should_stop() && atomic_read(&p446_burst)) {\n            a52_p446_mark(P446_EVT_PERIODIC, 1U, 0U);\n            usleep_range(900, 1100);\n        }\n    }\n    return 0;\n}\nvoid a52_p446_set_burst(u32 enable)\n{\n    atomic_set(&p446_burst, !!enable);\n    a52_p446_mark(0x180U, !!enable, 0U);\n    if (enable)\n        wake_up_interruptible(&p446_burst_wq);\n}\nEXPORT_SYMBOL_GPL(a52_p446_set_burst);\nstatic int __init p446_sampler_init(void)\n{\n    p446_burst_task = kthread_run(p446_burst_threadfn, NULL, "p446-burst");\n    if (IS_ERR(p446_burst_task))\n        p446_burst_task = NULL;\n    mod_delayed_work(system_unbound_wq, &p446_work, 0);\n    return 0;\n}\n'''
+    block='''static int p446_burst_threadfn(void *unused)\n{\n    u64 deadline;\n    (void)unused;\n    while (!kthread_should_stop()) {\n        wait_event_interruptible(p446_burst_wq,\n            kthread_should_stop() || atomic_read(&p446_burst));\n        if (kthread_should_stop())\n            break;\n        deadline = ktime_get_boottime_ns() + 120000000ULL;\n        while (!kthread_should_stop() && atomic_read(&p446_burst)) {\n            a52_p446_mark(P446_EVT_PERIODIC, 1U, 0U);\n            if (ktime_get_boottime_ns() >= deadline) {\n                atomic_set(&p446_burst, 0);\n                a52_p446_mark(0x181U, 1U, 120U);\n                break;\n            }\n            usleep_range(900, 1100);\n        }\n    }\n    return 0;\n}\nvoid a52_p446_set_burst(u32 enable)\n{\n    atomic_set(&p446_burst, !!enable);\n    a52_p446_mark(0x180U, !!enable, 0U);\n    if (enable)\n        wake_up_interruptible(&p446_burst_wq);\n}\nEXPORT_SYMBOL_GPL(a52_p446_set_burst);\nstatic int __init p446_sampler_init(void)\n{\n    p446_burst_task = kthread_run(p446_burst_threadfn, NULL, "p446-burst");\n    if (IS_ERR(p446_burst_task))\n        p446_burst_task = NULL;\n    mod_delayed_work(system_unbound_wq, &p446_work, 0);\n    return 0;\n}\n'''
     s=s.replace(anchor,block,1)
     return s
 
@@ -123,7 +123,7 @@ def pick(root,cands,required=True,basename=None):
 
 def check(paths):
     c=read(paths["central"])
-    for t in ("p446_burst_threadfn","a52_p446_set_burst","usleep_range(900, 1100)","0x180U"):
+    for t in ("p446_burst_threadfn","a52_p446_set_burst","usleep_range(900, 1100)","120000000ULL","0x180U","0x181U"):
         if t not in c: die("burst contract missing "+t)
     m=read(paths["msm_drv"])
     if "a52_p446_set_burst(1U)" not in m or "a52_p446_set_burst(0U)" not in m: die("DRM burst bracket missing")

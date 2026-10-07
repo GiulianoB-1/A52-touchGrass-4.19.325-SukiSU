@@ -75,11 +75,6 @@ def build_tg_c(repo_root: Path) -> str:
         "static atomic_t p446_terminal_seen = ATOMIC_INIT(0);",
     )
 
-    # 4.19 exposes the same CLOCK_BOOTTIME value as ktime_get_boot_ns().
-    # Keep the Phase446 timestamp semantics identical without depending on the
-    # newer ktime_get_boottime_ns() helper symbol.
-    c = c.replace("ktime_get_boottime_ns()", "ktime_get_boot_ns()")
-
     old_work = """static void p446_workfn(struct work_struct *w)
 {
     u64 age; unsigned long d; (void)w; a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boottime_ns()-p446_start_ns;
@@ -102,6 +97,11 @@ def build_tg_c(repo_root: Path) -> str:
     if old_work not in c:
         die("canonical periodic work body changed")
     c = c.replace(old_work, new_work, 1)
+
+    # 4.19 exposes the same CLOCK_BOOTTIME value as ktime_get_boot_ns().
+    # Apply this only after canonical text matching, then adapt every remaining
+    # timestamp site including p446_workfn, a52_p446_mark and early init.
+    c = c.replace("ktime_get_boottime_ns()", "ktime_get_boot_ns()")
 
     marker = 'static const char p446_marker[] __used = "A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1";'
     terminal = r'''

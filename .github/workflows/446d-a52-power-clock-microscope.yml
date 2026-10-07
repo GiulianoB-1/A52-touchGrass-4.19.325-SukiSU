@@ -1,7 +1,7 @@
-name: Phase446f - GKI skip late SMMU component match
-run-name: Phase446f GKI skip late SMMU DRM component
-# Phase446f reuses the Phase446d recorder and changes one variable only:
-# keep Phase201 early SMMU child creation/probe, but do not add that child to the DRM component match.
+name: Phase446g - GKI skip TE IRQ and sample gpio23
+run-name: Phase446g GKI skip TE IRQ, sample TLMM gpio23
+# Phase446g reuses the Phase446d recorder and changes one variable only:
+# skip dsi_display_register_te_irq(), while sampling the live gpio23 TLMM mux state.
 
 on:
   push:
@@ -28,13 +28,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446f-skip-smmu-component-${{ github.ref }}
+  group: a52-phase446g-te-irq-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446f GKI skip late SMMU component
+    name: Build Phase446g GKI skip TE IRQ
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -68,16 +68,17 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446f_apply_skip_smmu_component_match.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
-          python3 scripts/446f_apply_skip_smmu_component_match.py --help >/dev/null
+          python3 scripts/446g_apply_te_irq_test.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/446d_apply_extra_observers.py --help >/dev/null
           bash -n scripts/446d_collect_boot_identity.sh
           python3 scripts/decode_phase446d.py --help >/dev/null
+          python3 scripts/decode_phase446g.py --help >/dev/null
           python3 scripts/decode_phase446.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/decode_phase445.py --help >/dev/null
@@ -605,15 +606,15 @@ jobs:
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki
-          python3 scripts/446f_apply_skip_smmu_component_match.py --root "$ROOT"
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki
+          python3 scripts/446g_apply_te_irq_test.py --root "$ROOT"
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
-          python3 scripts/446f_apply_skip_smmu_component_match.py --root "$ROOT" --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446g_apply_te_irq_test.py --root "$ROOT" --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -672,8 +673,12 @@ jobs:
           grep -Fq 'A52_PHASE446C_INITIAL_POST_ENABLE_GATE' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           ! grep -Fq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'static bool a52_p446c_keep_earlymap;' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
-          grep -Fq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$ROOT/drivers/a52_display/msm/msm_drv.c"
-          grep -Fq 'a52_p446_mark(0x190U, 1U, !!smmu_pdev->dev.driver);' "$ROOT/drivers/a52_display/msm/msm_drv.c"
+          ! grep -Fq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$ROOT/drivers/a52_display/msm/msm_drv.c"
+          grep -Fq 'component_match_add(dev, matchptr, compare_of, smmu_node);' "$ROOT/drivers/a52_display/msm/msm_drv.c"
+          grep -Fq 'A52_PHASE446G_SKIP_TE_IRQ_TLMM23_V1' "$P445"
+          grep -Fq 'A52_PHASE446G_TE_IRQ_SKIP' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          grep -Fq 'u32 te23_cfg, te23_intr_cfg;' "$P445"
+          grep -Fq 'BUILD_BUG_ON(sizeof(struct p446_rec) != 672U);' "$P445"
           grep -Fq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$P445"
           grep -Fq 'a52_p446_set_burst(1U)' "$ROOT/drivers/a52_display/msm/msm_drv.c"
           ! grep -Fq 'safe_mdp=!(gcc_ahb & BIT(31))' "$P445"
@@ -752,11 +757,12 @@ jobs:
           python3 scripts/446_apply_heartbeat_cb2.py --root "$ROOT" --check-only
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
-          python3 scripts/446f_apply_skip_smmu_component_match.py --root "$ROOT" --check-only
+          python3 scripts/446g_apply_te_irq_test.py --root "$ROOT" --check-only
           grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446G_SKIP_TE_IRQ_TLMM23_V1' "$IMAGE"
+          ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
           grep -Fq ' a52_p446_read_cb2' "$MAP"
@@ -788,15 +794,15 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446f GKI no SMMU component
+      - name: Package Phase446g GKI skip TE IRQ
         if: success()
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-          OUT="$PWD/phase446f-gki-no-smmu-component-out"
+          OUT="$PWD/phase446g-gki-skip-te-irq-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
-          FINAL="$OUT/package/boot-phase446f-gki-no-smmu-component-v1.img"
+          FINAL="$OUT/package/boot-phase446g-gki-skip-te-irq-v1.img"
 
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
@@ -827,6 +833,8 @@ jobs:
           cp "$ROOT/drivers/base/core.c" "$OUT/source/base_core.c"
           cp "$ROOT/drivers/base/component.c" "$OUT/source/component.c"
           cp "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" "$OUT/source/dispcc-lagoon.c"
+          cp "$ROOT/drivers/pinctrl/qcom/pinctrl-msm.c" "$OUT/source/pinctrl-msm.c"
+          cp "$ROOT/drivers/pinctrl/qcom/pinctrl-lagoon.c" "$OUT/source/pinctrl-lagoon.c"
           PLL_DRV="$(find "$ROOT" -path "*/pll/pll_drv.c" | head -1)"
           DSI_PLL7="$(find "$ROOT" -path "*/pll/dsi_pll_7nm.c" | head -1)"
           [ -n "$PLL_DRV" ] && cp "$PLL_DRV" "$OUT/source/pll_drv.c"
@@ -851,13 +859,14 @@ jobs:
              scripts/decode_phase437_open.py \
              scripts/446_apply_heartbeat_cb2.py scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py \
-             scripts/446f_apply_skip_smmu_component_match.py \
+             scripts/446g_apply_te_irq_test.py \
              scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
              scripts/446d_apply_extra_observers.py \
              scripts/446d_collect_boot_identity.sh \
              scripts/decode_phase446.py scripts/decode_phase446.py.z64 \
              scripts/decode_phase446d.py scripts/decode_phase446d.py.z64 \
+             scripts/decode_phase446g.py \
              scripts/decode_phase446_pair.py \
              scripts/446_append_boot_cmdline.py "$OUT/audit/"
           cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt /tmp/p441-vrr-audit.txt "$OUT/audit/" 2>/dev/null || true
@@ -874,7 +883,7 @@ jobs:
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
 
-          # Phase446f changes one variable only: skip the late SMMU DRM component match.
+          # Phase446g changes one variable only: skip the TE GPIO IRQ registration.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
           cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
@@ -882,35 +891,37 @@ jobs:
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
-          Phase446f GKI skip late SMMU DRM component
-          ===========================================
+          Phase446g GKI TE IRQ / gpio23 mux discriminator
+          ================================================
           Evidence basis:
-            - Phase446e proved the built-in switch executed and live CB2 SCTLR
-              stayed 0x66 (M=0), yet INTF1 FRAME_COUNT still froze at 740.
-            - therefore SCTLR.M / translation enable is not the splash killer.
-            - the death window is now around late component binding / earliest
-              sde_kms_init and display runtime-power entry.
-            - the SMMU child is already created and probed earlier (~1.30 s).
+            - Phase446e proved SMMU translation is not causal: 0x150 fired,
+              live CB2 SCTLR stayed 0x66 (M=0), yet the splash still froze.
+            - dsi_display_register_te_irq() is the final action in
+              dsi_display_bind() in the generated A52 GKI display source.
+            - Android 5.10 qcom pinctrl claims an IRQ GPIO through
+              msm_pinmux_request_gpio() plus direction_input().
+            - Lagoon gpio23 is the panel TE pad; mux function 1 is MDP_VSYNC.
 
-          One-variable behavior change:
-            - retain the Phase201 find/create path for qcom,smmu_sde_unsec.
-            - retain msm_smmu_probe(), iommu domain lookup, DMA parms, fault
-              handler, drvdata, and component_add() on the child.
-            - do NOT add that SMMU child to the DRM master's component match.
-            - EARLY_MAP behavior is back to normal; translation may enable.
-            - runtime proof marker is event 0x190.
+          Single behavior change:
+            - skip dsi_display_register_te_irq(display).
+            - normal SMMU component matching is restored.
+            - normal EARLY_MAP / SCTLR.M behavior is restored.
+            - markers 0x191/0x192 bracket the skipped request and carry
+              display->disp_te_gpio in aux0.
 
-          Expected behavior:
-            - msm_smmu_new() should still find the existing child and its drvdata.
-            - if KMS MMU init nevertheless defers/fails, that is diagnostic.
-            - success criterion is INTF1 FRAME_COUNT advancing beyond the usual
-              ~1.45 s death point.
+          Passive evidence added to each P446 record:
+            - record size is 672 bytes.
+            - te23_cfg      = phys 0x0F117000.
+            - te23_intr_cfg = phys 0x0F117008.
+            - gpio23 FUNC_SEL = te23_cfg bits[5:2]: 0=GPIO, 1=MDP_VSYNC.
+            - BUILD_BUG_ON requires sizeof(struct p446_rec)==672.
+            - 1536 slots plus 4 KiB header use 1,036,288 bytes, leaving
+              12,288 bytes spare in the 1 MiB recorder window.
 
-          Recorder:
-            - full Phase446d 664-byte recorder and ~1 ms DRM-bind burst retained.
-            - generic 0x160/0x161 component markers remain active.
-            - compile-time marker:
-              A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1.
+          Success:
+            - INTF1 FRAME_COUNT keeps advancing beyond the old end-of-DSI-bind
+              death point.
+            - also report whether the later F0 command DMA completes.
 
           This is a diagnostic boot, not a final fix.
           EOF
@@ -919,11 +930,11 @@ jobs:
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
 
-      - name: Upload Phase446f GKI failure diagnostics
+      - name: Upload Phase446g GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446F-GKI-NO-SMMU-COMPONENT-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446G-GKI-SKIP-TE-IRQ-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -931,7 +942,7 @@ jobs:
             gki/common/drivers/a52_display/msm/dsi/dsi_display.c
             gki/common/drivers/a52_display/msm/sde/sde_kms.c
             scripts/446c_apply_takeover_window.py
-            scripts/446f_apply_skip_smmu_component_match.py
+            scripts/446g_apply_te_irq_test.py
             gki/common/drivers/a52_display/msm/a52_phase445.c
             gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
             gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
@@ -947,26 +958,28 @@ jobs:
             scripts/446d_apply_extra_observers.py
             scripts/446d_collect_boot_identity.sh
             gki/common/drivers/clk/qcom/dispcc-lagoon.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-msm.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
 
-      - name: Upload Phase446f GKI
+      - name: Upload Phase446g GKI
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446F-GKI-NO-SMMU-COMPONENT-${{ github.run_number }}
-          path: phase446f-gki-no-smmu-component-out/
+          name: A52XQ-PHASE446G-GKI-SKIP-TE-IRQ-${{ github.run_number }}
+          path: phase446g-gki-skip-te-irq-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446f GKI boot image
+      - name: Upload Phase446g GKI boot image
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446F-GKI-NO-SMMU-COMPONENT-${{ github.run_number }}-BOOT
-          path: phase446f-gki-no-smmu-component-out/package/boot-phase446f-gki-no-smmu-component-v1.img
+          name: A52XQ-PHASE446G-GKI-SKIP-TE-IRQ-${{ github.run_number }}-BOOT
+          path: phase446g-gki-skip-te-irq-out/package/boot-phase446g-gki-skip-te-irq-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

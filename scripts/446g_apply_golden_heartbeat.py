@@ -122,11 +122,11 @@ EXPORT_SYMBOL_GPL(a52_p446_terminal);
     )
 
     live_cb_pat = re.compile(
-        r"(?m)^(?P<indent>[ \\t]*)lrc\\s*=\\s*a52_p446_read_cb2\\s*\\([^;\\n]*\\);[ \\t]*$"
+        r"(?m)^(?P<indent>[ \t]*)lrc\s*=\s*a52_p446_read_cb2\s*\([^;\n]*\);[ \t]*$"
     )
     c, live_cb_n = live_cb_pat.subn(
-        r'\\g<indent>/* A52_PHASE446G_NO_LIVE_CB_POWER_VOTE: use cached SMMU state */\\n'
-        r'\\g<indent>lrc=-1;',
+        r'\g<indent>/* A52_PHASE446G_NO_LIVE_CB_POWER_VOTE: use cached SMMU state */\n'
+        r'\g<indent>lrc=-1;',
         c,
         count=1,
     )

@@ -423,7 +423,7 @@ def patch_dsi_display(s: str) -> str:
         "extern void a52_p446_terminal(u32 event,u32 aux0,u32 aux1);\n"
         "/* " + marker + " */\n"
     )
-    incs = list(re.finditer(r"(?m)^#include[^\\n]*\\n", s))
+    incs = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
     if not incs:
         die("dsi display include block missing")
     pos = incs[-1].end()

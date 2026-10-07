@@ -121,18 +121,6 @@ EXPORT_SYMBOL_GPL(a52_p446_terminal);
         "static const struct file_operations p446_ops={.owner=THIS_MODULE,.open=p446_open,.read=seq_read,.llseek=seq_lseek,.release=single_release};",
     )
 
-    live_cb_pat = re.compile(
-        r"(?m)^(?P<indent>[ \t]*)lrc\s*=\s*a52_p446_read_cb2\s*\([^;\n]*\);[ \t]*$"
-    )
-    c, live_cb_n = live_cb_pat.subn(
-        r'\g<indent>/* A52_PHASE446G_NO_LIVE_CB_POWER_VOTE: use cached SMMU state */\n'
-        r'\g<indent>lrc=-1;',
-        c,
-        count=1,
-    )
-    if live_cb_n != 1:
-        die(f"canonical live-CB call count changed: {live_cb_n}")
-
     if "struct proc_ops" in c:
         die("4.19 proc_ops adaptation incomplete")
     if "a52_phase446_raw" not in c or "P446_MAX_REC 2048U" not in c:

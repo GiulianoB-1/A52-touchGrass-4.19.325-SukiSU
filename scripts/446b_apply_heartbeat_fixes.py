@@ -139,6 +139,16 @@ def patch_central(s: str) -> str:
     return s
 
 
+def patch_tg_passive_central(s: str) -> str:
+    """Keep the TouchGrass twin passive: do not power-vote the SMMU per record."""
+    old = "            lrc=a52_p446_read_cb2(&l_smr,&l_s2cr,&l_cb,&l_sctlr,&l_ttbr0,&l_tcr,&l_fsr);\n"
+    new = (
+        "            /* A52_PHASE446B_TG_NO_LIVE_CB_POWER_VOTE */\n"
+        "            lrc=-1;\n"
+    )
+    return one(s, old, new, "TG disable live CB power vote")
+
+
 def patch_arm_gki(s: str) -> str:
     if "A52_PHASE446B_LIVE_CB_API" in s:
         return s
@@ -508,6 +518,8 @@ def main() -> None:
 
     if not a.check_only:
         cs = patch_central(central.read_text(errors="replace"))
+        if a.kind == "tg":
+            cs = patch_tg_passive_central(cs)
         central.write_text(patch_central_micro(cs))
         ars = arm.read_text(errors="replace")
         arm.write_text(patch_arm_gki(ars) if a.kind == "gki" else patch_arm_tg(ars))
@@ -564,6 +576,11 @@ def main() -> None:
         )
     if not p446_capacity_ok:
         missing.append("P446_MAX_REC")
+    if a.kind == "tg":
+        if "A52_PHASE446B_TG_NO_LIVE_CB_POWER_VOTE" not in cs:
+            missing.append("TG passive live-CB marker")
+        if "lrc=a52_p446_read_cb2(" in cs:
+            missing.append("TG live-CB power vote still active")
     if missing:
         die("contract missing: " + ", ".join(missing))
 

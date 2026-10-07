@@ -190,12 +190,15 @@ def patch_msm_drv(s: str) -> str:
     marker = "A52_PHASE446_TG_DRM_MARKERS"
     if marker in s:
         return s
-    anchor = "static int add_display_components(struct device *dev,\n"
-    s = add_extern(
-        s, anchor,
-        "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */",
-        "msm drv",
-    )
+    # Phase446G inserts power-init markers near the top half of msm_drv.c,
+    # before add_display_components(). Put the prototype with the includes so
+    # every inserted call is declared under Clang.
+    decl = "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */\n"
+    incs = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
+    if not incs:
+        die("msm drv: include block missing")
+    pos = incs[-1].end()
+    s = s[:pos] + "\n" + decl + s[pos:]
 
     old_bind = """static int msm_drm_bind(struct device *dev)
 {

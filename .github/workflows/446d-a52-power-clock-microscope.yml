@@ -806,6 +806,7 @@ jobs:
           cp "$ROOT/kernel/exit.c" "$OUT/source/kernel_exit.c"
           cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arm64_syscall.c"
           cp "$ROOT/drivers/base/core.c" "$OUT/source/base_core.c"
+          cp "$ROOT/drivers/base/component.c" "$OUT/source/component.c"
           cp "$ROOT/drivers/base/power/runtime.c" "$OUT/source/runtime_pm.c"
           cp "$ROOT/drivers/base/power/domain.c" "$OUT/source/genpd_domain.c"
           cp "$ROOT/drivers/regulator/core.c" "$OUT/source/regulator_core.c"
@@ -883,7 +884,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446C-GKI-TAKEOVER-WINDOW-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -911,21 +912,18 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446C-GKI-TAKEOVER-WINDOW-${{ github.run_number }}
+          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-${{ github.run_number }}
           path: phase446d-gki-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446d GKI boot images
+      - name: Upload Phase446d GKI boot image
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446C-GKI-TAKEOVER-WINDOW-${{ github.run_number }}-BOOT-IMAGES
-          path: |
-            phase446d-gki-out/package/boot-phase446d-gki-control-v1.img
-            phase446d-gki-out/package/boot-phase446d-gki-keep-earlymap-v1.img
-            phase446d-gki-out/package/boot-phase446d-gki-skip-post-enable-init-v1.img
+          name: A52XQ-PHASE446D-GKI-POWER-CLOCK-${{ github.run_number }}-BOOT
+          path: phase446d-gki-out/package/boot-phase446d-gki-control-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

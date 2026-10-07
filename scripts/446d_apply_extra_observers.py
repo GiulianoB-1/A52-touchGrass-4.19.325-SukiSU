@@ -104,10 +104,20 @@ def patch_dispcc(s):
         s=s[:m.end()]+"\n\ta52_p446_mark(0x18aU, 0U, 0U);"+s[m.end():end]+"\ta52_p446_mark(0x18bU, 0U, 0U);\n"+s[end:]
     return s
 
-def pick(root,cands,required=True):
+def pick(root,cands,required=True,basename=None):
     for rel in cands:
         p=root/rel
         if p.is_file(): return p
+    if basename:
+        hits=[p for p in root.rglob(basename) if "/pll/" in p.as_posix()]
+        if len(hits)==1:
+            return hits[0]
+        if len(hits)>1:
+            # Prefer the ported display tree over unrelated copies.
+            ranked=[p for p in hits if "a52_display" in p.as_posix() or "techpack/display" in p.as_posix()]
+            if len(ranked)==1:
+                return ranked[0]
+            die("ambiguous "+basename+": "+", ".join(str(p) for p in hits))
     if required: die("none of candidate paths exist: "+", ".join(cands))
     return None
 
@@ -135,8 +145,8 @@ def main():
     if a.kind=="gki":
         central=a.root/"drivers/a52_display/msm/a52_phase445.c"
         msm=a.root/"drivers/a52_display/msm/msm_drv.c"
-        pll=pick(a.root,["drivers/a52_display/pll/pll_drv.c","drivers/a52_display/msm/pll/pll_drv.c"])
-        dsi=pick(a.root,["drivers/a52_display/pll/dsi_pll_7nm.c","drivers/a52_display/msm/pll/dsi_pll_7nm.c"])
+        pll=pick(a.root,["drivers/a52_display/pll/pll_drv.c","drivers/a52_display/msm/pll/pll_drv.c"],basename="pll_drv.c")
+        dsi=pick(a.root,["drivers/a52_display/pll/dsi_pll_7nm.c","drivers/a52_display/msm/pll/dsi_pll_7nm.c"],basename="dsi_pll_7nm.c")
     else:
         central=a.root/"techpack/display/msm/a52_phase446g.c"
         msm=a.root/"techpack/display/msm/msm_drv.c"

@@ -12,6 +12,8 @@ on:
       - scripts/446d_apply_power_clock_microscope.py
       - scripts/446d_apply_power_clock_microscope.py.z64
       - scripts/446d_apply_capacity_guard.py
+      - scripts/446d_apply_extra_observers.py
+      - scripts/446d_collect_boot_identity.sh
       - scripts/decode_phase446d.py
       - scripts/decode_phase446d.py.z64
       - scripts/decode_phase446_pair.py
@@ -58,13 +60,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
-          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/446g_apply_golden_heartbeat.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
+          python3 scripts/446d_apply_extra_observers.py --help >/dev/null
+          bash -n scripts/446d_collect_boot_identity.sh
           python3 scripts/decode_phase446d.py --help >/dev/null
           python3 scripts/decode_phase446_pair.py --help >/dev/null
           echo "Phase446dG power/clock payload preflight: PASS"
@@ -87,6 +91,8 @@ jobs:
              scripts/446d_apply_power_clock_microscope.py \
              scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
+             scripts/446d_apply_extra_observers.py \
+             scripts/446d_collect_boot_identity.sh \
              scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/decode_phase446.py \
              scripts/decode_phase446.py.z64 \
@@ -109,6 +115,7 @@ jobs:
             golden-work/scripts/446b_apply_heartbeat_fixes.py \
             golden-work/scripts/446d_apply_power_clock_microscope.py \
             golden-work/scripts/446d_apply_capacity_guard.py \
+            golden-work/scripts/446d_apply_extra_observers.py \
             golden-work/scripts/decode_phase444.py \
             golden-work/scripts/decode_phase446.py \
             golden-work/scripts/decode_phase446d.py \
@@ -183,9 +190,11 @@ jobs:
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg
           python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg
           python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg
+          python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg --check-only
+          python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg --check-only
 
           git -C "$K" diff --check -- \
             techpack/display/msm/Makefile \
@@ -206,7 +215,11 @@ jobs:
             drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c \
             drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c \
             drivers/soc/qcom/msm_bus/msm_bus_proxy_client.c \
-            drivers/clk/clk.c
+            drivers/clk/clk.c \
+            drivers/base/component.c \
+            drivers/clk/qcom/dispcc-lagoon.c \
+            techpack/display/pll/pll_drv.c \
+            techpack/display/pll/dsi_pll_7nm.c
 
           DSI="$K/techpack/display/msm/dsi"
           ! grep -Rqs 'A52_PHASE315G_GOLDEN_F0_FULL_PRESTATE_REFERENCE_V1' "$DSI"
@@ -215,7 +228,7 @@ jobs:
           ! grep -Rqs 'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1' "$DSI"
           ! grep -Rqs 'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' "$DSI"
           ! grep -Rqs 'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1' "$DSI"
-          grep -Fq "P446_MAX_REC 2048U" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "P446_MAX_REC 1536U" "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq 'proc_create("a52_phase446_raw",0444' "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq "A52_PHASE446_TG_ARM_SMMU" "$K/drivers/iommu/arm-smmu.c"
@@ -224,6 +237,10 @@ jobs:
           grep -Fq "A52_PHASE446B_CRTC_H10_H11" "$K/techpack/display/msm/sde/sde_crtc.c"
           grep -Fq "A52_PHASE446B_H12_BRIDGE_PRE_ENABLE" "$K/techpack/display/msm/msm_atomic.c"
           grep -Fq "A52_PHASE446B_H13_PANEL_ENABLE" "$K/techpack/display/msm/dsi/dsi_display.c"
+          grep -Fq "A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "a52_p446_set_burst(1U)" "$K/techpack/display/msm/msm_drv.c"
+          grep -Fq "0x184U" "$K/techpack/display/pll/dsi_pll_7nm.c"
+          grep -Fq "0x188U" "$K/drivers/clk/qcom/dispcc-lagoon.c"
           ! grep -Fq "a52.cb2_reuse" "$K/drivers/iommu/arm-smmu.c"
           ! grep -Fq "A52_PHASE446_CB2_SWITCH" "$K/drivers/iommu/arm-smmu.c"
           grep -Fq "P444_MAX_SECTIONS 120U" "$K/techpack/display/msm/a52_phase444.c"
@@ -250,6 +267,7 @@ jobs:
           grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:TG' "$IMAGE"
+          grep -aFq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$IMAGE"
           grep -aFq 'A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1' "$IMAGE"
           grep -aFq 'a52_phase446_raw' "$IMAGE"
           grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
@@ -277,7 +295,7 @@ jobs:
           CONFIG="$PWD/artifacts/config-$LABEL"
           K="$PWD/workspace/touchgrass-a52xq"
           OUT="$PWD/phase446dg-touchgrass-out"
-          FINAL="$OUT/package/boot-phase446dg-touchgrass-golden-heartbeat-v1.img"
+          FINAL="$OUT/package/boot-phase446dg-touchgrass-power-clock-v2.img"
 
           rm -rf "$OUT" intake
           mkdir -p "$OUT"/{audit,source,package} intake
@@ -296,6 +314,8 @@ jobs:
              scripts/446d_apply_power_clock_microscope.py \
              scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
+             scripts/446d_apply_extra_observers.py \
+             scripts/446d_collect_boot_identity.sh \
              scripts/decode_phase446.py \
              scripts/decode_phase446.py.z64 \
              scripts/decode_phase446d.py \
@@ -305,6 +325,9 @@ jobs:
           cp "$K/techpack/display/msm/a52_phase444.c" "$OUT/source/"
           cp "$K/techpack/display/msm/a52_phase446g.c" "$OUT/source/"
           cp "$K/drivers/base/component.c" "$OUT/source/component.c"
+          cp "$K/drivers/clk/qcom/dispcc-lagoon.c" "$OUT/source/dispcc-lagoon.c"
+          cp "$K/techpack/display/pll/pll_drv.c" "$OUT/source/pll_drv.c"
+          cp "$K/techpack/display/pll/dsi_pll_7nm.c" "$OUT/source/dsi_pll_7nm.c"
           cp "$K/drivers/iommu/arm-smmu.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_drv.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_smmu.c" "$OUT/source/"
@@ -324,7 +347,7 @@ jobs:
           cp "$K/techpack/display/msm/dsi/dsi_display.c" "$OUT/source/"
 
           cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-          experiment=PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-V1
+          experiment=PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-V2
           base=clean-proven-TouchGrass-4.19.200-Golden-lineage
           touchgrass_commit=$TOUCHGRASS_COMMIT
           resukisu_commit=$RESUKISU_COMMIT
@@ -342,6 +365,10 @@ jobs:
           phase446d_record_capacity=1536
           phase446d_power_clock_microscope=yes
           phase446d_behavior_changes=no
+          phase446d_burst_sampling=drm_bind_900_1100us
+          phase446d_dsi_pll_provider_markers=yes
+          phase446d_dispcc_registration_markers=yes
+          phase446d_boot_identity_helper=yes
           phase446b_record_capacity=2048
           phase446b_debug_partition_mirror=dropped
           phase446_behavior_changes=no
@@ -369,6 +396,9 @@ jobs:
             --source intake/boot.img --kernel "$OUT/package/Image.gz" \
             --output "$FINAL" --report "$OUT/package/repack-report.json"
           test "$(stat -c %s "$FINAL")" -eq 100663296
+          cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
+          chmod +x "$OUT/package/446d_collect_boot_identity.sh"
+          sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
@@ -385,7 +415,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-FAIL-${{ github.run_number }}
+          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-FAIL-${{ github.run_number }}
           path: |
             golden-work/artifacts/logs/
             golden-work/phase446dg-touchgrass-build.log
@@ -397,6 +427,11 @@ jobs:
             golden-work/workspace/touchgrass-a52xq/drivers/clk/clk.c
             golden-work/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_ctrl.c
             golden-work/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c
+            golden-work/workspace/touchgrass-a52xq/drivers/clk/qcom/dispcc-lagoon.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/pll/pll_drv.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/pll/dsi_pll_7nm.c
+            scripts/446d_apply_extra_observers.py
+            scripts/446d_collect_boot_identity.sh
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
@@ -405,7 +440,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}
+          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-${{ github.run_number }}
           path: golden-work/phase446dg-touchgrass-out/
           if-no-files-found: error
           compression-level: 1
@@ -415,8 +450,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446BG-TOUCHGRASS-GOLDEN-HEARTBEAT-${{ github.run_number }}-BOOT-IMG
-          path: golden-work/phase446dg-touchgrass-out/package/boot-phase446dg-touchgrass-golden-heartbeat-v1.img
+          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase446dg-touchgrass-out/package/boot-phase446dg-touchgrass-power-clock-v2.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

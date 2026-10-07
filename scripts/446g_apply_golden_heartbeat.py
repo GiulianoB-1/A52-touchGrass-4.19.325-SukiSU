@@ -190,12 +190,12 @@ def patch_msm_drv(s: str) -> str:
     marker = "A52_PHASE446_TG_DRM_MARKERS"
     if marker in s:
         return s
-    anchor = "static int add_display_components(struct device *dev,\n"
-    s = add_extern(
-        s, anchor,
-        "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */",
-        "msm drv",
-    )
+    decl = "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n/* " + marker + " */\n"
+    include_matches = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
+    if not include_matches:
+        die("msm drv include block missing")
+    decl_pos = include_matches[-1].end()
+    s = s[:decl_pos] + "\n" + decl + s[decl_pos:]
 
     old_bind = """static int msm_drm_bind(struct device *dev)
 {
@@ -599,6 +599,7 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
     # tree, so provide a file-scope prototype immediately after the include
     # block. Do not depend on a vendor-specific header being present.
     proto = (
+        "struct arm_smmu_device;\n"
         "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\n"
         "                               int sme, u32 cb, u32 aux);\n"
     )

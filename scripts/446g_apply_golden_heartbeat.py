@@ -77,7 +77,7 @@ def build_tg_c(repo_root: Path) -> str:
 
     old_work = """static void p446_workfn(struct work_struct *w)
 {
-    u64 age; unsigned long d; (void)w; a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boottime_ns()-p446_start_ns;
+    u64 age; unsigned long d; (void)w; a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boot_ns()-p446_start_ns;
     d=(age < 10000000000ULL)?msecs_to_jiffies(10):msecs_to_jiffies(1000); mod_delayed_work(system_unbound_wq,&p446_work,d);
 }"""
     new_work = """static void p446_workfn(struct work_struct *w)
@@ -90,7 +90,7 @@ def build_tg_c(repo_root: Path) -> str:
     a52_p446_mark(P446_EVT_PERIODIC,0,0);
     if (atomic_read(&p446_terminal_seen))
         return;
-    age=ktime_get_boottime_ns()-p446_start_ns;
+    age=ktime_get_boot_ns()-p446_start_ns;
     d=(age < 10000000000ULL)?msecs_to_jiffies(10):msecs_to_jiffies(1000);
     mod_delayed_work(system_unbound_wq,&p446_work,d);
 }"""

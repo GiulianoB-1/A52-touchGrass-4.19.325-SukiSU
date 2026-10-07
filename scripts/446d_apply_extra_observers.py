@@ -171,12 +171,19 @@ def main():
     for p in paths.values():
         if not p.is_file(): die(f"missing {p}")
     if not a.check_only:
-        write(central,patch_central(read(central)))
+        central_src=patch_central(read(central))
+        if a.kind=="tg":
+            # TouchGrass 4.19 names the boot-time nanosecond helper
+            # ktime_get_boot_ns(); 5.10 uses ktime_get_boottime_ns().
+            central_src=central_src.replace("ktime_get_boottime_ns()","ktime_get_boot_ns()")
+        write(central,central_src)
         write(msm,patch_msm_drv(read(msm)))
         write(pll,patch_pll_drv(read(pll)))
         write(dsi,patch_dsi_pll(read(dsi)))
         write(paths["dispcc"],patch_dispcc(read(paths["dispcc"])))
     check(paths)
+    if a.kind=="tg" and "ktime_get_boottime_ns()" in read(central):
+        die("TouchGrass timekeeping compatibility missing")
 
 if __name__=="__main__":
     main()

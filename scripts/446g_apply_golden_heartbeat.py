@@ -597,10 +597,10 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
     # arm_smmu_handoff_cbs() appears before the helper definition in this 4.19
     # tree, so provide a file-scope prototype before the first possible call.
     proto = (
-        "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\\n"
-        "                               int sme, u32 cb, u32 aux);\\n"
+        "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\n"
+        "                               int sme, u32 cb, u32 aux);\n"
     )
-    proto_anchor = "static int arm_smmu_alloc_cb(struct iommu_domain *domain,\\n"
+    proto_anchor = "static int arm_smmu_alloc_cb(struct iommu_domain *domain,\n"
     proto_pos = s.find(proto_anchor)
     if proto_pos < 0:
         die("a52_p446g_emit_smmu prototype anchor missing")

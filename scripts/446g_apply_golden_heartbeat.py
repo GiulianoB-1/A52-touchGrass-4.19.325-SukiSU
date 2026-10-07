@@ -415,15 +415,16 @@ def patch_dsi_display(s: str) -> str:
     marker = "A52_PHASE446_TG_DSI_STEPS"
     if marker in s:
         return s
-    anchor = "#if defined(CONFIG_DISPLAY_SAMSUNG)\nextern bool pba_regulator_control_ss;\n#endif\n"
     decl = (
         "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n"
         "extern void a52_p446_terminal(u32 event,u32 aux0,u32 aux1);\n"
         "/* " + marker + " */\n"
     )
-    if anchor not in s:
-        die("dsi display extern anchor missing")
-    s = s.replace(anchor, anchor + decl, 1)
+    include_matches = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
+    if not include_matches:
+        die("dsi display include block missing")
+    decl_pos = include_matches[-1].end()
+    s = s[:decl_pos] + "\n" + decl + s[decl_pos:]
 
     sig = "int dsi_display_cont_splash_config(void *dsi_display)\n{\n"
     s = one(s, sig, sig + "\ta52_p446_mark(0x80U,0U,0U);\n", "cont splash entry")
@@ -598,14 +599,14 @@ static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,
     # tree, so provide a file-scope prototype immediately after the include
     # block. Do not depend on a vendor-specific header being present.
     proto = (
-        "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\\n"
-        "                               int sme, u32 cb, u32 aux);\\n"
+        "static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,\n"
+        "                               int sme, u32 cb, u32 aux);\n"
     )
     include_matches = list(re.finditer(r"(?m)^#include[^\n]*\n", s))
     if not include_matches:
         die("a52_p446g_emit_smmu include block missing")
     proto_pos = include_matches[-1].end()
-    s = s[:proto_pos] + "\\n" + proto + s[proto_pos:]
+    s = s[:proto_pos] + "\n" + proto + s[proto_pos:]
 
     # Earliest apps-SMMU probe and native firmware handoff checkpoint.
     s = one(

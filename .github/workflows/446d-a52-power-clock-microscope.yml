@@ -68,12 +68,14 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
+          python3 scripts/446d_apply_extra_observers.py --help >/dev/null
+          bash -n scripts/446d_collect_boot_identity.sh
           python3 scripts/decode_phase446d.py --help >/dev/null
           python3 scripts/decode_phase446.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
@@ -604,9 +606,11 @@ jobs:
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki
+          python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -641,12 +645,15 @@ jobs:
             "$BUILD/drivers/a52_display/msm/sde_power_handle.o" \
             "$BUILD/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.o" \
             "$BUILD/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.o" \
-            "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o"
+            "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu.o" \
+            "$BUILD/drivers/base/component.o" \
+            "$BUILD/drivers/clk/qcom/dispcc-lagoon.o"
+          find "$BUILD" -type f \( -name pll_drv.o -o -name dsi_pll_7nm.o \) -delete
 
           grep -Rqs 'A52_PHASE445' "$ROOT/drivers/a52_display/msm" "$ROOT/drivers/a52_display/msm/dsi" || { echo "Phase445 marker missing"; exit 1; }
           grep -Fq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$P445"
           grep -Fq 'P446_RAM_PHYS 0xB1800000ULL' "$P445"
-          grep -Fq 'P446_MAX_REC 2048U' "$P445"
+          grep -Fq 'P446_MAX_REC 1536U' "$P445"
           grep -Fq 'A52_PHASE446_CB2_SWITCH' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
           grep -Fq 'A52_PHASE446_BUS_LATE_HANDOFF' "$ROOT/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c"
           grep -Fq 'A52_PHASE446_POWER_BUS_MARKERS' "$ROOT/drivers/a52_display/msm/sde_power_handle.c"
@@ -660,6 +667,8 @@ jobs:
           grep -Fq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'A52_PHASE446C_POST_ENABLE_SUBSTEPS' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
           grep -Fq 'A52_PHASE446C_INITIAL_POST_ENABLE_GATE' "$ROOT/drivers/a52_display/msm/sde/sde_kms.c"
+          grep -Fq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$P445"
+          grep -Fq 'a52_p446_set_burst(1U)' "$ROOT/drivers/a52_display/msm/msm_drv.c"
           ! grep -Fq 'safe_mdp=!(gcc_ahb & BIT(31))' "$P445"
           ! grep -Fq 'a52_ackfr_record("P446 q=%u' "$P445"
           echo "Phase446d GKI source and stale-object audit: PASS"
@@ -807,6 +816,11 @@ jobs:
           cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arm64_syscall.c"
           cp "$ROOT/drivers/base/core.c" "$OUT/source/base_core.c"
           cp "$ROOT/drivers/base/component.c" "$OUT/source/component.c"
+          cp "$ROOT/drivers/clk/qcom/dispcc-lagoon.c" "$OUT/source/dispcc-lagoon.c"
+          PLL_DRV="$(find "$ROOT" -path "*/pll/pll_drv.c" | head -1)"
+          DSI_PLL7="$(find "$ROOT" -path "*/pll/dsi_pll_7nm.c" | head -1)"
+          [ -n "$PLL_DRV" ] && cp "$PLL_DRV" "$OUT/source/pll_drv.c"
+          [ -n "$DSI_PLL7" ] && cp "$DSI_PLL7" "$OUT/source/dsi_pll_7nm.c"
           cp "$ROOT/drivers/base/power/runtime.c" "$OUT/source/runtime_pm.c"
           cp "$ROOT/drivers/base/power/domain.c" "$OUT/source/genpd_domain.c"
           cp "$ROOT/drivers/regulator/core.c" "$OUT/source/regulator_core.c"
@@ -829,6 +843,8 @@ jobs:
              scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py \
              scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
+             scripts/446d_apply_extra_observers.py \
+             scripts/446d_collect_boot_identity.sh \
              scripts/decode_phase446.py scripts/decode_phase446.py.z64 \
              scripts/decode_phase446d.py scripts/decode_phase446d.py.z64 \
              scripts/decode_phase446_pair.py \
@@ -850,6 +866,9 @@ jobs:
           # Phase446d is observation-only. Keep the established control boot only.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
+          cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
+          chmod +x "$OUT/package/446d_collect_boot_identity.sh"
+          sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
           Phase446d GKI passive power/clock microscope
@@ -871,6 +890,10 @@ jobs:
               PCLK0, ESC0, VSYNC and AHB RCGs, plus PLL0 MODE/L/ALPHA/USER/
               CONFIG/CONFIG_U/TEST/TEST_U/STATUS.
             - compile-time image marker is independent of boot cmdline.
+            - 0x180 brackets the DRM-bind burst sampler; aux0=1 periodic records are ~1 ms burst samples.
+            - 0x182..0x185 bracket DSI PLL clock registration/provider publication.
+            - 0x186..0x189 bracket DISPCC PLL configure/clock registration; 0x18a/0x18b are added only if a sync_state callback exists.
+            - package includes EXPECTED-BOOT-SHA256.txt and a recovery identity helper.
 
           Package exactly one GKI control boot. No Phase446d behavior switch.
 
@@ -878,7 +901,7 @@ jobs:
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
-          sha256sum "$FINAL" "$KEEP" "$SKIP"
+          sha256sum "$FINAL"
 
       - name: Upload Phase446d GKI failure diagnostics
         if: failure()
@@ -904,6 +927,9 @@ jobs:
             scripts/439_apply_dsi_autopsy.py
             scripts/440_apply_early_f0_cleanup_forensics.py
             scripts/441_apply_vrr_state_compat.py
+            scripts/446d_apply_extra_observers.py
+            scripts/446d_collect_boot_identity.sh
+            gki/common/drivers/clk/qcom/dispcc-lagoon.c
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7

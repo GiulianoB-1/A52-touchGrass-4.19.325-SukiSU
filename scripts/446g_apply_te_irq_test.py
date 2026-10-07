@@ -72,6 +72,15 @@ def patch_dsi(s: str) -> str:
     if "A52_PHASE446G_TE_IRQ_SKIP" in s:
         return s
 
+    # Skipping the only call makes this static helper unused under -Werror.
+    # Keep the implementation compiled for audit, but explicitly allow it.
+    s = one(
+        s,
+        "static void dsi_display_register_te_irq(struct dsi_display *display)\n",
+        "static void __maybe_unused dsi_display_register_te_irq(struct dsi_display *display)\n",
+        "TE IRQ helper maybe_unused",
+    )
+
     bind = "static int dsi_display_bind(struct device *dev,\n"
     decl = (
         "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n"
@@ -106,6 +115,7 @@ def check(central: str, dsi: str) -> None:
         "a52_p446_mark(0x191U, (u32)display->disp_te_gpio, 0U);",
         "a52_p446_mark(0x192U, (u32)display->disp_te_gpio, 1U);",
         "/* dsi_display_register_te_irq(display); */",
+        "static void __maybe_unused dsi_display_register_te_irq(struct dsi_display *display)",
     )
     missing=[x for x in required_c if x not in central] + [x for x in required_d if x not in dsi]
     if missing:

@@ -68,11 +68,12 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446d_apply_power_clock_microscope.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
+          python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/decode_phase446d.py --help >/dev/null
           python3 scripts/decode_phase446.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
@@ -602,8 +603,10 @@ jobs:
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki
+          python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -824,6 +827,7 @@ jobs:
              scripts/446_apply_heartbeat_cb2.py scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py \
              scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_power_clock_microscope.py.z64 \
+             scripts/446d_apply_capacity_guard.py \
              scripts/decode_phase446.py scripts/decode_phase446.py.z64 \
              scripts/decode_phase446d.py scripts/decode_phase446d.py.z64 \
              scripts/decode_phase446_pair.py \

@@ -73,10 +73,74 @@ def _compat_end(changed):
             if old in s:
                 p.write_text(s.replace(old, new, 1))
 
+def _compat_post():
+    if _arg_value("--kind") != "gki" or "--check-only" in sys.argv:
+        return
+    root = _arg_value("--root")
+    if not root:
+        return
+    p = Path(root) / "drivers/a52_display/msm/sde/sde_kms.c"
+    if not p.is_file():
+        return
+    s = p.read_text()
+
+    old = """static int sde_kms_hw_init(struct msm_kms *kms)
+{
+\ta52_p446_mark(0x164U, 0U, 0U);
+\t{ const unsigned char *p=(const unsigned char *)saved_command_line; u32 h=2166136261U; if(p) while(*p){h^=*p++;h*=16777619U;} a52_p446_mark(0x15eU,h,0U); }
+\ta52_p446_mark(0x15fU, (a52_p446c_keep_earlymap ? 1U : 0U) | (a52_p446c_skip_post_enable_init ? 2U : 0U), 0U);
+
+\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_hw_init");
+\tstruct sde_kms *sde_kms;
+\tstruct drm_device *dev;
+\tstruct msm_drm_private *priv;
+\tstruct platform_device *platformdev;
+\tint i, irq_num, rc = -EINVAL;
+
+"""
+    new = """static int sde_kms_hw_init(struct msm_kms *kms)
+{
+\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_hw_init");
+\tstruct sde_kms *sde_kms;
+\tstruct drm_device *dev;
+\tstruct msm_drm_private *priv;
+\tstruct platform_device *platformdev;
+\tint i, irq_num, rc = -EINVAL;
+
+\ta52_p446_mark(0x164U, 0U, 0U);
+\t{ const unsigned char *p=(const unsigned char *)saved_command_line; u32 h=2166136261U; if(p) while(*p){h^=*p++;h*=16777619U;} a52_p446_mark(0x15eU,h,0U); }
+\ta52_p446_mark(0x15fU, (a52_p446c_keep_earlymap ? 1U : 0U) | (a52_p446c_skip_post_enable_init ? 2U : 0U), 0U);
+
+"""
+    if old in s:
+        s = s.replace(old, new, 1)
+
+    old = """struct msm_kms *sde_kms_init(struct drm_device *dev)
+{
+\ta52_p446_mark(0x162U, 0U, 0U);
+\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_init");
+\tstruct msm_drm_private *priv;
+\tstruct sde_kms *sde_kms;
+
+"""
+    new = """struct msm_kms *sde_kms_init(struct drm_device *dev)
+{
+\tA52_ACKFR_SCOPE("DISP", "a52.life.sde_kms_init");
+\tstruct msm_drm_private *priv;
+\tstruct sde_kms *sde_kms;
+
+\ta52_p446_mark(0x162U, 0U, 0U);
+"""
+    if old in s:
+        s = s.replace(old, new, 1)
+
+    p.write_text(s)
+
 payload = Path(__file__).with_suffix(Path(__file__).suffix + ".z64")
 compat = _compat_begin()
 try:
     src = zlib.decompress(base64.b64decode(payload.read_text().strip()))
     exec(compile(src, str(__file__), "exec"))
+    _compat_post()
 finally:
     _compat_end(compat)

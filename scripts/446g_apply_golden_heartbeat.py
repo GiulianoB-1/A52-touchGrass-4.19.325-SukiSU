@@ -415,15 +415,19 @@ def patch_dsi_display(s: str) -> str:
     marker = "A52_PHASE446_TG_DSI_STEPS"
     if marker in s:
         return s
-    anchor = "#if defined(CONFIG_DISPLAY_SAMSUNG)\nextern bool pba_regulator_control_ss;\n#endif\n"
+    # Events are also inserted into dsi_host_transfer(), well before the
+    # continuous-splash function. Keep the prototypes with the include block
+    # so every call has a visible declaration under Clang.
     decl = (
         "extern void a52_p446_mark(u32 event,u32 aux0,u32 aux1);\n"
         "extern void a52_p446_terminal(u32 event,u32 aux0,u32 aux1);\n"
         "/* " + marker + " */\n"
     )
-    if anchor not in s:
-        die("dsi display extern anchor missing")
-    s = s.replace(anchor, anchor + decl, 1)
+    incs = list(re.finditer(r"(?m)^#include[^\\n]*\\n", s))
+    if not incs:
+        die("dsi display include block missing")
+    pos = incs[-1].end()
+    s = s[:pos] + "\n" + decl + s[pos:]
 
     sig = "int dsi_display_cont_splash_config(void *dsi_display)\n{\n"
     s = one(s, sig, sig + "\ta52_p446_mark(0x80U,0U,0U);\n", "cont splash entry")

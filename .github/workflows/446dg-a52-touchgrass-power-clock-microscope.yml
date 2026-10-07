@@ -53,11 +53,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Prepare Golden runner and validate Phase444 payload
+        timeout-minutes: 12
         run: |
           set -Eeuo pipefail
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          echo "Golden preflight: bounded runner cleanup"
+          sudo timeout 120s rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          echo "Golden preflight: bounded apt update"
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          echo "Golden preflight: bounded package install"
+          sudo timeout 300s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
           python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py

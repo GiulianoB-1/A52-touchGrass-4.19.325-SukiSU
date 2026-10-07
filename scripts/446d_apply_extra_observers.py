@@ -28,7 +28,7 @@ def patch_central(s):
         s=s[:p]+"".join(x+"\n" for x in missing)+s[p:]
     anchor="static atomic_t p446_drop = ATOMIC_INIT(0);"
     if anchor not in s: die("p446_drop anchor missing")
-    inject=anchor+'''\nstatic atomic_t p446_burst = ATOMIC_INIT(0);\nstatic DECLARE_WAIT_QUEUE_HEAD(p446_burst_wq);\nstatic struct task_struct *p446_burst_task;\n/* A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL */\n'''
+    inject=anchor+'''\nstatic atomic_t p446_burst = ATOMIC_INIT(0);\nstatic DECLARE_WAIT_QUEUE_HEAD(p446_burst_wq);\nstatic struct task_struct *p446_burst_task;\nstatic const char p446d_extra_marker[] __used = "A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL";\n'''
     s=s.replace(anchor,inject,1)
 
     old="(void)w; a52_p446_mark(P446_EVT_PERIODIC,0,0); age=ktime_get_boottime_ns()-p446_start_ns;"

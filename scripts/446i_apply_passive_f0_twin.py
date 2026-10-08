@@ -236,9 +236,9 @@ EXPORT_SYMBOL_GPL(a52_p446i_hw_post);
 
 def patch_ctrl(s: str) -> str:
     if MARK in s: return s
-    sig='static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,'
+    sig='static void dsi_kickoff_msg_tx('
     p=s.find(sig)
-    if p<0: die('dsi_message_tx missing')
+    if p<0: die('dsi_kickoff_msg_tx missing')
     decl=('/* '+MARK+' */\n'
           "extern void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags);\n"
           "extern void a52_p446i_hw_pre(struct dsi_ctrl_hw *ctrl);\n"

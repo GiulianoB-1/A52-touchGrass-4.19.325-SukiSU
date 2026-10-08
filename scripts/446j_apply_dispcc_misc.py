@@ -96,7 +96,7 @@ def display(s):
 extern void a52_p446j_misc_event(struct dsi_ctrl_hw *,u32,u32,u32);
 static void a52_p446j_point(struct dsi_display *d, u32 tag, u32 a, u32 b)
 {
-    if (!d || !d->ctrl || !d->ctrl[0].ctrl) return;
+    if (!d || !d->ctrl[0].ctrl) return;
     a52_p446j_misc_event(&d->ctrl[0].ctrl->hw,tag,a,b);
 }
 
@@ -108,17 +108,17 @@ static void a52_p446j_point(struct dsi_display *d, u32 tag, u32 a, u32 b)
         if idx<0: raise RuntimeError('no final rc return')
         return body[:idx]+line+body[idx:]
     def pre(body):
-        body=one(body,'\tstruct dsi_display *display = priv;',
-            '\tstruct dsi_display *display = priv;\n'
+        body=one(body,'\tstruct dsi_display_ctrl *ctrl;',
+            '\tstruct dsi_display_ctrl *ctrl;\n'
             '\ta52_p446j_point(display,0x4a10U,(u32)clk,(u32)l_type);',
-            'clkoff entry')
+            'clkoff entry after declarations')
         return at_return(body,'\ta52_p446j_point(display,0x4a11U,(u32)clk,(u32)l_type);\n')
     s=modify_func(s,'int dsi_pre_clkoff_cb(void *priv,',pre)
     def post(body):
-        body=one(body,'\tstruct dsi_display *display = priv;',
-            '\tstruct dsi_display *display = priv;\n'
+        body=one(body,'\tbool mmss_clamp = false;',
+            '\tbool mmss_clamp = false;\n'
             '\ta52_p446j_point(display,0x4a20U,(u32)clk,(u32)l_type);',
-            'clkon entry')
+            'clkon entry after declarations')
         fifo='\t\t\tdsi_display_toggle_resync_fifo(display);'
         body=one(body,fifo,fifo+
             '\n\t\ta52_p446j_point(display,0x4a22U,(u32)clk,(u32)l_type);',

@@ -1,7 +1,7 @@
-name: Phase446h - GKI TE fix path plus panel F0 microscope
-run-name: Phase446h GKI keep TE skip, trace panel F0
-# Phase446h keeps the proven Phase446h TE-IRQ skip and adds panel/F0 lifecycle markers.
-# Recorder switches to cached SMMU state after panel handoff so sampling can continue.
+name: Phase446i - GKI matched passive F0 environment twin
+run-name: Phase446i GKI matched passive F0 environment
+# Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
+# It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
   push:
@@ -28,13 +28,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446h-panel-f0-${{ github.ref }}
+  group: a52-phase446i-gki-f0-twin-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446h GKI panel/F0 microscope
+    name: Build Phase446i GKI matched passive twin
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -68,12 +68,13 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446h_apply_panel_f0_microscope.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446h_apply_panel_f0_microscope.py scripts/446i_apply_passive_f0_twin.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
           python3 scripts/446g_apply_te_irq_test.py --help >/dev/null
           python3 scripts/446h_apply_panel_f0_microscope.py --help >/dev/null
+          python3 scripts/446i_apply_passive_f0_twin.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/446d_apply_extra_observers.py --help >/dev/null
@@ -612,12 +613,15 @@ jobs:
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki
           python3 scripts/446g_apply_te_irq_test.py --root "$ROOT"
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT"
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_extra_observers.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446g_apply_te_irq_test.py --root "$ROOT" --check-only
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT" --check-only
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -684,6 +688,12 @@ jobs:
           grep -Fq 'A52_PHASE446H_DISPLAY_HANDOFF' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           grep -Fq 'A52_PHASE446H_PANEL_STEPS' "$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c"
           grep -Fq 'A52_PHASE446H_F0_LIFECYCLE' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          grep -Fq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$ROOT/drivers/a52_display/msm/a52_phase444.c"
+          grep -Fq 'I_BUS_PRE' "$ROOT/drivers/a52_display/msm/a52_phase444.c"
+          grep -Fq 'a52_p446i_hw_pre(&dsi_ctrl->hw);' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          grep -Fq 'qcom,refgen-kona-regulator' "$ROOT/drivers/regulator/refgen.c"
+          ! grep -Fq 'REFGEN_REG_BIAS_EN' "$ROOT/drivers/regulator/refgen.c"
+          grep -Fq 'vreg->rdesc.ops = &refgen_kona_ops;' "$ROOT/drivers/regulator/refgen.c"
           grep -Fq 'static atomic_t p446h_late_safe = ATOMIC_INIT(0);' "$P445"
           grep -Fq 'u32 te23_cfg, te23_intr_cfg;' "$P445"
           grep -Fq 'BUILD_BUG_ON(sizeof(struct p446_rec) != 672U);' "$P445"
@@ -771,6 +781,7 @@ jobs:
           grep -aFq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446G_SKIP_TE_IRQ_TLMM23_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
@@ -803,15 +814,15 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446h GKI panel/F0 microscope
+      - name: Package Phase446i GKI matched passive twin
         if: success()
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-          OUT="$PWD/phase446h-gki-panel-f0-out"
+          OUT="$PWD/phase446i-gki-f0-twin-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
-          FINAL="$OUT/package/boot-phase446h-gki-panel-f0-v1.img"
+          FINAL="$OUT/package/boot-phase446i-gki-f0-twin-v1.img"
 
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
@@ -822,6 +833,8 @@ jobs:
           mkdir -p "$OUT/source" "$OUT/audit"
           cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
           cp "$ROOT/drivers/a52_display/msm/a52_phase445.c" "$OUT/source/a52_phase445.c"
+          cp "$ROOT/drivers/a52_display/msm/a52_phase444.c" "$OUT/source/a52_phase444.c"
+          cp "$ROOT/drivers/regulator/refgen.c" "$OUT/source/refgen.c"
           cp "$ROOT/drivers/a52_display/msm/msm_drv.c" "$OUT/source/msm_drv.c"
           cp "$ROOT/drivers/a52_display/msm/msm_smmu.c" "$OUT/source/msm_smmu.c"
           cp "$ROOT/drivers/a52_display/msm/sde/sde_kms.c" "$OUT/source/sde_kms.c"
@@ -870,6 +883,7 @@ jobs:
              scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py \
              scripts/446g_apply_te_irq_test.py \
              scripts/446h_apply_panel_f0_microscope.py \
+             scripts/446i_apply_passive_f0_twin.py \
              scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
              scripts/446d_apply_extra_observers.py \
@@ -893,7 +907,7 @@ jobs:
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
 
-          # Phase446h changes one variable only: skip the TE GPIO IRQ registration.
+          # Phase446i changes one variable only: skip the TE GPIO IRQ registration.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
           cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
@@ -901,47 +915,40 @@ jobs:
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
-          Phase446h GKI panel/F0 lifecycle microscope
-          ============================================
-          Established by Phase446g:
-            - skipping dsi_display_register_te_irq() keeps continuous splash
-              alive through DRM bind and to Android takeover.
-            - gpio23 remains mux function 1 (MDP_VSYNC).
-            - FRAME_COUNT advances at ~60 Hz into the thousands.
+          Phase446i GKI matched passive F0 environment twin
+          ==================================================
+          Established:
+            - Phase446g/h TE IRQ skip keeps the inherited splash streaming until Android handoff.
+            - F0 still enters DSI BUSY, lanes remain LP-11, DMA_DONE never asserts.
+            - R1 controller reset and R2 ctrl/PHY/PLL rebuild already failed.
 
-          Phase446h keeps that proven TE skip and adds observation only:
-            - event 0x193 enables late-safe recorder mode before panel enable.
-            - late-safe mode stops live CB2 runtime-PM reads and uses cached
-              SMMU state, so the periodic worker cannot block there.
-            - 0x194..0x19d bracket dsi_panel_enable(), ss_panel_on_pre(),
-              DSI_CMD_SET_ON, ss_panel_on_post(), and return.
-            - 0x1a0..0x1ad trace exact F0 5A 5A from tx entry, mode/validate,
-              Phase445 arm, HW kickoff, DMA completion wait, R1 retry, and
-              wrapper return.
-            - existing DSI register snapshots remain in every 672-byte record.
+          Phase446i adds observation only:
+            - I_SW_ENTRY: cached DSI controller states and requested byte/pixel/byte_intf/esc rates.
+            - I_RAW_PRE / I_RAW_POST: full 0x88e7000..0x88e70ff refgen dump,
+              known DISPCC RCG CMD/CFG/M/N/D, PLL0 registers, selected MDP/INTF state,
+              direct DSI STATUS/LANE/CLK/INT and compact debug selectors.
+            - I_BUS_PRE / I_BUS_POST: full Kona DSI debug selector table.
+            - hot-path capture uses MMIO only: no clk API, regulator API, allocation, printk,
+              runtime-PM, reset, force-clock, or recovery write.
 
-          Behavior:
-            - TE IRQ remains skipped exactly as in successful Phase446g.
-            - SMMU component matching and EARLY_MAP remain normal.
-            - no F0 transport mode or timeout semantics are intentionally changed.
+          Refgen source audit:
+            - GKI port is Kona-only: qcom,refgen-kona-regulator + refgen_kona_ops.
+            - generic +0x08/+0x14 BIAS_EN/BG_CTRL path is absent.
+            - therefore the earlier generic-ops corruption theory is source-ruled-out.
 
-          Goal:
-            - determine whether F0 DMA_DONE now succeeds with live splash.
-            - if it still stalls, identify the exact lifecycle boundary and
-              keep recorder output alive after panel enable.
-
-          This is a diagnostic build.
+          GKI retains the proven TE IRQ skip solely so F0 is tested on a live display link.
+          Compare I_* sections directly against the Phase446i TouchGrass twin.
           EOF
 
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
 
-      - name: Upload Phase446h GKI failure diagnostics
+      - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446H-GKI-PANEL-F0-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446I-GKI-F0-TWIN-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -951,6 +958,7 @@ jobs:
             scripts/446c_apply_takeover_window.py
             scripts/446g_apply_te_irq_test.py
             scripts/446h_apply_panel_f0_microscope.py
+            scripts/446i_apply_passive_f0_twin.py
             gki/common/drivers/a52_display/msm/a52_phase445.c
             gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
             gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
@@ -972,22 +980,22 @@ jobs:
           compression-level: 1
           retention-days: 7
 
-      - name: Upload Phase446h GKI
+      - name: Upload Phase446i GKI
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446H-GKI-PANEL-F0-${{ github.run_number }}
-          path: phase446h-gki-panel-f0-out/
+          name: A52XQ-PHASE446I-GKI-F0-TWIN-${{ github.run_number }}
+          path: phase446i-gki-f0-twin-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446h GKI boot image
+      - name: Upload Phase446i GKI boot image
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446H-GKI-PANEL-F0-${{ github.run_number }}-BOOT
-          path: phase446h-gki-panel-f0-out/package/boot-phase446h-gki-panel-f0-v1.img
+          name: A52XQ-PHASE446I-GKI-F0-TWIN-${{ github.run_number }}-BOOT
+          path: phase446i-gki-f0-twin-out/package/boot-phase446i-gki-f0-twin-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

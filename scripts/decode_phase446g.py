@@ -17,7 +17,7 @@ src=src.replace(
     "0x1a3:'F0_ARMED',0x1a4:'F0_KICKOFF_WRAP_PRE',0x1a5:'F0_HW_KICK_PRE',"
     "0x1a6:'F0_HW_KICK_POST',0x1a7:'F0_WAIT_ENTER',0x1a8:'F0_WAIT_SHORT_DONE',"
     "0x1a9:'F0_WAIT_RESULT',0x1aa:'F0_R1_BEGIN',0x1ab:'F0_R1_RESULT',"
-    "0x1ad:'F0_KICKOFF_WRAP_POST',0x100:'PERIODIC'}",
+    "0x1ac:'F0_TX_RETURN',0x1ad:'F0_KICKOFF_WRAP_POST',0x100:'PERIODIC'}",
     1,
 )
 src=src.replace(

@@ -6,7 +6,7 @@ run-name: Phase446i GKI matched passive F0 environment
 on:
   push:
     branches:
-      - agent/a52-phase446d-power-clock-microscope-v1
+      - agent/a52-phase446i-clock-source-export-v1
   workflow_dispatch:
 
 permissions:
@@ -849,6 +849,49 @@ jobs:
           cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c" "$OUT/source/dsi_ctrl.c"
           cp "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/dsi_ctrl_hw_cmn.c"
           cp "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" "$OUT/source/dsi_display.c"
+          # Phase446i source-only export: effective post-reconstruction GKI
+          # and pinned TG oracle. Neither changes kernel image nor board state.
+          # Preserve exact path mapping and hashes for independently reproducible diffs.
+          GKI_MSM="$ROOT/drivers/a52_display/msm"
+          GKI_PLL="$ROOT/drivers/a52_display/pll"
+          TG_MSM="$PWD/workspace/touchgrass-a52xq/techpack/display/msm"
+          TG_PLL="$PWD/workspace/touchgrass-a52xq/techpack/display/pll"
+          mkdir -p "$OUT/golden-source"
+          : > "$OUT/source/clock-layer-pathmap.tsv"
+          for file in dsi_clk_manager.c dsi_phy.c dsi_phy_hw_v3_0.c dsi_phy_hw_v2_0.c dsi_phy_timing_v3_0.c dsi_catalog.c; do
+            gp="$GKI_MSM/dsi/$file"
+            tp="$TG_MSM/dsi/$file"
+            test -s "$gp" && test -s "$tp"
+            cp "$gp" "$OUT/source/$file"
+            cp "$tp" "$OUT/golden-source/$file"
+            printf '%s\t%s\t%s\n' "$file" "$gp" "$tp" >> "$OUT/source/clock-layer-pathmap.tsv"
+          done
+          for file in dsi_pll_10nm.c dsi_pll_7nm.c dsi_pll_util.c pll_drv.c pll_util.c; do
+            gp="$GKI_PLL/$file"
+            tp="$TG_PLL/$file"
+            test -s "$gp" && test -s "$tp"
+            cp "$gp" "$OUT/source/$file"
+            cp "$tp" "$OUT/golden-source/$file"
+            printf '%s\t%s\t%s\n' "$file" "$gp" "$tp" >> "$OUT/source/clock-layer-pathmap.tsv"
+          done
+          for file in clk.c; do
+            gp="$ROOT/drivers/clk/$file"
+            tp="$PWD/workspace/touchgrass-a52xq/drivers/clk/$file"
+            test -s "$gp" && test -s "$tp"
+            cp "$gp" "$OUT/source/clk-framework-$file"
+            cp "$tp" "$OUT/golden-source/clk-framework-$file"
+            printf '%s\t%s\t%s\n' "$file" "$gp" "$tp" >> "$OUT/source/clock-layer-pathmap.tsv"
+          done
+          for file in clk-rcg2.c clk-branch.c clk-regmap.c clk-alpha-pll.c clk-rpmh.c; do
+            gp="$ROOT/drivers/clk/qcom/$file"
+            tp="$PWD/workspace/touchgrass-a52xq/drivers/clk/qcom/$file"
+            test -s "$gp" && test -s "$tp"
+            cp "$gp" "$OUT/source/$file"
+            cp "$tp" "$OUT/golden-source/$file"
+            printf '%s\t%s\t%s\n' "$file" "$gp" "$tp" >> "$OUT/source/clock-layer-pathmap.tsv"
+          done
+          (cd "$OUT" && find source golden-source -type f -print0 | sort -z |
+            xargs -0 sha256sum > clock-layer-sha256sums.txt)
           cp "$ROOT/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c" "$OUT/source/ss_dsi_panel_sysfs.c"
           cp "$ROOT/kernel/exit.c" "$OUT/source/kernel_exit.c"
           cp "$ROOT/arch/arm64/kernel/syscall.c" "$OUT/source/arm64_syscall.c"

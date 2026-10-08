@@ -130,7 +130,7 @@ static void p446i_fill_raw(struct p446i_raw *r, struct dsi_ctrl_hw *ctrl)
     static const u32 mdp_off[12] = {
         0x1008U,0x100cU,0x1010U,0x1014U,
         0x6b800U,0x6b8a8U,0x6b8acU,0x6b8b0U,
-        0x712cU,0x7128U,0x712c0U,0x71030U
+        0x71014U,0x71028U,0x7102cU,0x71030U
     };
     memset(r,0,sizeof(*r)); r->ns=ktime_get_ns();
     if (ctrl && ctrl->base) {
@@ -275,7 +275,7 @@ def main() -> None:
         sde=(msm/'sde_dbg.c').read_text(errors='replace')
         selectors=parse_kona_selectors(sde)
         cp=msm/'a52_phase444.c'; cp.write_text(patch_central(cp.read_text(errors='replace'),selectors))
-        dp=msm/'dsi/dsi_ctrl.c'; dp.write_text(patch_ctrl(dp.read_text(errors='replace'))
+        dp=msm/'dsi/dsi_ctrl.c'; dp.write_text(patch_ctrl(dp.read_text(errors='replace')))
     check(root,a.kind)
 
 if __name__=="__main__": main()

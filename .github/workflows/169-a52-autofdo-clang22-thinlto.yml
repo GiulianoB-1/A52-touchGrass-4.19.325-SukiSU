@@ -1,0 +1,2024 @@
+name: 169 - A52 AutoFDO on P168 Clang22 ThinLTO
+
+on:
+  push:
+    branches:
+      - agent/a52-p169-autofdo-clang22-thinlto-v1
+    paths:
+      - .github/workflows/169-a52-autofdo-clang22-thinlto.yml
+      - scripts/169_apply_autofdo_clang22.py
+      - scripts/169_convert_pmu_nonlbr.sh
+      - profiles/**
+      - scripts/168_apply_storage_memory_correctness_completion.py
+      - scripts/167_apply_mglru_f2fs_correctness.py
+      - scripts/166_apply_fuse_priority_f2fs_stable.py
+      - scripts/165_apply_security_storage_correctness.py
+      - scripts/162_apply_f2fs_atomic_fmode_write_fix.py
+      - scripts/161_apply_zram_multicomp_zstd.py
+      - scripts/160_enable_zram_zstd_writeback.py
+      - scripts/159_teardown_recorders_and_markers.py
+      - scripts/156_apply_clang22_initcall_order_fix.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-clang22-thinlto-p169-autofdo-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 5G
+  IMAGE: artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+  ANYKERNEL_COMMIT: 1c9a500dd4aa8081952523126e97eb155aed941b
+  P150_BASELINE_SHA: 763a272cba83463fc495b3787812a1e78157250f
+  P150_BASELINE_RUN: '36054686392'
+  PHASE_SOURCE_SHA: c932824ddbd67cf9792599edd98ea4ce95c1ac12
+  AOSP_CLANG_REVISION: clang-r596125
+  AOSP_CLANG_COMMIT: 9344e2cd672890d122f7b637885abe6e91758eef
+
+jobs:
+  build:
+    name: Build P168 + AutoFDO training/profiled kernel
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out exact boot-tested P150 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.P150_BASELINE_SHA }}
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+
+      - name: Restore Clang 22 ThinLTO compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-
+
+      - name: Configure compiler cache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --zero-stats
+
+      - name: Restore exact prepared P134 feature source cache
+        id: p134_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Restore exact 35461116688 pre-build source on P134 miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        id: prebuild_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-effp1-recorder-prebuild-${{ runner.os }}-${{ hashFiles('scripts/104_apply_fuse_740_upstream_passthrough.py', 'scripts/106_apply_mglru_modern_p1.py', 'scripts/106_apply_mglru_modern_p1_core.py', 'scripts/107_apply_mglru_modern_p2.py', 'scripts/108_apply_mglru_modern_p3.py', 'scripts/109_apply_eevdf_efficiency_p1.py', 'scripts/109b_finalize_eevdf_efficiency_p1.py', 'scripts/110_apply_uclamp_efficiency_p1.py', 'scripts/110b_finalize_uclamp_efficiency_p1.py', 'scripts/111_apply_mglru_power_diag_p1.py', 'scripts/112_apply_mglru_power_recorder_p2.py', 'scripts/115_apply_a52_efficiency_p1.py', 'scripts/116_apply_a52_scheduler_recorder.py', 'scripts/117_migrate_mglru_trace_to_proc.py') }}
+
+      - name: Restore exact 35196552336 prepared source on deeper cache miss
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        id: base351_source
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base352494-clean-nobt-recorder-pre-fuse104-${{ runner.os }}-v4
+
+      - name: Restore Linux stable checkpoint cache
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        id: stable_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/linux-stable-checkpoint-cache
+          key: a52xq-linux-stable-4.19.200-${{ runner.os }}-v2
+
+      - name: Prepare workspace
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts release workspace
+          chmod +x scripts/*.sh scripts/*.py
+
+      - name: Reconstruct exact 35196552336 pre-FUSE104 baseline
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true' && steps.base351_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          ./scripts/57_update_linux_4.19.200_to_4.19.206.sh
+          ./scripts/58_backport_bpf_ringbuf.sh
+          ./scripts/58_apply_ringbuf_overrun_fix.sh
+          ./scripts/07_patch_resukisu_exec_hook.sh
+
+          python3 scripts/59_apply_eevdf_phase1_scaffold.py workspace/touchgrass-a52xq
+          python3 scripts/60_apply_eevdf_phase2_accounting.py workspace/touchgrass-a52xq
+          python3 scripts/61_apply_eevdf_phase3_deadline_lag.py workspace/touchgrass-a52xq
+          python3 scripts/62_apply_eevdf_phase4_tree_picker.py workspace/touchgrass-a52xq
+          python3 scripts/63_apply_eevdf_phase5_picker_integration.py workspace/touchgrass-a52xq
+          python3 scripts/64_apply_eevdf_phase6_wakeup_preempt.py workspace/touchgrass-a52xq
+          python3 scripts/65_apply_eevdf_phase7_placement_consistency.py workspace/touchgrass-a52xq
+          python3 scripts/74_apply_eevdf_multitask_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/77_apply_eevdf_lifecycle_correctness.py workspace/touchgrass-a52xq
+          python3 scripts/78_apply_eevdf77_cass_hybrid.py workspace/touchgrass-a52xq
+
+          ./scripts/79_apply_mglru_phase1.sh
+          python3 scripts/80_apply_mglru_android_hardening.py workspace/touchgrass-a52xq
+
+          ./scripts/81_apply_android17_binder_core_probe.sh
+          python3 scripts/82_enable_retained_binderfs.py workspace/touchgrass-a52xq
+          ./scripts/84_apply_android17_binder_alloc.sh
+          python3 scripts/84_apply_fuse_passthrough_android.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_android17_uclamp_phase1.py workspace/touchgrass-a52xq
+          python3 scripts/86_apply_uclamp_cass_p2.py workspace/touchgrass-a52xq
+
+          python3 scripts/85_apply_a619_gpu_modernization.py workspace/touchgrass-a52xq
+          python3 scripts/87_apply_a619_gpu_modernization_p2.py workspace/touchgrass-a52xq
+          python3 scripts/90_apply_a619_gpu_modernization_p3.py workspace/touchgrass-a52xq
+          python3 scripts/91_apply_a619_gpu_modernization_p4.py workspace/touchgrass-a52xq
+          python3 scripts/94_apply_a619_gpu_modernization_p5.py workspace/touchgrass-a52xq
+
+          ./scripts/87_apply_bbr3_net.sh workspace/touchgrass-a52xq
+
+          python3 scripts/98_apply_fuse_passthrough_modern_p1.py workspace/touchgrass-a52xq
+          python3 scripts/99_apply_fuse_passthrough_modern_p2.py workspace/touchgrass-a52xq
+          python3 scripts/101_apply_fuse_passthrough_modern_p3.py workspace/touchgrass-a52xq
+          python3 scripts/102_apply_fuse_negotiation_probe.py workspace/touchgrass-a52xq
+          python3 scripts/103_apply_fuse_740_init_compat.py workspace/touchgrass-a52xq
+
+          python3 scripts/104_apply_a619_gpu_undervolt_p1.py workspace/touchgrass-a52xq
+          python3 scripts/105_apply_a619_gpu_undervolt_p1_diag.py workspace/touchgrass-a52xq
+          python3 scripts/106_apply_mglru_modern_p1.py workspace/touchgrass-a52xq
+
+          git -C workspace/touchgrass-a52xq diff --check
+
+      - name: Rebuild exact 35461116688 pre-build boundary
+        if: steps.p134_source.outputs.cache-hit != 'true' && steps.prebuild_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 -m py_compile scripts/115_apply_a52_efficiency_p1.py
+          python3 scripts/115_apply_a52_efficiency_p1.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-efficiency-p1-apply.txt
+
+          # Phase 112 in the pinned reconstruction already exports
+          # /proc/lru_gen_trace. Older cached trees needed Phase 117 to migrate
+          # the debugfs-only recorder. Keep the fallback compatible with both.
+          if grep -Fq 'proc_create("lru_gen_trace", 0444, NULL, &mglru_rec_trace_fops);' "$KERNEL/mm/vmscan.c"; then
+            echo "MGLRU recorder already has procfs export; Phase 117 migration not required." \
+              | tee artifacts/mglru-procfs-migration-apply.txt
+          else
+            python3 -m py_compile scripts/117_migrate_mglru_trace_to_proc.py
+            python3 scripts/117_migrate_mglru_trace_to_proc.py "$KERNEL" \
+              2>&1 | tee artifacts/mglru-procfs-migration-apply.txt
+          fi
+
+          python3 -m py_compile scripts/116_apply_a52_scheduler_recorder.py
+          python3 scripts/116_apply_a52_scheduler_recorder.py "$KERNEL" \
+            2>&1 | tee artifacts/a52-scheduler-recorder-apply.txt
+
+          python3 -m py_compile scripts/104_apply_fuse_740_upstream_passthrough.py
+          python3 scripts/104_apply_fuse_740_upstream_passthrough.py "$KERNEL" \
+            2>&1 | tee artifacts/fuse-740-native-apply.txt
+
+          git -C "$KERNEL" diff --check
+          grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' "$KERNEL/include/uapi/linux/fuse.h"
+          grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+
+      - name: Require usable source boundary
+        run: |
+          set -Eeuo pipefail
+          echo "P134 cache hit: ${{ steps.p134_source.outputs.cache-hit }}"
+          echo "prebuild cache hit: ${{ steps.prebuild_source.outputs.cache-hit }}"
+          echo "base351 cache hit: ${{ steps.base351_source.outputs.cache-hit }}"
+          test -d workspace/touchgrass-a52xq/.git
+
+          if [ "${{ steps.p134_source.outputs.cache-hit }}" = "true" ]; then
+            grep -Fq 'static void dev_map_hash_remove_netdev' workspace/touchgrass-a52xq/kernel/bpf/devmap.c
+          else
+            grep -Fq '#define FUSE_KERNEL_MINOR_VERSION 40' workspace/touchgrass-a52xq/include/uapi/linux/fuse.h
+            grep -Fq 'A52 MGLRU Efficiency P4: clear seed PTE before look-around bailouts' workspace/touchgrass-a52xq/mm/vmscan.c
+            grep -Fq 'A52 CASS P3: uclamp-fit + sync-waker + no task double-count active' workspace/touchgrass-a52xq/kernel/sched/cass.c
+            grep -Fq 'A52 A619 GPU UV P3: 565 MHz one ARC corner' workspace/touchgrass-a52xq/drivers/gpu/msm/kgsl_gmu.c
+          fi
+
+      - name: Rebuild prepared P134 boundary on cache miss
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+            "$KERNEL" artifacts/f2fs-stable325-p1.txt artifacts/f2fs-stable325-patches
+          python3 scripts/119_apply_f2fs_gc_merge_p2.py "$KERNEL"
+          python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py "$KERNEL" artifacts/f2fs-inmem-p3a
+
+          mkdir -p artifacts/pre-atgc-p3b/fs artifacts/pre-atgc-p3b/include/trace/events
+          cp -a "$KERNEL/fs/f2fs" artifacts/pre-atgc-p3b/fs/
+          cp -a "$KERNEL/include/trace/events/f2fs.h" artifacts/pre-atgc-p3b/include/trace/events/
+
+          python3 scripts/122_apply_f2fs_atgc_p3b.py "$KERNEL" artifacts/f2fs-atgc-p3b
+          python3 scripts/123_enable_f2fs_atgc_p3c.py "$KERNEL" artifacts/f2fs-atgc-p3c
+          python3 scripts/124_apply_f2fs_atgc_p4.py "$KERNEL" artifacts/f2fs-atgc-p4
+          python3 scripts/125_apply_f2fs_block_age_p5a.py "$KERNEL" artifacts/f2fs-block-age-p5a
+          python3 scripts/126_enable_f2fs_block_age_p5b.py "$KERNEL" artifacts/f2fs-block-age-p5b
+          python3 scripts/127_apply_f2fs_gc_cp_p6.py "$KERNEL" artifacts/f2fs-gc-cp-p6
+          python3 scripts/128_apply_f2fs_correctness_p7.py "$KERNEL" artifacts/f2fs-correctness-p7
+          python3 scripts/129_apply_bpf_bootfix_p1.py "$KERNEL" artifacts/bpf-bootfix-p1
+          python3 scripts/134_apply_bpf_devmap_rndis_clean_fix.py "$KERNEL" artifacts/bpf-devmap-rndis-clean-p134
+
+          git -C "$KERNEL" diff --check
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+          grep -Fq 'F2FS_MOUNT_ATGC' "$KERNEL/fs/f2fs/f2fs.h"
+          grep -Fq 'F2FS_MOUNT_AGE_EXTENT_CACHE' "$KERNEL/fs/f2fs/f2fs.h"
+
+      - name: Save rebuilt P134 source cache
+        if: steps.p134_source.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: workspace/touchgrass-a52xq
+          key: a52xq-base35633887441-p134-src-v1-${{ runner.os }}-${{ hashFiles('scripts/118_apply_f2fs_stable_325_p1.sh', 'scripts/119_apply_f2fs_gc_merge_p2.py', 'scripts/121_apply_f2fs_inmem_curseg_p3a.py', 'scripts/122_apply_f2fs_atgc_p3b.py', 'scripts/123_enable_f2fs_atgc_p3c.py', 'scripts/124_apply_f2fs_atgc_p4.py', 'scripts/125_apply_f2fs_block_age_p5a.py', 'scripts/126_enable_f2fs_block_age_p5b.py', 'scripts/127_apply_f2fs_gc_cp_p6.py', 'scripts/128_apply_f2fs_correctness_p7.py', 'scripts/129_apply_bpf_bootfix_p1.py', 'scripts/134_apply_bpf_devmap_rndis_clean_fix.py') }}
+
+      - name: Prepare P166 source-cache identity
+        id: p166_identity
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/166_apply_fuse_priority_f2fs_stable.py" \
+            -o /tmp/166_apply_fuse_priority_f2fs_stable.py
+          python3 -m py_compile /tmp/166_apply_fuse_priority_f2fs_stable.py
+
+          SHA="$(sha256sum /tmp/166_apply_fuse_priority_f2fs_stable.py | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "P166 source-cache script sha256=$SHA"
+
+      - name: Restore exact P166 applied-source snapshot
+        id: p166_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p166-source.tar.zst
+          key: a52xq-p166-source-v2-r596125-${{ steps.p166_identity.outputs.sha }}
+
+      - name: Restore boot-tested P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        id: p165_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p165-source.tar.zst
+          key: a52xq-p165-source-v2-r596125-3b66837b0643b90eb34dc0f6ad527e52bf77b0b4
+
+      - name: Activate cached P165 or P166 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit == 'true' || steps.p165_source_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+
+          if [ "${{ steps.p166_source_cache.outputs.cache-hit }}" = "true" ]; then
+            SNAP=.phase-cache/p166-source.tar.zst
+            LEVEL=P166
+          else
+            SNAP=.phase-cache/p165-source.tar.zst
+            LEVEL=P165
+          fi
+
+          test -s "$SNAP"
+          rm -rf workspace/touchgrass-a52xq artifacts
+          tar --zstd -xf "$SNAP"
+          mkdir -p artifacts
+
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          git -C "$KERNEL" diff --check
+
+          if [ "$LEVEL" = P166 ]; then
+            grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'fc->writeback_cache = 0;' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'CP_XATTR_DIR' "$KERNEL/fs/f2fs/f2fs.h"
+          else
+            ! grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+            grep -Fq 'FUSE_NO_OPEN_SUPPORT |' "$KERNEL/fs/fuse/inode.c"
+          fi
+
+          echo "Activated cached source boundary: $LEVEL"
+
+      - name: Replay production chain through boot-tested P149
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          python3 scripts/135_remove_project_diagnostics.py workspace/touchgrass-a52xq artifacts/production-nodiag-p135
+          python3 scripts/136_apply_a619_kgsl_p6_pm.py workspace/touchgrass-a52xq
+          python3 scripts/137_apply_a52_boot_rescue.py workspace/touchgrass-a52xq
+          python3 scripts/138_apply_a619_kgsl_p7_cp_init.py workspace/touchgrass-a52xq
+          python3 scripts/139_apply_mglru_modern_p4_pagecache.py workspace/touchgrass-a52xq
+          python3 scripts/140_apply_schedutil_iowait_android17_p1.py workspace/touchgrass-a52xq
+          python3 scripts/141_apply_schedutil_android17_limits_sync_p2.py workspace/touchgrass-a52xq
+          python3 scripts/142_apply_uclamp_android17_reinc_idle_p3.py workspace/touchgrass-a52xq
+          python3 scripts/143_apply_uclamp_android17_rq_idle_p4.py workspace/touchgrass-a52xq
+          python3 scripts/145_apply_teo_baseline_p1.py workspace/touchgrass-a52xq backports/145_teo_4.19.c
+          python3 scripts/146_apply_teo_active_recentfix_p2.py workspace/touchgrass-a52xq
+          python3 scripts/148_apply_qcom_lpm_fixpack_p1.py workspace/touchgrass-a52xq
+          python3 scripts/149_apply_ufs_runtime_autosuspend_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/ufs-runtime-autosuspend-p149.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'A52 UFS P149: precise devfreq + runtime-PM autosuspend' "$KERNEL/drivers/scsi/ufs/ufshcd.c"
+          grep -Fq 'A52 QCOM LPM P1: raw idle locks + short-idle tick + hotpath cleanup' "$KERNEL/drivers/cpuidle/lpm-levels.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P150 AOD power saver
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ env.PHASE_SOURCE_SHA }}/scripts/150_apply_aod_power_saver_p1.py" \
+            -o /tmp/150_apply_aod_power_saver_p1.py
+
+          python3 -m py_compile /tmp/150_apply_aod_power_saver_p1.py
+          python3 /tmp/150_apply_aod_power_saver_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/aod-power-saver-p150.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          COMMON="$KERNEL/techpack/display/msm/samsung/ss_dsi_panel_common.c"
+
+          grep -Fq 'A52 AOD P150: FC3 60-to-30nit cap + duplicate LPM TX suppression' "$PANEL"
+          grep -Fq 'if (requested == LPM_60NIT)' "$PANEL"
+          grep -Fq 'return LPM_30NIT;' "$PANEL"
+          grep -Fq 'static int a52_aod_last_lpm_bl[MAX_DISPLAY_NDX];' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate(vdd, lpm_bl_level)' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
+          test "$(grep -Fc 'int lpm_bl_level = a52_aod_effective_lpm_bl_level(vdd);' "$PANEL")" -eq 2
+          test "$(grep -Fc 'switch (lpm_bl_level) {' "$PANEL")" -eq 2
+          grep -Fq 'case LPM_30NIT:' "$PANEL"
+          grep -Fq 'case LPM_60NIT:' "$PANEL"
+          grep -Fq 'vdd->panel_lpm.esd_recovery' "$PANEL"
+          grep -Fq 'unlikely(vdd->is_factory_mode)' "$PANEL"
+          grep -Fq 'Hz : 30Hz' "$COMMON"
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- \
+            techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c \
+            > artifacts/aod-power-saver-p150.diff
+
+      - name: Apply boot-proven P151 deferred init + first async batch
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ env.PHASE_SOURCE_SHA }}/scripts/151_apply_boot_async_deferred_init_p1.py" \
+            -o /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 -m py_compile /tmp/151_apply_boot_async_deferred_init_p1.py
+          python3 /tmp/151_apply_boot_async_deferred_init_p1.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-deferred-p151.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/nfc/sec_nfc.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P151 */' "$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P152 second selective async peripheral batch
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ env.PHASE_SOURCE_SHA }}/scripts/152_apply_boot_async_peripherals_p2.py" \
+            -o /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 -m py_compile /tmp/152_apply_boot_async_peripherals_p2.py
+          python3 /tmp/152_apply_boot_async_peripherals_p2.py workspace/touchgrass-a52xq \
+            | tee artifacts/boot-async-peripherals-p152.txt
+
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/sensors/sx9360.c"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS, /* A52 P152 */' "$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+          git -C "$KERNEL" diff --check
+
+          git -C "$KERNEL" diff -- \
+            arch/arm64/configs/a52xq_defconfig \
+            drivers/nfc/sec_nfc.c \
+            drivers/fingerprint/et7xx-spi.c \
+            drivers/sensors/sx9360.c \
+            drivers/vibrator/dc/dc_vibrator.c \
+            > artifacts/boot-async-p151-p152.diff
+      - name: Apply P153 Binder Linux 4.19 MM compatibility
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/153_patch_clang22_binder_mm_compat.py" \
+            -o /tmp/153_patch_clang22_binder_mm_compat.py
+          python3 -m py_compile /tmp/153_patch_clang22_binder_mm_compat.py
+          python3 /tmp/153_patch_clang22_binder_mm_compat.py workspace/touchgrass-a52xq \
+            | tee artifacts/clang22-binder-mm-compat.txt
+
+          BINDER=workspace/touchgrass-a52xq/drivers/android/binder_alloc.c
+          grep -Fq 'A52 Clang22 P153: Linux 4.19 binder_page_insert MM compat' "$BINDER"
+          ! grep -Fq 'lock_vma_under_rcu(mm, addr)' "$BINDER"
+          ! grep -Fq 'vma_lookup(mm, addr)' "$BINDER"
+          git -C workspace/touchgrass-a52xq diff --check
+      - name: Apply P154 Lagoon GPU clock Clang 22 compatibility
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/154_patch_clang22_lagoon_clock_ub.py" \
+            -o /tmp/154_patch_clang22_lagoon_clock_ub.py
+          python3 -m py_compile /tmp/154_patch_clang22_lagoon_clock_ub.py
+          python3 /tmp/154_patch_clang22_lagoon_clock_ub.py workspace/touchgrass-a52xq \
+            | tee artifacts/clang22-lagoon-clock-compat.txt
+
+          GPUCC=workspace/touchgrass-a52xq/drivers/clk/qcom/gpucc-lagoon.c
+          CLK=workspace/touchgrass-a52xq/drivers/clk/clk.c
+          grep -Fq 'DEFINE_VDD_REGULATORS(vdd_gx, VDD_GX_NUM, 1, vdd_gx_corner)' "$GPUCC"
+          grep -Fq 'DEFINE_VDD_REGULATORS(vdd_mx, VDD_NUM, 1, vdd_corner)' "$GPUCC"
+          grep -Fq 'if (!ret)' "$CLK"
+          git -C workspace/touchgrass-a52xq diff --check
+      - name: Restore pinned Clang 22 toolchain cache
+        id: clang22_toolchain_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .toolchains/aosp-clang
+          key: a52xq-aosp-clang-r596125-${{ runner.os }}-${{ env.AOSP_CLANG_COMMIT }}-v1
+      - name: Install pinned AOSP Clang 22 r596125
+        run: |
+          set -Eeuo pipefail
+
+          KERNEL="$GITHUB_WORKSPACE/workspace/touchgrass-a52xq"
+          TOOLCHAIN_REPO="$GITHUB_WORKSPACE/.toolchains/aosp-clang"
+          OLD_CLANG="$KERNEL/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
+
+          mkdir -p "$GITHUB_WORKSPACE/.toolchains" artifacts
+          NEW_CLANG="$TOOLCHAIN_REPO/$AOSP_CLANG_REVISION/bin/clang"
+          CACHE_OK=0
+          if [ -x "$NEW_CLANG" ] && [ -d "$TOOLCHAIN_REPO/.git" ]; then
+            if [ "$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD 2>/dev/null || true)" = "$AOSP_CLANG_COMMIT" ]; then
+              CACHE_OK=1
+              echo "Using cached AOSP Clang 22 toolchain"
+            fi
+          fi
+
+          if [ "$CACHE_OK" -ne 1 ]; then
+            rm -rf "$TOOLCHAIN_REPO"
+            git init -q "$TOOLCHAIN_REPO"
+            git -C "$TOOLCHAIN_REPO" remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+            git -C "$TOOLCHAIN_REPO" sparse-checkout init --cone
+            git -C "$TOOLCHAIN_REPO" sparse-checkout set "$AOSP_CLANG_REVISION"
+            git -C "$TOOLCHAIN_REPO" -c protocol.version=2 fetch --depth=1 --filter=blob:none origin "$AOSP_CLANG_COMMIT"
+            git -C "$TOOLCHAIN_REPO" checkout --quiet --detach FETCH_HEAD
+          fi
+          test -x "$NEW_CLANG"
+          test "$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD)" = "$AOSP_CLANG_COMMIT"
+
+          {
+            echo "=== ORIGINAL P152 COMPILER ==="
+            "$OLD_CLANG" --version || true
+            echo
+            echo "=== EXPERIMENT COMPILER ==="
+            "$NEW_CLANG" --version
+            echo
+            echo "aosp_clang_commit=$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD)"
+          } | tee artifacts/clang22-toolchain.txt
+
+          "$NEW_CLANG" --version | grep -Fq 'r596125'
+          "$NEW_CLANG" --version | grep -Eq 'clang version 22([.]| )'
+          echo "A52_CLANG_OVERRIDE=$NEW_CLANG" >> "$GITHUB_ENV"
+
+      - name: Save pinned Clang 22 toolchain cache
+        if: steps.clang22_toolchain_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .toolchains/aosp-clang
+          key: a52xq-aosp-clang-r596125-${{ runner.os }}-${{ env.AOSP_CLANG_COMMIT }}-v1
+
+      - name: Override compiler and LLD, retain GNU cross tools
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/common.sh")
+          s = p.read_text()
+          old = '  local clang="$KERNEL_DIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"'
+          new = '  local clang="${A52_CLANG_OVERRIDE:-$KERNEL_DIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang}"'
+          if s.count(old) != 1:
+              raise SystemExit(f"common.sh clang anchor count: {s.count(old)}")
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+          grep -Fq 'A52_CLANG_OVERRIDE' scripts/common.sh
+          grep -Fq 'toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-' scripts/common.sh
+          {
+            echo "Compiler override: $A52_CLANG_OVERRIDE"
+            echo "GNU cross/binutils retained:"
+            grep -E 'export (PATH|CROSS_COMPILE)=' scripts/common.sh
+          } | tee artifacts/clang22-override-audit.txt
+      - name: Enable ThinLTO and minimum LLVM linker tools
+        run: |
+          set -Eeuo pipefail
+
+          KERNEL=workspace/touchgrass-a52xq
+          CLANG_BIN="$(dirname "$A52_CLANG_OVERRIDE")"
+
+          test -x "$CLANG_BIN/ld.lld"
+          test -x "$CLANG_BIN/llvm-ar"
+          test -x "$CLANG_BIN/llvm-nm"
+          echo "A52_LLD_OVERRIDE=$CLANG_BIN/ld.lld" >> "$GITHUB_ENV"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/common.sh')
+          s = p.read_text()
+
+          path_old = '  export PATH="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin:$PATH"\n'
+          path_new = ('  if [ -n "${A52_LLD_OVERRIDE:-}" ]; then\n'
+                      '    export PATH="$(dirname "$A52_LLD_OVERRIDE"):$PATH"\n'
+                      '  fi\n'
+                      + path_old)
+          if s.count(path_old) != 1:
+              raise SystemExit(f'common.sh PATH anchor count: {s.count(path_old)}')
+          s = s.replace(path_old, path_new, 1)
+
+          make_old = '      CONFIG_BUILD_ARM64_DT_OVERLAY=y \\\n'
+          make_new = ('      CONFIG_BUILD_ARM64_DT_OVERLAY=y \\\n'
+                      '      LD="${A52_LLD_OVERRIDE:-${CROSS_COMPILE}ld}" \\\n')
+          if s.count(make_old) != 2:
+              raise SystemExit(f'common.sh make anchor count: {s.count(make_old)}')
+          s = s.replace(make_old, make_new)
+          p.write_text(s)
+          PY
+
+          "$KERNEL/scripts/config" --file "$KERNEL/arch/arm64/configs/a52xq_defconfig" \
+            -d LTO_NONE -e LTO_CLANG -e THINLTO \
+            -d CFI_CLANG -d CFI -d CFI_PERMISSIVE -d CFI_CLANG_SHADOW
+
+          {
+            echo '=== Optimization ==='
+            grep -Fx 'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+            echo '=== Requested LTO config ==='
+            grep -E 'CONFIG_(LTO|THINLTO|CFI)' "$KERNEL/arch/arm64/configs/a52xq_defconfig" || true
+            echo '=== LLVM tools ==='
+            "$CLANG_BIN/ld.lld" --version | head -1
+            "$CLANG_BIN/llvm-ar" --version | head -1
+            "$CLANG_BIN/llvm-nm" --version | head -1
+          } | tee artifacts/thinlto-request-audit.txt
+
+          # Keep ThinLTO's backend cache outside out/, because common.sh
+          # deletes the whole output tree at the start of every build.
+          echo "A52_THINLTO_CACHE_DIR=$GITHUB_WORKSPACE/.thinlto-link-cache" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/.thinlto-link-cache"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          makefile = Path('workspace/touchgrass-a52xq/Makefile')
+          s = makefile.read_text()
+          old = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=.thinlto-cache'
+          new = 'KBUILD_LDFLAGS\t+= --thinlto-cache-dir=$(A52_THINLTO_CACHE_DIR)'
+          if new in s:
+              print('[already] ThinLTO cache-dir uses A52_THINLTO_CACHE_DIR')
+          elif s.count(old) == 1:
+              makefile.write_text(s.replace(old, new, 1))
+              print('[patched] ThinLTO cache-dir moved outside out/')
+          else:
+              raise SystemExit(
+                  f'ThinLTO cache-dir shape unknown: old={s.count(old)} new={s.count(new)}'
+              )
+
+          # LLVM 22 treats SIGPIPE from llvm-nm as a fatal diagnostic.
+          # Old Android 4.19 Kbuild uses grep -q, which exits as soon as it
+          # finds __ksymtab and closes the pipe early. Consume the full stream.
+          build = Path('workspace/touchgrass-a52xq/scripts/Makefile.build')
+          s = build.read_text()
+          old = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep -q __ksymtab; then'
+          new = 'if $(LLVM_NM) $(@D)/.tmp_$(@F) | grep __ksymtab >/dev/null; then'
+          old_count = s.count(old)
+          new_count = s.count(new)
+          if old_count:
+              build.write_text(s.replace(old, new))
+              print(f'[patched] {old_count} llvm-nm grep-q pipeline(s)')
+          elif new_count:
+              print(f'[already] {new_count} llvm-nm pipeline(s) consume full stream')
+          else:
+              raise SystemExit('LLVM_NM pipeline shape unknown')
+          PY
+      - name: Apply P156 Clang22 initcall-order repair
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/156_apply_clang22_initcall_order_fix.py" \
+            -o /tmp/156_apply_clang22_initcall_order_fix.py
+          python3 -m py_compile /tmp/156_apply_clang22_initcall_order_fix.py
+          python3 /tmp/156_apply_clang22_initcall_order_fix.py --root "$KERNEL" \
+            | tee artifacts/p156-initcall-fix.txt
+          python3 /tmp/156_apply_clang22_initcall_order_fix.py --root "$KERNEL" --check-only
+
+          F="$KERNEL/scripts/generate_initcall_order.pl"
+          grep -Fq -- '--just-symbol-name --defined-only' "$F"
+          ! grep -Fq -- '-just-symbol-name -defined-only' "$F"
+          grep -Fq 'no initcalls found while CONFIG_LTO_CLANG is active' "$F"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P159 ThinLTO cross-TU import limit
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          F="$KERNEL/Makefile"
+
+          test "$(grep -Fc -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=5' "$F")" -eq 1
+          sed -i 's/LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=5/LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=25/' "$F"
+          test "$(grep -Fc -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=25' "$F")" -eq 1
+          ! grep -Fq -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=5' "$F"
+
+          {
+            echo 'P158 ThinLTO import policy:'
+            grep -nF -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=' "$F"
+          } | tee artifacts/p159-thinlto-import25-apply.txt
+
+          git -C "$KERNEL" diff --check
+
+      - name: Enable ZRAM Zstd backend and validate writeback stack
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/160_enable_zram_zstd_writeback.py" \
+            -o /tmp/160_enable_zram_zstd_writeback.py
+
+          python3 -m py_compile /tmp/160_enable_zram_zstd_writeback.py
+          python3 /tmp/160_enable_zram_zstd_writeback.py "$KERNEL" \
+            | tee artifacts/p160-zram-zstd-writeback-apply.txt
+
+          grep -Fxq 'CONFIG_CRYPTO_ZSTD=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_ZRAM_WRITEBACK=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fxq 'CONFIG_ZRAM_LRU_WRITEBACK=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P161 ZRAM multi-comp recompression backport
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/161_apply_zram_multicomp_zstd.py" \
+            -o /tmp/161_apply_zram_multicomp_zstd.py
+
+          python3 -m py_compile /tmp/161_apply_zram_multicomp_zstd.py
+          python3 /tmp/161_apply_zram_multicomp_zstd.py "$KERNEL" \
+            | tee artifacts/p161-zram-multicomp-apply.txt
+
+          grep -Fxq 'CONFIG_ZRAM_MULTI_COMP=y' "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+          grep -Fq 'static ssize_t recompress_store' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'static ssize_t recomp_algorithm_show' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'zram_dedup_enabled(zram)' "$KERNEL/drivers/block/zram/zram_drv.c"
+          git -C "$KERNEL" diff --check
+
+      - name: Apply P162 integrated security stability efficiency fixes
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/162_apply_f2fs_atomic_fmode_write_fix.py" \
+            -o /tmp/162_apply_f2fs_atomic_fmode_write_fix.py
+
+          python3 -m py_compile /tmp/162_apply_f2fs_atomic_fmode_write_fix.py
+          python3 /tmp/162_apply_f2fs_atomic_fmode_write_fix.py "$KERNEL" \
+            | tee artifacts/p162-f2fs-atomic-fmode-apply.txt
+
+          FILE="$KERNEL/fs/f2fs/file.c"
+          for fn in \
+            f2fs_ioc_start_atomic_write \
+            f2fs_ioc_commit_atomic_write \
+            f2fs_ioc_start_volatile_write \
+            f2fs_ioc_release_volatile_write \
+            f2fs_ioc_abort_volatile_write; do
+            python3 - "$FILE" "$fn" <<'PY'
+          import sys
+          from pathlib import Path
+          p, name = Path(sys.argv[1]), sys.argv[2]
+          s = p.read_text()
+          sig = f"static int {name}(struct file *filp)"
+          start = s.index(sig)
+          brace = s.index("{", start)
+          depth = 0
+          end = None
+          for i in range(brace, len(s)):
+              if s[i] == "{":
+                  depth += 1
+              elif s[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit(f"{name}: unterminated function")
+          block = s[start:end]
+          guard = "if (!(filp->f_mode & FMODE_WRITE))\n\t\treturn -EBADF;"
+          if block.count(guard) != 1:
+              raise SystemExit(f"{name}: expected exactly one FMODE_WRITE/-EBADF guard")
+          if block.index(guard) > block.index("if (!inode_owner_or_capable(inode))"):
+              raise SystemExit(f"{name}: guard is after ownership check")
+          PY
+          done
+
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff -- fs/f2fs/file.c \
+            > artifacts/p162-f2fs-atomic-fmode.diff
+          git -C "$KERNEL" diff --binary > artifacts/p162-final.diff
+          test -s artifacts/p162-final.diff
+
+          {
+            echo "phase=P162"
+            echo "baseline_sha=a8389945c3dc63ec401287b92293f33d6ffa3d65"
+            echo "upstream_A1=700f3a7c7fa5764c9f24bbf7c78e0b6e479fa653"
+            echo "fixes=A1,A6,B2,C1,C2,C4,C5,C7,D5,D6,D7,D9"
+            echo "C7_status=already_present_in_imported_uclamp_and_audited"
+            echo "C3_status=unchanged_by_this_bundle"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_workflow=${{ github.workflow }}"
+          } | tee artifacts/p162-build-info.txt
+
+      - name: Apply P165 FUSE security storage correctness bundle
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/165_apply_security_storage_correctness.py" \
+            -o /tmp/165_apply_security_storage_correctness.py
+
+          python3 -m py_compile /tmp/165_apply_security_storage_correctness.py
+          python3 /tmp/165_apply_security_storage_correctness.py "$KERNEL" \
+            | tee artifacts/p165-apply-audit.txt
+
+          git -C "$KERNEL" diff --check
+
+          {
+            echo "phase=P165"
+            echo "runtime_baseline=P162_boot_tested"
+            echo "p162_run=36977369765"
+            echo "p162_kernel_changes=retained_except_D6"
+            echo "fixes=D6_rollback,A2_BPF,A3_F2FS,B1_B4_B5_MGLRU,D2_ZRAM,A5_TCP"
+            echo "scheduler_delta=none"
+            echo "gpu_policy_delta=none"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+            echo "github_workflow=${{ github.workflow }}"
+          } | tee artifacts/p165-build-info.txt
+
+      - name: Create P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p165-source.tar.zst
+          tar --zstd -cf .phase-cache/p165-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p165-source.tar.zst
+          du -h .phase-cache/p165-source.tar.zst
+
+      - name: Save boot-tested P165 source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true' && steps.p165_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p165-source.tar.zst
+          key: a52xq-p165-source-v2-r596125-3b66837b0643b90eb34dc0f6ad527e52bf77b0b4
+
+      - name: Apply P166 FUSE priority experiment and F2FS stable continuation
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          test -s /tmp/166_apply_fuse_priority_f2fs_stable.py
+          python3 /tmp/166_apply_fuse_priority_f2fs_stable.py "$KERNEL" \
+            | tee artifacts/p166-apply-audit.txt
+
+          git -C "$KERNEL" diff --check
+
+          {
+            echo "phase=P166"
+            echo "runtime_baseline=P165_boot_and_fuse_tested"
+            echo "p165_workflow_run=37003864311"
+            echo "experiment=offer_writeback_but_prefer_upstream_passthrough"
+            echo "new_fixes=f2fs_4d9c9b7,f2fs_72c6b13"
+            echo "b3_status=audited_no_mm_state_wait"
+            echo "d3_status=audited_qcom_short_idle_tick"
+            echo "b6_status=deferred"
+            echo "scheduler_delta=none"
+            echo "gpu_policy_delta=none"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+          } | tee artifacts/p166-build-info.txt
+
+      - name: Create P166 applied-source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p166-source.tar.zst
+          tar --zstd -cf .phase-cache/p166-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p166-source.tar.zst
+          du -h .phase-cache/p166-source.tar.zst
+
+      - name: Save exact P166 applied-source snapshot
+        if: steps.p166_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p166-source.tar.zst
+          key: a52xq-p166-source-v2-r596125-${{ steps.p166_identity.outputs.sha }}
+
+      - name: Refresh P166 run provenance
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "phase=P166"
+            echo "runtime_baseline=P165_boot_and_fuse_tested"
+            echo "p165_workflow_run=37003864311"
+            echo "experiment=offer_writeback_but_prefer_upstream_passthrough"
+            echo "new_fixes=f2fs_4d9c9b7,f2fs_72c6b13"
+            echo "source_cache_p166=${{ steps.p166_source_cache.outputs.cache-hit }}"
+            echo "source_cache_p165=${{ steps.p165_source_cache.outputs.cache-hit }}"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+          } > artifacts/p166-build-info.txt
+
+      - name: Prepare P167 source-cache identity
+        id: p167_identity
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/167_apply_mglru_f2fs_correctness.py" \
+            -o /tmp/167_apply_mglru_f2fs_correctness.py
+          python3 -m py_compile /tmp/167_apply_mglru_f2fs_correctness.py
+          SHA="$(sha256sum /tmp/167_apply_mglru_f2fs_correctness.py | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "P167 script sha256=$SHA"
+
+      - name: Restore exact P167 applied-source snapshot
+        id: p167_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p167-source.tar.zst
+          key: a52xq-p167-source-v1-r596125-${{ steps.p167_identity.outputs.sha }}
+
+      - name: Activate cached P167 source snapshot
+        if: steps.p167_source_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          test -s .phase-cache/p167-source.tar.zst
+          rm -rf workspace/touchgrass-a52xq artifacts
+          tar --zstd -xf .phase-cache/p167-source.tar.zst
+          mkdir -p artifacts
+
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          git -C "$KERNEL" diff --check
+          grep -Fq 'size += max_t(long,' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'f2fs_readonly(F2FS_I_SB(inode)->sb)' "$KERNEL/fs/f2fs/inode.c"
+          grep -Fq '((u64)segment_count_main << log_blocks_per_seg)' "$KERNEL/fs/f2fs/super.c"
+          echo "Activated exact P167 source snapshot"
+
+      - name: Apply P167 MGLRU and F2FS correctness continuation
+        if: steps.p167_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s /tmp/167_apply_mglru_f2fs_correctness.py
+
+          python3 /tmp/167_apply_mglru_f2fs_correctness.py "$KERNEL" \
+            | tee artifacts/p167-apply-audit.txt
+          git -C "$KERNEL" diff --check
+
+      - name: Create P167 applied-source snapshot
+        if: steps.p167_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p167-source.tar.zst
+          tar --zstd -cf .phase-cache/p167-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p167-source.tar.zst
+          du -h .phase-cache/p167-source.tar.zst
+
+      - name: Save exact P167 applied-source snapshot
+        if: steps.p167_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p167-source.tar.zst
+          key: a52xq-p167-source-v1-r596125-${{ steps.p167_identity.outputs.sha }}
+
+      - name: Refresh P167 run provenance
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "phase=P167"
+            echo "runtime_baseline=P166_boot_and_fuse_tested"
+            echo "p166_workflow_run=37013957497"
+            echo "new_fixes=MGLRU_EVICTABLE_READ_CLAMP,2d291651,24dfe070,eb926232"
+            echo "fuse_delta=none"
+            echo "scheduler_delta=none"
+            echo "gpu_delta=none"
+            echo "source_cache_p167=${{ steps.p167_source_cache.outputs.cache-hit }}"
+            echo "source_cache_p166=${{ steps.p166_source_cache.outputs.cache-hit }}"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+          } > artifacts/p167-build-info.txt
+
+      - name: Prepare P168 source-cache identity
+        id: p168_identity
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/168_apply_storage_memory_correctness_completion.py" \
+            -o /tmp/168_apply_storage_memory_correctness_completion.py
+          python3 -m py_compile /tmp/168_apply_storage_memory_correctness_completion.py
+          SHA="$(sha256sum /tmp/168_apply_storage_memory_correctness_completion.py | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "P168 script sha256=$SHA"
+
+      - name: Restore exact P168 applied-source snapshot
+        id: p168_source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .phase-cache/p168-source.tar.zst
+          key: a52xq-p168-source-v1-r596125-${{ steps.p168_identity.outputs.sha }}
+
+      - name: Activate cached P168 source snapshot
+        if: steps.p168_source_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          test -s .phase-cache/p168-source.tar.zst
+          rm -rf workspace/touchgrass-a52xq artifacts
+          tar --zstd -xf .phase-cache/p168-source.tar.zst
+          mkdir -p artifacts
+
+          KERNEL=workspace/touchgrass-a52xq
+          test -d "$KERNEL/.git"
+          git -C "$KERNEL" diff --check
+
+          grep -Fq 'fscrypt_symlink_getattr' "$KERNEL/fs/crypto/hooks.c"
+          grep -Fq 'mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);' "$KERNEL/fs/f2fs/namei.c"
+          grep -Fq 'need_upper = need_lower' "$KERNEL/fs/f2fs/segment.h"
+          grep -Fq 'if (count <= copied)' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'atomic_long_t pages_compacted;' "$KERNEL/include/linux/zsmalloc.h"
+          echo "Activated exact P168 source snapshot"
+
+      - name: Apply P168 storage and memory correctness completion
+        if: steps.p168_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s /tmp/168_apply_storage_memory_correctness_completion.py
+
+          python3 /tmp/168_apply_storage_memory_correctness_completion.py "$KERNEL" \
+            | tee artifacts/p168-apply-audit.txt
+          git -C "$KERNEL" diff --check
+
+      - name: Create P168 applied-source snapshot
+        if: steps.p168_source_cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .phase-cache
+          rm -f .phase-cache/p168-source.tar.zst
+          tar --zstd -cf .phase-cache/p168-source.tar.zst \
+            workspace/touchgrass-a52xq artifacts
+          test -s .phase-cache/p168-source.tar.zst
+          du -h .phase-cache/p168-source.tar.zst
+
+      - name: Save exact P168 applied-source snapshot
+        if: steps.p168_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .phase-cache/p168-source.tar.zst
+          key: a52xq-p168-source-v1-r596125-${{ steps.p168_identity.outputs.sha }}
+
+      - name: Refresh P168 run provenance
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "phase=P168"
+            echo "runtime_baseline=P167_boot_and_fuse_tested"
+            echo "p167_workflow_run=37027523157"
+            echo "code_changes=7"
+            echo "f2fs_fixes=8377a6af,83def434,6cc20869,bccae81d"
+            echo "fscrypt_dependency=symlink_getattr"
+            echo "zram_fix=26df52b3"
+            echo "zsmalloc_fix=638c9546"
+            echo "p118_semantic_closures=3506e1b8,c1ea7a86"
+            echo "source_cache_p168=${{ steps.p168_source_cache.outputs.cache-hit }}"
+            echo "source_cache_p167=${{ steps.p167_source_cache.outputs.cache-hit }}"
+            echo "scheduler_delta=none"
+            echo "gpu_delta=none"
+            echo "fuse_delta=none"
+            echo "github_sha=${{ github.sha }}"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_number=${{ github.run_number }}"
+          } > artifacts/p168-build-info.txt
+
+      - name: Teardown recorders and diagnostic markers
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/159_teardown_recorders_and_markers.py" \
+            -o /tmp/159_teardown_recorders_and_markers.py
+
+          python3 -m py_compile /tmp/159_teardown_recorders_and_markers.py
+          python3 /tmp/159_teardown_recorders_and_markers.py \
+            --root "$KERNEL" \
+            --report artifacts/p159-diagnostic-teardown.txt
+
+          test ! -e "$KERNEL/drivers/misc/a52_p155_esd_recorder.c"
+          test ! -e "$KERNEL/include/linux/a52_p155_esd_recorder.h"
+          ! grep -R -nE 'a52_p155_|mglru_rec_|mglru_diag_|a52_sched_diag_|A52_R48|R48_REC' \
+            "$KERNEL/drivers" "$KERNEL/kernel" "$KERNEL/mm" "$KERNEL/fs" "$KERNEL/techpack" \
+            > artifacts/p159-recorder-survivors.txt
+          git -C "$KERNEL" diff --check
+
+      - name: Check out optional P169 sample profile from current branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .autofdo-input
+          sparse-checkout: profiles
+
+      - name: Apply P169 AutoFDO Clang 22 ThinLTO Kbuild port
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/169_apply_autofdo_clang22.py" \
+            -o /tmp/169_apply_autofdo_clang22.py
+          python3 -m py_compile /tmp/169_apply_autofdo_clang22.py
+          python3 /tmp/169_apply_autofdo_clang22.py "$KERNEL" \
+            | tee artifacts/p169-autofdo-port.txt
+
+          # Ensure source diff/cache identity includes this newly added file.
+          git -C "$KERNEL" add -N scripts/Makefile.autofdo
+          git -C "$KERNEL" diff --check
+          test -s "$KERNEL/scripts/Makefile.autofdo"
+
+          INPUT="$GITHUB_WORKSPACE/.autofdo-input/profiles/a52xq.autofdo"
+          MODE=TRAINING
+          PROFILE_SHA=none
+          if [ -e "$INPUT" ]; then
+            test -s "$INPUT"
+            mkdir -p "$GITHUB_WORKSPACE/.profiles"
+            cp "$INPUT" "$GITHUB_WORKSPACE/.profiles/a52xq.autofdo"
+            PROFILE="$GITHUB_WORKSPACE/.profiles/a52xq.autofdo"
+            BIN="$(dirname "$A52_CLANG_OVERRIDE")"
+            test -x "$BIN/llvm-profdata"
+            "$BIN/llvm-profdata" show --sample "$PROFILE" > artifacts/p169-profile-inspect.txt
+            test -s artifacts/p169-profile-inspect.txt
+            # Fail closed if the profile cannot even be read by Clang 22.
+            printf 'int a52_afdo_probe(void) { return 1; }\n' | \
+              "$A52_CLANG_OVERRIDE" --target=aarch64-linux-gnu \
+                -fprofile-sample-use="$PROFILE" -x c -c -o /tmp/p169-profile-probe.o -
+            test -s /tmp/p169-profile-probe.o
+            PROFILE_SHA="$(sha256sum "$PROFILE" | awk '{print $1}')"
+            echo "CLANG_AUTOFDO_PROFILE=$PROFILE" >> "$GITHUB_ENV"
+            MODE=PROFILED
+          fi
+
+          echo "A52_AUTOFDO_MODE=$MODE" >> "$GITHUB_ENV"
+          echo "A52_AUTOFDO_PROFILE_SHA=$PROFILE_SHA" >> "$GITHUB_ENV"
+          {
+            echo "p169_mode=$MODE"
+            echo "aosp_clang=$AOSP_CLANG_REVISION"
+            echo "thinlto=yes"
+            echo "thinlto_import_limit=25"
+            echo "sample_profile_sha256=$PROFILE_SHA"
+            echo "source_branch=${{ github.ref_name }}"
+            echo "source_sha=${{ github.sha }}"
+          } | tee artifacts/p169-autofdo-selection.txt
+
+      - name: P168 E2 capture final binary source diff
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          git -C "$KERNEL" diff --check
+          git -C "$KERNEL" diff --binary --no-ext-diff > artifacts/p168-final.diff
+          test -s artifacts/p168-final.diff
+          sha256sum artifacts/p168-final.diff | tee artifacts/p168-final-diff-sha256.txt
+
+      - name: P168 E3 extend build provenance
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          {
+            echo "kernel_head=$(git -C "$KERNEL" rev-parse HEAD)"
+            echo "kernel_diff_sha256=$(sha256sum artifacts/p168-final.diff | awk '{print $1}')"
+            echo "defconfig_sha256=$(sha256sum "$KERNEL/arch/arm64/configs/a52xq_defconfig" | awk '{print $1}')"
+            echo "aosp_clang_revision=$AOSP_CLANG_REVISION"
+            echo "aosp_clang_commit=$AOSP_CLANG_COMMIT"
+          } >> artifacts/p168-build-info.txt
+
+      - name: Compute P159 built-output cache key
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          # Key the final-output cache to the actual patched kernel tree,
+          # final defconfig, build wrapper and pinned toolchain identity.
+          # Workflow-only audit/package edits therefore reuse the same build.
+          {
+            git -C "$KERNEL" diff --binary
+            sha256sum "$KERNEL/arch/arm64/configs/a52xq_defconfig"
+            sha256sum scripts/common.sh
+            printf '%s\n' "$AOSP_CLANG_COMMIT"
+            printf '%s\n' "${A52_AUTOFDO_PROFILE_SHA:-none}"
+            printf '%s\n' 'P169_AUTOFDO_CLANG22_THINLTO_V1'
+          } > /tmp/p159-build-inputs.txt
+
+          SIG="$(sha256sum /tmp/p159-build-inputs.txt | awk '{print $1}')"
+          KEY="a52xq-p169-autofdo-v1-built-r596125-${SIG}"
+          echo "P159_BUILD_CACHE_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "p159_build_cache_key=$KEY" | tee artifacts/p159-build-cache-key.txt
+
+      - name: Restore P159 built outputs
+        id: p159_built_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq/out/vmlinux
+            workspace/touchgrass-a52xq/out/.tmp_lto.lds
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/System.map
+            workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/boot-async-p152-build.log
+          key: ${{ env.P159_BUILD_CACHE_KEY }}
+
+      - name: Restore ThinLTO link cache
+        id: thinlto_cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .thinlto-link-cache
+          key: a52xq-thinlto-link-r596125-p169-autofdo-v1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            a52xq-thinlto-link-r596125-p161-zram-multicomp-zstd-${{ runner.os }}-
+            a52xq-thinlto-link-r596125-
+      - name: Build integrated kernel
+        if: steps.p159_built_cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          echo '=== COMPILER USED ==='
+          "$A52_CLANG_OVERRIDE" --version
+          echo '=== CCACHE BEFORE ==='
+          ccache --show-stats || true
+          START=$(date +%s)
+          ./scripts/57_build_resukisu_susfs_manual_detection.sh \
+            2>&1 | tee artifacts/boot-async-p152-build.log
+          RC=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "kernel_build_seconds=$((END-START))"
+          echo '=== CCACHE AFTER ==='
+          ccache --show-stats || true
+          if [ "$RC" -eq 0 ]; then
+            grep -Fxq 'CONFIG_LTO_CLANG=y' workspace/touchgrass-a52xq/out/.config
+            grep -Fxq 'CONFIG_THINLTO=y' workspace/touchgrass-a52xq/out/.config
+            grep -Eq 'LTO[[:space:]]+vmlinux[.]o' artifacts/boot-async-p152-build.log
+          fi
+          exit "$RC"
+
+      - name: Validate restored P159 built outputs
+        if: steps.p159_built_cache.outputs.cache-hit == 'true'
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$KERNEL/out/.tmp_lto.lds"
+          test -s "$KERNEL/out/.config"
+          test -s "$KERNEL/out/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          CONFIG_ARTIFACT="${IMAGE/Image-/config-}"
+          if [ ! -s "$CONFIG_ARTIFACT" ]; then
+            cp "$KERNEL/out/.config" "$CONFIG_ARTIFACT"
+          fi
+          test -s "$CONFIG_ARTIFACT"
+          test -s artifacts/boot-async-p152-build.log
+          grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
+          echo "P159 final build outputs restored from cache"
+
+      - name: Save P159 built outputs
+        if: steps.p159_built_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            workspace/touchgrass-a52xq/out/vmlinux
+            workspace/touchgrass-a52xq/out/.tmp_lto.lds
+            workspace/touchgrass-a52xq/out/.config
+            workspace/touchgrass-a52xq/out/System.map
+            workspace/touchgrass-a52xq/out/arch/arm64/boot/Image
+            artifacts/Image-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/config-touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core
+            artifacts/boot-async-p152-build.log
+          key: ${{ env.P159_BUILD_CACHE_KEY }}
+
+      - name: Audit P169 AutoFDO and ThinLTO integration
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          grep -Fxq 'CONFIG_AUTOFDO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y' "$KERNEL/out/.config"
+          grep -Fq 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=25' "$KERNEL/Makefile"
+          grep -Fq -- '-fdebug-info-for-profiling' "$KERNEL/scripts/Makefile.autofdo"
+          grep -Fq -- '--lto-sample-profile=' "$KERNEL/scripts/Makefile.autofdo"
+          if [ "$A52_AUTOFDO_MODE" = PROFILED ]; then
+            test -n "${CLANG_AUTOFDO_PROFILE:-}"
+            test -s "$CLANG_AUTOFDO_PROFILE"
+            test "$A52_AUTOFDO_PROFILE_SHA" = "$(sha256sum "$CLANG_AUTOFDO_PROFILE" | awk '{print $1}')"
+          else
+            test "$A52_AUTOFDO_MODE" = TRAINING
+            test -z "${CLANG_AUTOFDO_PROFILE:-}"
+          fi
+          {
+            echo "P169 AutoFDO Kbuild: PASS"
+            echo "Mode: $A52_AUTOFDO_MODE"
+            echo "Profile sha256: $A52_AUTOFDO_PROFILE_SHA"
+            echo "Clang22 r596125 + ThinLTO import25 retained"
+            echo "Production/performance/boot validation: NOT YET PROVEN"
+          } | tee artifacts/p169-autofdo-audit.txt
+
+      - name: Prove P159 initcall table is populated
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          VMLINUX="$KERNEL/out/vmlinux"
+          LTO_LDS="$KERNEL/out/.tmp_lto.lds"
+          LLVM_NM="$(dirname "$A52_CLANG_OVERRIDE")/llvm-nm"
+          LLVM_READELF="$(dirname "$A52_CLANG_OVERRIDE")/llvm-readelf"
+
+          test -s "$VMLINUX"
+          test -s "$LTO_LDS"
+
+          COUNT="$(grep -cF '*(' "$LTO_LDS")"
+          echo "lto_initcall_entries=$COUNT"
+          test "$COUNT" -ge 500
+
+          "$LLVM_NM" -n "$VMLINUX" > artifacts/p159-vmlinux-nm.txt
+          START="$(awk '$3=="__initcall_start"{print $1; exit}' artifacts/p159-vmlinux-nm.txt)"
+          END="$(awk '$3=="__initcall_end"{print $1; exit}' artifacts/p159-vmlinux-nm.txt)"
+          test -n "$START"
+          test -n "$END"
+          test "$START" != "$END"
+
+          "$LLVM_READELF" -S "$VMLINUX" > artifacts/p159-vmlinux-sections.txt
+          LEFT="$(grep -Ec '\.initcall[^ ]*\.init\.\.' artifacts/p159-vmlinux-sections.txt || true)"
+          test "$LEFT" -eq 0
+
+          {
+            echo "P159 INITCALL ORDER: PASS"
+            echo "tmp_lto_entries=$COUNT"
+            echo "__initcall_start=$START"
+            echo "__initcall_end=$END"
+            echo "leftover_unique_initcall_sections=$LEFT"
+            echo
+            sed -n '1,80p' "$LTO_LDS"
+          } | tee artifacts/p159-initcall-audit.txt
+
+          cp "$LTO_LDS" artifacts/p159-tmp_lto.lds
+
+      - name: Save ThinLTO link cache
+        if: always() && steps.thinlto_cache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .thinlto-link-cache
+          key: a52xq-thinlto-link-r596125-p169-autofdo-v1-${{ runner.os }}-${{ github.sha }}
+
+      - name: Audit retained production functionality after teardown
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          PANEL="$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          NFC="$KERNEL/drivers/nfc/sec_nfc.c"
+          FP="$KERNEL/drivers/fingerprint/et7xx-spi.c"
+          GRIP="$KERNEL/drivers/sensors/sx9360.c"
+          VIB="$KERNEL/drivers/vibrator/dc/dc_vibrator.c"
+          UFS="$KERNEL/drivers/scsi/ufs/ufshcd.c"
+
+          test -s "$IMAGE"
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$CFG"
+
+          grep -Fxq 'CONFIG_DEFERRED_STRUCT_PAGE_INIT=y' "$CFG"
+          grep -Fxq 'CONFIG_SPARSEMEM=y' "$CFG"
+          grep -Fxq 'CONFIG_NO_BOOTMEM=y' "$CFG"
+
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS' "$NFC"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS' "$FP"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS' "$GRIP"
+          grep -Fq 'PROBE_PREFER_ASYNCHRONOUS' "$VIB"
+
+          grep -Fq 'a52_aod_effective_lpm_bl_level' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_is_duplicate' "$PANEL"
+          grep -Fq 'a52_aod_lpm_bl_cache(vdd, lpm_bl_level);' "$PANEL"
+          grep -Fq '#define UFSHCD_AUTO_SUSPEND_DELAY_MS 2000' "$UFS"
+          grep -Fq 'static void dev_map_hash_remove_netdev' "$KERNEL/kernel/bpf/devmap.c"
+
+          # Diagnostic teardown invariants.
+          test ! -e "$KERNEL/drivers/misc/a52_p155_esd_recorder.c"
+          test ! -e "$KERNEL/include/linux/a52_p155_esd_recorder.h"
+          ! grep -R -nE 'a52_p155_|mglru_rec_|mglru_diag_|a52_sched_diag_|A52_R48|R48_REC' \
+            "$KERNEL/drivers" "$KERNEL/kernel" "$KERNEL/mm" "$KERNEL/fs" "$KERNEL/techpack"
+
+          git -C "$KERNEL" diff --check
+          echo "P159 functional retention + diagnostic teardown: PASS" \
+            | tee artifacts/p159-clean-functional-audit.txt
+
+      - name: Audit inherited P162 bundle with P166 FUSE override
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          FILE="$KERNEL/fs/f2fs/file.c"
+
+          echo 'P166: skip mutating P162 re-apply; audit inherited source non-destructively' \
+            | tee artifacts/p162-f2fs-atomic-fmode-postbuild-audit.txt
+          git -C workspace/touchgrass-a52xq diff --check
+
+          grep -Fq 'FMODE_WRITE' "$FILE"
+          grep -Fq 'return -EBADF;' "$FILE"
+          grep -Fq 'FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'fc->writeback_cache = 0;' "$KERNEL/fs/fuse/inode.c"
+          grep -Fq 'f2fs_init_age_extent_tree(inode);' "$KERNEL/fs/f2fs/namei.c"
+          grep -Fq 'bool eevdf_reweight = eevdf && old_weight != weight;' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'eevdf_cancel_protect_slice(se);' "$KERNEL/kernel/sched/fair.c"
+          grep -Fq 'cpu_isolated(cpu)' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'task_fits_max(p, cpu)' "$KERNEL/kernel/sched/cass.c"
+          grep -Fq 'if (success || !min_ttl || sc->order)' "$KERNEL/mm/vmscan.c"
+          grep -Fq 'a52_a619_uv_disable_locked' "$KERNEL/drivers/gpu/msm/kgsl_gmu.c"
+          grep -Fq 'DEVICE_ATTR_RW(a52_gpu_uv_enable)' "$KERNEL/drivers/gpu/msm/kgsl_pwrctrl.c"
+          grep -Fq 'P162 UV fail-safe before GPU reset' "$KERNEL/drivers/gpu/msm/adreno_dispatch.c"
+          grep -Fq 'if (!ss_send_cmd(vdd, TX_LPM_BL_CMD))' "$KERNEL/techpack/display/msm/samsung/S6E3FC3_AMS646YD01/ss_dsi_panel_S6E3FC3_AMS646YD01.c"
+          test -s artifacts/p162-f2fs-atomic-fmode.diff
+          test -s artifacts/p162-final.diff
+
+          {
+            echo 'P162 integrated bundle audit: PASS'
+            echo 'A1 F2FS FMODE_WRITE: PASS'
+            echo 'A6 A619 UV one-corner + stock rebuild + fault auto-disable + manual off: PASS'
+            echo 'B2 MGLRU min_ttl=0 OOM guard: PASS'
+            echo 'C1 CASS core_ctl isolation: PASS'
+            echo 'C2 CASS Samsung WALT/boost/RTG aware placement: PASS'
+            echo 'C4 EEVDF reweight only on weight change: PASS'
+            echo 'C5 EEVDF yield protection cancel: PASS'
+            echo 'C7 uclamp inactive decrement guard: PASS'
+            echo 'D5 F2FS new inode age extent init: PASS'
+            echo 'P166 supersedes D6: WRITEBACK offered, modern passthrough wins: PASS'
+            echo 'D7 UFS duplicate runtime-PM guard/put removed: PASS'
+            echo 'D9 AOD cache only after successful panel command: PASS'
+          } | tee artifacts/p162-f2fs-atomic-fmode-audit.txt
+
+      - name: Audit P166 FUSE negotiation and F2FS stable continuation
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 - <<'PY' | tee artifacts/p166-postbuild-audit.txt
+          from pathlib import Path
+          root=Path("workspace/touchgrass-a52xq")
+          inode=(root/"fs/fuse/inode.c").read_text()
+          assert "FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT" in inode
+          a=inode.index("} else if (arg->minor >= 40 &&")
+          modern=inode[a:a+2200]
+          assert "!(arg->flags & FUSE_WRITEBACK_CACHE)" not in modern
+          assert "fc->writeback_cache = 0;" in modern
+          assert "fc->passthrough = 1;" in modern
+
+          acl=(root/"fs/f2fs/acl.c").read_text()
+          filec=(root/"fs/f2fs/file.c").read_text()
+          xattr=(root/"fs/f2fs/xattr.c").read_text()
+          hdr=(root/"fs/f2fs/f2fs.h").read_text()
+          trace=(root/"include/trace/events/f2fs.h").read_text()
+          assert "static int f2fs_acl_update_mode(" in acl
+          assert "cp_reason = CP_XATTR_DIR;" in filec
+          assert "XATTR_DIR_INO" in hdr and "CP_XATTR_DIR" in hdr
+          assert "f2fs_add_ino_entry(sbi, inode->i_ino, XATTR_DIR_INO);" in xattr
+          assert "CP_XATTR_DIR" in trace
+
+          vm=(root/"mm/vmscan.c").read_text()
+          assert "wait_event_killable(lruvec->mm_state.wait" not in vm, "B3 mm_state wait unexpectedly present"
+
+          lpm=(root/"drivers/cpuidle/lpm-levels.c").read_text()
+          start=lpm.index("static int cpu_power_select(")
+          cpu_select=lpm[start:start+3500]
+          assert "bool *stop_tick" in cpu_select, "D3 stop_tick parameter missing"
+          assert "tick_nohz_get_sleep_length(&delta_next)" in cpu_select, "D3 next-event horizon missing"
+          assert "*stop_tick = false;" in cpu_select, "D3 short-idle tick retention missing"
+          assert "return cpu_power_select(dev, cpu, stop_tick);" in lpm, "D3 stop_tick plumbing missing"
+
+          print("P166 post-build audit: PASS")
+          print("fuse_writeback_offer=enabled")
+          print("modern_passthrough_priority=enabled")
+          print("f2fs_4d9c9b7=present")
+          print("f2fs_72c6b13=present")
+          print("B3=already_good")
+          print("D3=already_good")
+          PY
+
+      - name: Audit P167 MGLRU and F2FS correctness
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 - <<'PY' | tee artifacts/p167-postbuild-audit.txt
+          from pathlib import Path
+          root=Path("workspace/touchgrass-a52xq")
+
+          vm=(root/"mm/vmscan.c").read_text()
+          a=vm.index("static long get_nr_evictable(")
+          b=vm.index("\n}\n",a)+3
+          ev=vm[a:b]
+          assert "size += max_t(long," in ev, "MGLRU evictable read clamp missing"
+          assert "READ_ONCE(lrugen->nr_pages[gen][type][zone]), 0);" in ev
+
+          inode=(root/"fs/f2fs/inode.c").read_text()
+          a=inode.index("void f2fs_mark_inode_dirty_sync(")
+          b=inode.index("\n}\n",a)+3
+          dirty=inode[a:b]
+          assert "f2fs_readonly(F2FS_I_SB(inode)->sb)" in dirty
+
+          sup=(root/"fs/f2fs/super.c").read_text()
+          assert "((u64)segment_count_main << log_blocks_per_seg)" in sup
+          assert "((u64)segment_count << log_blocks_per_seg)" in sup
+
+          x=(root/"fs/f2fs/xattr.c").read_text()
+          a=x.index("static int __f2fs_setxattr(")
+          b=x.index("\n}\n",a)+3
+          xf=x[a:b]
+          same=xf.index("same:")
+          exitp=xf.index("exit:",same)
+          tail=xf[same:exitp]
+          assert tail.count("inode->i_ctime = current_time(inode);") == 1
+          assert tail.count("f2fs_mark_inode_dirty_sync(inode, true);") == 1
+          assert "f2fs_mark_inode_dirty_sync(inode, true);" not in xf[:same]
+
+          fuse=(root/"fs/fuse/inode.c").read_text()
+          assert "FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT" in fuse
+          p=fuse.index("} else if (arg->minor >= 40 &&")
+          modern=fuse[p:p+2200]
+          assert "fc->writeback_cache = 0;" in modern
+          assert "fc->passthrough = 1;" in modern
+          assert "!(arg->flags & FUSE_WRITEBACK_CACHE)" not in modern
+
+          print("P167 post-build audit: PASS")
+          print("MGLRU_evictable_read_clamp=PASS")
+          print("F2FS_2d291651=PASS")
+          print("F2FS_24dfe070=PASS")
+          print("F2FS_eb926232=PASS")
+          print("P166_FUSE_negotiation=retained")
+          PY
+
+      - name: Audit P168 storage and memory correctness completion
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+
+          python3 - <<'PY' | tee artifacts/p168-postbuild-audit.txt
+          from pathlib import Path
+          import re
+
+          root=Path("workspace/touchgrass-a52xq")
+
+          hooks=(root/"fs/crypto/hooks.c").read_text()
+          hdr=(root/"include/linux/fscrypt.h").read_text()
+          namei=(root/"fs/f2fs/namei.c").read_text()
+          inode=(root/"fs/f2fs/inode.c").read_text()
+          segh=(root/"fs/f2fs/segment.h").read_text()
+          data=(root/"fs/f2fs/data.c").read_text()
+          segment=(root/"fs/f2fs/segment.c").read_text()
+          sup=(root/"fs/f2fs/super.c").read_text()
+          xattr=(root/"fs/f2fs/xattr.c").read_text()
+          zram=(root/"drivers/block/zram/zram_drv.c").read_text()
+          zsh=(root/"include/linux/zsmalloc.h").read_text()
+          zs=(root/"mm/zsmalloc.c").read_text()
+          vm=(root/"mm/vmscan.c").read_text()
+          fuse=(root/"fs/fuse/inode.c").read_text()
+
+          assert "EXPORT_SYMBOL_GPL(fscrypt_symlink_getattr);" in hooks
+          assert hdr.count("fscrypt_symlink_getattr(const struct path *path") >= 2
+          assert "static int f2fs_encrypted_symlink_getattr(" in namei
+          assert re.search(r"\.getattr\s*=\s*f2fs_encrypted_symlink_getattr,", namei)
+
+          assert inode.count("mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);") >= 3
+          mkdir=namei[namei.index("static int f2fs_mkdir("):]
+          mkdir=mkdir[:mkdir.index("\n}\n")+3]
+          assert "mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);" in mkdir
+
+          assert "need_lower = node_secs + dent_secs + reserved_sections(sbi) + needed;" in segh
+          assert "need_upper = need_lower + (node_blocks ? 1 : 0) + (dent_blocks ? 1 : 0);" in segh
+          assert "has_curseg_enough_space(sbi, node_blocks, dent_blocks)" in segh
+
+          submit=data[data.index("int f2fs_submit_page_bio("):]
+          submit=submit[:submit.index("\n}\n")+3]
+          assert "wbc_account_io(fio->io_wbc, fio->page, PAGE_SIZE);" in submit
+          write=data[data.index("void f2fs_submit_page_write("):]
+          write=write[:write.index("\n}\n")+3]
+          assert "wbc_account_io(fio->io_wbc, fio->page, PAGE_SIZE);" in write
+
+          rb=zram[zram.index("static ssize_t read_block_state("):]
+          rb=rb[:rb.index("\n}\n")+3]
+          assert "if (count <= copied)" in rb
+
+          assert "atomic_long_t pages_compacted;" in zsh
+          assert "static unsigned long __zs_compact(" in zs
+          assert "atomic_long_add(pages_freed, &pool->stats.pages_compacted);" in zs
+          shrink=zs[zs.index("static unsigned long zs_shrinker_scan("):]
+          shrink=shrink[:shrink.index("\n}\n")+3]
+          assert "pages_freed = zs_compact(pool);" in shrink
+          mmstat=zram[zram.index("static ssize_t mm_stat_show("):]
+          mmstat=mmstat[:mmstat.index("\n}\n")+3]
+          assert "atomic_long_read(&pool_stats.pages_compacted)" in mmstat
+
+          # P118 skips that are already satisfied semantically.
+          assert "invalid journal entries nats %u sits %u" in segment
+          assert "Failed to initialize F2FS segment manager (%d)" in sup
+          assert "Failed to initialize F2FS node manager (%d)" in sup
+          assert "if (!error && S_ISDIR(inode->i_mode))" not in xattr
+          assert "if (!S_ISDIR(inode->i_mode))" in xattr
+
+          # Preserve P167/P166 and rejected legacy MGLRU behavior.
+          assert "wait_event_killable(lruvec->mm_state.wait" not in vm
+          ev=vm[vm.index("static long get_nr_evictable("):]
+          ev=ev[:ev.index("\n}\n")+3]
+          assert "size += max_t(long," in ev
+          assert "READ_ONCE(lrugen->nr_pages[gen][type][zone]), 0);" in ev
+
+          assert "FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT" in fuse
+          modern=fuse[fuse.index("} else if (arg->minor >= 40 &&"):]
+          assert "fc->writeback_cache = 0;" in modern
+          assert "fc->passthrough = 1;" in modern
+          assert "!(arg->flags & FUSE_WRITEBACK_CACHE)" not in modern
+
+          print("P168 post-build audit: PASS")
+          print("fscrypt_symlink_getattr=PASS")
+          print("F2FS_8377a6af=PASS")
+          print("F2FS_83def434=PASS")
+          print("F2FS_6cc20869=PASS")
+          print("F2FS_bccae81d=PASS")
+          print("ZRAM_26df52b3=PASS")
+          print("ZSMALLOC_638c9546=PASS")
+          print("P118_3506e1b8=already_semantic")
+          print("P118_c1ea7a86=already_semantic")
+          print("P167_MGLRU_read_hardening=retained")
+          print("P166_FUSE_negotiation=retained")
+          PY
+
+      - name: Audit P161 ZRAM multi-comp recompression
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          VMLINUX="$KERNEL/out/vmlinux"
+          DRV="$KERNEL/drivers/block/zram/zram_drv.c"
+          HDR="$KERNEL/drivers/block/zram/zram_drv.h"
+
+          grep -Fxq 'CONFIG_ZRAM_MULTI_COMP=y' "$CFG"
+          grep -Fxq 'CONFIG_CRYPTO_ZSTD=y' "$CFG"
+          grep -Fq 'ZRAM_RECOMP' "$HDR"
+          grep -Fq 'struct zcomp *recomp;' "$HDR"
+          grep -Fq 'static ssize_t recomp_algorithm_show' "$DRV"
+          grep -Fq 'static ssize_t recompress_store' "$DRV"
+          grep -Fq 'static ssize_t recomp_stat_show' "$DRV"
+          grep -Fq 'static int zram_recompress_page' "$DRV"
+          grep -Fq 'return -EOPNOTSUPP;' "$DRV"
+          grep -Fq 'zram_test_flag(zram, index, ZRAM_RECOMP)' "$DRV"
+
+          strings "$VMLINUX" > artifacts/p161-zram-vmlinux-strings.txt
+          grep -Fq 'recomp_algorithm' artifacts/p161-zram-vmlinux-strings.txt
+          grep -Fq 'recompress' artifacts/p161-zram-vmlinux-strings.txt
+          grep -Fq 'recomp_stat' artifacts/p161-zram-vmlinux-strings.txt
+
+          {
+            echo 'P161 ZRAM multi-comp audit: PASS'
+            echo 'primary=lzo-rle'
+            echo 'secondary=zstd'
+            echo 'priority=1'
+            echo 'CONFIG_ZRAM_MULTI_COMP=y'
+            echo 'dedup-enabled recompression is rejected'
+            echo 'secondary objects excluded from Samsung compressed writeback'
+          } | tee artifacts/p161-zram-multicomp-audit.txt
+
+      - name: Audit P160 ZRAM Zstd and writeback capabilities
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CFG="$KERNEL/out/.config"
+          VMLINUX="$KERNEL/out/vmlinux"
+
+          for option in \
+            CONFIG_ZRAM=y \
+            CONFIG_ZRAM_WRITEBACK=y \
+            CONFIG_ZRAM_LRU_WRITEBACK=y \
+            CONFIG_CRYPTO_ZSTD=y \
+            CONFIG_ZSTD_COMPRESS=y \
+            CONFIG_ZSTD_DECOMPRESS=y; do
+            grep -Fxq "$option" "$CFG"
+          done
+
+          grep -Fq '"zstd",' "$KERNEL/drivers/block/zram/zcomp.c"
+          grep -Fq 'alloc_percpu(struct zcomp_strm *)' "$KERNEL/drivers/block/zram/zcomp.c"
+          grep -Fq 'return *get_cpu_ptr(comp->stream);' "$KERNEL/drivers/block/zram/zcomp.c"
+          grep -Fq 'static DEVICE_ATTR_RW(backing_dev);' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'static DEVICE_ATTR_WO(writeback);' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'static DEVICE_ATTR_RW(writeback_limit);' "$KERNEL/drivers/block/zram/zram_drv.c"
+          grep -Fq 'static DEVICE_ATTR_RW(writeback_limit_enable);' "$KERNEL/drivers/block/zram/zram_drv.c"
+
+          strings "$VMLINUX" > artifacts/p160-zram-vmlinux-strings.txt
+          grep -Fq 'zstd-scomp' artifacts/p160-zram-vmlinux-strings.txt
+          grep -Fq 'setup backing device' artifacts/p160-zram-vmlinux-strings.txt
+
+          {
+            echo 'P160 ZRAM capability audit: PASS'
+            echo 'CONFIG_ZRAM_WRITEBACK=y'
+            echo 'CONFIG_ZRAM_LRU_WRITEBACK=y'
+            echo 'CONFIG_CRYPTO_ZSTD=y'
+            echo 'zstd selectable via comp_algorithm'
+            echo 'zcomp compression streams are per-CPU'
+            echo 'default compressor remains lzo-rle'
+          } | tee artifacts/p160-zram-capability-audit.txt
+
+      - name: Audit Clang 22 build output
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          VMLINUX="$KERNEL/out/vmlinux"
+          IMAGE_FILE="$KERNEL/out/arch/arm64/boot/Image"
+          GNU_PREFIX="$KERNEL/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-"
+
+          test -s "$VMLINUX"
+          test -s "$IMAGE_FILE"
+
+          {
+            echo "=== CLANG ==="
+            "$A52_CLANG_OVERRIDE" --version
+            echo
+            echo "=== LLD LINKER ==="
+            "$A52_LLD_OVERRIDE" --version | head -2
+            echo
+            echo "=== FILE SIZES ==="
+            stat -c 'Image_bytes=%s' "$IMAGE_FILE"
+            stat -c 'vmlinux_bytes=%s' "$VMLINUX"
+            echo
+            echo "=== ELF text/data/bss ==="
+            "${GNU_PREFIX}size" "$VMLINUX" || size "$VMLINUX"
+            echo
+            echo "=== EMBEDDED LINUX VERSION ==="
+            strings "$VMLINUX" | grep -m1 '^Linux version ' || true
+            echo
+            echo "=== SHA256 ==="
+            sha256sum "$IMAGE_FILE" "$VMLINUX"
+          } | tee artifacts/clang22-build-audit.txt
+
+          "$A52_CLANG_OVERRIDE" --version | grep -Fq 'r596125'
+          grep -Fxq 'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y' "$KERNEL/out/.config"
+          grep -Fq -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=25' "$KERNEL/Makefile"
+          grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
+          grep -Fxq '# CONFIG_LTO_NONE is not set' "$KERNEL/out/.config"
+          "$A52_LLD_OVERRIDE" --version | grep -Fq 'LLD 22'
+          grep -Eq 'LTO[[:space:]]+vmlinux[.]o' artifacts/boot-async-p152-build.log
+          strings "$VMLINUX" | grep -m1 '^Linux version ' | grep -Fq 'LLD 22.0.2'
+          {
+            echo '=== FINAL CONFIG ==='
+            grep -E 'CONFIG_(CC_OPTIMIZE|LTO|THINLTO|CFI)' "$KERNEL/out/.config" || true
+            echo '=== LLD ==='
+            "$A52_LLD_OVERRIDE" --version | head -1
+          } | tee artifacts/thinlto-final-audit.txt
+
+      - name: Audit P159 ThinLTO import-limit-25 clean image
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          IMAGE_FILE="$KERNEL/out/arch/arm64/boot/Image"
+          VMLINUX="$KERNEL/out/vmlinux"
+          LLVM_NM="$(dirname "$A52_CLANG_OVERRIDE")/llvm-nm"
+
+          test -s "$IMAGE_FILE"
+          test -s "$VMLINUX"
+          grep -Fxq 'CONFIG_LTO_CLANG=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_THINLTO=y' "$KERNEL/out/.config"
+          grep -Fxq 'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y' "$KERNEL/out/.config"
+          grep -Fq -- 'LD_FLAGS_LTO_CLANG := -mllvm -import-instr-limit=25' "$KERNEL/Makefile"
+          strings "$VMLINUX" | grep -m1 '^Linux version ' | grep -Fq 'LLD 22.0.2'
+
+          "$LLVM_NM" "$VMLINUX" > artifacts/p159-final-nm.txt
+          ! grep -E 'a52_p155_|mglru_rec_|mglru_diag_|a52_sched_diag_|R48_REC' artifacts/p159-final-nm.txt
+
+          strings "$IMAGE_FILE" > artifacts/p159-image-strings.txt
+          ! grep -E 'A52_P155_|P155 HB|P155 BOOT|A52_BOOT_RESCUE:|\[AOD P150\]|FUSE_740_|R48_REC' \
+            artifacts/p159-image-strings.txt
+
+          BASELINE_IMAGE_BYTES=50826320
+          IMAGE_BYTES="$(stat -c '%s' "$IMAGE_FILE")"
+          DELTA_BYTES=$((IMAGE_BYTES - BASELINE_IMAGE_BYTES))
+          DELTA_PCT="$(awk -v d="$DELTA_BYTES" -v b="$BASELINE_IMAGE_BYTES" 'BEGIN { printf "%.3f", (d * 100.0) / b }')"
+
+          {
+            echo "P159 Image_bytes=$IMAGE_BYTES"
+            echo "P157_baseline_Image_bytes=$BASELINE_IMAGE_BYTES"
+            echo "Image_delta_bytes=$DELTA_BYTES"
+            echo "Image_delta_percent=$DELTA_PCT"
+          } | tee artifacts/p159-size-delta-vs-p157.txt
+
+          {
+            echo 'P159 ThinLTO import-limit-25 clean audit: PASS'
+            echo 'Clang: r596125 / 22.0.2'
+            echo 'LLD: 22.0.2'
+            echo 'Optimization: O2 / CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y'
+            echo 'ThinLTO: enabled'
+            echo 'ThinLTO cross-TU import limit: 25'
+            echo 'Project diagnostic recorders: absent'
+            echo 'Runtime phase-marker logs: absent'
+            echo
+            sha256sum "$IMAGE_FILE" "$VMLINUX"
+          } | tee artifacts/p159-import25-clean-audit.txt
+
+      - name: Check out pinned AnyKernel3
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          ref: ${{ env.ANYKERNEL_COMMIT }}
+          path: packaging/AnyKernel3
+          fetch-depth: 1
+
+      - name: Package P168 storage/memory-correctness flashable ZIP
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          CONFIG_ARTIFACT="${IMAGE/Image-/config-}"
+          if [ ! -s "$CONFIG_ARTIFACT" ]; then
+            cp "$KERNEL/out/.config" "$CONFIG_ARTIFACT"
+          fi
+          test -s "$CONFIG_ARTIFACT"
+
+          cp scripts/09_package_a52xq_anykernel.sh scripts/.package-p152.sh
+          sed -i "s/grep -Fxq '# CONFIG_KSU_SUSFS is not set'/grep -Fxq 'CONFIG_KSU_SUSFS=y'/" scripts/.package-p152.sh
+          sed -i 's/SUSFS must remain disabled for this package/Kernel config does not enable SUSFS core/' scripts/.package-p152.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/.package-p152.sh')
+          s = p.read_text()
+          anchor = 'dump_boot;\nwrite_boot;'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'unexpected boot-write anchor count: {s.count(anchor)}')
+          s = s.replace(
+              anchor,
+              'dump_boot;\n'
+              'patch_cmdline "sched_eevdf" "sched_eevdf=1";\n'
+              'patch_cmdline "sched_cass" "sched_cass=1";\n'
+              'write_boot;',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+          python3 scripts/88_patch_anykernel_vulkan_renderengine.py scripts/.package-p152.sh
+          sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0 + Clang22 ThinLTO AutoFDO/' scripts/.package-p152.sh
+          sed -i "s/ReSukiSU-v4.1.0-BUILD-VERIFIED-FLASHABLE.zip/A52-P169-AUTOFDO-CLANG22-THINLTO-I25-r596125-${A52_AUTOFDO_MODE}.zip/" scripts/.package-p152.sh
+          chmod +x scripts/.package-p152.sh
+          ./scripts/.package-p152.sh 4.19.206 "$IMAGE" packaging/AnyKernel3 release
+          rm -f scripts/.package-p152.sh
+      - name: Verify package
+        run: |
+          set -Eeuo pipefail
+          ZIP="$(find release -maxdepth 1 -name '*.zip' -type f | head -1)"
+          test -s "$ZIP"
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_eevdf" "sched_eevdf=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'patch_cmdline "sched_cass" "sched_cass=1";'
+          unzip -p "$ZIP" anykernel.sh | grep -Fq 'install_vulkan_re_module;'
+          unzip -p "$ZIP" Image > /tmp/p159-package-Image
+          ! grep -aFq 'A52_P155_THINLTO_ESD_DUAL_RECORDER_V1' /tmp/p159-package-Image
+          strings /tmp/p159-package-Image | grep -m1 '^Linux version ' | grep -Fq 'LLD 22.0.2'
+          strings /tmp/p159-package-Image > /tmp/p159-package-strings
+          ! grep -E 'A52_P155_|P155 HB|P155 BOOT|A52_BOOT_RESCUE:|\[AOD P150\]|FUSE_740_|R48_REC' /tmp/p159-package-strings
+          sha256sum /tmp/p159-package-Image | tee artifacts/p159-package-image-sha256.txt
+          sha256sum "$ZIP" | tee artifacts/package-sha256.txt
+
+      - name: P168 finalize artifact provenance
+        run: |
+          set -Eeuo pipefail
+          KERNEL=workspace/touchgrass-a52xq
+          ZIP="$(find release -maxdepth 1 -name '*A52-P169-AUTOFDO-*.zip' -type f | head -1)"
+          test -s "$KERNEL/out/arch/arm64/boot/Image"
+          test -s "$KERNEL/out/vmlinux"
+          test -s "$ZIP"
+          {
+            echo "image_sha256=$(sha256sum "$KERNEL/out/arch/arm64/boot/Image" | awk '{print $1}')"
+            echo "vmlinux_sha256=$(sha256sum "$KERNEL/out/vmlinux" | awk '{print $1}')"
+            echo "package_sha256=$(sha256sum "$ZIP" | awk '{print $1}')"
+            echo "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> artifacts/p168-build-info.txt
+          cat artifacts/p168-build-info.txt
+
+      - name: Save compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload P168 bundle and audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P169-AUTOFDO-${{ env.A52_AUTOFDO_MODE }}-${{ github.run_number }}
+          path: |
+            release/
+            artifacts/p169-autofdo-*.txt
+            artifacts/p169-profile-inspect.txt
+            artifacts/aod-power-saver-p150.txt
+            artifacts/boot-async-deferred-p151.txt
+            artifacts/boot-async-peripherals-p152.txt
+            artifacts/boot-async-p151-p152.diff
+            artifacts/boot-async-p152-audit.txt
+            artifacts/clang22-binder-mm-compat.txt
+            artifacts/clang22-lagoon-clock-compat.txt
+            artifacts/clang22-toolchain.txt
+            artifacts/clang22-override-audit.txt
+            artifacts/clang22-build-audit.txt
+            artifacts/thinlto-request-audit.txt
+            artifacts/thinlto-final-audit.txt
+            artifacts/boot-async-p152-build.log
+            artifacts/package-sha256.txt
+            artifacts/p156-initcall-fix.txt
+            artifacts/p160-zram-zstd-writeback-apply.txt
+            artifacts/p161-zram-multicomp-apply.txt
+            artifacts/p162-f2fs-atomic-fmode-apply.txt
+            artifacts/p162-f2fs-atomic-fmode-postbuild-audit.txt
+            artifacts/p162-f2fs-atomic-fmode-audit.txt
+            artifacts/p162-f2fs-atomic-fmode.diff
+            artifacts/p162-build-info.txt
+            artifacts/p162-final.diff
+            artifacts/p165-apply-audit.txt
+            artifacts/p165-build-info.txt
+            artifacts/p166-apply-audit.txt
+            artifacts/p166-build-info.txt
+            artifacts/p166-postbuild-audit.txt
+            artifacts/p167-apply-audit.txt
+            artifacts/p167-build-info.txt
+            artifacts/p167-postbuild-audit.txt
+            artifacts/p168-apply-audit.txt
+            artifacts/p168-build-info.txt
+            artifacts/p168-final.diff
+            artifacts/p168-final-diff-sha256.txt
+            artifacts/p168-postbuild-audit.txt
+            artifacts/p159-build-cache-key.txt
+            artifacts/p161-zram-multicomp-audit.txt
+            artifacts/p161-zram-vmlinux-strings.txt
+            artifacts/p160-zram-capability-audit.txt
+            artifacts/p160-zram-vmlinux-strings.txt
+            artifacts/p159-diagnostic-teardown.txt
+            artifacts/p159-recorder-survivors.txt
+            artifacts/p159-clean-functional-audit.txt
+            artifacts/p159-final-nm.txt
+            artifacts/p159-image-strings.txt
+            artifacts/p159-import25-clean-audit.txt
+            artifacts/p159-package-image-sha256.txt
+            artifacts/p159-initcall-audit.txt
+            artifacts/p159-tmp_lto.lds
+            artifacts/p159-build-cache-key.txt
+            artifacts/p159-vmlinux-nm.txt
+            artifacts/p159-vmlinux-sections.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+# Exact user-selected baseline:
+# P150 run 36054686392 / 763a272cba83463fc495b3787812a1e78157250f
+#
+# P152 carries forward P150, reapplies boot-tested P151, then adds:
+# - async SX9364/SX9360 grip sensor
+# - async Samsung DC vibrator
+#
+# Still synchronous: UFS, display, PMIC/SPMI, clocks, regulators,
+# interconnect, IOMMU/SMMU, CPUfreq/devfreq, eSE, thermal, Bluetooth,
+# audio, touchscreen and camera core.
+
+# Clang22 + LLD22 ThinLTO experiment:
+# - Exact P152 source reconstruction is pinned to PHASE_SOURCE_SHA.
+# - AOSP clang-r596125 is pinned to AOSP_CLANG_COMMIT.
+# - ThinLTO and LLD are intentionally enabled; CFI remains disabled.
+# - P156 repairs the legacy 4.19 initcall-order generator for modern llvm-nm.
+
+# P161: Samsung-safe ZRAM multi-compressor/recompression backport.
+# - Base: boot-proven P160 (O2 + Clang22 + ThinLTO25 + ZRAM writeback + Zstd).
+# - Primary compressor remains lzo-rle.
+# - Secondary compressor defaults to zstd and is created during disksize init.
+# - Adds recomp_algorithm, recompress and recomp_stat sysfs ABI.
+# - Runtime recompression refuses CONFIG_ZRAM_DEDUP active mode to avoid shared-entry corruption.
+# - Recompressed objects are excluded from Samsung compressed writeback because its legacy
+#   backing format carries size/index but no compressor identifier.
+
+# P162 integrated security/stability/efficiency bundle.
+# - Baseline: boot-tested P161 commit a8389945c3dc63ec401287b92293f33d6ffa3d65.
+# - A1 exact F2FS stable FMODE_WRITE hardening plus requested A6/B2/C1/C2/C4/C5/C7/D5/D6/D7/D9.
+# - C7 is audit-only because the imported Samsung/TouchGrass uclamp already has the upstream inactive guard.
+# - C3 remains unchanged and reserved for its separately agreed queued/running-state refinement.
+# - P159 teardown/retention audits and P160/P161 ZRAM audits remain mandatory.
+
+# P165:
+# - starts from the same P162 reconstruction the user boot-tested.
+# - intentionally reverts P162 D6 after runtime FUSE write -EFAULT isolation.
+# - adds A2 BPF ringbuf hardening, verified F2FS stable cleanup,
+#   B1/B4/B5 MGLRU correctness, D2 ZRAM scan semantics, and A5 TCP pacing math.
+# - scheduler and GPU policy remain identical to P162.
+# - E1 is deliberately omitted; the production -w build policy remains unchanged.
+# - E2/E3 are retained as artifact/provenance improvements only.
+
+# P166:
+# - starts from the successful P165 reconstruction and preserves all P165 fixes.
+# - experimental FUSE arbitration: WRITEBACK_CACHE is offered again, while
+#   modern >=7.40 upstream passthrough clears fc->writeback_cache and wins.
+# - legacy <7.36 Android passthrough is unchanged.
+# - hand-ports stable F2FS 4d9c9b7 and 72c6b13.
+# - B3 and D3 are audited as already satisfied; B6 stays deferred.
+# - no scheduler/GPU/UFS/display/AOD runtime changes.
+
+# P166 cache v2:
+# - exact P165 source+artifact snapshot cache skips replay through P165 on P166 edits.
+# - exact P166 source+artifact snapshot cache is keyed by the P166 patcher SHA256.
+# - Clang toolchain, ccache, ThinLTO, P134 source, and final built-output caches remain enabled.
+# - post-build D3 audit checks executable source behavior, not teardown-removable marker comments.
+
+# P167:
+# - baseline: P166 booted and passed /sdcard text + 1 MiB FUSE writes.
+# - MGLRU read-side hardening clamps transient negative per-zone generation sizes only while summing get_nr_evictable().
+# - adds remaining stable F2FS correctness ports 2d291651, 24dfe070, eb926232.
+# - restores and reuses the exact P166 source snapshot cache, plus a P167 snapshot cache.
+# - no FUSE negotiation, scheduler, GPU, UFS, display, or AOD runtime changes.
+
+# P167 cache-idempotency:
+# - ThinLTO Makefile and llvm-nm compatibility setup accept either pristine or already-patched cached source.
+# - required environment variables are still refreshed on every run.
+
+# P168:
+# - runtime baseline: P167 booted and passed /sdcard FUSE write.
+# - seven code changes: fscrypt encrypted-symlink getattr dependency,
+#   four remaining F2FS stable correctness ports, ZRAM block_state bounds,
+#   and zsmalloc concurrent compaction accounting.
+# - closes the remaining P118 skipped-F2FS set by structural audit.
+# - exact P167 source snapshot is reused; P168 gets its own content-keyed source cache.
+# - rejected MGLRU mm_state.wait remains absent.
+# - no scheduler, GPU, FUSE, UFS, display, or AOD behavior changes.

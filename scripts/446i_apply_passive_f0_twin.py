@@ -64,6 +64,8 @@ def patch_central(s: str, selectors: list[int], kind: str) -> str:
 /* A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1
  * Matched GKI/TG F0 environment capture. Hot-path code is MMIO-only.
  */
+static const char p446i_marker[] __used =
+    "A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1";
 #define P446I_REFGEN_PHYS 0x088e7000ULL
 #define P446I_REFGEN_BYTES 0x100U
 #define P446I_DISPCC_PHYS 0x0af00000ULL

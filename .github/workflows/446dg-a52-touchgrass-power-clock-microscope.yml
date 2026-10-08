@@ -59,6 +59,11 @@ jobs:
           set -Eeuo pipefail
           echo "Golden preflight: bounded runner cleanup"
           sudo timeout 120s rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          # The stable checkpoint scripts use shallow Git repos. Keep fetches
+          # serial so concurrent shallow-file updates cannot race.
+          git config --global fetch.parallel 1
+          git config --global submodule.fetchJobs 1
+          git config --global maintenance.auto false
           echo "Golden preflight: bounded apt update"
           sudo timeout 180s apt-get \
             -o Acquire::Retries=3 \

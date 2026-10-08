@@ -1,5 +1,5 @@
-name: Phase446dG - TouchGrass power clock microscope
-run-name: Phase446dG TouchGrass Golden matched power/clock microscope
+name: Phase446iG - TouchGrass matched passive F0 environment twin
+run-name: Phase446iG TouchGrass matched passive F0 environment
 
 on:
   push:
@@ -13,6 +13,7 @@ on:
       - scripts/446d_apply_power_clock_microscope.py.z64
       - scripts/446d_apply_capacity_guard.py
       - scripts/446d_apply_extra_observers.py
+      - scripts/446i_apply_passive_f0_twin.py
       - scripts/446d_collect_boot_identity.sh
       - scripts/decode_phase446d.py
       - scripts/decode_phase446d.py.z64
@@ -33,12 +34,12 @@ env:
   RESUKISU_VERSION: v4.1.0-2206a7dd-dirty@ReSukiSU
 
 concurrency:
-  group: a52-phase446dg-touchgrass-power-clock
+  group: a52-phase446ig-touchgrass-f0-twin
   cancel-in-progress: true
 
 jobs:
   golden:
-    name: Build Phase446dG TouchGrass Golden power/clock microscope + ReSukiSU
+    name: Build Phase446iG TouchGrass matched passive twin + ReSukiSU
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
@@ -72,7 +73,7 @@ jobs:
             install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
-          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/446i_apply_passive_f0_twin.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/446g_apply_golden_heartbeat.py --help >/dev/null
@@ -80,10 +81,11 @@ jobs:
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/446d_apply_extra_observers.py --help >/dev/null
+          python3 scripts/446i_apply_passive_f0_twin.py --help >/dev/null
           bash -n scripts/446d_collect_boot_identity.sh
           python3 scripts/decode_phase446d.py --help >/dev/null
           python3 scripts/decode_phase446_pair.py --help >/dev/null
-          echo "Phase446dG power/clock payload preflight: PASS"
+          echo "Phase446iG power/clock payload preflight: PASS"
 
       - name: Create clean proven Golden-control workspace
         run: |
@@ -104,6 +106,7 @@ jobs:
              scripts/446d_apply_power_clock_microscope.py.z64 \
              scripts/446d_apply_capacity_guard.py \
              scripts/446d_apply_extra_observers.py \
+             scripts/446i_apply_passive_f0_twin.py \
              scripts/446d_collect_boot_identity.sh \
              scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/decode_phase446.py \
@@ -203,10 +206,12 @@ jobs:
           python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg
           python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg
           python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$K" --kind tg
           python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg --check-only
           python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg --check-only
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$K" --kind tg --check-only
 
           git -C "$K" diff --check -- \
             techpack/display/msm/Makefile \
@@ -230,6 +235,7 @@ jobs:
             drivers/clk/clk.c \
             drivers/base/component.c \
             drivers/clk/qcom/dispcc-lagoon.c \
+            drivers/regulator/refgen.c \
             techpack/display/pll/pll_drv.c \
             techpack/display/pll/dsi_pll_7nm.c
 
@@ -245,6 +251,11 @@ jobs:
           grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446g.c"
           grep -Fq "A52_PHASE446_TG_ARM_SMMU" "$K/drivers/iommu/arm-smmu.c"
           grep -Fq "A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1" "$K/techpack/display/msm/a52_phase444.c"
+          grep -Fq "I_BUS_PRE" "$K/techpack/display/msm/a52_phase444.c"
+          grep -Fq "a52_p446i_hw_pre(&dsi_ctrl->hw);" "$K/techpack/display/msm/dsi/dsi_ctrl.c"
+          grep -Fq "qcom,refgen-kona-regulator" "$K/drivers/regulator/refgen.c"
+          grep -Fq "REFGEN_REG_PWRDWN_CTRL5" "$K/drivers/regulator/refgen.c"
           grep -Fq "A52_PHASE446B_PLANE_H08_H09" "$K/techpack/display/msm/sde/sde_plane.c"
           grep -Fq "A52_PHASE446B_CRTC_H10_H11" "$K/techpack/display/msm/sde/sde_crtc.c"
           grep -Fq "A52_PHASE446B_H12_BRIDGE_PRE_ENABLE" "$K/techpack/display/msm/msm_atomic.c"
@@ -256,13 +267,13 @@ jobs:
           ! grep -Fq "a52.cb2_reuse" "$K/drivers/iommu/arm-smmu.c"
           ! grep -Fq "A52_PHASE446_CB2_SWITCH" "$K/drivers/iommu/arm-smmu.c"
           grep -Fq "P444_MAX_SECTIONS 120U" "$K/techpack/display/msm/a52_phase444.c"
-          echo "Phase446dG observation-only heartbeat scope: PASS"
+          echo "Phase446iG observation-only heartbeat scope: PASS"
 
-      - name: Build Phase446dG Golden ReSukiSU Image
+      - name: Build Phase446iG Golden ReSukiSU Image
         run: |
           set -Eeuo pipefail
           cd golden-work
-          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446dg
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446ig
           set -o pipefail
           bash -lc "source scripts/common.sh; build_kernel '$LABEL'" \
             2>&1 | tee phase446dg-touchgrass-build.log
@@ -281,6 +292,7 @@ jobs:
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:TG' "$IMAGE"
           grep -aFq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$IMAGE"
           grep -aFq 'A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
           grep -aFq 'a52_phase446_raw' "$IMAGE"
           grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
           grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG"
@@ -295,19 +307,19 @@ jobs:
             ! grep -aFq "$marker" "$IMAGE"
           done
 
-          echo "Phase446dG Golden ReSukiSU compiled-image audit: PASS"
+          echo "Phase446iG Golden ReSukiSU compiled-image audit: PASS"
           ccache -s || true
 
-      - name: Package Phase446dG Golden ReSukiSU
+      - name: Package Phase446iG Golden ReSukiSU
         run: |
           set -Eeuo pipefail
           cd golden-work
-          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446dg
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446ig
           IMAGE="$PWD/artifacts/Image-$LABEL"
           CONFIG="$PWD/artifacts/config-$LABEL"
           K="$PWD/workspace/touchgrass-a52xq"
-          OUT="$PWD/phase446dg-touchgrass-out"
-          FINAL="$OUT/package/boot-phase446dg-touchgrass-power-clock-v2.img"
+          OUT="$PWD/phase446ig-touchgrass-f0-twin-out"
+          FINAL="$OUT/package/boot-phase446ig-touchgrass-f0-twin-v1.img"
 
           rm -rf "$OUT" intake
           mkdir -p "$OUT"/{audit,source,package} intake
@@ -338,6 +350,8 @@ jobs:
           cp "$K/techpack/display/msm/a52_phase446g.c" "$OUT/source/"
           cp "$K/drivers/base/component.c" "$OUT/source/component.c"
           cp "$K/drivers/clk/qcom/dispcc-lagoon.c" "$OUT/source/dispcc-lagoon.c"
+          cp "$K/drivers/regulator/refgen.c" "$OUT/source/refgen.c"
+          cp "$K/arch/arm64/boot/dts/vendor/qcom/lagoon-regulators.dtsi" "$OUT/source/lagoon-regulators.dtsi"
           cp "$K/techpack/display/pll/pll_drv.c" "$OUT/source/pll_drv.c"
           cp "$K/techpack/display/pll/dsi_pll_7nm.c" "$OUT/source/dsi_pll_7nm.c"
           cp "$K/drivers/iommu/arm-smmu.c" "$OUT/source/"
@@ -359,7 +373,7 @@ jobs:
           cp "$K/techpack/display/msm/dsi/dsi_display.c" "$OUT/source/"
 
           cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
-          experiment=PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-V2
+          experiment=PHASE446IG-TOUCHGRASS-MATCHED-PASSIVE-F0-TWIN-V1
           base=clean-proven-TouchGrass-4.19.200-Golden-lineage
           touchgrass_commit=$TOUCHGRASS_COMMIT
           resukisu_commit=$RESUKISU_COMMIT
@@ -412,6 +426,26 @@ jobs:
           chmod +x "$OUT/package/446d_collect_boot_identity.sh"
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
+          cat > "$OUT/PHASE446I-NOTES.txt" <<'EOF'
+          Phase446iG TouchGrass matched passive F0 environment twin
+          ==========================================================
+          Same Phase446i helper/schema as GKI:
+            I_SW_ENTRY  cached controller state/requested rates
+            I_RAW_PRE   refgen[0x00..0xfc], DISPCC RCG/PLL, selected MDP, DSI compact state
+            I_RAW_POST  same immediately after HW kickoff
+            I_BUS_PRE   full Kona DSI debug selector sweep
+            I_BUS_POST  full Kona DSI debug selector sweep immediately after kickoff
+
+          Safety:
+            no clk/regulator framework calls in the kickoff window
+            no allocation or printk in the Phase446i hot path
+            no reset, force-clock, recovery, or behavior switch
+
+          TouchGrass refgen source/DT:
+            qcom,refgen-kona-regulator
+            Kona ops use only PWRDWN_CTRL5 +0x80 bit0
+          EOF
+
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
@@ -423,11 +457,11 @@ jobs:
           path: golden-work/.ccache
           key: a52xq-phase446dg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
 
-      - name: Upload Phase446dG Golden failure diagnostics
+      - name: Upload Phase446iG Golden failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-FAIL-${{ github.run_number }}
+          name: A52XQ-PHASE446IG-TOUCHGRASS-F0-TWIN-FAIL-${{ github.run_number }}
           path: |
             golden-work/artifacts/logs/
             golden-work/phase446dg-touchgrass-build.log
@@ -443,27 +477,30 @@ jobs:
             golden-work/workspace/touchgrass-a52xq/techpack/display/pll/pll_drv.c
             golden-work/workspace/touchgrass-a52xq/techpack/display/pll/dsi_pll_7nm.c
             scripts/446d_apply_extra_observers.py
+            scripts/446i_apply_passive_f0_twin.py
+            golden-work/workspace/touchgrass-a52xq/drivers/regulator/refgen.c
+            golden-work/workspace/touchgrass-a52xq/arch/arm64/boot/dts/vendor/qcom/lagoon-regulators.dtsi
             scripts/446d_collect_boot_identity.sh
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
 
-      - name: Upload Phase446dG Golden ReSukiSU bundle
+      - name: Upload Phase446iG Golden ReSukiSU bundle
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-${{ github.run_number }}
-          path: golden-work/phase446dg-touchgrass-out/
+          name: A52XQ-PHASE446IG-TOUCHGRASS-F0-TWIN-${{ github.run_number }}
+          path: golden-work/phase446ig-touchgrass-f0-twin-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
 
-      - name: Upload Phase446dG Golden ReSukiSU boot.img
+      - name: Upload Phase446iG Golden ReSukiSU boot.img
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446DG-TOUCHGRASS-GOLDEN-POWER-CLOCK-${{ github.run_number }}-BOOT-IMG
-          path: golden-work/phase446dg-touchgrass-out/package/boot-phase446dg-touchgrass-power-clock-v2.img
+          name: A52XQ-PHASE446IG-TOUCHGRASS-F0-TWIN-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/phase446ig-touchgrass-f0-twin-out/package/boot-phase446ig-touchgrass-f0-twin-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

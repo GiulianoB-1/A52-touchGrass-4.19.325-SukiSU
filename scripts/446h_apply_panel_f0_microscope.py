@@ -92,6 +92,7 @@ def patch_display(s: str) -> str:
 def patch_panel(s: str) -> str:
     if "A52_PHASE446H_PANEL_STEPS" in s:
         return s
+
     anchor = "int dsi_panel_enable(struct dsi_panel *panel)\n"
     s = one(
         s, anchor,
@@ -99,70 +100,79 @@ def patch_panel(s: str) -> str:
         "/* A52_PHASE446H_PANEL_STEPS */\n" + anchor,
         "panel declaration",
     )
+
     s = one(
         s,
-        "\ta52_ackfr_record(\"DISP PANEL_ENABLE p=%s init=%d\",\n"
-        "\t\tpanel->name, panel->panel_initialized);\n\n"
-        "\tmutex_lock(&panel->panel_lock);\n",
-        "\ta52_ackfr_record(\"DISP PANEL_ENABLE p=%s init=%d\",\n"
-        "\t\tpanel->name, panel->panel_initialized);\n"
-        "\ta52_p446_mark(0x194U,(u32)panel->panel_initialized,0U);\n\n"
-        "\tmutex_lock(&panel->panel_lock);\n"
-        "\ta52_p446_mark(0x195U,1U,0U);\n",
+        '\ta52_ackfr_record("DISP PANEL_ENABLE p=%s init=%d",\n'
+        '\t\tpanel->name, panel->panel_initialized);\n\n'
+        '\tmutex_lock(&panel->panel_lock);\n',
+        '\ta52_ackfr_record("DISP PANEL_ENABLE p=%s init=%d",\n'
+        '\t\tpanel->name, panel->panel_initialized);\n'
+        '\ta52_p446_mark(0x194U,(u32)panel->panel_initialized,0U);\n\n'
+        '\tmutex_lock(&panel->panel_lock);\n'
+        '\ta52_p446_mark(0x195U,1U,0U);\n',
         "panel enter/lock",
     )
+
+    # Phase445 changed the early return to -ECANCELED when its Samsung gate
+    # blocks subsequent traffic. Bracket the actual current form, preserving it.
     old_pre = '''\tif (!ss_panel_on_pre(panel->panel_private)) {
 \t\tmutex_unlock(&panel->panel_lock);
-\t\tpanel->panel_initialized = true;
-\t\treturn 0;
+\t\tif (!a52_p445_samsung_blocked())
+\t\t\tpanel->panel_initialized = true;
+\t\treturn a52_p445_samsung_blocked() ? -ECANCELED : 0;
 \t}
 '''
-    new_pre = '''\t{
-\t\tint p446h_pre;
-\t\ta52_p446_mark(0x196U,0U,0U);
-\t\tp446h_pre = ss_panel_on_pre(panel->panel_private);
-\t\ta52_p446_mark(0x197U,(u32)p446h_pre,0U);
-\t\tif (!p446h_pre) {
-\t\t\tmutex_unlock(&panel->panel_lock);
+    new_pre = '''\ta52_p446_mark(0x196U,0U,0U);
+\tif (!ss_panel_on_pre(panel->panel_private)) {
+\t\ta52_p446_mark(0x197U,0U,(u32)a52_p445_samsung_blocked());
+\t\tmutex_unlock(&panel->panel_lock);
+\t\tif (!a52_p445_samsung_blocked())
 \t\t\tpanel->panel_initialized = true;
-\t\t\ta52_p446_mark(0x19cU,0U,1U);
-\t\t\treturn 0;
-\t\t}
+\t\treturn a52_p445_samsung_blocked() ? -ECANCELED : 0;
 \t}
+\ta52_p446_mark(0x197U,1U,(u32)a52_p445_samsung_blocked());
 '''
     s = one(s, old_pre, new_pre, "ss_panel_on_pre bracket")
 
-    old_tx = '''\t} else {
+    old_on = '''\t/* skip cmds during splash booting */
+\tif (vdd->skip_cmd_set_on_splash_enabled && vdd->samsung_splash_enabled) {
+\t\tLCD_INFO(vdd, "skip send DSI_CMD_SET_ON during splash booting\\n");
+\t\trc = 0;
+\t} else {
 \t\trc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
 \t}
 '''
-    new_tx = '''\t} else {
-\t\ta52_p446_mark(0x198U,0U,(u32)vdd->samsung_splash_enabled);
+    new_on = '''\t/* skip cmds during splash booting */
+\ta52_p446_mark(0x198U,0U,(u32)vdd->samsung_splash_enabled);
+\tif (vdd->skip_cmd_set_on_splash_enabled && vdd->samsung_splash_enabled) {
+\t\tLCD_INFO(vdd, "skip send DSI_CMD_SET_ON during splash booting\\n");
+\t\trc = 0;
+\t} else {
 \t\trc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
-\t\ta52_p446_mark(0x199U,(u32)rc,0U);
 \t}
+\ta52_p446_mark(0x199U,(u32)rc,(u32)a52_p445_samsung_blocked());
 '''
-    s = one(s, old_tx, new_tx, "DSI_CMD_SET_ON bracket")
+    s = one(s, old_on, new_on, "DSI_CMD_SET_ON bracket")
+
+    old_post = '''\tif (!a52_p445_samsung_blocked())
+\t\tss_panel_on_post(panel->panel_private);
+\tLCD_INFO(vdd, "--\\n");
+'''
+    new_post = '''\tif (!a52_p445_samsung_blocked()) {
+\t\ta52_p446_mark(0x19aU,(u32)rc,0U);
+\t\tss_panel_on_post(panel->panel_private);
+\t\ta52_p446_mark(0x19bU,(u32)rc,0U);
+\t}
+\tLCD_INFO(vdd, "--\\n");
+'''
+    s = one(s, old_post, new_post, "panel on_post bracket")
 
     s = one(
         s,
-        "\tss_panel_on_post(panel->panel_private);\n"
-        "\tLCD_INFO(vdd, \"--\\n\");\n",
-        "\ta52_p446_mark(0x19aU,(u32)rc,0U);\n"
-        "\tss_panel_on_post(panel->panel_private);\n"
-        "\ta52_p446_mark(0x19bU,(u32)rc,0U);\n"
-        "\tLCD_INFO(vdd, \"--\\n\");\n",
-        "panel on_post bracket",
-    )
-    s = one(
-        s,
-        "\tmutex_unlock(&panel->panel_lock);\n"
-        "\treturn rc;\n"
-        "}\n\nint dsi_panel_post_enable",
-        "\ta52_p446_mark(0x19cU,(u32)rc,(u32)panel->panel_initialized);\n"
-        "\tmutex_unlock(&panel->panel_lock);\n"
-        "\treturn rc;\n"
-        "}\n\nint dsi_panel_post_enable",
+        '\tmutex_unlock(&panel->panel_lock);\n\treturn rc;\n}\n\nint dsi_panel_post_enable',
+        '\ta52_p446_mark(0x19cU,(u32)rc,(u32)panel->panel_initialized);\n'
+        '\tmutex_unlock(&panel->panel_lock);\n\treturn rc;\n}\n\nint dsi_panel_post_enable',
         "panel return",
     )
     return s
@@ -184,16 +194,15 @@ extern void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *m
     s = one(
         s,
         "\tbool a52_p421_f0 = false;\n",
-        "\tbool a52_p421_f0 = false;\n"
-        "\tbool a52_p446h_f0 = false;\n",
+        "\tbool a52_p421_f0 = false;\n\tbool a52_p446h_f0 = false;\n",
         "F0 local",
     )
 
-    samsung_end = '''#endif
+    detect_anchor = '''#endif
 
 \ta52_p421_f0 = false; /* Phase444 retires legacy F0 forensics */
 '''
-    samsung_repl = '''#endif
+    detect_repl = '''#endif
 
 \tif (dsi_ctrl && msg && dsi_ctrl->cell_index == 0 && msg->type == 0x29 &&
 \t    msg->tx_len == 3 && msg->tx_buf) {
@@ -206,7 +215,7 @@ extern void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *m
 
 \ta52_p421_f0 = false; /* Phase444 retires legacy F0 forensics */
 '''
-    s = one(s, samsung_end, samsung_repl, "F0 detect")
+    s = one(s, detect_anchor, detect_repl, "F0 detect")
 
     s = one(
         s,
@@ -229,102 +238,126 @@ extern void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *m
         "\tif (a52_p446h_f0) a52_p446_mark(0x1a3U,*flags,(u32)a52_p445_active());\n",
         "F0 arm",
     )
+
     s = one(
         s,
         "\tdsi_kickoff_msg_tx(dsi_ctrl, msg, &cmd, &cmd_mem, *flags);\n"
         "\tif (a52_p445_abort_pending()) { rc = -ETIMEDOUT; goto error; }\n",
         "\tif (a52_p446h_f0) a52_p446_mark(0x1a4U,*flags,(u32)cmd_mem.offset);\n"
         "\tdsi_kickoff_msg_tx(dsi_ctrl, msg, &cmd, &cmd_mem, *flags);\n"
-        "\tif (a52_p446h_f0) a52_p446_mark(0x1adU,(u32)rc,(u32)atomic_read(&dsi_ctrl->dma_irq_trig));\n"
+        "\tif (a52_p446h_f0) a52_p446_mark(0x1adU,(u32)rc,(u32)a52_p445_active());\n"
         "\tif (a52_p445_abort_pending()) { rc = -ETIMEDOUT; goto error; }\n",
         "F0 kickoff wrapper",
     )
 
-    # Actual memory-DMA write to the hardware.
-    kick = '''\t\t\t\tdsi_hw_ops.kickoff_command(
+    # The real HW kickoff is in dsi_kickoff_msg_tx(), so use Phase445's global
+    # active state there rather than the dsi_message_tx() local boolean.
+    old_hw = '''\t\t\t\tif (a52_p445_active() && a52_p445_rung() == 0)
+\t\t\t\t\ta52_p445_capture_kickoff_ctx(dsi_ctrl, cmd_mem, hw_flags);
+\t\t\t\tdsi_hw_ops.kickoff_command(
 \t\t\t\t\t\t&dsi_ctrl->hw,
 \t\t\t\t\t\tcmd_mem,
 \t\t\t\t\t\thw_flags);
 '''
-    kick_new = '''\t\t\t\tif (a52_p446h_f0)
+    new_hw = '''\t\t\t\tif (a52_p445_active() && a52_p445_rung() == 0)
+\t\t\t\t\ta52_p445_capture_kickoff_ctx(dsi_ctrl, cmd_mem, hw_flags);
+\t\t\t\tif (a52_p445_active())
 \t\t\t\t\ta52_p446_mark(0x1a5U,(u32)cmd_mem->offset,(u32)cmd_mem->length);
 \t\t\t\tdsi_hw_ops.kickoff_command(
 \t\t\t\t\t\t&dsi_ctrl->hw,
 \t\t\t\t\t\tcmd_mem,
 \t\t\t\t\t\thw_flags);
-\t\t\t\tif (a52_p446h_f0)
-\t\t\t\t\ta52_p446_mark(0x1a6U,hw_flags,DSI_R32(&dsi_ctrl->hw,DSI_STATUS));
+\t\t\t\tif (a52_p445_active())
+\t\t\t\t\ta52_p446_mark(0x1a6U,hw_flags,
+\t\t\t\t\t\tDSI_R32(&dsi_ctrl->hw,DSI_STATUS));
 '''
-    # There are deferred and non-deferred kickoff_command calls. Patch the non-deferred one
-    # closest to the Phase445 capture anchor.
-    pos=s.find('if (a52_p445_active() && a52_p445_rung() == 0)')
-    if pos < 0:
-        die("Phase445 kickoff anchor missing")
-    kpos=s.find(kick,pos)
-    if kpos < 0:
-        die("non-deferred kickoff_command anchor missing")
-    s=s[:kpos] + s[kpos:].replace(kick,kick_new,1)
+    s = one(s, old_hw, new_hw, "F0 HW kickoff")
 
-    # Completion wait lifecycle. a52_p445_active() identifies the exact F0 transaction.
     wait_anchor = '''\tdsi_ctrl = container_of(work, struct dsi_ctrl, dma_cmd_wait);
 \tdsi_hw_ops = dsi_ctrl->hw.ops;
+\tSDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY);
 '''
     wait_repl = '''\tdsi_ctrl = container_of(work, struct dsi_ctrl, dma_cmd_wait);
 \tdsi_hw_ops = dsi_ctrl->hw.ops;
 \tif (a52_p445_active())
 \t\ta52_p446_mark(0x1a7U,(u32)atomic_read(&dsi_ctrl->dma_irq_trig),
 \t\t\tDSI_R32(&dsi_ctrl->hw,DSI_STATUS));
+\tSDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY);
 '''
     s = one(s, wait_anchor, wait_repl, "F0 wait enter")
 
-    short_anchor = '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {
+    s = one(
+        s,
+        '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {
 \t\tif (a52_p445_active())
 \t\t\ta52_p445_terminal(dsi_ctrl, 1);
-'''
-    short_repl = '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {
+''',
+        '''\tif (atomic_read(&dsi_ctrl->dma_irq_trig)) {
 \t\tif (a52_p445_active())
 \t\t\ta52_p446_mark(0x1a8U,1U,(u32)atomic_read(&dsi_ctrl->dma_irq_trig));
 \t\tif (a52_p445_active())
 \t\t\ta52_p445_terminal(dsi_ctrl, 1);
-'''
-    s = one(s, short_anchor, short_repl, "F0 immediate done")
+''',
+        "F0 immediate done",
+    )
 
-    wait_call = '''\tret = wait_for_completion_timeout(
+    s = one(
+        s,
+        '''\tret = wait_for_completion_timeout(
 \t\t\t&dsi_ctrl->irq_info.cmd_dma_done,
 \t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));
 \tif (a52_p445_active()) {
-'''
-    wait_call_new = '''\tret = wait_for_completion_timeout(
+\t\ta52_p445_terminal(dsi_ctrl, ret);
+''',
+        '''\tret = wait_for_completion_timeout(
 \t\t\t&dsi_ctrl->irq_info.cmd_dma_done,
 \t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));
-\tif (a52_p445_active())
+\tif (a52_p445_active()) {
 \t\ta52_p446_mark(0x1a9U,(u32)ret,(u32)atomic_read(&dsi_ctrl->dma_irq_trig));
-\tif (a52_p445_active()) {
-'''
-    s = one(s, wait_call, wait_call_new, "F0 wait result")
+\t\ta52_p445_terminal(dsi_ctrl, ret);
+''',
+        "F0 first wait result",
+    )
 
-    r1_anchor = '''\t\tif (!ret && a52_p445_should_r1()) {
+    s = one(
+        s,
+        '''\t\tif (!ret && a52_p445_should_r1()) {
 \t\t\ta52_p445_begin_r1(dsi_ctrl);
-'''
-    r1_repl = '''\t\tif (!ret && a52_p445_should_r1()) {
+''',
+        '''\t\tif (!ret && a52_p445_should_r1()) {
 \t\t\ta52_p446_mark(0x1aaU,0U,DSI_R32(&dsi_ctrl->hw,DSI_STATUS));
 \t\t\ta52_p445_begin_r1(dsi_ctrl);
-'''
-    s = one(s, r1_anchor, r1_repl, "F0 R1 begin")
+''',
+        "F0 R1 begin",
+    )
 
-    r1_done = '''\t\t\ta52_p445_terminal(dsi_ctrl, ret);
-\t\t}
-'''
-    r1_done_new = '''\t\t\ta52_p446_mark(0x1abU,(u32)ret,(u32)atomic_read(&dsi_ctrl->dma_irq_trig));
+    s = one(
+        s,
+        '''\t\t\telse
+\t\t\t\tret = 0;
 \t\t\ta52_p445_terminal(dsi_ctrl, ret);
-\t\t}
-'''
-    # Only the terminal inside the R1 block, after the second wait.
-    r1pos=s.find('a52_p445_begin_r1(dsi_ctrl);')
-    tpos=s.find(r1_done,r1pos)
-    if tpos < 0:
-        die("F0 R1 terminal anchor missing")
-    s=s[:tpos] + s[tpos:].replace(r1_done,r1_done_new,1)
+''',
+        '''\t\t\telse
+\t\t\t\tret = 0;
+\t\t\ta52_p446_mark(0x1abU,(u32)ret,
+\t\t\t\t(u32)atomic_read(&dsi_ctrl->dma_irq_trig));
+\t\t\ta52_p445_terminal(dsi_ctrl, ret);
+''',
+        "F0 R1 result",
+    )
+
+    s = one(
+        s,
+        '''error:
+\tif (buffer)
+''',
+        '''error:
+\tif (a52_p446h_f0)
+\t\ta52_p446_mark(0x1acU,(u32)rc,(u32)a52_p445_active());
+\tif (buffer)
+''',
+        "F0 tx return",
+    )
     return s
 
 def check(c: str, d: str, p: str, ctrl: str) -> None:

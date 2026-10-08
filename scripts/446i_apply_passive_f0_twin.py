@@ -21,31 +21,21 @@ def msm_dir(root: Path, kind: str) -> Path:
     return p
 
 def central_path(root: Path, kind: str) -> Path:
-    candidates = []
-    if kind == "gki":
-        candidates += [
-            root/"drivers/a52_display/msm/a52_phase444.c",
-            root/"drivers/a52_secure/a52_phase444.c",
-        ]
+    msm=msm_dir(root,kind)
+    if kind=="gki":
+        p=msm/"a52_phase445.c"
+        marker="A52_PHASE445_RECOVERY_LADDER_V1"
+        store="a52_p445_store_section"
     else:
-        candidates += [
-            root/"techpack/display/msm/a52_phase444.c",
-            root/"drivers/a52_display/msm/a52_phase444.c",
-        ]
-    for p in candidates:
-        if p.is_file() and "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1" in p.read_text(errors="replace"):
-            return p
-    for base in (root/"drivers", root/"techpack"):
-        if not base.exists():
-            continue
-        for p in base.rglob("*.c"):
-            try:
-                t=p.read_text(errors="replace")
-            except OSError:
-                continue
-            if "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1" in t and "a52_p444_store_section" in t:
-                return p
-    die("Phase444 central C file not found by marker")
+        p=msm/"a52_phase444.c"
+        marker="A52_PHASE444_DEEP_PASSIVE_COMPARE_V1"
+        store="a52_p444_store_section"
+    if not p.is_file():
+        die("central recorder missing: "+str(p))
+    t=p.read_text(errors="replace")
+    if marker not in t or store not in t:
+        die(f"central recorder contract missing for {kind}: {p}")
+    return p
 
 def parse_kona_selectors(sde: str) -> list[int]:
     m=re.search(r"\bu32\s+dsi_dbg_bus_kona\s*\[\]\s*=\s*\{(.*?)\};",sde,re.S)
@@ -55,15 +45,23 @@ def parse_kona_selectors(sde: str) -> list[int]:
         die(f'unexpected Kona selector count {len(vals)}')
     return vals
 
-def patch_central(s: str, selectors: list[int]) -> str:
-    if MARK in s: return s
+def patch_central(s: str, selectors: list[int], kind: str) -> str:
+    if MARK in s:
+        return s
 
-    anchor='static u32 p444_saved_dbg;\n'
-    if anchor not in s: die('Phase444 central saved-dbg anchor missing')
+    backend="p445" if kind=="gki" else "p444"
+    store_fn="a52_p445_store_section" if kind=="gki" else "a52_p444_store_section"
+    anchor=f"static u32 {backend}_saved_dbg;\n"
+    fn_anchor=f"static void {backend}_hot_one(struct dsi_ctrl_hw *ctrl, u32 point, u64 base)\n"
+    if anchor not in s:
+        die(f"{backend} saved-dbg anchor missing")
+    if fn_anchor not in s:
+        die(f"{backend}_hot_one anchor missing")
+
     sel=', '.join(f'0x{x:04x}U' for x in selectors)
-    inject=f'''static u32 p444_saved_dbg;
+    inject=r'''__ANCHOR__
 
-/* {MARK}
+/* A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1
  * Matched GKI/TG F0 environment capture. Hot-path code is MMIO-only.
  */
 #define P446I_REFGEN_PHYS 0x088e7000ULL
@@ -72,17 +70,21 @@ def patch_central(s: str, selectors: list[int]) -> str:
 #define P446I_DISPCC_BYTES 0x3000U
 #define P446I_MDP_PHYS 0x0ae00000ULL
 #define P446I_MDP_BYTES 0x85000U
+
+#define P446I_STAGE_SW   0x44610001U
+#define P446I_STAGE_PRE  0x44610002U
+#define P446I_STAGE_POST 0x44610003U
 #define P446I_TYPE_RAW 10U
 #define P446I_TYPE_BUS 11U
 #define P446I_TYPE_SW 12U
 
-struct p446i_bus_pair {{ u32 selector, value; }} __packed;
-struct p446i_sw {{
+struct p446i_bus_pair { u32 selector, value; } __packed;
+struct p446i_sw {
     u32 flags, msg_flags, panel_mode, power_state;
     u32 host_initialized, controller_state, cmd_engine_state, vid_engine_state;
     u32 byte_rate, pix_rate, byte_intf_rate, esc_rate;
-}} __packed;
-struct p446i_raw {{
+} __packed;
+struct p446i_raw {
     u64 ns;
     u32 dsi_status, lane_status, clk_status, int_ctrl, dbg_ctl;
     u32 refgen[64];
@@ -90,34 +92,44 @@ struct p446i_raw {{
     u32 pll0[9];
     u32 mdp[12];
     u32 compact[8];
-}} __packed;
+} __packed;
 
 static void __iomem *p446i_refgen, *p446i_dispcc, *p446i_mdp;
 static atomic_t p446i_seen = ATOMIC_INIT(0);
 static atomic_t p446i_target = ATOMIC_INIT(0);
 static struct p446i_sw p446i_sw;
 static struct p446i_raw p446i_pre, p446i_post;
-static struct p446i_bus_pair p446i_bus_pre[{len(selectors)}];
-static struct p446i_bus_pair p446i_bus_post[{len(selectors)}];
-static const u32 p446i_sel[{len(selectors)}] = {{ {sel} }};
-static const u32 p446i_compact_sel[8] = {{
+static struct p446i_bus_pair p446i_bus_pre[__NSEL__];
+static struct p446i_bus_pair p446i_bus_post[__NSEL__];
+static const u32 p446i_sel[__NSEL__] = { __SEL__ };
+static const u32 p446i_compact_sel[8] = {
     0x0151U,0x0171U,0x0181U,0x0191U,0x01a1U,0x01b1U,0x01c1U,0x0211U
-}};
-static const u32 p446i_rcg_base[6] = {{
+};
+static const u32 p446i_rcg_base[6] = {
     0x107cU,0x10c4U,0x1064U,0x10e0U,0x10acU,0x115cU
-}};
-static const u32 p446i_pll_off[9] = {{
+};
+static const u32 p446i_pll_off[9] = {
     0x00U,0x04U,0x08U,0x0cU,0x10U,0x14U,0x18U,0x1cU,0x2cU
-}};
+};
 '''
-    s=one(s,anchor,inject,'Phase444 central Phase446i globals')
+    inject=(inject.replace("__ANCHOR__",anchor.rstrip("\n"))
+                  .replace("__NSEL__",str(len(selectors)))
+                  .replace("__SEL__",sel))
+    s=one(s,anchor,inject,f"{backend} Phase446i globals")
 
-    fn_anchor='static void p444_hot_one(struct dsi_ctrl_hw *ctrl, u32 point, u64 base)\n'
-    if fn_anchor not in s: die('p444_hot_one anchor missing')
     helper=r'''static inline u32 p446i_r(void __iomem *b, u32 o)
 {
     return b ? readl_relaxed((u8 __iomem *)b + o) : ~0U;
 }
+
+static int __init p446i_map_init(void)
+{
+    p446i_refgen=ioremap(P446I_REFGEN_PHYS,P446I_REFGEN_BYTES);
+    p446i_dispcc=ioremap(P446I_DISPCC_PHYS,P446I_DISPCC_BYTES);
+    p446i_mdp=ioremap(P446I_MDP_PHYS,P446I_MDP_BYTES);
+    return 0;
+}
+late_initcall(p446i_map_init);
 
 static bool p446i_exact_f0(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg)
 {
@@ -146,7 +158,7 @@ void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u
     m->byte_intf_rate=ctrl->clk_freq.byte_intf_clk_rate;
     m->esc_rate=ctrl->clk_freq.esc_clk_rate;
     atomic_set(&p446i_target,1);
-    a52_p444_store_section(P444_STAGE_PRE_TRIGGER,P446I_TYPE_SW,
+    __STORE__(P446I_STAGE_SW,P446I_TYPE_SW,
         "I_SW_ENTRY",flags,(u32)msg->flags,m,sizeof(*m));
 }
 EXPORT_SYMBOL_GPL(a52_p446i_sw_entry);
@@ -205,27 +217,21 @@ void a52_p446i_hw_post(struct dsi_ctrl_hw *ctrl)
     if (!atomic_read(&p446i_target)) return;
     p446i_fill_raw(&p446i_post,ctrl);
     p446i_sweep(p446i_bus_post,ctrl);
-    a52_p444_store_section(P444_STAGE_PRE_TRIGGER,P446I_TYPE_RAW,"I_RAW_PRE",
+    __STORE__(P446I_STAGE_PRE,P446I_TYPE_RAW,"I_RAW_PRE",
         (u32)p446i_pre.refgen[0x80/4],p446i_pre.compact[1],&p446i_pre,sizeof(p446i_pre));
-    a52_p444_store_section(P444_STAGE_HOT,P446I_TYPE_RAW,"I_RAW_POST",
+    __STORE__(P446I_STAGE_POST,P446I_TYPE_RAW,"I_RAW_POST",
         (u32)p446i_post.refgen[0x80/4],p446i_post.compact[1],&p446i_post,sizeof(p446i_post));
-    a52_p444_store_section(P444_STAGE_PRE_TRIGGER,P446I_TYPE_BUS,"I_BUS_PRE",
+    __STORE__(P446I_STAGE_PRE,P446I_TYPE_BUS,"I_BUS_PRE",
         ARRAY_SIZE(p446i_sel),p446i_pre.dbg_ctl,p446i_bus_pre,sizeof(p446i_bus_pre));
-    a52_p444_store_section(P444_STAGE_HOT,P446I_TYPE_BUS,"I_BUS_POST",
+    __STORE__(P446I_STAGE_POST,P446I_TYPE_BUS,"I_BUS_POST",
         ARRAY_SIZE(p446i_sel),p446i_post.dbg_ctl,p446i_bus_post,sizeof(p446i_bus_post));
     atomic_set(&p446i_target,0);
 }
 EXPORT_SYMBOL_GPL(a52_p446i_hw_post);
 
 '''
-    s=one(s,fn_anchor,helper+fn_anchor,'Phase446i helpers')
-
-    init_anchor='    p444_phy=ioremap(0x0ae94000ULL,0x1000U);\n'
-    init_new=(init_anchor+
-        "    p446i_refgen=ioremap(P446I_REFGEN_PHYS,P446I_REFGEN_BYTES);\n"
-        "    p446i_dispcc=ioremap(P446I_DISPCC_PHYS,P446I_DISPCC_BYTES);\n"
-        "    p446i_mdp=ioremap(P446I_MDP_PHYS,P446I_MDP_BYTES);\n")
-    s=one(s,init_anchor,init_new,'Phase446i ioremap')
+    helper=helper.replace("__STORE__",store_fn)
+    s=one(s,fn_anchor,helper+fn_anchor,"Phase446i helpers")
     return s
 
 def patch_ctrl(s: str) -> str:
@@ -273,8 +279,12 @@ def check(root: Path, kind: str) -> None:
     c=cp.read_text(errors='replace')
     d=(msm/'dsi/dsi_ctrl.c').read_text(errors='replace')
     for tok in (MARK,'I_SW_ENTRY','I_RAW_PRE','I_RAW_POST','I_BUS_PRE','I_BUS_POST',
-                'P446I_REFGEN_PHYS 0x088e7000ULL','a52_p446i_hw_pre','a52_p446i_hw_post'):
+                'P446I_REFGEN_PHYS 0x088e7000ULL','P446I_STAGE_PRE',
+                'a52_p446i_hw_pre','a52_p446i_hw_post'):
         if tok not in c+d: die('contract missing: '+tok)
+    expected_store='a52_p445_store_section' if kind=='gki' else 'a52_p444_store_section'
+    if expected_store not in c:
+        die('wrong recorder backend: '+expected_store)
     if d.count('a52_p446i_sw_entry(dsi_ctrl,msg,*flags);') != 1:
         die('sw-entry hook count wrong')
     if d.count('a52_p446i_hw_pre(&dsi_ctrl->hw);') != 1 or d.count('a52_p446i_hw_post(&dsi_ctrl->hw);') != 1:
@@ -286,7 +296,6 @@ def check(root: Path, kind: str) -> None:
     if 'qcom,refgen-kona-regulator' not in rs or 'REFGEN_REG_PWRDWN_CTRL5' not in rs:
         die('Kona refgen contract missing')
     if kind=='gki':
-        # Current port is intentionally Kona-only. Fail if generic write path appears.
         if 'REFGEN_REG_BIAS_EN' in rs or 'REFGEN_REG_BG_CTRL' in rs:
             die('GKI refgen unexpectedly contains generic +0x08/+0x14 path')
         if 'vreg->rdesc.ops = &refgen_kona_ops;' not in rs:
@@ -302,7 +311,7 @@ def main() -> None:
     if not a.check_only:
         sde=(msm/'sde_dbg.c').read_text(errors='replace')
         selectors=parse_kona_selectors(sde)
-        cp=central_path(root,a.kind); cp.write_text(patch_central(cp.read_text(errors='replace'),selectors))
+        cp=central_path(root,a.kind); cp.write_text(patch_central(cp.read_text(errors='replace'),selectors,a.kind))
         dp=msm/'dsi/dsi_ctrl.c'; dp.write_text(patch_ctrl(dp.read_text(errors='replace')))
     check(root,a.kind)
 

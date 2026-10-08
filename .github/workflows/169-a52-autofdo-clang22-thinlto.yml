@@ -1300,6 +1300,14 @@ jobs:
             echo "Production/performance/boot validation: NOT YET PROVEN"
           } | tee artifacts/p169-autofdo-audit.txt
 
+          # Match the exact profiled/training vmlinux to the perf data.
+          # The flashable Image alone cannot be used for offline profile creation.
+          cp "$KERNEL/out/vmlinux" artifacts/p169-vmlinux
+          cp "$KERNEL/out/System.map" artifacts/p169-System.map
+          cp "$KERNEL/out/.config" artifacts/p169-kernel.config
+          sha256sum artifacts/p169-vmlinux artifacts/p169-System.map \
+            artifacts/p169-kernel.config > artifacts/p169-build-input-sha256.txt
+
       - name: Prove P159 initcall table is populated
         run: |
           set -Eeuo pipefail
@@ -1889,6 +1897,10 @@ jobs:
             release/
             artifacts/p169-autofdo-*.txt
             artifacts/p169-profile-inspect.txt
+            artifacts/p169-vmlinux
+            artifacts/p169-System.map
+            artifacts/p169-kernel.config
+            artifacts/p169-build-input-sha256.txt
             artifacts/aod-power-saver-p150.txt
             artifacts/boot-async-deferred-p151.txt
             artifacts/boot-async-peripherals-p152.txt

@@ -20,6 +20,33 @@ def msm_dir(root: Path, kind: str) -> Path:
     if not p.is_dir(): die(f'missing {p}')
     return p
 
+def central_path(root: Path, kind: str) -> Path:
+    candidates = []
+    if kind == "gki":
+        candidates += [
+            root/"drivers/a52_display/msm/a52_phase444.c",
+            root/"drivers/a52_secure/a52_phase444.c",
+        ]
+    else:
+        candidates += [
+            root/"techpack/display/msm/a52_phase444.c",
+            root/"drivers/a52_display/msm/a52_phase444.c",
+        ]
+    for p in candidates:
+        if p.is_file() and "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1" in p.read_text(errors="replace"):
+            return p
+    for base in (root/"drivers", root/"techpack"):
+        if not base.exists():
+            continue
+        for p in base.rglob("*.c"):
+            try:
+                t=p.read_text(errors="replace")
+            except OSError:
+                continue
+            if "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1" in t and "a52_p444_store_section" in t:
+                return p
+    die("Phase444 central C file not found by marker")
+
 def parse_kona_selectors(sde: str) -> list[int]:
     m=re.search(r"\bu32\s+dsi_dbg_bus_kona\s*\[\]\s*=\s*\{(.*?)\};",sde,re.S)
     if not m: die('dsi_dbg_bus_kona table missing')
@@ -242,7 +269,8 @@ def patch_ctrl(s: str) -> str:
 
 def check(root: Path, kind: str) -> None:
     msm=msm_dir(root,kind)
-    c=(msm/'a52_phase444.c').read_text(errors='replace')
+    cp=central_path(root,kind)
+    c=cp.read_text(errors='replace')
     d=(msm/'dsi/dsi_ctrl.c').read_text(errors='replace')
     for tok in (MARK,'I_SW_ENTRY','I_RAW_PRE','I_RAW_POST','I_BUS_PRE','I_BUS_POST',
                 'P446I_REFGEN_PHYS 0x088e7000ULL','a52_p446i_hw_pre','a52_p446i_hw_post'):
@@ -274,7 +302,7 @@ def main() -> None:
     if not a.check_only:
         sde=(msm/'sde_dbg.c').read_text(errors='replace')
         selectors=parse_kona_selectors(sde)
-        cp=msm/'a52_phase444.c'; cp.write_text(patch_central(cp.read_text(errors='replace'),selectors))
+        cp=central_path(root,a.kind); cp.write_text(patch_central(cp.read_text(errors='replace'),selectors))
         dp=msm/'dsi/dsi_ctrl.c'; dp.write_text(patch_ctrl(dp.read_text(errors='replace')))
     check(root,a.kind)
 

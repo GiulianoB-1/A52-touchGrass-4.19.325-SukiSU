@@ -790,10 +790,14 @@ jobs:
           grep -aFq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
           grep -aFq 'J_MISC_TRACE' "$IMAGE"
-          grep -aFq 'A52_PHASE_U1_LEGACY_QUSB2_V2_PORT_V1' "$IMAGE"
-          grep -aFq 'A52_PHASE_U1_RUNTIME_HS_ONLY' "$IMAGE"
-          grep -aFq 'A52_PHASE_U1_GKI_UTMI_PIPE' "$IMAGE"
+          # The source markers are comments (not emitted in vmlinux).
+          # Audit actual runtime strings and the symbol of the linked PHY.
+          grep -aFq 'msm-qusb-phy-v2' "$IMAGE"
+          grep -aFq 'U1: forcing authenticated high-speed USB gadget' "$IMAGE"
+          grep -aFq 'U1: selecting UTMI as PIPE on lagoon' "$IMAGE"
           grep -aFq 'U1: optional USB3 PHY absent' "$IMAGE"
+          grep -Fq ' a52_u1_usb2_only' "$MAP" || true
+          python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
 
           ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"

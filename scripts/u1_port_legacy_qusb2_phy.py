@@ -109,6 +109,66 @@ def patch(root: Path, tg: Path):
         text += "obj-$(CONFIG_USB_PHY) += phy-a52-qusb2-v2.o\n"
         mk.write_text(text)
     dt.write_text(patch_dt(dt.read_text()))
+    patch_active_dwc3(root)
+
+def patch_active_dwc3(root: Path):
+    """Boot header v2 repacker preserves original DTB; force HS in the live code."""
+    core = root / "drivers/usb/dwc3/core.c"
+    glue = root / "drivers/usb/dwc3/dwc3-qcom.c"
+    if not core.is_file() or not glue.is_file():
+        raise RuntimeError("active GKI DWC3 source missing")
+    c = core.read_text()
+    helper = r'''/* A52_PHASE_U1_RUNTIME_HS_ONLY
+ * Boot repacker preserves the stock DTB: compiled C quirk is essential.
+ * Apply only to the downstream Qualcomm USB3 glue parent of this phone.
+ */
+static bool a52_u1_usb2_only(struct device *dev)
+{
+    struct device_node *parent = dev && dev->parent ?
+                                 dev->parent->of_node : NULL;
+    return parent && of_device_is_compatible(parent, "qcom,dwc-usb3-msm") &&
+           of_node_name_eq(parent, "ssusb");
+}
+
+'''
+    if "A52_PHASE_U1_RUNTIME_HS_ONLY" not in c:
+        c = once(c, "static int dwc3_core_get_phy(struct dwc3 *dwc)\n",
+                 helper + "static int dwc3_core_get_phy(struct dwc3 *dwc)\n",
+                 "legacy PHY get helper")
+        c = once(c,
+                 '\t\tdwc->usb3_phy = devm_usb_get_phy_by_phandle(dev, "usb-phy", 1);\n',
+                 '\t\tdwc->usb3_phy = devm_usb_get_phy_by_phandle(dev, "usb-phy", 1);\n'
+                 '\t\tif (a52_u1_usb2_only(dev) && IS_ERR(dwc->usb3_phy) &&\n'
+                 '\t\t    PTR_ERR(dwc->usb3_phy) == -EPROBE_DEFER) {\n'
+                 '\t\t\tdev_warn(dev, "U1: optional USB3 PHY absent, use high-speed gadget\\n");\n'
+                 '\t\t\tdwc->usb3_phy = NULL;\n'
+                 '\t\t}\n',
+                 "make only legacy USB3 PHY optional")
+        c = once(c, "\tdwc3_get_properties(dwc);\n",
+                 "\tdwc3_get_properties(dwc);\n"
+                 "\tif (a52_u1_usb2_only(dev)) {\n"
+                 "\t\tdwc->maximum_speed = USB_SPEED_HIGH;\n"
+                 "\t\tdwc->dr_mode = USB_DR_MODE_PERIPHERAL;\n"
+                 '\t\tdev_warn(dev, "U1: forcing authenticated high-speed USB gadget\\n");\n'
+                 "\t}\n",
+                 "force high-speed gadget regardless of preserved DTB")
+        core.write_text(c)
+
+    g = glue.read_text()
+    if "A52_PHASE_U1_GKI_UTMI_PIPE" not in g:
+        g = once(g,
+                 'ignore_pipe_clk = device_property_read_bool(dev,\n'
+                 '\t\t\t\t"qcom,select-utmi-as-pipe-clk");\n',
+                 'ignore_pipe_clk = device_property_read_bool(dev,\n'
+                 '\t\t\t\t"qcom,select-utmi-as-pipe-clk");\n'
+                 '\t/* A52_PHASE_U1_GKI_UTMI_PIPE: HS-only while USB3 PHY absent. */\n'
+                 '\tif (np && res && res->start == 0x0a600000ULL &&\n'
+                 '\t    of_device_is_compatible(np, "qcom,dwc-usb3-msm")) {\n'
+                 '\t\tignore_pipe_clk = true;\n'
+                 '\t\tdev_warn(dev, "U1: selecting UTMI as PIPE on lagoon\\n");\n'
+                 '\t}\n',
+                 "select UTMI clock for lagoon core without DTB changes")
+        glue.write_text(g)
 
 def validate(root: Path):
     src = (root / KERNEL_PATH).read_text()
@@ -126,7 +186,15 @@ def validate(root: Path):
             raise RuntimeError("DT missing " + token)
     if 'usb-phy = <&qusb_phy0>, <&usb_qmp_dp_phy>;' in dt:
         raise RuntimeError("USB3 PHY still requested by DWC3")
-    print("Phase U1 PASS: legacy QUSB2 driver compiled in, USB3 absent, USB2 peripheral")
+    core = (root / "drivers/usb/dwc3/core.c").read_text()
+    glue = (root / "drivers/usb/dwc3/dwc3-qcom.c").read_text()
+    for text, marker in ((core, "A52_PHASE_U1_RUNTIME_HS_ONLY"),
+                         (core, "optional USB3 PHY absent"),
+                         (core, "dwc->maximum_speed = USB_SPEED_HIGH;"),
+                         (glue, "A52_PHASE_U1_GKI_UTMI_PIPE")):
+        if marker not in text:
+            raise RuntimeError("active USB quirk missing " + marker)
+    print("Phase U1 PASS: QUSB2 legacy PHY, runtime optional USB3, HS gadget, UTMI PIPE")
 
 def main():
     ap = argparse.ArgumentParser()

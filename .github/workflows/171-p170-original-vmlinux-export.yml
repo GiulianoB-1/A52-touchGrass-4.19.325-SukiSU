@@ -1,0 +1,156 @@
+name: 171 - P170 original training vmlinux export (no kernel build)
+
+on:
+  push:
+    branches:
+      - agent/a52-p170-autofdo-etm4x-diag-clang22-thinlto-v1
+    paths:
+      - .github/workflows/171-p170-original-vmlinux-export.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  export-matching-vmlinux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Fetch exact vmlinux from original P170 profiling build
+        uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-P170-ETM4X-AUTOFDO-TRAINING-2
+          run-id: 37893262053
+          github-token: ${{ github.token }}
+          path: original-p170
+
+      - name: Compress and split matching vmlinux for independent inspection
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VMLINUX="original-p170/artifacts/p169-vmlinux"
+          test -s "$VMLINUX"
+          echo '=== SOURCE BINARY ==='
+          file "$VMLINUX"
+          readelf -n "$VMLINUX" | grep -m1 -A1 'Build ID:' || true
+          echo '=== EXPECTED ORIGINAL IMAGE SHA256 ==='
+          printf '%s  %s\n' 'da7e96477722c4e8720c8ba7cfae2d8f55b70ab87bc9ad75143b5f0d68f1be58' "$VMLINUX" | sha256sum -c -
+          mkdir -p parts
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          zstd -q -T2 -10 "$VMLINUX" -o /tmp/p170-original-vmlinux.zst
+          sha256sum /tmp/p170-original-vmlinux.zst | tee parts/compressed-sha256.txt
+          sha256sum "$VMLINUX" | tee parts/original-sha256.txt
+          readelf -n "$VMLINUX" | sed -n '/Build ID:/p' | head -1 | tee parts/original-build-id.txt
+          stat -c 'original_vmlinux_bytes=%s' "$VMLINUX"
+          stat -c 'compressed_vmlinux_bytes=%s' /tmp/p170-original-vmlinux.zst
+          split -b 160M -d -a 2 /tmp/p170-original-vmlinux.zst parts/p170-vmlinux.zst.part-
+          count="$(find parts -maxdepth 1 -name 'p170-vmlinux.zst.part-*' | wc -l)"
+          echo "part_count=$count"
+          test "$count" -gt 0
+          test "$count" -le 10
+          sha256sum parts/p170-vmlinux.zst.part-* | tee parts/part-sha256.txt
+          cat parts/original-build-id.txt
+
+      - name: Upload original training vmlinux identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-IDENTITY
+          path: |
+            parts/original-sha256.txt
+            parts/compressed-sha256.txt
+            parts/original-build-id.txt
+            parts/part-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 00
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-00') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-00
+          path: parts/p170-vmlinux.zst.part-00
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 01
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-01') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-01
+          path: parts/p170-vmlinux.zst.part-01
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 02
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-02') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-02
+          path: parts/p170-vmlinux.zst.part-02
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 03
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-03') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-03
+          path: parts/p170-vmlinux.zst.part-03
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 04
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-04') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-04
+          path: parts/p170-vmlinux.zst.part-04
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 05
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-05') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-05
+          path: parts/p170-vmlinux.zst.part-05
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 06
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-06') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-06
+          path: parts/p170-vmlinux.zst.part-06
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 07
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-07') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-07
+          path: parts/p170-vmlinux.zst.part-07
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 08
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-08') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-08
+          path: parts/p170-vmlinux.zst.part-08
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original vmlinux part 09
+        if: ${{ hashFiles('parts/p170-vmlinux.zst.part-09') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-ORIGINAL-VMLINUX-PART-09
+          path: parts/p170-vmlinux.zst.part-09
+          if-no-files-found: error
+          retention-days: 14

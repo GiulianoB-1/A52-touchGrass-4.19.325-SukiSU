@@ -39,33 +39,59 @@ def main():
 extern int a52_p445_store_section(u32, u32, const char *, u32, u32,
                                   const void *, u32);
 extern void a52_p446_mark(u32, u32, u32);
+extern int a52_p446l_probe_begin(void);
+extern void a52_p446l_probe_end(void);
+extern void a52_p446l_probe_state(u32 *, u32 *, u32 *);
+extern void a52_p446j_misc_event(struct dsi_ctrl_hw *, u32, u32, u32);
+struct p446l_snap {
+    u32 frame, line, out_line, int_count, autorefresh, intf_status, ctl_status;
+    u32 dsi_status, dsi_lane, dsi_clk;
+} __packed;
 struct p446l_result {
     u32 magic, version, stage, splash, frame0, frame1, frame2;
     u32 pwr, host, ctrl, cmd, cmd_ref, iova, dma_pre, dma_post;
-    s32 clk_on, alloc, engine_on, idle, transfer, engine_off, clk_off;
+    u32 gate_pre, armed_pre, seen_pre, gate_post, armed_post, seen_post;
+    u32 cmd_ref_post, cmd_state_post, frame_after_restore;
+    s32 clk_on, alloc, engine_on, idle, probe_begin, transfer, engine_off, clk_off;
+    struct p446l_snap pre, post, next;
     u64 start_ns, end_ns;
 } __packed;
 static struct dsi_display *p446l_display;
 static void p446l_worker(struct work_struct *work);
 static DECLARE_DELAYED_WORK(p446l_work, p446l_worker);
 static atomic_t p446l_once = ATOMIC_INIT(0);
+static void p446l_snap_take(struct p446l_snap *p, struct dsi_ctrl *c,
+                            void __iomem *intf, void __iomem *pp,
+                            void __iomem *ctl)
+{
+    p->frame = readl_relaxed(intf + 0x8ac);
+    p->intf_status = readl_relaxed(intf + 0x800);
+    p->line = readl_relaxed(pp + 0x02c);
+    p->out_line = readl_relaxed(pp + 0x028);
+    p->int_count = readl_relaxed(pp + 0x014);
+    p->autorefresh = readl_relaxed(pp + 0x030);
+    p->ctl_status = readl_relaxed(ctl + 0x064);
+    p->dsi_status = readl_relaxed(c->hw.base + DSI_STATUS);
+    p->dsi_lane = readl_relaxed(c->hw.base + DSI_LANE_STATUS);
+    p->dsi_clk = readl_relaxed(c->hw.base + DSI_CLK_STATUS);
+}
 
 static void p446l_worker(struct work_struct *work)
 {
     struct dsi_display *d = READ_ONCE(p446l_display);
-    struct dsi_ctrl *c;
+    struct dsi_ctrl *c = NULL;
     struct mipi_dsi_msg msg = {0};
     struct p446l_result v = {0};
-    void __iomem *frame = NULL;
+    void __iomem *frame = NULL, *pp = NULL, *ctl = NULL;
     const u8 f0[3] = { 0xF0, 0x5A, 0x5A };
     u32 flags = DSI_CTRL_CMD_FETCH_MEMORY;
     int rc = -EAGAIN;
-    bool voted = false, eng = false;
+    bool voted = false, eng = false, probe = false;
 
     (void)work;
     if (!d || atomic_cmpxchg(&p446l_once, 0, 1)) return;
     v.magic = 0x446c0001U; v.version = 1;
-    v.clk_on = v.alloc = v.engine_on = v.idle =
+    v.clk_on = v.alloc = v.engine_on = v.idle = v.probe_begin =
         v.transfer = v.engine_off = v.clk_off = -EAGAIN;
     v.start_ns = ktime_get_boottime_ns();
     v.stage = 1;
@@ -85,12 +111,14 @@ static void p446l_worker(struct work_struct *work)
     a52_p446_mark(0x1e0U, v.pwr, (v.host << 16) | (v.ctrl << 8) | v.cmd);
 
     /* A continuously advancing INTF1 counter validates a live MDP splash. */
-    frame = ioremap(0x0ae6b8acULL, 4);
+    frame = ioremap(0x0ae6b000ULL, 0x1000);
+    pp = ioremap(0x0ae71000ULL, 0x1000);
+    ctl = ioremap(0x0ae02000ULL, 0x1000);
     v.stage = 2;
-    if (!frame) goto done;
-    v.frame0 = readl_relaxed(frame);
+    if (!frame || !pp || !ctl) goto done;
+    v.frame0 = readl_relaxed(frame + 0x8ac);
     msleep(27);
-    v.frame1 = readl_relaxed(frame);
+    v.frame1 = readl_relaxed(frame + 0x8ac);
     a52_p446_mark(0x1e1U, v.frame0, v.frame1);
     if (!d->is_cont_splash_enabled || v.frame0 == v.frame1)
         goto done;
@@ -130,21 +158,51 @@ static void p446l_worker(struct work_struct *work)
     msg.tx_buf = f0;
 
     v.stage = 7;
-    v.dma_pre = readl_relaxed(c->hw.base + 0x0008);
-    a52_p446_mark(0x1e2U, v.frame1, v.dma_pre);
+    p446l_snap_take(&v.pre, c, frame, pp, ctl);
+    v.dma_pre = v.pre.dsi_status;
+    a52_p446l_probe_state(&v.gate_pre, &v.armed_pre, &v.seen_pre);
+    if (v.gate_pre || v.armed_pre || v.seen_pre) {
+        v.probe_begin = -EBUSY;
+        goto done;
+    }
+    rc = a52_p446l_probe_begin();
+    v.probe_begin = rc;
+    if (rc) goto done;
+    probe = true;
+    a52_p446j_misc_event(&c->hw, 0x4a40U, v.pre.frame, v.pre.dsi_status);
+    a52_p446_mark(0x1e2U, v.pre.frame, v.pre.dsi_status);
+    v.stage = 8;
     rc = dsi_ctrl_cmd_transfer(c, &msg, &flags);
     v.transfer = rc;
-    v.dma_post = readl_relaxed(c->hw.base + 0x0008);
-    v.frame2 = readl_relaxed(frame);
-    v.stage = 8;
-    a52_p446_mark(0x1e3U, (u32)rc, v.dma_post);
+    p446l_snap_take(&v.post, c, frame, pp, ctl);
+    v.dma_post = v.post.dsi_status;
+    a52_p446j_misc_event(&c->hw, 0x4a41U, v.post.frame, v.post.dsi_status);
+    a52_p446l_probe_end();
+    probe = false;
+    a52_p446l_probe_state(&v.gate_post, &v.armed_post, &v.seen_post);
+    v.frame2 = v.post.frame;
+    v.stage = 9;
+    a52_p446_mark(0x1e3U, (u32)rc, v.post.dsi_status);
+    /* Observe the next logo refresh; leave MDP/PP untouched. */
+    msleep(27);
+    p446l_snap_take(&v.next, c, frame, pp, ctl);
 
 done:
+    if (probe) a52_p446l_probe_end();
     if (eng) v.engine_off = dsi_display_cmd_engine_disable(d);
     if (voted)
         v.clk_off = dsi_display_clk_ctrl(d->dsi_clk_handle,
                                         DSI_ALL_CLKS, DSI_CLK_OFF);
-    if (frame) iounmap(frame);
+    if (c && v.splash) {
+        v.cmd_ref_post = d->cmd_engine_refcount;
+        v.cmd_state_post = c->current_state.cmd_engine_state;
+    }
+    if (frame) {
+        v.frame_after_restore = readl_relaxed(frame + 0x8ac);
+        iounmap(frame);
+    }
+    if (pp) iounmap(pp);
+    if (ctl) iounmap(ctl);
     v.end_ns = ktime_get_boottime_ns();
     a52_p445_store_section(0x446c0001U, 15U, "L_EARLY_F0",
                            v.stage, (u32)v.transfer, &v, sizeof(v));

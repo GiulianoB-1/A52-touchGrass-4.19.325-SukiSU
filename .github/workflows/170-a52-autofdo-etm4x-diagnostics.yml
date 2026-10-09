@@ -1939,6 +1939,14 @@ jobs:
           path: .ccache
           key: a52xq-clang22-thinlto-v2-r596125-${{ runner.os }}-${{ github.sha }}
 
+      - name: Upload P170 flashable kernel ZIP separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P170-ETM4X-FLASHABLE-${{ env.A52_AUTOFDO_MODE }}-${{ github.run_number }}
+          path: release/*A52-P170-ETM4X-DIAG-AUTOFDO-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload P168 bundle and audit
         if: always()
         uses: actions/upload-artifact@v4

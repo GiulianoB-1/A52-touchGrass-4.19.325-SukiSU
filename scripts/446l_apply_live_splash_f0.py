@@ -242,20 +242,20 @@ done:
         if "A52_PHASE446L_PROBE_GUARD_V1" not in b:
             b = one(b,
                 "static atomic_t p446i_seen = ATOMIC_INIT(0);",
-                "static atomic_t p446i_seen = ATOMIC_INIT(0);\\n"
+                "static atomic_t p446i_seen = ATOMIC_INIT(0);\n"
                 "static atomic_t p446l_probe_active = ATOMIC_INIT(0);",
                 "p445 guard atomic")
             b = one(b,
-                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
-                "{\\n    const u8 *p;",
-                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
-                "{\\n    const u8 *p;\\n    if (atomic_read(&p446l_probe_active)) return;",
+                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\n"
+                "{\n    const u8 *p;",
+                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\n"
+                "{\n    const u8 *p;\n    if (atomic_read(&p446l_probe_active)) return;",
                 "early F0 arm guard")
             b = one(b,
-                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
-                "{\\n    struct p446i_sw *m=&p446i_sw;",
-                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
-                "{\\n    struct p446i_sw *m=&p446i_sw;\\n"
+                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\n"
+                "{\n    struct p446i_sw *m=&p446i_sw;",
+                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\n"
+                "{\n    struct p446i_sw *m=&p446i_sw;\n"
                 "    if (atomic_read(&p446l_probe_active)) return;",
                 "natural one-shot guard")
             block = '''/* A52_PHASE446L_PROBE_GUARD_V1
@@ -286,8 +286,8 @@ void a52_p446l_probe_state(u32 *gate, u32 *armed, u32 *seen)
 EXPORT_SYMBOL_GPL(a52_p446l_probe_state);
 
 '''
-            b = one(b, "bool a52_p445_active(void)\\n{",
-                    block + "bool a52_p445_active(void)\\n{",
+            b = one(b, "bool a52_p445_active(void)\n{",
+                    block + "bool a52_p445_active(void)\n{",
                     "probe helper insertion")
             central.write_text(b)
 

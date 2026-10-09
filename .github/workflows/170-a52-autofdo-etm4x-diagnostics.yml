@@ -8,6 +8,7 @@ on:
       - .github/workflows/170-a52-autofdo-etm4x-diagnostics.yml
       - scripts/170_enable_etm4x_diagnostics.py
       - scripts/170_termux_etm_readonly.sh
+      - scripts/170_apply_f2fs_stable_325_p1_with_git_fallback.sh
       - scripts/169_apply_autofdo_clang22.py
       - scripts/169_convert_pmu_nonlbr.sh
       - profiles/**
@@ -241,7 +242,13 @@ jobs:
           set -Eeuo pipefail
           KERNEL=workspace/touchgrass-a52xq
 
-          ./scripts/118_apply_f2fs_stable_325_p1.sh \
+          # P170 cold-branch fallback: GitHub patch HTML endpoints returned 504
+          # for 14 commits; use the identical git objects when they do.
+          curl -fsSL --retry 3 --retry-delay 2 \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/170_apply_f2fs_stable_325_p1_with_git_fallback.sh" \
+            -o /tmp/170_apply_f2fs_stable_325_p1_with_git_fallback.sh
+          bash -n /tmp/170_apply_f2fs_stable_325_p1_with_git_fallback.sh
+          bash /tmp/170_apply_f2fs_stable_325_p1_with_git_fallback.sh \
             "$KERNEL" artifacts/f2fs-stable325-p1.txt artifacts/f2fs-stable325-patches
           python3 scripts/119_apply_f2fs_gc_merge_p2.py "$KERNEL"
           python3 scripts/121_apply_f2fs_inmem_curseg_p3a.py "$KERNEL" artifacts/f2fs-inmem-p3a
@@ -1940,6 +1947,7 @@ jobs:
           path: |
             release/
             artifacts/p170-etm4x-*.txt
+            artifacts/f2fs-stable325-p1.txt
             artifacts/p169-autofdo-*.txt
             artifacts/p169-profile-inspect.txt
             artifacts/p169-vmlinux

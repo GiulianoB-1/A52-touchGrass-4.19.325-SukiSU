@@ -160,6 +160,13 @@ static void p446l_worker(struct work_struct *work)
     v.stage = 7;
     p446l_snap_take(&v.pre, c, frame, pp, ctl);
     v.dma_pre = v.pre.dsi_status;
+    /* The PP-idle wait is not atomic with the next autorefresh frame.
+     * Never transmit if the immediate PRE sample says MDP is busy.
+     */
+    if (v.pre.dsi_status & BIT(2)) {
+        v.idle = -EBUSY;
+        goto done;
+    }
     a52_p446l_probe_state(&v.gate_pre, &v.armed_pre, &v.seen_pre);
     if (v.gate_pre || v.armed_pre || v.seen_pre) {
         v.probe_begin = -EBUSY;
@@ -194,6 +201,8 @@ done:
         v.clk_off = dsi_display_clk_ctrl(d->dsi_clk_handle,
                                         DSI_ALL_CLKS, DSI_CLK_OFF);
     if (c && v.splash) {
+        /* Explicit restoration witness for subsequent natural F0. */
+        a52_p446l_probe_state(&v.gate_post, &v.armed_post, &v.seen_post);
         v.cmd_ref_post = d->cmd_engine_refcount;
         v.cmd_state_post = c->current_state.cmd_engine_state;
     }
@@ -293,7 +302,9 @@ EXPORT_SYMBOL_GPL(a52_p446l_probe_state);
 
     text = target.read_text()
     for check in (MARK, 'L_EARLY_F0', 'p446l_worker', 'msecs_to_jiffies(7000)',
-                  'dsi_ctrl_cmd_transfer(c, &msg, &flags)'):
+                  'dsi_ctrl_cmd_transfer(c, &msg, &flags)',
+                  'if (v.pre.dsi_status & BIT(2))', 'v.frame_after_restore',
+                  'a52_p446l_probe_state(&v.gate_post'):
         if check not in text:
             raise RuntimeError('missing '+check)
     if text.count(MARK) != 1:

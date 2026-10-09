@@ -129,11 +129,18 @@ def main() -> int:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--u1-usb2-hs-dtb", action="store_true",
+                        help="Patch embedded A52 DTB for USB2-only device mode")
     args = parser.parse_args()
 
     source = args.source.read_bytes()
     new_kernel = args.kernel.read_bytes()
     original = parse_boot(source)
+    source_dtb_sha256 = sha256(original["dtb"])
+    if args.u1_usb2_hs_dtb:
+        from u1_patch_boot_dtb import patch_lagoon_dtb
+        original["dtb"] = patch_lagoon_dtb(original["dtb"])
+        print("Phase U1: actual boot v2 DTB patched for USB2-only HS", flush=True)
 
     if not new_kernel.startswith(b"\x1f\x8b"):
         raise SystemExit("replacement kernel is not gzip-compressed Image.gz")
@@ -180,6 +187,10 @@ def main() -> int:
 
     rebuilt = parse_boot(bytes(output))
     invariants = {
+        "u1_usb2_dtb_verified": (
+            not args.u1_usb2_hs_dtb or
+            __import__("u1_patch_boot_dtb").verify_lagoon_dtb(rebuilt["dtb"])
+        ),
         "partition_size_preserved": len(output) == len(source),
         "header_version_preserved": rebuilt["header_version"] == original["header_version"],
         "page_size_preserved": rebuilt["page_size"] == original["page_size"],
@@ -206,6 +217,9 @@ def main() -> int:
     report = {
         "status": "repacked-audited",
         "hardware_validated": False,
+        "u1_usb2_hs_dtb": args.u1_usb2_hs_dtb,
+        "original_source_dtb_sha256": source_dtb_sha256,
+        "repacked_dtb_sha256": sha256(rebuilt["dtb"]),
         "flashable_candidate": True,
         "source_sha256": sha256(source),
         "output_sha256": sha256(output),

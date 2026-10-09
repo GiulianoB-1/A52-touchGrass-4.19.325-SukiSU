@@ -42,6 +42,7 @@ extern void a52_p446_mark(u32, u32, u32);
 extern int a52_p446l_probe_begin(void);
 extern void a52_p446l_probe_end(void);
 extern void a52_p446l_probe_state(u32 *, u32 *, u32 *);
+extern u32 a52_p446l_kickoff_count(void);
 extern void a52_p446j_misc_event(struct dsi_ctrl_hw *, u32, u32, u32);
 struct p446l_snap {
     u32 frame, line, out_line, int_count, autorefresh, intf_status, ctl_status;
@@ -51,6 +52,7 @@ struct p446l_result {
     u32 magic, version, stage, splash, frame0, frame1, frame2;
     u32 pwr, host, ctrl, cmd, cmd_ref, iova, dma_pre, dma_post;
     u32 gate_pre, armed_pre, seen_pre, gate_post, armed_post, seen_post;
+    u32 hw_kickoff_count;
     u32 cmd_ref_post, cmd_state_post, frame_after_restore;
     s32 clk_on, alloc, engine_on, idle, probe_begin, transfer, engine_off, clk_off;
     struct p446l_snap pre, post, next;
@@ -181,6 +183,7 @@ static void p446l_worker(struct work_struct *work)
     v.stage = 8;
     rc = dsi_ctrl_cmd_transfer(c, &msg, &flags);
     v.transfer = rc;
+    v.hw_kickoff_count = a52_p446l_kickoff_count();
     p446l_snap_take(&v.post, c, frame, pp, ctl);
     v.dma_post = v.post.dsi_status;
     a52_p446j_misc_event(&c->hw, 0x4a41U, v.post.frame, v.post.dsi_status);
@@ -218,9 +221,9 @@ done:
     a52_ackfr_record("P446L stage=%u live=%u frame=%u>%u idle=%d transfer=%d eng=%d",
                       v.stage, v.splash, v.frame0, v.frame1, v.idle,
                       v.transfer, v.engine_on);
-    pr_err("P446L EARLY stage=%u live=%u frames=%u,%u,%u clk=%d alloc=%d cmd=%d idle=%d DMA=%d off=%d/%d\n",
+    pr_err("P446L EARLY stage=%u live=%u frames=%u,%u,%u clk=%d alloc=%d cmd=%d idle=%d kick=%u DMA=%d off=%d/%d\n",
            v.stage, v.splash, v.frame0, v.frame1, v.frame2,
-           v.clk_on, v.alloc, v.engine_on, v.idle, v.transfer,
+           v.clk_on, v.alloc, v.engine_on, v.idle, v.hw_kickoff_count, v.transfer,
            v.engine_off, v.clk_off);
     mutex_unlock(&d->display_lock);
 }
@@ -252,7 +255,8 @@ done:
             b = one(b,
                 "static atomic_t p446i_seen = ATOMIC_INIT(0);",
                 "static atomic_t p446i_seen = ATOMIC_INIT(0);\n"
-                "static atomic_t p446l_probe_active = ATOMIC_INIT(0);",
+                "static atomic_t p446l_probe_active = ATOMIC_INIT(0);\n"
+                "static atomic_t p446l_kickoff_count = ATOMIC_INIT(0);",
                 "p445 guard atomic")
             b = one(b,
                 "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\n"
@@ -278,6 +282,7 @@ int a52_p446l_probe_begin(void)
         return -EBUSY;
     if (atomic_cmpxchg(&p446l_probe_active, 0, 1))
         return -EBUSY;
+    atomic_set(&p446l_kickoff_count, 0);
     return 0;
 }
 EXPORT_SYMBOL_GPL(a52_p446l_probe_begin);
@@ -293,12 +298,43 @@ void a52_p446l_probe_state(u32 *gate, u32 *armed, u32 *seen)
     if (seen) *seen = (u32)atomic_read(&p446i_seen);
 }
 EXPORT_SYMBOL_GPL(a52_p446l_probe_state);
+void a52_p446l_note_kickoff(void)
+{
+    if (atomic_read(&p446l_probe_active))
+        atomic_inc(&p446l_kickoff_count);
+}
+EXPORT_SYMBOL_GPL(a52_p446l_note_kickoff);
+u32 a52_p446l_kickoff_count(void)
+{
+    return (u32)atomic_read(&p446l_kickoff_count);
+}
+EXPORT_SYMBOL_GPL(a52_p446l_kickoff_count);
 
 '''
             b = one(b, "bool a52_p445_active(void)\n{",
                     block + "bool a52_p445_active(void)\n{",
                     "probe helper insertion")
             central.write_text(b)
+
+        # Place the execution witness at the real HW DMA kickoff, not at
+        # dsi_ctrl_cmd_transfer() entry (which can reject before kickoff).
+        ctrl_path = a.root / "drivers/a52_display/msm/dsi/dsi_ctrl.c"
+        c_src = ctrl_path.read_text()
+        if "A52_PHASE446L_HW_KICKOFF_WITNESS_V1" not in c_src:
+            c_src = one(c_src,
+                "a52_p446i_hw_pre(&dsi_ctrl->hw);\n"
+                "\t\t\t\tdsi_hw_ops.kickoff_command(",
+                "a52_p446i_hw_pre(&dsi_ctrl->hw);\n"
+                "\t\t\t\t/* A52_PHASE446L_HW_KICKOFF_WITNESS_V1 */\n"
+                "\t\t\t\ta52_p446l_note_kickoff();\n"
+                "\t\t\t\tdsi_hw_ops.kickoff_command(",
+                "pre-hardware DMA kickoff marker")
+            c_src = one(c_src,
+                "extern void a52_p446i_hw_pre(struct dsi_ctrl_hw *ctrl);",
+                "extern void a52_p446l_note_kickoff(void);\n"
+                "extern void a52_p446i_hw_pre(struct dsi_ctrl_hw *ctrl);",
+                "DMA witness prototype")
+            ctrl_path.write_text(c_src)
 
     text = target.read_text()
     for check in (MARK, 'L_EARLY_F0', 'p446l_worker', 'msecs_to_jiffies(7000)',
@@ -312,9 +348,13 @@ EXPORT_SYMBOL_GPL(a52_p446l_probe_state);
     central_text = (a.root / "drivers/a52_display/msm/a52_phase445.c").read_text()
     for token in ("A52_PHASE446L_PROBE_GUARD_V1",
                   "if (atomic_read(&p446l_probe_active)) return;",
-                  "a52_p446l_probe_begin", "a52_p446l_probe_end"):
+                  "a52_p446l_probe_begin", "a52_p446l_probe_end",
+                  "a52_p446l_note_kickoff", "a52_p446l_kickoff_count"):
         if token not in central_text:
             raise RuntimeError("missing guard: " + token)
+    if "A52_PHASE446L_HW_KICKOFF_WITNESS_V1" not in (
+        a.root / "drivers/a52_display/msm/dsi/dsi_ctrl.c").read_text():
+        raise RuntimeError("hardware kickoff witness missing")
     if text.count('schedule_delayed_work(&p446l_work') != 1:
         raise RuntimeError('duplicate schedule')
     if 'msleep(35)' in text:

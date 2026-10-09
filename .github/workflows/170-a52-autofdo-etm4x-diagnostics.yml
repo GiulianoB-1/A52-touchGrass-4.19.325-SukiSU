@@ -1123,7 +1123,18 @@ jobs:
           git -C "$KERNEL" diff --check
           test -s "$KERNEL/scripts/Makefile.autofdo"
 
+          # Prefer user-uploaded balanced AutoFDO v2 without overwriting
+          # the known-good v1 profile kept as a fallback on this branch.
           INPUT="$GITHUB_WORKSPACE/.autofdo-input/profiles/a52xq.autofdo"
+          V2_INPUT="$GITHUB_WORKSPACE/.autofdo-input/profiles/p170-v2-bias-mitigated.autofdo"
+          if [ -e "$V2_INPUT" ]; then
+            test -s "$V2_INPUT"
+            INPUT="$V2_INPUT"
+            echo "P170_PROFILE_SOURCE=v2-bias-mitigated" >> "$GITHUB_ENV"
+          else
+            echo "P170_PROFILE_SOURCE=v1-fallback" >> "$GITHUB_ENV"
+          fi
+          echo "Selected sample profile: $INPUT"
           MODE=TRAINING
           PROFILE_SHA=none
           if [ -e "$INPUT" ]; then
@@ -1153,6 +1164,7 @@ jobs:
             echo "thinlto=yes"
             echo "thinlto_import_limit=25"
             echo "sample_profile_sha256=$PROFILE_SHA"
+            echo "sample_profile_input=$INPUT"
             echo "source_branch=${{ github.ref_name }}"
             echo "source_sha=${{ github.sha }}"
           } | tee artifacts/p169-autofdo-selection.txt

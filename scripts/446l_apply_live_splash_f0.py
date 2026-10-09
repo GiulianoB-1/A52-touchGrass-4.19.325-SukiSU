@@ -235,6 +235,62 @@ done:
         s = s[:st] + section + s[en:]
         target.write_text(s)
 
+        # Guard Phase445 ladder and Phase446i one-shot ONLY for this
+        # controller-level diagnostic, leaving the natural F0 untouched.
+        central = a.root / "drivers/a52_display/msm/a52_phase445.c"
+        b = central.read_text()
+        if "A52_PHASE446L_PROBE_GUARD_V1" not in b:
+            b = one(b,
+                "static atomic_t p446i_seen = ATOMIC_INIT(0);",
+                "static atomic_t p446i_seen = ATOMIC_INIT(0);\\n"
+                "static atomic_t p446l_probe_active = ATOMIC_INIT(0);",
+                "p445 guard atomic")
+            b = one(b,
+                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
+                "{\\n    const u8 *p;",
+                "void a52_p445_try_arm(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
+                "{\\n    const u8 *p;\\n    if (atomic_read(&p446l_probe_active)) return;",
+                "early F0 arm guard")
+            b = one(b,
+                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
+                "{\\n    struct p446i_sw *m=&p446i_sw;",
+                "void a52_p446i_sw_entry(struct dsi_ctrl *ctrl, const struct mipi_dsi_msg *msg, u32 flags)\\n"
+                "{\\n    struct p446i_sw *m=&p446i_sw;\\n"
+                "    if (atomic_read(&p446l_probe_active)) return;",
+                "natural one-shot guard")
+            block = '''/* A52_PHASE446L_PROBE_GUARD_V1
+ * Probe-only bypass: never arm Phase445 or consume Phase446i natural F0.
+ */
+int a52_p446l_probe_begin(void)
+{
+    if (atomic_read(&p445_gate) != P445_GATE_OFF ||
+        atomic_read(&p445_state) != 0 ||
+        atomic_read(&p446i_seen) != 0)
+        return -EBUSY;
+    if (atomic_cmpxchg(&p446l_probe_active, 0, 1))
+        return -EBUSY;
+    return 0;
+}
+EXPORT_SYMBOL_GPL(a52_p446l_probe_begin);
+void a52_p446l_probe_end(void)
+{
+    atomic_set(&p446l_probe_active, 0);
+}
+EXPORT_SYMBOL_GPL(a52_p446l_probe_end);
+void a52_p446l_probe_state(u32 *gate, u32 *armed, u32 *seen)
+{
+    if (gate) *gate = (u32)atomic_read(&p445_gate);
+    if (armed) *armed = (u32)atomic_read(&p445_state);
+    if (seen) *seen = (u32)atomic_read(&p446i_seen);
+}
+EXPORT_SYMBOL_GPL(a52_p446l_probe_state);
+
+'''
+            b = one(b, "bool a52_p445_active(void)\\n{",
+                    block + "bool a52_p445_active(void)\\n{",
+                    "probe helper insertion")
+            central.write_text(b)
+
     text = target.read_text()
     for check in (MARK, 'L_EARLY_F0', 'p446l_worker', 'msecs_to_jiffies(7000)',
                   'dsi_ctrl_cmd_transfer(c, &msg, &flags)'):
@@ -242,6 +298,12 @@ done:
             raise RuntimeError('missing '+check)
     if text.count(MARK) != 1:
         raise RuntimeError('duplicate marker')
+    central_text = (a.root / "drivers/a52_display/msm/a52_phase445.c").read_text()
+    for token in ("A52_PHASE446L_PROBE_GUARD_V1",
+                  "if (atomic_read(&p446l_probe_active)) return;",
+                  "a52_p446l_probe_begin", "a52_p446l_probe_end"):
+        if token not in central_text:
+            raise RuntimeError("missing guard: " + token)
     if text.count('schedule_delayed_work(&p446l_work') != 1:
         raise RuntimeError('duplicate schedule')
     if 'msleep(35)' in text:

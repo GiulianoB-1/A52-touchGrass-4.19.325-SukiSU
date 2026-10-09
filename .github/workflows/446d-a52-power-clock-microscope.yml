@@ -1,12 +1,12 @@
-name: Phase446j - GKI DISP_CC_MISC_CMD handoff trace
-run-name: Phase446j GKI DISP_CC_MISC_CMD read-only trace
+name: Phase446l - pre-handoff live-splash F0 discriminator
+run-name: Phase446l GKI direct early F0 while splash live
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
   push:
     branches:
-      - agent/a52-phase446j-dispcc-misc-trace-v1
+      - agent/a52-phase446l-live-splash-f0-v1
   workflow_dispatch:
 
 permissions:
@@ -28,13 +28,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446j-gki-f0-misc-${{ github.ref }}
+  group: a52-phase446l-gki-live-splash-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446j GKI read-only DISP_CC_MISC trace
+    name: Build Phase446l GKI live-splash F0 diagnostic
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -68,7 +68,7 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446h_apply_panel_f0_microscope.py scripts/446i_apply_passive_f0_twin.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py scripts/446j_apply_dispcc_misc.py
+          python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446h_apply_panel_f0_microscope.py scripts/446i_apply_passive_f0_twin.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py scripts/446j_apply_dispcc_misc.py scripts/446l_apply_live_splash_f0.py
           python3 scripts/446_apply_heartbeat_cb2.py --help >/dev/null
           python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
           python3 scripts/446c_apply_takeover_window.py --help >/dev/null
@@ -76,6 +76,7 @@ jobs:
           python3 scripts/446h_apply_panel_f0_microscope.py --help >/dev/null
           python3 scripts/446i_apply_passive_f0_twin.py --help >/dev/null
           python3 scripts/446j_apply_dispcc_misc.py --help >/dev/null
+          python3 scripts/446l_apply_live_splash_f0.py --help >/dev/null
           python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
           python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
           python3 scripts/446d_apply_extra_observers.py --help >/dev/null
@@ -616,6 +617,7 @@ jobs:
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT"
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki
           python3 scripts/446j_apply_dispcc_misc.py --root "$ROOT" --kind gki
+          python3 scripts/446l_apply_live_splash_f0.py --root "$ROOT"
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only
@@ -624,6 +626,7 @@ jobs:
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT" --check-only
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446j_apply_dispcc_misc.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446l_apply_live_splash_f0.py --root "$ROOT" --check-only
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
@@ -689,6 +692,7 @@ jobs:
           grep -Fq 'A52_PHASE446G_TE_IRQ_SKIP' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           grep -Fq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$P445"
           grep -Fq 'A52_PHASE446H_DISPLAY_HANDOFF' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          grep -Fq 'A52_PHASE446L_LIVE_SPLASH_F0_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           grep -Fq 'A52_PHASE446H_PANEL_STEPS' "$ROOT/drivers/a52_display/msm/dsi/dsi_panel.c"
           grep -Fq 'A52_PHASE446H_F0_LIFECYCLE' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           grep -Fq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$P445"
@@ -825,9 +829,9 @@ jobs:
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-          OUT="$PWD/phase446j-gki-f0-misc-out"
+          OUT="$PWD/phase446l-gki-early-f0-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
-          FINAL="$OUT/package/boot-phase446j-gki-f0-misc-v1.img"
+          FINAL="$OUT/package/boot-phase446l-gki-early-f0-v1.img"
 
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
@@ -952,7 +956,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446J-GKI-F0-MISC-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446L-GKI-EARLY-F0-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -988,8 +992,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446J-GKI-F0-MISC-${{ github.run_number }}
-          path: phase446j-gki-f0-misc-out/
+          name: A52XQ-PHASE446L-GKI-EARLY-F0-${{ github.run_number }}
+          path: phase446l-gki-early-f0-out/
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
@@ -998,8 +1002,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446J-GKI-F0-MISC-${{ github.run_number }}-BOOT
-          path: phase446j-gki-f0-misc-out/package/boot-phase446j-gki-f0-misc-v1.img
+          name: A52XQ-PHASE446L-GKI-EARLY-F0-${{ github.run_number }}-BOOT
+          path: phase446l-gki-early-f0-out/package/boot-phase446l-gki-early-f0-v1.img
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

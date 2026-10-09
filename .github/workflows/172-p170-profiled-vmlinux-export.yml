@@ -1,0 +1,153 @@
+name: 172 - P170 PROFILED-4 vmlinux symbol export (no kernel build)
+
+on:
+  push:
+    branches:
+      - agent/a52-p170-autofdo-etm4x-diag-clang22-thinlto-v1
+    paths:
+      - .github/workflows/172-p170-profiled-vmlinux-export.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  export-profiled-vmlinux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Fetch exact vmlinux from P170 PROFILED-4
+        uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-P170-ETM4X-AUTOFDO-PROFILED-4
+          run-id: 37922954071
+          github-token: ${{ github.token }}
+          path: profiled-p170
+
+      - name: Validate identity then compress and split profiling binary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VMLINUX="profiled-p170/artifacts/p169-vmlinux"
+          test -s "$VMLINUX"
+          file "$VMLINUX"
+          printf '%s  %s\n' 'c247d8e13f00a0e02d25513999d44ded382346d8809a924e42e45aa11c7d5de8' "$VMLINUX" | sha256sum -c -
+          mkdir -p parts
+          readelf -n "$VMLINUX" | grep -m1 'Build ID:' | tee parts/profiled-build-id.txt
+          grep -Fq '710986bf9bb5e5e8a3c8ba289dd6c22f8a7c3148' parts/profiled-build-id.txt
+          sha256sum "$VMLINUX" | tee parts/vmlinux-sha256.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          zstd -q -T2 -10 "$VMLINUX" -o /tmp/p170-profiled-vmlinux.zst
+          sha256sum /tmp/p170-profiled-vmlinux.zst | tee parts/zstd-sha256.txt
+          stat -c 'original_vmlinux_bytes=%s' "$VMLINUX"
+          stat -c 'compressed_vmlinux_bytes=%s' /tmp/p170-profiled-vmlinux.zst
+          split -b 160M -d -a 2 /tmp/p170-profiled-vmlinux.zst parts/p170-profiled.zst.part-
+          count="$(find parts -maxdepth 1 -name 'p170-profiled.zst.part-*' | wc -l)"
+          echo "part_count=$count"
+          test "$count" -ge 1
+          test "$count" -le 10
+          sha256sum parts/p170-profiled.zst.part-* | tee parts/parts-sha256.txt
+
+      - name: Upload PROFILED-4 binary identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-IDENTITY
+          path: |
+            parts/profiled-build-id.txt
+            parts/vmlinux-sha256.txt
+            parts/zstd-sha256.txt
+            parts/parts-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 00
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-00') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-00
+          path: parts/p170-profiled.zst.part-00
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 01
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-01') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-01
+          path: parts/p170-profiled.zst.part-01
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 02
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-02') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-02
+          path: parts/p170-profiled.zst.part-02
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 03
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-03') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-03
+          path: parts/p170-profiled.zst.part-03
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 04
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-04') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-04
+          path: parts/p170-profiled.zst.part-04
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 05
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-05') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-05
+          path: parts/p170-profiled.zst.part-05
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 06
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-06') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-06
+          path: parts/p170-profiled.zst.part-06
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 07
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-07') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-07
+          path: parts/p170-profiled.zst.part-07
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 08
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-08') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-08
+          path: parts/p170-profiled.zst.part-08
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload PROFILED-4 binary part 09
+        if: ${{ hashFiles('parts/p170-profiled.zst.part-09') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: P170-PROFILED4-VMLINUX-PART-09
+          path: parts/p170-profiled.zst.part-09
+          if-no-files-found: error
+          retention-days: 14

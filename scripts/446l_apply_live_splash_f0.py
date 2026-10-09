@@ -29,7 +29,7 @@ def main():
     s = target.read_text()
     if not a.check_only and MARK not in s:
         s = one(s, "#include <linux/workqueue.h>",
-                "#include <linux/workqueue.h>\n#include <linux/io.h>", "io include")
+                "#include <linux/workqueue.h>\n#include <linux/io.h>\n#include \"dsi_ctrl_reg.h\"", "DSI MMIO register definitions")
 
         helper = r'''/* A52_PHASE446L_LIVE_SPLASH_F0_V1
  * 7 s after cont-splash activation: verify live MDP frame count then try
@@ -345,6 +345,8 @@ EXPORT_SYMBOL_GPL(a52_p446l_kickoff_count);
             raise RuntimeError('missing '+check)
     if text.count(MARK) != 1:
         raise RuntimeError('duplicate marker')
+    if '#include "dsi_ctrl_reg.h"' not in text:
+        raise RuntimeError('DSI register definitions not included')
     central_text = (a.root / "drivers/a52_display/msm/a52_phase445.c").read_text()
     for token in ("A52_PHASE446L_PROBE_GUARD_V1",
                   "if (atomic_read(&p446l_probe_active)) return;",

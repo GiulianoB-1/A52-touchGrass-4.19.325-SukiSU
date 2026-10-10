@@ -6,7 +6,7 @@ on:
     branches:
       - agent/a52-tgu1-golden-acm-console-v1
     paths:
-      - .github/workflows/446dg-a52-touchgrass-power-clock-microscope.yml
+      - .github/workflows/tgu1-a52-golden-acm-console.yml
       - scripts/446g_apply_golden_heartbeat.py
       - scripts/446b_apply_heartbeat_fixes.py
       - scripts/446d_apply_power_clock_microscope.py

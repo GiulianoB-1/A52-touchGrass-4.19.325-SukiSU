@@ -9,6 +9,7 @@ on:
       - .github/workflows/f0bisect-touchgrass-p6.yml
       - scripts/f0_bisect_stage_guard.py
       - scripts/f0_bisect_stage_guard.py.z64
+      - scripts/f0_bisect_ar_idle.py
       - scripts/446g_apply_golden_heartbeat.py
       - scripts/446b_apply_heartbeat_fixes.py
       - scripts/446d_apply_power_clock_microscope.py
@@ -97,6 +98,8 @@ jobs:
           python3 scripts/446i_apply_passive_f0_twin.py --help >/dev/null
           python3 scripts/446j_apply_dispcc_misc.py --help >/dev/null
           python3 scripts/446l2_apply_live_fifo_golden.py --help >/dev/null
+          python3 -m py_compile scripts/f0_bisect_ar_idle.py
+          python3 scripts/f0_bisect_ar_idle.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_stage_guard.py
           python3 scripts/f0_bisect_stage_guard.py --help >/dev/null
           python3 -m py_compile scripts/tgu1_enable_golden_acm_console.py scripts/tgu2_enable_runtime_console.py scripts/tgu4_enable_verbose_usb_console.py
@@ -133,6 +136,7 @@ jobs:
              scripts/446l2_apply_live_fifo_golden.py \
              scripts/f0_bisect_stage_guard.py \
              scripts/f0_bisect_stage_guard.py.z64 \
+             scripts/f0_bisect_ar_idle.py \
              scripts/tgu1_enable_golden_acm_console.py \
              scripts/tgu2_enable_runtime_console.py \
              scripts/tgu4_enable_verbose_usb_console.py \
@@ -240,6 +244,8 @@ jobs:
           python3 scripts/446j_apply_dispcc_misc.py --root "$K" --kind tg
           python3 scripts/f0_bisect_stage_guard.py --root "$K" --mode tg --active-stage 6
           python3 scripts/f0_bisect_stage_guard.py --root "$K" --mode tg --active-stage 6 --check-only
+          python3 scripts/f0_bisect_ar_idle.py --root "$K" --mode tg
+          python3 scripts/f0_bisect_ar_idle.py --root "$K" --mode tg --check-only
           echo "F0B TG P6: one guarded FIFO after DSI_LINK_CLK_ON; no old L2 injection."
           python3 scripts/tgu1_enable_golden_acm_console.py --root "$K"
           python3 scripts/tgu1_enable_golden_acm_console.py --root "$K" --check-only
@@ -364,6 +370,8 @@ jobs:
 
           grep -aFq "F0B ACTIVE P%u" "$IMAGE"
           grep -aFq "F0BISECT" "$IMAGE"
+          grep -aFq "F0BAR #" "$IMAGE"
+          grep -Fq "A52_F0B_AR_IDLE_16X_V1" "$PWD/workspace/touchgrass-a52xq/techpack/display/msm/sde/sde_encoder_phys_cmd.c"
           grep -Fq "#define F0B_ACTIVE_STAGE 6" "$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_display.c"
           ! grep -aFq "P446L2 stage=" "$IMAGE" || { echo "old P446L2 experiment leaked"; exit 1; }
           echo "TGU4 Golden verbose USB kernel console compiled-image audit: PASS"
@@ -403,6 +411,7 @@ jobs:
              scripts/446l2_apply_live_fifo_golden.py \
              scripts/f0_bisect_stage_guard.py \
              scripts/f0_bisect_stage_guard.py.z64 \
+             scripts/f0_bisect_ar_idle.py \
              scripts/tgu1_enable_golden_acm_console.py \
              scripts/tgu2_enable_runtime_console.py \
              scripts/decode_phase446.py \
@@ -424,6 +433,7 @@ jobs:
           cp "$K/techpack/display/msm/msm_smmu.c" "$OUT/source/"
           cp "$K/techpack/display/msm/msm_atomic.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_kms.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_encoder_phys_cmd.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_plane.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde/sde_crtc.c" "$OUT/source/"
           cp "$K/techpack/display/msm/sde_power_handle.c" "$OUT/source/"

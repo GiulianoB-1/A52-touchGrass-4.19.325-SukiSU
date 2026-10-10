@@ -18,8 +18,8 @@ from pathlib import Path
 MARK = "A52_U2_AB_OBSERVER_QUIET_V1"
 TARGETS = {
     "drivers/a52_display/msm/a52_phase445.c": [
-        ("p446_emit", "void", True),
-        ("p446_worker", "void", True),
+        ("a52_p446_mark", "void", True),
+        ("p446_workfn", "void", True),
         ("p446_burst_threadfn", "int", True),
         ("a52_p446i_hw_pre", "void", True),
         ("a52_p446i_hw_post", "void", True),
@@ -133,7 +133,7 @@ def main():
         if not target.is_file():
             raise SystemExit("U2-AB missing kernel source: "+str(target))
         report[rel] = patch_file(target, funcs, args.check_only)
-    # Retired historical UFS sampler must not be invoked by this boot.
+    # The Phase446 function names above are from the archived U2-AB failed\n    # build’s effective a52_phase445.c (GitHub Actions run 38047069220).\n    # Retired historical UFS sampler must not be invoked by this boot.
     ufs = (root/"drivers/scsi/ufs/ufshcd.c").read_text()
     if re.search(r"(?m)^\s*a52_r380_start_sampler\s*\(hba\)\s*;", ufs):
         raise SystemExit("U2-AB UNRETIRED Phase380 UFS sampler: do not flash")

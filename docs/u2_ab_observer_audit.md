@@ -8,9 +8,9 @@ The U1 and U2 workflows replay the same Phase430–446 diagnostic stack; U2 addi
 
 | Observer | Driver/location | Trigger/frequency | Read characteristics | Quiet-A/B |
 |---|---|---|---|---|
-| P446 `p446_worker` | `drivers/a52_display/msm/a52_phase445.c` | Starts at init; 10 ms until 10 s, then 1 s | Calls `p446_emit`: raw GCC, DISPCC, REFGEN and, when gated safe, MDP and DSI MMIO | Disabled |
-| P446 `p446_emit` | same | Called also on many event marks | Raw MMIO on **every mark**, even when periodic worker is inactive | Disabled |
-| P446D `p446_burst_threadfn` | same | Triggered near display bind; every ~1 ms over 120 ms | Repeated `a52_p446_mark` → `p446_emit` MMIO | Disabled |
+| P446 `p446_workfn` | `drivers/a52_display/msm/a52_phase445.c` | Starts at init; 10 ms until 10 s, then 1 s | Calls `a52_p446_mark`: raw GCC, DISPCC, REFGEN and, when gated safe, MDP and DSI MMIO | Disabled |
+| P446 `a52_p446_mark` | same | Called also on many event marks | Raw MMIO on **every mark**, even when periodic worker is inactive | Disabled |
+| P446D `p446_burst_threadfn` | same | Triggered near display bind; every ~1 ms over 120 ms | Repeated `a52_p446_mark` → `a52_p446_mark` MMIO | Disabled |
 | P385 `a52_r385_observer_fn` | `block/blk-mq.c` | 230 ms–2 s relative to old frontier trigger | Software block-queue state; not demonstrated to do raw MMIO | Disabled |
 | P385 `a52_r385_usb_observer_fn` | `drivers/usb/gadget/udc/core.c` | 230/300/425/750 ms after frontier trigger | USB gadget pointer/config state; not raw MMIO | Disabled |
 | P430 `a52_p430_sampler_fn` | `drivers/a52_secure/a52_ack_secure_flight_recorder.c` | Polls SF startup and samples tasks | Includes `a52_p430_ufs_compact` in affected lineage (inspect generated source) | Disabled if present |
@@ -23,7 +23,7 @@ The U1 and U2 workflows replay the same Phase430–446 diagnostic stack; U2 addi
 | P446i `a52_p446i_sw_entry`, `a52_p446i_hw_pre`, `a52_p446i_hw_post` | `a52_phase445.c` | Actual first F0 command | Disabled |
 | P439 DSI autopsy | `dsi_ctrl.c`, `dsi_ctrl_hw_cmn.c` | DSI diagnostic instrumentation; the `a52_p439_f0` active variant is off in U2 | Not fully gated |
 | P444/P445 deep passive snapshots and recovery ladder | `a52_phase445.c` and display/secure recorder | First-commit window | Not fully gated |
-| P446 event calls outside `p446_worker` | multiple display callbacks | Binding, power, IRQ, SMMU | Safe because `p446_emit` is gated |
+| P446 event calls outside `p446_workfn` | multiple display callbacks | Binding, power, IRQ, SMMU | Safe because `a52_p446_mark` is gated |
 
 ## Retired sampler requiring effective-source verification
 

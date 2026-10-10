@@ -42,6 +42,32 @@ def port_phy(source: str) -> str:
     source = once(source, '\tqphy->phy.drive_dp_pulse\t= msm_qusb_phy_drive_dp_pulse;\n',
                   '', "remove downstream-only usb_phy callback")
     source = cut_function(source, 'static int msm_qusb_phy_drive_dp_pulse(')
+    # Linux 5.10 has void debugfs_create_x8(); the TG 4.19 helper
+    # incorrectly tests the return value as struct dentry *.
+    # Keep debugfs optional and don't let a debugfs failure abort PHY probe.
+    source = cut_function(source, 'static int qusb_phy_create_debugfs(')
+    debugfs_510 = r'''static int qusb_phy_create_debugfs(struct qusb_phy *qphy)
+{
+    int i;
+    char name[6];
+
+    qphy->root = debugfs_create_dir(dev_name(qphy->phy.dev), NULL);
+    if (IS_ERR_OR_NULL(qphy->root))
+        return 0;
+
+    for (i = 0; i < 5; ++i) {
+        snprintf(name, sizeof(name), "tune%d", i + 1);
+        debugfs_create_x8(name, 0644, qphy->root, &qphy->tune[i]);
+    }
+    debugfs_create_x8("bias_ctrl2", 0644, qphy->root,
+                      &qphy->bias_ctrl2);
+    return 0;
+}
+
+'''
+    source = once(source, 'static int qusb2_get_regulators(struct qusb_phy *qphy)\n',
+                  debugfs_510 + 'static int qusb2_get_regulators(struct qusb_phy *qphy)\n',
+                  'Linux 5.10 void debugfs API compatibility')
     source = source.replace('devm_ioremap_nocache(', 'devm_ioremap(')
     # GKI still has usb_phy.flags but does not define Samsung extensions.
     # Keep those code paths dormant; USB2 gadget path never sets these bits.
@@ -177,7 +203,9 @@ def validate(root: Path):
     mk = (root / "drivers/usb/phy/Makefile").read_text()
     dt_path = root / "arch/arm64/boot/dts/vendor/qcom/lagoon-usb.dtsi"
     dt = dt_path.read_text() if dt_path.is_file() else None
-    for token in (MARK, 'qcom,qusb2phy-v2', 'usb_add_phy_dev(&qphy->phy)'):
+    for token in (MARK, 'qcom,qusb2phy-v2', 'usb_add_phy_dev(&qphy->phy)',
+                  'static int qusb_phy_create_debugfs(',
+                  'debugfs_create_x8("bias_ctrl2", 0644, qphy->root,'):
         if token not in src:
             raise RuntimeError("ported USB2 driver missing " + token)
     for token in ('phy-a52-qusb2-v2.o', 'CONFIG_USB_PHY'):

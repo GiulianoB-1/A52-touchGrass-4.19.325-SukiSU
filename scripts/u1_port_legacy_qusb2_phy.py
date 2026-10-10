@@ -42,6 +42,9 @@ def port_phy(source: str) -> str:
     source = once(source, '\tqphy->phy.drive_dp_pulse\t= msm_qusb_phy_drive_dp_pulse;\n',
                   '', "remove downstream-only usb_phy callback")
     source = cut_function(source, 'static int msm_qusb_phy_drive_dp_pulse(')
+    # The TG register write/readback helper has no callers in this port.
+    # Clang -Werror rejects the unused static function on GKI 5.10.
+    source = cut_function(source, 'static void msm_usb_write_readback(')
     # Linux 5.10 has void debugfs_create_x8(); the TG 4.19 helper
     # incorrectly tests the return value as struct dentry *.
     # Keep debugfs optional and don't let a debugfs failure abort PHY probe.

@@ -26,4 +26,6 @@ new = r'''    if n != 1 and why == "entry":
 if source.count(old) != 1:
     raise RuntimeError("F0B compressed source 'once' contract changed")
 source = source.replace(old, new, 1)
+from f0_bisect_v2_transform import transform
+source = transform(source)
 exec(compile(source, str(p.with_suffix(".expanded.py")), "exec"), globals())

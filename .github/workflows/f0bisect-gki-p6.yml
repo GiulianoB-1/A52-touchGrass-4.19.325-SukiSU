@@ -68,7 +68,7 @@ jobs:
           python3 scripts/441_apply_vrr_state_compat.py --help >/dev/null
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
-          python3 -m py_compile scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py
+          python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py
           python3 scripts/f0_bisect_ar_idle.py --help >/dev/null
           python3 scripts/f0_bisect_stage_guard.py --help >/dev/null
           python3 -m py_compile scripts/446_apply_heartbeat_cb2.py scripts/446b_apply_heartbeat_fixes.py scripts/446c_apply_takeover_window.py scripts/446g_apply_te_irq_test.py scripts/446h_apply_panel_f0_microscope.py scripts/446i_apply_passive_f0_twin.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446g.py scripts/decode_phase446_pair.py scripts/446_append_boot_cmdline.py scripts/446j_apply_dispcc_misc.py scripts/u1_port_legacy_qusb2_phy.py scripts/u1_patch_boot_dtb.py scripts/u2_apply_gki_usb_composite_handover.py scripts/38_repack_a52_p1_boot.py
@@ -767,6 +767,9 @@ jobs:
           grep -aFq 'F0B ACTIVE P%u' "$IMAGE"
           grep -aFq 'F0BISECT' "$IMAGE"
           grep -aFq 'F0BAR #' "$IMAGE"
+          grep -aFq 'refuse=%04x' "$IMAGE"
+          grep -aFq 'dbg_busy7=%u' "$IMAGE"
+          grep -aFq 'intf_valid=%u' "$IMAGE"
           grep -Fq 'A52_F0B_AR_IDLE_16X_V1' "$ROOT/drivers/a52_display/msm/sde/sde_encoder_phys_cmd.c"
           grep -Fq '#define F0B_ACTIVE_STAGE 6' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
 

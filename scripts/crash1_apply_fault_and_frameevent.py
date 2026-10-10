@@ -71,9 +71,9 @@ void a52_crash1_event(u32 tag, u32 event, const void *cbdata,
     r.crtc_id = crtc_id;
     r.pid = task_pid_nr(current);
     r.ns = ktime_get_ns();
-    r.cbdata = (u64)(uintptr_t)cbdata;
-    r.crtc = (u64)(uintptr_t)crtc;
-    r.fevent = (u64)(uintptr_t)fevent;
+    r.cbdata = (u64)(unsigned long)cbdata;
+    r.crtc = (u64)(unsigned long)crtc;
+    r.fevent = (u64)(unsigned long)fevent;
     r.ns_inv = ~r.ns;
     for (i = 0; i < CRASH1_REPLICAS; i++) copies[i] = r;
     (void)a52_p445_store_section(0xc1a50001U, 0xc1a5U,
@@ -199,6 +199,7 @@ def modify_fault(s):
     if first_include < 0:
         raise RuntimeError("CRASH1 cannot place fault declaration")
     s = s[:first_include] + ("/* A52_CRASH1_ARM64_DECL */\n"
+         "struct pt_regs;\n"
          "extern void a52_crash1_fault(unsigned long, unsigned int,\n"
          "                             const struct pt_regs *);\n") + s[first_include:]
     return s

@@ -11,6 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Patch-test on actual failed GKI source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/f0-art /tmp/f0-sandbox/drivers/a52_display/msm/dsi
+          gh run download 38068442691 --repo "$GITHUB_REPOSITORY" \
+            --name A52XQ-F0BISECT-GKI-P6-FAIL-DIAG-3 \
+            --dir /tmp/f0-art
+          src="$(find /tmp/f0-art -path '*/drivers/a52_display/msm/dsi/dsi_display.c' | head -1)"
+          test -n "$src" && test -s "$src"
+          cp "$src" /tmp/f0-sandbox/drivers/a52_display/msm/dsi/dsi_display.c
+          python3 scripts/f0_bisect_stage_guard.py --root /tmp/f0-sandbox --mode gki --active-stage 6
+          python3 scripts/f0_bisect_stage_guard.py --root /tmp/f0-sandbox --mode gki --active-stage 6 --check-only
+          echo "PASS: all P1-P6 hooks applied on exact failed GKI effective display source"
       - name: Reveal compiled probe anchors
         run: |
           python3 - <<'PY'

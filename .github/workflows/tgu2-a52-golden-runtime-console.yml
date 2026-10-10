@@ -1,0 +1,567 @@
+name: TGU2 - Golden runtime ACM ttyGS0 console + FIFO twin
+run-name: TGU2 TouchGrass kernel-select ttyGS0 ACM console
+
+on:
+  push:
+    branches:
+      - agent/a52-tgu2-golden-runtime-console-v1
+    paths:
+      - .github/workflows/tgu2-a52-golden-runtime-console.yml
+      - scripts/446g_apply_golden_heartbeat.py
+      - scripts/446b_apply_heartbeat_fixes.py
+      - scripts/446d_apply_power_clock_microscope.py
+      - scripts/446d_apply_power_clock_microscope.py.z64
+      - scripts/446d_apply_capacity_guard.py
+      - scripts/446d_apply_extra_observers.py
+      - scripts/446i_apply_passive_f0_twin.py
+      - scripts/446j_apply_dispcc_misc.py
+      - scripts/446l2_apply_live_fifo.py
+      - scripts/446l2_apply_live_fifo_golden.py
+      - scripts/tgu1_enable_golden_acm_console.py
+      - scripts/tgu2_enable_runtime_console.py
+      - scripts/446d_collect_boot_identity.sh
+      - scripts/decode_phase446d.py
+      - scripts/decode_phase446d.py.z64
+      - scripts/decode_phase446_pair.py
+      - scripts/446_apply_heartbeat_cb2.py.z64
+      - scripts/decode_phase446.py
+      - scripts/decode_phase446.py.z64
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
+  GOLDEN_CONTROL_REF: agent/a52-golden-touchgrass-clock-reference-v1
+  RESUKISU_COMMIT: 2206a7dd71e600f34378c4c583244f46e7a35670
+  RESUKISU_VERSION: v4.1.0-2206a7dd-dirty@ReSukiSU
+
+concurrency:
+  group: a52-tgu2-golden-console-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golden:
+    name: Build TouchGrass Golden kernel-selected ttyGS0 + ReSukiSU
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: '4'
+      CCACHE_DIR: ${{ github.workspace }}/golden-work/.ccache
+      CCACHE_MAXSIZE: 5G
+      BOOT_SOURCE_ASSET_ID: '478920392'
+      BOOT_SOURCE_SHA256: '41ae3b24771c70747c26aa17a18d254ffcb1c0d742b96f4f1f1fff20a6638554'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Golden runner and validate Phase444 payload
+        timeout-minutes: 12
+        run: |
+          set -Eeuo pipefail
+          echo "Golden preflight: bounded runner cleanup"
+          sudo timeout 120s rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          # The stable checkpoint scripts use shallow Git repos. Keep fetches
+          # serial so concurrent shallow-file updates cannot race.
+          git config --global fetch.parallel 1
+          git config --global submodule.fetchJobs 1
+          git config --global maintenance.auto false
+          echo "Golden preflight: bounded apt update"
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          echo "Golden preflight: bounded package install"
+          sudo timeout 300s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends \
+            git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/446i_apply_passive_f0_twin.py scripts/446j_apply_dispcc_misc.py scripts/446l2_apply_live_fifo.py scripts/446l2_apply_live_fifo_golden.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
+          python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
+          python3 scripts/decode_phase444.py --help >/dev/null
+          python3 scripts/446g_apply_golden_heartbeat.py --help >/dev/null
+          python3 scripts/446b_apply_heartbeat_fixes.py --help >/dev/null
+          python3 scripts/446d_apply_power_clock_microscope.py --help >/dev/null
+          python3 scripts/446d_apply_capacity_guard.py --help >/dev/null
+          python3 scripts/446d_apply_extra_observers.py --help >/dev/null
+          python3 scripts/446i_apply_passive_f0_twin.py --help >/dev/null
+          python3 scripts/446j_apply_dispcc_misc.py --help >/dev/null
+          python3 scripts/446l2_apply_live_fifo_golden.py --help >/dev/null
+          python3 -m py_compile scripts/tgu1_enable_golden_acm_console.py scripts/tgu2_enable_runtime_console.py
+          python3 scripts/tgu2_enable_runtime_console.py --help >/dev/null
+          python3 scripts/tgu1_enable_golden_acm_console.py --help >/dev/null
+          bash -n scripts/446d_collect_boot_identity.sh
+          python3 scripts/decode_phase446d.py --help >/dev/null
+          python3 scripts/decode_phase446_pair.py --help >/dev/null
+          echo "Phase446iG power/clock payload preflight: PASS"
+
+      - name: Create clean proven Golden-control workspace
+        run: |
+          set -Eeuo pipefail
+          rm -rf golden-work
+          gh repo clone "$GITHUB_REPOSITORY" golden-work -- \
+            --depth=1 --branch "$GOLDEN_CONTROL_REF" --single-branch
+
+          mkdir -p golden-work/scripts golden-work/projects/a52-p1-boot-image
+          cp scripts/444_apply_deep_passive_compare.py \
+             scripts/444_apply_deep_passive_compare.py.z64 \
+             scripts/decode_phase444.py \
+             scripts/decode_phase444.py.z64 \
+             scripts/445g_apply_golden_sync_pre.py \
+             scripts/446g_apply_golden_heartbeat.py \
+             scripts/446b_apply_heartbeat_fixes.py \
+             scripts/446d_apply_power_clock_microscope.py \
+             scripts/446d_apply_power_clock_microscope.py.z64 \
+             scripts/446d_apply_capacity_guard.py \
+             scripts/446d_apply_extra_observers.py \
+             scripts/446i_apply_passive_f0_twin.py \
+             scripts/446j_apply_dispcc_misc.py \
+             scripts/446l2_apply_live_fifo.py \
+             scripts/446l2_apply_live_fifo_golden.py \
+             scripts/tgu1_enable_golden_acm_console.py \
+             scripts/tgu2_enable_runtime_console.py \
+             scripts/tgu2_enable_runtime_console.py \
+             scripts/446_append_boot_cmdline.py \
+             scripts/446d_collect_boot_identity.sh \
+             scripts/446_apply_heartbeat_cb2.py.z64 \
+             scripts/decode_phase446.py \
+             scripts/decode_phase446.py.z64 \
+             scripts/decode_phase446d.py \
+             scripts/decode_phase446d.py.z64 \
+             scripts/decode_phase446_pair.py \
+             scripts/37_validate_a52_p1_boot_source.py \
+             scripts/38_repack_a52_p1_boot.py \
+             golden-work/scripts/
+          cp projects/a52-p1-boot-image/boot-source.lock \
+             golden-work/projects/a52-p1-boot-image/
+
+          grep -Fxq 'RESUKISU_REPO=https://github.com/ReSukiSU/ReSukiSU.git' golden-work/sources.lock
+          grep -Fxq "RESUKISU_COMMIT=$RESUKISU_COMMIT" golden-work/sources.lock
+          grep -Fxq "RESUKISU_VERSION_FULL=$RESUKISU_VERSION" golden-work/sources.lock
+          python3 -m py_compile \
+            golden-work/scripts/444_apply_deep_passive_compare.py \
+            golden-work/scripts/445g_apply_golden_sync_pre.py \
+            golden-work/scripts/446g_apply_golden_heartbeat.py \
+            golden-work/scripts/446b_apply_heartbeat_fixes.py \
+            golden-work/scripts/446d_apply_power_clock_microscope.py \
+            golden-work/scripts/446d_apply_capacity_guard.py \
+            golden-work/scripts/446d_apply_extra_observers.py \
+            golden-work/scripts/decode_phase444.py \
+            golden-work/scripts/decode_phase446.py \
+            golden-work/scripts/decode_phase446d.py \
+            golden-work/scripts/decode_phase446_pair.py
+          chmod +x golden-work/scripts/*.sh golden-work/scripts/*.py
+          echo "Golden control + exact ReSukiSU identity: PASS"
+
+      - name: Restore Golden compiler cache
+        id: tgccache
+        uses: actions/cache/restore@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase446dg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
+          restore-keys: |
+            a52xq-phase446dg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-
+            a52xq-touchgrass-golden-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-
+
+      - name: Reconstruct clean TouchGrass 4.19.200 Golden
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          ./scripts/01_prepare_source.sh
+          ./scripts/03_apply_linux_4.19.153.sh
+          ./scripts/04_apply_linux_4.19.154.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+          K="$PWD/workspace/touchgrass-a52xq"
+          DSI="$K/techpack/display/msm/dsi"
+          ! grep -Rqs 'A52_PHASE315G_GOLDEN_F0_FULL_PRESTATE_REFERENCE_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE319_DSI_SIXPOINT_TEMPORAL_OBSERVER_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' "$DSI"
+          ! grep -Rqs 'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1' "$DSI"
+          echo "Clean Golden display baseline: PASS"
+
+      - name: Restore exact ReSukiSU v4.1.0 Golden root stack
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          ./scripts/07_patch_resukisu_exec_hook.sh
+          ./scripts/08_build_resukisu_safe_checkpoint.sh 4.19.200
+
+          IMAGE=artifacts/Image-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          CONFIG=artifacts/config-touchgrass-4.19.200-resukisu-v4.1.0-safe
+          test -s "$IMAGE" -a -s "$CONFIG"
+          grep -aFq "$RESUKISU_VERSION" "$IMAGE"
+          grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG"
+          grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$CONFIG"
+          echo "ReSukiSU Golden baseline: PASS"
+
+      - name: Apply Phase444 deep passive observer to Golden
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          K="$PWD/workspace/touchgrass-a52xq"
+          python3 scripts/444_apply_deep_passive_compare.py --root "$K" --kind tg
+          python3 scripts/444_apply_deep_passive_compare.py --root "$K" --kind tg --check-only
+          python3 scripts/445g_apply_golden_sync_pre.py --root "$K"
+          python3 scripts/445g_apply_golden_sync_pre.py --root "$K" --check-only
+          python3 scripts/446g_apply_golden_heartbeat.py --root "$K" --repo-root "$PWD/.." 
+          python3 scripts/446g_apply_golden_heartbeat.py --root "$K" --repo-root "$PWD/.." --check-only
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg
+          python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg
+          python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg
+          python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$K" --kind tg
+          python3 scripts/446j_apply_dispcc_misc.py --root "$K" --kind tg
+          python3 scripts/446l2_apply_live_fifo_golden.py --root "$K"
+          python3 scripts/tgu1_enable_golden_acm_console.py --root "$K"
+          python3 scripts/tgu1_enable_golden_acm_console.py --root "$K" --check-only
+          python3 scripts/tgu2_enable_runtime_console.py --root "$K"
+          python3 scripts/tgu2_enable_runtime_console.py --root "$K" --check-only
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$K" --kind tg --check-only
+          python3 scripts/446d_apply_power_clock_microscope.py --root "$K" --kind tg --check-only
+          python3 scripts/446d_apply_capacity_guard.py --root "$K" --kind tg --check-only
+          python3 scripts/446d_apply_extra_observers.py --root "$K" --kind tg --check-only
+          python3 scripts/446i_apply_passive_f0_twin.py --root "$K" --kind tg --check-only
+          python3 scripts/446j_apply_dispcc_misc.py --root "$K" --kind tg --check-only
+          python3 scripts/446l2_apply_live_fifo_golden.py --root "$K" --check-only
+
+          git -C "$K" diff --check -- \
+            techpack/display/msm/Makefile \
+            techpack/display/msm/sde_dbg.c \
+            techpack/display/msm/dsi/dsi_ctrl.c \
+            techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c \
+            techpack/display/msm/dsi/dsi_display.c \
+            techpack/display/msm/a52_phase446g.c \
+            techpack/display/msm/msm_drv.c \
+            techpack/display/msm/msm_smmu.c \
+            techpack/display/msm/msm_atomic.c \
+            techpack/display/msm/sde/sde_kms.c \
+            techpack/display/msm/sde/sde_plane.c \
+            techpack/display/msm/sde/sde_crtc.c \
+            techpack/display/msm/sde/sde_power_handle.c \
+            techpack/display/msm/sde/sde_core_irq.c \
+            drivers/iommu/arm-smmu.c \
+            drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c \
+            drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c \
+            drivers/soc/qcom/msm_bus/msm_bus_proxy_client.c \
+            drivers/clk/clk.c \
+            drivers/base/component.c \
+            drivers/clk/qcom/dispcc-lagoon.c \
+            drivers/regulator/refgen.c \
+            drivers/usb/gadget/function/u_serial.c \
+            techpack/display/pll/pll_drv.c \
+            techpack/display/pll/dsi_pll_7nm.c
+
+          DSI="$K/techpack/display/msm/dsi"
+          ! grep -Rqs 'A52_PHASE315G_GOLDEN_F0_FULL_PRESTATE_REFERENCE_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE319_DSI_SIXPOINT_TEMPORAL_OBSERVER_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1' "$DSI"
+          ! grep -Rqs 'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' "$DSI"
+          ! grep -Rqs 'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1' "$DSI"
+          grep -Fq "P446_MAX_REC 1536U" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq 'proc_create("a52_phase446_raw",0444' "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq 'proc_create("a52_phase446",0444' "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "A52_PHASE446_TG_ARM_SMMU" "$K/drivers/iommu/arm-smmu.c"
+          grep -Fq "A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1" "$K/techpack/display/msm/a52_phase444.c"
+          grep -Fq "I_BUS_PRE" "$K/techpack/display/msm/a52_phase444.c"
+          grep -Fq "J_MISC_TRACE" "$K/techpack/display/msm/a52_phase444.c"
+          grep -Fq "a52_p446i_hw_pre(&dsi_ctrl->hw);" "$K/techpack/display/msm/dsi/dsi_ctrl.c"
+          grep -Fq "qcom,refgen-kona-regulator" "$K/drivers/regulator/refgen.c"
+          grep -Fq "REFGEN_REG_PWRDWN_CTRL5" "$K/drivers/regulator/refgen.c"
+          grep -Fq "A52_PHASE446B_PLANE_H08_H09" "$K/techpack/display/msm/sde/sde_plane.c"
+          grep -Fq "A52_PHASE446B_CRTC_H10_H11" "$K/techpack/display/msm/sde/sde_crtc.c"
+          grep -Fq "A52_PHASE446B_H12_BRIDGE_PRE_ENABLE" "$K/techpack/display/msm/msm_atomic.c"
+          grep -Fq "A52_PHASE446B_H13_PANEL_ENABLE" "$K/techpack/display/msm/dsi/dsi_display.c"
+          grep -Fq "A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL" "$K/techpack/display/msm/a52_phase446g.c"
+          grep -Fq "a52_p446_set_burst(1U)" "$K/techpack/display/msm/msm_drv.c"
+          grep -Fq "0x184U" "$K/techpack/display/pll/dsi_pll_7nm.c"
+          grep -Fq "0x188U" "$K/drivers/clk/qcom/dispcc-lagoon.c"
+          ! grep -Fq "a52.cb2_reuse" "$K/drivers/iommu/arm-smmu.c"
+          ! grep -Fq "A52_PHASE446_CB2_SWITCH" "$K/drivers/iommu/arm-smmu.c"
+          grep -Fq "P444_MAX_SECTIONS 120U" "$K/techpack/display/msm/a52_phase444.c"
+          echo "Phase446jG DISP_CC_MISC_CMD observation-only scope: PASS"
+
+      - name: Build Phase446iG Golden ReSukiSU Image
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446ig
+          set -o pipefail
+          bash -lc "source scripts/common.sh; build_kernel '$LABEL'" \
+            2>&1 | tee phase446dg-touchgrass-build.log
+
+          IMAGE="$PWD/artifacts/Image-$LABEL"
+          CONFIG="$PWD/artifacts/config-$LABEL"
+          test -s "$IMAGE" -a -s "$CONFIG"
+
+          grep -aFq "$RESUKISU_VERSION" "$IMAGE"
+          grep -aFq 'P444 TERM ret=%d/%d irq=%u/%u' "$IMAGE"
+          grep -aFq 'P444 S i=%d p=%u dt=%llu' "$IMAGE"
+          grep -aFq 'HOT_0_75US' "$IMAGE"
+          grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_FIRST_COMMIT_MICROSCOPE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:TG' "$IMAGE"
+          grep -aFq 'A52_PHASE446D_BURST_PLL_PROVIDER_V2_CENTRAL' "$IMAGE"
+          grep -aFq 'A52_PHASE446_TG_GOLDEN_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
+          grep -aFq 'a52_phase446_raw' "$IMAGE"
+          grep -Fxq 'CONFIG_KSU=y' "$CONFIG"
+          grep -Fxq 'CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG"
+          grep -Fxq 'CONFIG_U_SERIAL_CONSOLE=y' "$CONFIG"
+          grep -aFq "A52TGU2 ttyGS%d console enabled=%u" "$IMAGE"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_ACM=y' "$CONFIG"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_F_FS=y' "$CONFIG"
+
+          for marker in \
+            'A52_PHASE315G_GOLDEN_F0_FULL_PRESTATE_REFERENCE_V1' \
+            'A52_PHASE319_DSI_SIXPOINT_TEMPORAL_OBSERVER_V1' \
+            'A52_PHASE344G_GOLDEN_DMA_TRANSITION_RECORDER_V1' \
+            'A52_PHASE424G_PAIRED_HW_SNAPSHOT_V1' \
+            'A52_PHASE439G_GOLDEN_DSI_AUTOPSY_V2' \
+            'A52_PHASE439FG_GOLDEN_DENSE_CLOCK_V1'; do
+            ! grep -aFq "$marker" "$IMAGE"
+          done
+
+          grep -aFq "P446L2 stage=" "$IMAGE"
+          echo "Phase446l2G Golden ReSukiSU compiled-image audit: PASS"
+          ccache -s || true
+
+      - name: Package Phase446iG Golden ReSukiSU
+        run: |
+          set -Eeuo pipefail
+          cd golden-work
+          LABEL=touchgrass-4.19.200-resukisu-v4.1.0-safe-phase446ig
+          IMAGE="$PWD/artifacts/Image-$LABEL"
+          CONFIG="$PWD/artifacts/config-$LABEL"
+          K="$PWD/workspace/touchgrass-a52xq"
+          OUT="$PWD/tgu2-golden-runtime-console-out"
+          FINAL="$OUT/package/boot-tgu2-golden-runtime-console-v1.img"
+
+          rm -rf "$OUT" intake
+          mkdir -p "$OUT"/{audit,source,package} intake
+          cp "$IMAGE" "$OUT/Image"
+          cp "$CONFIG" "$OUT/config"
+          cp phase446dg-touchgrass-build.log "$OUT/audit/"
+          cp artifacts/linux-4.19.200-resukisu-safe.txt "$OUT/audit/" 2>/dev/null || true
+          cp artifacts/resukisu-v4.1.0-exec-hook.txt "$OUT/audit/" 2>/dev/null || true
+          cp scripts/444_apply_deep_passive_compare.py \
+             scripts/444_apply_deep_passive_compare.py.z64 \
+             scripts/decode_phase444.py \
+             scripts/decode_phase444.py.z64 \
+             scripts/445g_apply_golden_sync_pre.py \
+             scripts/446g_apply_golden_heartbeat.py \
+             scripts/446b_apply_heartbeat_fixes.py \
+             scripts/446d_apply_power_clock_microscope.py \
+             scripts/446d_apply_power_clock_microscope.py.z64 \
+             scripts/446d_apply_capacity_guard.py \
+             scripts/446d_apply_extra_observers.py \
+             scripts/446d_collect_boot_identity.sh \
+             scripts/446l2_apply_live_fifo.py \
+             scripts/446l2_apply_live_fifo_golden.py \
+             scripts/tgu1_enable_golden_acm_console.py \
+             scripts/decode_phase446.py \
+             scripts/decode_phase446.py.z64 \
+             scripts/decode_phase446d.py \
+             scripts/decode_phase446d.py.z64 \
+             scripts/decode_phase446_pair.py "$OUT/audit/"
+
+          cp "$K/techpack/display/msm/a52_phase444.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/a52_phase446g.c" "$OUT/source/"
+          cp "$K/drivers/base/component.c" "$OUT/source/component.c"
+          cp "$K/drivers/clk/qcom/dispcc-lagoon.c" "$OUT/source/dispcc-lagoon.c"
+          cp "$K/drivers/regulator/refgen.c" "$OUT/source/refgen.c"
+          cp "$K/arch/arm64/boot/dts/vendor/qcom/lagoon-regulators.dtsi" "$OUT/source/lagoon-regulators.dtsi"
+          cp "$K/techpack/display/pll/pll_drv.c" "$OUT/source/pll_drv.c"
+          cp "$K/techpack/display/pll/dsi_pll_7nm.c" "$OUT/source/dsi_pll_7nm.c"
+          cp "$K/drivers/iommu/arm-smmu.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/msm_drv.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/msm_smmu.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/msm_atomic.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_kms.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_plane.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_crtc.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde_power_handle.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde/sde_core_irq.c" "$OUT/source/"
+          cp "$K/drivers/clk/clk.c" "$OUT/source/"
+          cp "$K/drivers/soc/qcom/msm_bus/msm_bus_arb_rpmh.c" "$OUT/source/"
+          cp "$K/drivers/soc/qcom/msm_bus/msm_bus_fabric_rpmh.c" "$OUT/source/"
+          cp "$K/drivers/soc/qcom/msm_bus/msm_bus_proxy_client.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/sde_dbg.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/dsi/dsi_ctrl.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c" "$OUT/source/"
+          cp "$K/techpack/display/msm/dsi/dsi_display.c" "$OUT/source/"
+
+          cat > "$OUT/BUILD-IDENTITY.txt" <<EOF
+          experiment=PHASE446IG-TOUCHGRASS-MATCHED-PASSIVE-F0-TWIN-V1
+          base=clean-proven-TouchGrass-4.19.200-Golden-lineage
+          touchgrass_commit=$TOUCHGRASS_COMMIT
+          resukisu_commit=$RESUKISU_COMMIT
+          resukisu_version=$RESUKISU_VERSION
+          root=ReSukiSU-manual-hook
+          phase439_observers_inherited=no
+          phase444_observer=yes
+          phase445_twin=yes
+          phase446_heartbeat_twin=yes
+          phase446b_gate_fix=yes
+          phase446b_live_cb_per_record=yes
+          phase446b_first_commit_microscope=H00-H13
+          phase446b_record_schema_bytes=508
+          phase446d_record_schema_bytes=664
+          phase446d_record_capacity=1536
+          phase446d_power_clock_microscope=yes
+          phase446d_behavior_changes=no
+          phase446d_burst_sampling=drm_bind_900_1100us
+          phase446d_dsi_pll_provider_markers=yes
+          phase446d_dispcc_registration_markers=yes
+          phase446d_boot_identity_helper=yes
+          phase446b_record_capacity=2048
+          phase446b_debug_partition_mirror=dropped
+          phase446_behavior_changes=no
+          phase446_record_phys=0xB1800000
+          phase446_record_bytes=0x00100000
+          phase446_proc=/proc/a52_phase446
+          phase446_raw_proc=/proc/a52_phase446_raw
+          recorder_phys=0xB1A62000
+          recorder_bytes=0x00098000
+          recovery_exporter=/dev/a52_samsung_reserved_raw
+          flashable=yes
+          tgu1_usb_acm_console_compiled=yes
+          tgu1_early_g_serial=no
+          tgu1_android_adb_acm_composition=not_modified
+          EOF
+
+          gzip -n -9 -c "$IMAGE" > "$OUT/package/Image.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/octet-stream' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${BOOT_SOURCE_ASSET_ID}" \
+            --output intake/boot.img
+          test "$(stat -c %s intake/boot.img)" = 100663296
+          printf '%s  %s\n' "$BOOT_SOURCE_SHA256" intake/boot.img | sha256sum -c -
+          python3 scripts/37_validate_a52_p1_boot_source.py intake/boot.img \
+            --lock projects/a52-p1-boot-image/boot-source.lock \
+            --output "$OUT/package/source-validation.json"
+          python3 scripts/38_repack_a52_p1_boot.py \
+            --source intake/boot.img --kernel "$OUT/package/Image.gz" \
+            --output "$FINAL" --report "$OUT/package/repack-report.json"
+          # Preserve stock ramdisk. Use boot extra_cmdline only if missing.
+          if python3 -c 'import sys; b=open(sys.argv[1],"rb").read(); c=(b[64:576].split(bytes([0]))[0]+b" "+b[608:1632].split(bytes([0]))[0]).split(); sys.exit(0 if b"console=ttyGS0" in c else 1)' "$FINAL"; then
+            echo "TGU1: ttyGS0 already in boot command line"
+          else
+            python3 scripts/446_append_boot_cmdline.py \
+              --source "$FINAL" --output "$FINAL.with-console" \
+              --report "$OUT/package/tgu1-console-cmdline-report.json" \
+              --append console=ttyGS0
+            mv "$FINAL.with-console" "$FINAL"
+          fi
+          test "$(stat -c %s "$FINAL")" -eq 100663296
+          cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
+          chmod +x "$OUT/package/446d_collect_boot_identity.sh"
+          sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
+
+          cat > "$OUT/PHASE446I-NOTES.txt" <<'EOF'
+          TGU2 Golden ACM console runtime registration variant of TGU1.
+          Fix: add_preferred_console(ttyGS,0) before register_console.
+          Needed because TGU1 actual /proc/cmdline had console=null only.
+          No changes to Android ConfigFS or display FIFO. Runtime not tested.
+          CONFIG_U_SERIAL_CONSOLE=y, console=ttyGS0.
+          Android adb+acm composition is NOT yet modified or proven.
+          Not a matched display control image.
+
+          Phase446iG TouchGrass matched passive F0 environment twin
+          ==========================================================
+          Same Phase446i helper/schema as GKI:
+            I_SW_ENTRY  cached controller state/requested rates
+            I_RAW_PRE   refgen[0x00..0xfc], DISPCC RCG/PLL, selected MDP, DSI compact state
+            I_RAW_POST  same immediately after HW kickoff
+            I_BUS_PRE   full Kona DSI debug selector sweep
+            I_BUS_POST  full Kona DSI debug selector sweep immediately after kickoff
+
+          Safety:
+            no clk/regulator framework calls in the kickoff window
+            no allocation or printk in the Phase446i hot path
+            no reset, force-clock, recovery, or behavior switch
+
+          TouchGrass refgen source/DT:
+            qcom,refgen-kona-regulator
+            Kona ops use only PWRDWN_CTRL5 +0x80 bit0
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Save Golden compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: golden-work/.ccache
+          key: a52xq-phase446dg-golden-resukisu-ccache-v1-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}-${{ env.RESUKISU_COMMIT }}-${{ github.run_id }}
+
+      - name: Upload Phase446iG Golden failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TGU2-GOLDEN-RUNTIME-CONSOLE-FAIL-${{ github.run_number }}
+          path: |
+            golden-work/artifacts/logs/
+            golden-work/phase446dg-touchgrass-build.log
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/a52_phase444.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/a52_phase446g.c
+            golden-work/workspace/touchgrass-a52xq/drivers/iommu/arm-smmu.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/msm_drv.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/sde/sde_kms.c
+            golden-work/workspace/touchgrass-a52xq/drivers/clk/clk.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_ctrl.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c
+            golden-work/workspace/touchgrass-a52xq/drivers/clk/qcom/dispcc-lagoon.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/pll/pll_drv.c
+            golden-work/workspace/touchgrass-a52xq/techpack/display/pll/dsi_pll_7nm.c
+            scripts/446d_apply_extra_observers.py
+            scripts/446i_apply_passive_f0_twin.py
+            golden-work/workspace/touchgrass-a52xq/drivers/regulator/refgen.c
+            golden-work/workspace/touchgrass-a52xq/arch/arm64/boot/dts/vendor/qcom/lagoon-regulators.dtsi
+            scripts/446d_collect_boot_identity.sh
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase446iG Golden ReSukiSU bundle
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TGU2-GOLDEN-RUNTIME-CONSOLE-${{ github.run_number }}
+          path: golden-work/tgu2-golden-runtime-console-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase446iG Golden ReSukiSU boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-TGU2-GOLDEN-RUNTIME-CONSOLE-${{ github.run_number }}-BOOT-IMG
+          path: golden-work/tgu2-golden-runtime-console-out/package/boot-tgu2-golden-runtime-console-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

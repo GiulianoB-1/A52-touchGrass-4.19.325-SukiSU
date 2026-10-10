@@ -4,14 +4,15 @@
 The actual disable function is sde_encoder_phys_cmd_prepare_commit, NOT
 dsi_display_prepare(P1). Record SW enable, HW enable, pending kickoff,
 TE pointer status, and encoder-error bit before/after the existing disable.
-16 identical records in ONE P445 (GKI) / P444 (TG) section. At most 8
-observations per boot, no changed clocks, no extra poll and no register
-writes. A missing hook/counter is reported as UNKNOWN, never PASS.
+Each sample is stored 16 times, with CRC. Eight phase-2 live-debug-bus
+samples are separated by approximately 1ms in BOTH kernels (adds ~7ms to
+commit preparation). INTF timing-engine status/frame count and CTL scheduler
+state are read-only. A missing hook is UNKNOWN, never PASS.
 """
 import argparse
 from pathlib import Path
 
-MARK="A52_F0B_AR_IDLE_16X_V1"
+MARK="A52_F0B_AR_IDLE_16X_V2"
 REL=Path("sde/sde_encoder_phys_cmd.c")
 
 def one(s,a,b,label):
@@ -21,7 +22,7 @@ def one(s,a,b,label):
     return s.replace(a,b,1)
 
 HELPER=r'''
-/* A52_F0B_AR_IDLE_16X_V1
+/* A52_F0B_AR_IDLE_16X_V2
  * Does not change the autorefresh/TE state. Snapshot only, 8 events max.
  * Step 1 = software says not enabled, so disable path skipped.
  * Step 2 = software says enabled, before existing disable.
@@ -30,6 +31,7 @@ HELPER=r'''
 #include <linux/ktime.h>
 #include <linux/atomic.h>
 #include <linux/string.h>
+#include <linux/delay.h>
 
 extern int __F0BAR_STORE__(u32, u32, const char *, u32, u32,
                            const void *, u32);
@@ -38,6 +40,8 @@ struct a52_f0bar_observation {
     u32 sw_autorefresh, hw_status, hw_valid, pending_kickoff;
     u32 enable_state, read_ptr, write_ptr, ptr_valid;
     u32 hw_status_inv, pending_inv, step_inv, tag;
+    u32 intf_valid, intf_engine_enabled, intf_frame_count, intf_line_count;
+    u32 ctl_valid, ctl_scheduler_status;
     u64 time_ns, time_ns_inv;
 };
 static atomic_t a52_f0bar_count = ATOMIC_INIT(0);
@@ -45,15 +49,16 @@ static void a52_f0bar_observe(struct sde_encoder_phys *phys, u32 step)
 {
     struct a52_f0bar_observation r[16], sample = {0};
     struct sde_hw_pp_vsync_info info = {0};
+    struct intf_status intf_state = {0};
     struct sde_hw_intf *intf;
     struct sde_hw_pingpong *pp;
     int index, i, rc = -ENODEV;
 
     if (!phys) return;
     index = atomic_inc_return(&a52_f0bar_count);
-    if (index > 8) return;
+    if (index > 24) return;
     sample.magic = 0x52414246U; /* FBAR */
-    sample.version = 1U;
+    sample.version = 2U;
     sample.index = (u32)index;
     sample.step = step;
     sample.sw_autorefresh = sde_encoder_phys_cmd_is_autorefresh_enabled(phys);
@@ -67,6 +72,18 @@ static void a52_f0bar_observe(struct sde_encoder_phys *phys, u32 step)
     sample.enable_state = (u32)phys->enable_state;
     intf = phys->hw_intf;
     pp = phys->hw_pp;
+    if (intf && intf->ops.get_status) {
+        intf->ops.get_status(intf, &intf_state);
+        sample.intf_valid = 1U;
+        sample.intf_engine_enabled = !!intf_state.is_en;
+        sample.intf_frame_count = intf_state.frame_count;
+        sample.intf_line_count = intf_state.line_count;
+    }
+    if (phys->hw_ctl && phys->hw_ctl->ops.get_scheduler_status) {
+        sample.ctl_valid = 1U;
+        sample.ctl_scheduler_status =
+            phys->hw_ctl->ops.get_scheduler_status(phys->hw_ctl);
+    }
     if (phys->has_intf_te && intf && intf->ops.get_vsync_info)
         rc = intf->ops.get_vsync_info(intf, &info);
     else if (pp && pp->ops.get_vsync_info)
@@ -79,18 +96,21 @@ static void a52_f0bar_observe(struct sde_encoder_phys *phys, u32 step)
     sample.hw_status_inv = ~sample.hw_status;
     sample.pending_inv = ~sample.pending_kickoff;
     sample.step_inv = ~sample.step;
-    sample.tag = 0xa52f0b01U;
+    sample.tag = 0xa52f0b02U;
     sample.time_ns = ktime_get_ns();
     sample.time_ns_inv = ~sample.time_ns;
     for (i=0; i<16; i++) r[i] = sample;
     (void)__F0BAR_STORE__(0x46304200U | step, 0x4630U, "F0BAR",
                           sample.index, step, r, sizeof(r));
-    pr_warn("F0BAR #%u phase=%u t=%llu sw=%u hw_valid=%u hw_ar=%08x hw_enable=%u pend=%u enc=%u ptr_valid=%u read=%u write=%u\n",
+    pr_warn("F0BAR #%u phase=%u t=%llu sw=%u dbg_valid=%u dbg=%08x dbg_busy7=%u pend=%u enc=%u ptr_valid=%u read=%u write=%u intf_valid=%u intf_en=%u intf_frame=%u intf_line=%u sched_valid=%u sched=%08x\n",
         sample.index, step, (unsigned long long)sample.time_ns,
         sample.sw_autorefresh, sample.hw_valid, sample.hw_status,
         sample.hw_valid ? !!(sample.hw_status & BIT(7)) : 0U,
         sample.pending_kickoff, sample.enable_state,
-        sample.ptr_valid, sample.read_ptr, sample.write_ptr);
+        sample.ptr_valid, sample.read_ptr, sample.write_ptr,
+        sample.intf_valid, sample.intf_engine_enabled,
+        sample.intf_frame_count, sample.intf_line_count,
+        sample.ctl_valid, sample.ctl_scheduler_status);
 }
 '''
 
@@ -108,7 +128,18 @@ def modify(s,store):
 \t\ta52_f0bar_observe(phys_enc, 1); /* no SW disable path */
 \t\treturn;
 \t}
-\ta52_f0bar_observe(phys_enc, 2); /* before autorefresh disable */
+\t/* Eight phase-2 samples capture debug-bus bit7 across a frame.
+\t * Read-only (apart from RAM recorder writes), paired GKI/TG;
+\t * this intentionally adds ~7ms before the unchanged disable path.
+\t */
+\t{
+\t\tint f0bar_i;
+\t\tfor (f0bar_i = 0; f0bar_i < 8; f0bar_i++) {
+\t\t\ta52_f0bar_observe(phys_enc, 2);
+\t\t\tif (f0bar_i != 7)
+\t\t\t\tusleep_range(950, 1050);
+\t\t}
+\t}
 
 \tsde_encoder_phys_cmd_connect_te(phys_enc, false);
 """
@@ -132,10 +163,10 @@ def validate(root,store):
     for needle in (MARK,store+"(u32,",'"F0BAR"', "a52_f0bar_observe(phys_enc, 1)",
             "a52_f0bar_observe(phys_enc, 2)",
             "a52_f0bar_observe(phys_enc, 3)",
-            "get_autorefresh_status", "pending_kickoff_cnt",
+            "get_autorefresh_status", "pending_kickoff_cnt", "get_scheduler_status", "get_status", "usleep_range(950, 1050)", "intf_engine_enabled",
             "ptr_valid", "hw_status & BIT(7)", "for (i=0; i<16; i++)"):
         if needle not in s:raise RuntimeError("AR-IDLE audit missing: "+needle)
-    print("AR-IDLE read-only source audit PASS: shared GKI/TG observation")
+    print("AR-IDLE v2 source audit PASS: GKI/TG 8x read-only status per 1ms + INTF/CTL")
     print("AR-IDLE cannot guarantee MDP fetching stopped; P1 is DSI prepare entry.")
 def main():
     p=argparse.ArgumentParser()

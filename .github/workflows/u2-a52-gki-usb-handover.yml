@@ -624,6 +624,11 @@ jobs:
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
           python3 scripts/u2_apply_gki_usb_composite_handover.py --root "$ROOT"
           python3 scripts/u2_apply_gki_usb_composite_handover.py --root "$ROOT" --check-only
+          "$ROOT/scripts/config" --file "$BUILD/.config" -e USB_G_SERIAL -e USB_CONFIGFS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_F_FS -e U_SERIAL_CONSOLE
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do
+            grep -Fxq "CONFIG_${opt}=y" "$BUILD/.config" || { echo "U2 missing CONFIG_${opt}=y"; exit 1; }
+          done
           python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_power_clock_microscope.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446d_apply_capacity_guard.py --root "$ROOT" --kind gki --check-only

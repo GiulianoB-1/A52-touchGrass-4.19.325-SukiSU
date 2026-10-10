@@ -1,0 +1,27 @@
+name: F0-BISECT standalone patch anchor audit
+on:
+  push:
+    branches: [agent/a52-f0bisect-gki-p6-v1]
+    paths: [.github/workflows/f0bisect-anchor-audit.yml, scripts/f0_bisect_stage_guard.py.z64, scripts/f0_bisect_stage_guard.py]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reveal compiled probe anchors
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zlib,base64
+          t=zlib.decompress(base64.b64decode(Path('scripts/f0_bisect_stage_guard.py.z64').read_text().strip())).decode()
+          a=t.splitlines()
+          print('EXPANDED SOURCE TOTAL LINES',len(a))
+          for i,x in enumerate(a):
+              if any(n in x for n in ('def patch_display','def after(','F0-BISECT entry','dsi_display_prepare(', 'def once(', 'def main(')):
+                  print('--- window at',i+1,'---')
+                  for j in range(max(0,i-8), min(len(a),i+24)):
+                      print(f'{j+1}: {a[j]}')
+          PY

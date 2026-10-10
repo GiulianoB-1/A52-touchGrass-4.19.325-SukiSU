@@ -14,12 +14,14 @@ source = zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
 
 old = '    if n != 1: raise RuntimeError(f"F0-BISECT {why}: expected one anchor, found {n}")'
 new = r'''    if n != 1 and why == "entry":
-        # Phase446h inserted a lifecycle marker between these original lines.
-        # Keep that marker and insert P1 directly after mode assignment instead.
-        needle = "\tmode = display->panel->cur_mode;"
+        # Phase446 injected extra assignments/markers around mode setup.
+        # The ESD call is a UNIQUE landmark immediately after early mode
+        # resolution in dsi_display_prepare; preserve all inserted markers.
+        needle = "\tdsi_display_set_ctrl_esd_check_flag(display, false);"
         if n == 0 and s.count(needle) == 1:
-            return s.replace(needle, needle +
-                "\n\tf0b_snap(display, 1, 0); /* prepare-entry; NOT autorefresh proof */", 1)
+            return s.replace(needle,
+                "\tf0b_snap(display, 1, 0); /* prepare-entry; NOT autorefresh proof */\n"
+                + needle, 1)
     if n != 1: raise RuntimeError(f"F0-BISECT {why}: expected one anchor, found {n}")'''
 if source.count(old) != 1:
     raise RuntimeError("F0B compressed source 'once' contract changed")

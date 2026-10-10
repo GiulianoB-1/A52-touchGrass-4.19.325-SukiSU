@@ -99,8 +99,9 @@ def patch(root: Path, tg: Path):
         raise RuntimeError("pinned TouchGrass phy-msm-qusb-v2.c missing")
     if not dst.parent.is_dir():
         raise RuntimeError("GKI USB PHY directory missing")
-    if not dt.is_file():
-        raise RuntimeError("GKI lagoon-usb.dtsi missing")
+    # GKI source need not contain the downstream lagoon DTS.
+    # The boot image carries the real lagoon DTB, patched by
+    # u1_patch_boot_dtb.py during repacking.
     if not dst.is_file():
         dst.write_text(port_phy(source.read_text()))
     text = mk.read_text()
@@ -108,7 +109,8 @@ def patch(root: Path, tg: Path):
         text += "\n# " + MARK + ": built-in legacy USB2 gadget PHY\n"
         text += "obj-$(CONFIG_USB_PHY) += phy-a52-qusb2-v2.o\n"
         mk.write_text(text)
-    dt.write_text(patch_dt(dt.read_text()))
+    if dt.is_file():
+        dt.write_text(patch_dt(dt.read_text()))
     patch_active_dwc3(root)
 
 def patch_active_dwc3(root: Path):
@@ -173,19 +175,23 @@ static bool a52_u1_usb2_only(struct device *dev)
 def validate(root: Path):
     src = (root / KERNEL_PATH).read_text()
     mk = (root / "drivers/usb/phy/Makefile").read_text()
-    dt = (root / "arch/arm64/boot/dts/vendor/qcom/lagoon-usb.dtsi").read_text()
+    dt_path = root / "arch/arm64/boot/dts/vendor/qcom/lagoon-usb.dtsi"
+    dt = dt_path.read_text() if dt_path.is_file() else None
     for token in (MARK, 'qcom,qusb2phy-v2', 'usb_add_phy_dev(&qphy->phy)'):
         if token not in src:
             raise RuntimeError("ported USB2 driver missing " + token)
     for token in ('phy-a52-qusb2-v2.o', 'CONFIG_USB_PHY'):
         if token not in mk:
             raise RuntimeError("Makefile missing " + token)
-    for token in ('A52_PHASE_U1_GADGET_HS_ONLY', 'maximum-speed = "high-speed";',
-                  'dr_mode = "peripheral";', 'qcom,select-utmi-as-pipe-clk;'):
-        if token not in dt:
-            raise RuntimeError("DT missing " + token)
-    if 'usb-phy = <&qusb_phy0>, <&usb_qmp_dp_phy>;' in dt:
-        raise RuntimeError("USB3 PHY still requested by DWC3")
+    if dt is not None:
+        for token in ('A52_PHASE_U1_GADGET_HS_ONLY', 'maximum-speed = "high-speed";',
+                      'dr_mode = "peripheral";', 'qcom,select-utmi-as-pipe-clk;'):
+            if token not in dt:
+                raise RuntimeError("optional source DTS missing " + token)
+        if 'usb-phy = <&qusb_phy0>, <&usb_qmp_dp_phy>;' in dt:
+            raise RuntimeError("USB3 PHY still requested by source DTS")
+    else:
+        print("U1: lagoon-usb.dtsi not in GKI tree; actual boot DTB patched at packaging")
     core = (root / "drivers/usb/dwc3/core.c").read_text()
     glue = (root / "drivers/usb/dwc3/dwc3-qcom.c").read_text()
     for text, marker in ((core, "A52_PHASE_U1_RUNTIME_HS_ONLY"),

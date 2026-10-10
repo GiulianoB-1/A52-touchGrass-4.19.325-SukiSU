@@ -370,13 +370,10 @@ jobs:
             ! grep -aFq "$marker" "$IMAGE"
           done
 
-          grep -aFq "F0B ACTIVE P%u" "$IMAGE"
-          grep -aFq "F0BISECT" "$IMAGE"
-          grep -aFq "F0BAR #" "$IMAGE"
-          grep -aFq "refuse=%04x" "$IMAGE"
-          grep -aFq "dbg_busy7=%u" "$IMAGE"
-          grep -aFq "intf_valid=%u" "$IMAGE"
-          grep -Fq "A52_F0B_AR_IDLE_16X_V1" "$PWD/workspace/touchgrass-a52xq/techpack/display/msm/sde/sde_encoder_phys_cmd.c"
+          for marker in 'F0B ACTIVE P%u' 'F0BISECT' 'F0BAR #' 'refuse=%04x' 'dbg_busy7=%u' 'intf_valid=%u'; do
+            grep -aFq "$marker" "$IMAGE" || { echo "FAIL: compiled Golden Image missing probe marker: $marker"; exit 1; }
+          done
+          grep -Fq "A52_F0B_AR_IDLE_16X_V2" "$PWD/workspace/touchgrass-a52xq/techpack/display/msm/sde/sde_encoder_phys_cmd.c" || { echo "FAIL: Golden source missing F0BAR v2 marker"; exit 1; }
           grep -Fq "#define F0B_ACTIVE_STAGE 6" "$PWD/workspace/touchgrass-a52xq/techpack/display/msm/dsi/dsi_display.c"
           ! grep -aFq "P446L2 stage=" "$IMAGE" || { echo "old P446L2 experiment leaked"; exit 1; }
           echo "TGU4 Golden verbose USB kernel console compiled-image audit: PASS"

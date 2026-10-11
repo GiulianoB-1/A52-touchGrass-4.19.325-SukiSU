@@ -69,7 +69,7 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
           python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
@@ -680,6 +680,8 @@ jobs:
           python3 scripts/u2_ab_quiet_legacy_observers.py --root "$ROOT" --check-only
           python3 scripts/fence1d_fix_ackfr_reentrant_comm.py --root "$ROOT"
           python3 scripts/fence1d_fix_ackfr_reentrant_comm.py --root "$ROOT" --check-only
+          python3 scripts/fence1e_quiet_dump_record_f0.py --root "$ROOT"
+          python3 scripts/fence1e_quiet_dump_record_f0.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" -e USB_G_SERIAL -e USB_CONFIGFS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_F_FS -e U_SERIAL_CONSOLE
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do
@@ -703,6 +705,7 @@ jobs:
           python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
           python3 scripts/fence1c_fix_dsi_pll_hw_init.py --root "$ROOT" --check-only
           python3 scripts/fence1d_fix_ackfr_reentrant_comm.py --root "$ROOT" --check-only
+          python3 scripts/fence1e_quiet_dump_record_f0.py --root "$ROOT" --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"

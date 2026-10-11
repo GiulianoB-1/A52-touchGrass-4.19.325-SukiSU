@@ -69,6 +69,8 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/crash1_apply_fault_and_frameevent.py --help >/dev/null
           python3 scripts/f0_bisect_ar_idle.py --help >/dev/null
           python3 scripts/f0_bisect_stage_guard.py --help >/dev/null
@@ -660,6 +662,8 @@ jobs:
           python3 scripts/f0_bisect_ar_idle.py --root "$ROOT" --mode gki --check-only
           python3 scripts/crash1_apply_fault_and_frameevent.py --root "$ROOT"
           python3 scripts/crash1_apply_fault_and_frameevent.py --root "$ROOT" --check-only
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT"
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq"
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
           echo "U2-AB-COM: do NOT install U2 g_serial/ConfigFS handover; early COM3 remains"
@@ -683,6 +687,7 @@ jobs:
           grep -Fxq '#define F0B_ACTIVE_STAGE 0' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
           python3 scripts/crash1_apply_fault_and_frameevent.py --root "$ROOT" --check-only
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -808,6 +813,7 @@ jobs:
           grep -Fq '#define F0B_ACTIVE_STAGE 0' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           grep -Fq 'A52_CRASH1_CB_HOOK_V1' "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c"
           grep -Fq 'A52_CRASH1_FAULT_HOOK_V1' "$ROOT/arch/arm64/mm/fault.c"
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
           grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
           echo "CRASH1: raw FIFO F0 disabled; standard Samsung command remains enabled"
 
@@ -933,6 +939,8 @@ jobs:
           done
           cp "$ROOT/drivers/a52_display/msm/sde/sde_plane.c" "$OUT/source/sde_plane.c"
           cp "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c" "$OUT/source/sde_crtc.c"
+          cp "$ROOT/drivers/a52_display/msm/sde/sde_fence.c" "$OUT/source/sde_fence.c"
+          cp scripts/crash1_fix_gki_dma_fence_union.py "$OUT/source/crash1_fix_gki_dma_fence_union.py"
           cp "$ROOT/arch/arm64/mm/fault.c" "$OUT/source/arm64_fault.c"
           cp scripts/crash1_apply_fault_and_frameevent.py "$OUT/source/crash1_apply_fault_and_frameevent.py"
           cp "$ROOT/drivers/a52_display/msm/msm_atomic.c" "$OUT/source/msm_atomic.c"

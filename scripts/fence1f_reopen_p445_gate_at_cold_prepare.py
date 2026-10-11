@@ -1,97 +1,139 @@
 #!/usr/bin/env python3
-"""FENCE1F: one-shot release of Phase445 fail-stop gate at cold recovery.
+"""FENCE1F: bounded Phase445 gate release only after successful cold preparation.
 
-Phase445 blocks all future panel transfers once the initial F0 ladder has
-exhausted R1. That correctly aborts its initial retries, but also prevents
-the later legitimate TouchGrass/Samsung ESD cold-recovery ON command from
-reaching the DSI controller. Reopen ONLY at first blocked cont=0 prepare.
+Keep Phase445 fail-stop through the initial splash F0, and through all failed
+cold-prepare attempts. After the first successful cont=0 prepare that reached
+the real F0B P6 checkpoint, reopen once for the actual Samsung panel ON.
+If that first post-cold real F0 returns an error, close the gate again.
+If it completes successfully, leave the tested normal panel path available.
 
-No panel/regulator/PLL/PHY operations or F0 packets are modified. The
-Phase445 safety mechanism can block again if the post-cold F0 times out.
+No panel regulator, PLL, PHY, reset, DMA packet or mode programming changes.
 """
 import argparse
 import re
 from pathlib import Path
 
 DISPLAY = Path("drivers/a52_display/msm/dsi/dsi_display.c")
-MARK = "A52_FENCE1F_REOPEN_P445_GATE_COLD_V1"
-DECL = r'''/* A52_FENCE1F_REOPEN_P445_GATE_COLD_V1: one shot at blocked cold prepare. */
-extern bool a52_p445_samsung_blocked(void);
-extern void a52_p445_gate_off(void);
-static atomic_t a52_fence1f_cold_once = ATOMIC_INIT(0);
+P445 = Path("drivers/a52_display/msm/a52_phase445.c")
+MARK = "A52_FENCE1F_COLD_SUCCESS_GATE_WINDOW_V2"
+RMARK = "A52_FENCE1F_POSTCOLD_F0_REBLOCK_V2"
+
+DECL = r'''/* A52_FENCE1F_COLD_SUCCESS_GATE_WINDOW_V2 */
+extern void a52_fence1f_cold_reopen(void);
 '''
-HOOK = '''\t/* FENCE1F: the failed Phase445 ladder must not veto a real cold
-\t * recovery. Do not touch the initial continuous-splash F0 attempt.
-\t * Re-arm at most once, allowing a single decisive cold-ON test.
-\t */
-\tif (!display->is_cont_splash_enabled &&
-\t    a52_p445_samsung_blocked() &&
-\t    atomic_cmpxchg(&a52_fence1f_cold_once, 0, 1) == 0) {
-\t\ta52_p445_gate_off();
-\t\tpr_warn("FENCE1F cold prepare: Phase445 BLOCK reopened once; real Samsung ON commands allowed\\n");
-\t}
+GATE = r'''
+/* A52_FENCE1F_POSTCOLD_F0_REBLOCK_V2
+ * 0 untouched, 1 first cold-ON test active, 2 F0 failed/block restored,
+ * 3 first cold-ON F0 succeeded; do not interfere with later traffic.
+ */
+static atomic_t a52_fence1f_window = ATOMIC_INIT(0);
+void a52_fence1f_cold_reopen(void)
+{
+    if (!a52_p445_samsung_blocked() ||
+        atomic_cmpxchg(&a52_fence1f_window, 0, 1) != 0)
+        return;
+    a52_p445_gate_off();
+    pr_warn("FENCE1F postcold gate OPEN: first successful P6/prepare; real Samsung ON allowed\n");
+}
+EXPORT_SYMBOL_GPL(a52_fence1f_cold_reopen);
+'''
+REB = r'''    /* First postcold real F0 return is the decisive result.
+     * Preserve Phase445's original fail-stop if the cold attempt also stalls.
+     */
+    if (marker == 0x1acU && (s32)arg0 < 0 &&
+        atomic_cmpxchg(&a52_fence1f_window, 1, 2) == 1) {
+        a52_p445_gate_block();
+        pr_warn("FENCE1F postcold F0 failed rc=%d: Phase445 gate BLOCK restored\n",
+                (s32)arg0);
+    } else if (marker == 0x1acU && (s32)arg0 >= 0 &&
+               atomic_cmpxchg(&a52_fence1f_window, 1, 3) == 1) {
+        pr_warn("FENCE1F postcold F0 completed rc=%d: gate left OPEN\n",
+                (s32)arg0);
+    }
 '''
 
-def patch(s):
+def patch_display(s):
     if MARK in s:
         return s
-    needle = "int dsi_display_prepare(struct dsi_display *display)\n"
-    if s.count(needle) != 1:
-        raise RuntimeError("FENCE1F dsi_display_prepare signature not unique")
-    if "a52_p445_gate_check" not in s:
-        # Phase445 may declare gate_check only in dsi_ctrl.c; use the
-        # symbol actually needed by FENCE1F as our source dependency.
-        if "a52_p445_gate_off" not in s:
-            raise RuntimeError("FENCE1F Phase445 gate helper declaration missing")
-    if "#include <linux/atomic.h>" not in s:
-        s = "#include <linux/atomic.h>\n" + s
-    s = s.replace(needle, DECL + "\n" + needle, 1)
-    start = s.index(needle)
-    boundary = s.find("\nint dsi_display_enable(", start)
-    if boundary < 0:
-        boundary = s.find("\nint dsi_display_unprepare(", start)
-    if boundary < 0:
-        boundary = len(s)
-    fn = s[start:boundary]
-    # Phase446 F0B installs a P1 marker immediately before the normal
-    # dsi_display_set_ctrl_esd_check_flag() call, after all declarations.
-    p1 = re.search(r"(?m)^[ \t]*f0b_snap\s*\(\s*display\s*,\s*1\s*,\s*0\s*\);[^\n]*\n", fn)
-    if p1:
-        at = p1.start()
-    else:
-        anchor = "\tdsi_display_set_ctrl_esd_check_flag(display, false);\n"
-        if fn.count(anchor) != 1:
-            raise RuntimeError("FENCE1F cannot find unique cold-prepare P1 boundary")
-        at = fn.index(anchor)
-    fn = fn[:at] + HOOK + fn[at:]
-    return s[:start] + fn + s[boundary:]
+    sig = "int dsi_display_prepare(struct dsi_display *display)\n"
+    if s.count(sig) != 1:
+        raise RuntimeError("FENCE1F prepare function count != 1")
+    start = s.index(sig)
+    end = s.find("\n}\n", start)
+    if end < 0:
+        raise RuntimeError("FENCE1F prepare function end missing")
+    end += 3
+    fn = s[start:end]
+    if fn.count("\tint rc = 0;\n") != 1:
+        raise RuntimeError("FENCE1F prepare rc declaration changed")
+    fn = fn.replace("\tint rc = 0;\n",
+                    "\tint rc = 0;\n\tbool a52_fence1f_p6_seen = false;\n", 1)
+    p6 = list(re.finditer(
+        r"(?m)^[ \t]*f0b_snap\s*\(\s*display\s*,\s*6\s*,\s*[^)]*\);[^\n]*\n",
+        fn))
+    if len(p6) != 1:
+        raise RuntimeError("FENCE1F requires one real F0BISECT P6 hook, got %d" % len(p6))
+    at = p6[0].end()
+    fn = fn[:at] + "\ta52_fence1f_p6_seen = true;\n" + fn[at:]
+    anchor = "\nerror:\n\tmutex_unlock(&display->display_lock);\n"
+    if fn.count(anchor) != 1:
+        raise RuntimeError("FENCE1F prepare success exit label missing")
+    hook = ( "\nerror:\n"
+        "\t/* Reopen ONLY after the successful cold P6 and panel prepare. */\n"
+        "\tif (!rc && a52_fence1f_p6_seen &&\n"
+        "\t    !display->is_cont_splash_enabled)\n"
+        "\t\ta52_fence1f_cold_reopen();\n"
+        "\tmutex_unlock(&display->display_lock);\n")
+    fn = fn.replace(anchor,hook,1)
+    return s[:start] + fn + s[end:].replace(sig, DECL + sig, 1) if False else \
+           s[:start] + fn + s[end:] if DECL in s else \
+           s[:start] + fn.replace(sig, DECL + sig, 1) + s[end:]
 
-def audit(s):
-    required = (MARK, "a52_fence1f_cold_once", "a52_p445_gate_off();",
-                "!display->is_cont_splash_enabled", "a52_p445_samsung_blocked()",
-                "atomic_cmpxchg(&a52_fence1f_cold_once, 0, 1)")
-    for v in required:
-        if v not in s:
-            raise RuntimeError("FENCE1F audit missing " + v)
-    if s.count(MARK) != 1:
-        raise RuntimeError("FENCE1F duplicated declaration")
-    if s.count("a52_p445_gate_off();") != 1:
-        raise RuntimeError("FENCE1F gate re-open must occur exactly once")
-    if "f0b_snap(display, 1, 0);" not in s:
-        raise RuntimeError("FENCE1F original F0B P1 instrumentation lost")
-    print("FENCE1F PASS: Phase445 BLOCK reopened at most once on cont=0; original F0 and recovery unchanged")
+def patch_p445(s):
+    if RMARK in s:
+        return s
+    marker = "static atomic_t a52_fence1e_f0_seq = ATOMIC_INIT(0);"
+    if s.count(marker) != 1:
+        raise RuntimeError("FENCE1F existing FENCE1E marker source changed")
+    s=s.replace(marker,GATE + "\n" + marker,1)
+    retline='    pr_warn("FENCE1E F0 attempt=%d seq=%d stage=%03x arg0=%08x arg1=%08x\\n",'
+    if s.count(retline) != 1:
+        raise RuntimeError("FENCE1F FENCE1E return print anchor changed")
+    s=s.replace(retline,REB + retline,1)
+    return s
+
+def audit(a,b):
+    required_a=(MARK,"a52_fence1f_p6_seen = true;",
+                "if (!rc && a52_fence1f_p6_seen &&",
+                "a52_fence1f_cold_reopen();",
+                "f0b_snap(display, 1, 0);")
+    for x in required_a:
+        if x not in a:
+            raise RuntimeError("FENCE1F missing display guarantee: "+x)
+    if a.count(MARK)!=1:
+        raise RuntimeError("FENCE1F display marker duplicated")
+    required_b=(RMARK,"a52_fence1f_window",
+                "atomic_cmpxchg(&a52_fence1f_window, 1, 2)",
+                "a52_p445_gate_off();","a52_p445_gate_block();",
+                "F1E_F0_TX")
+    for x in required_b:
+        if x not in b:
+            raise RuntimeError("FENCE1F missing persistent fail-stop: "+x)
+    if b.count(RMARK)!=1:
+        raise RuntimeError("FENCE1F P445 marker duplicated")
+    print("FENCE1F PASS: first successful cont=0 P6+prepare reopens once; first real F0 failure reblocks")
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--root", required=True, type=Path)
-    p.add_argument("--check-only", action="store_true")
-    a = p.parse_args()
-    file = a.root / DISPLAY
-    text = file.read_text()
+    p=argparse.ArgumentParser()
+    p.add_argument("--root",required=True,type=Path)
+    p.add_argument("--check-only",action="store_true")
+    a=p.parse_args()
+    pa=a.root/DISPLAY
+    pb=a.root/P445
     if not a.check_only:
-        text = patch(text)
-        file.write_text(text)
-    audit(text)
+        pa.write_text(patch_display(pa.read_text()))
+        pb.write_text(patch_p445(pb.read_text()))
+    audit(pa.read_text(),pb.read_text())
 
 if __name__ == "__main__":
     main()

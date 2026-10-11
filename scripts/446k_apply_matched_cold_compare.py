@@ -106,9 +106,11 @@ def patch(root,kind):
         start,end=bounds(s,"int dsi_display_prepare(struct dsi_display *display)")
         fn=s[start:end]
         fn=one(fn,"\nerror:\n","\nerror:\n"
-           "    /* A52_PHASE446K_PREPARED */\n"
-           "    if (!rc && !display->is_cont_splash_enabled && display->ctrl[0].ctrl)\n"
-           "        a52_p446k_capture(&display->ctrl[0].ctrl->hw,1U);\n","prepare success")
+           "\t/* A52_PHASE446K_PREPARED: matched end-of-cold-prepare. */\n"
+           "\tif (!rc && !display->is_cont_splash_enabled &&\n"
+           "\t    display->ctrl[0].ctrl) {\n"
+           "\t\ta52_p446k_capture(&display->ctrl[0].ctrl->hw,1U);\n"
+           "\t}\n","prepare success")
         dis.write_text(s[:start]+"extern void a52_p446k_capture(struct dsi_ctrl_hw *,u32);\n"+fn+s[end:])
     s=pan.read_text()
     if "A52_PHASE446K_ON" not in s:

@@ -1,5 +1,5 @@
 name: CRASH1 GKI - no raw F0, retained frame-event and oops diagnostics
-run-name: FENCE1B GKI no SDE panic, passive original F0, frame-event/fault/kmsg, COM3
+run-name: FENCE1C GKI quiet SDE evtlog dump, no panic, passive original F0, COM3
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
@@ -69,9 +69,10 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
+          python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
           python3 scripts/crash1_apply_fault_and_frameevent.py --help >/dev/null
           python3 scripts/f0_bisect_ar_idle.py --help >/dev/null
           python3 scripts/f0_bisect_stage_guard.py --help >/dev/null
@@ -667,6 +668,8 @@ jobs:
           python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
           python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT"
           python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT"
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq"
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
           echo "U2-AB-COM: do NOT install U2 g_serial/ConfigFS handover; early COM3 remains"
@@ -692,6 +695,7 @@ jobs:
           python3 scripts/crash1_apply_fault_and_frameevent.py --root "$ROOT" --check-only
           python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
           python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
 
           CTRL="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           HWC="$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c"
@@ -819,6 +823,7 @@ jobs:
           grep -Fq 'A52_CRASH1_FAULT_HOOK_V1' "$ROOT/arch/arm64/mm/fault.c"
           python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
           python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
           grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
           echo "CRASH1: raw FIFO F0 disabled; standard Samsung command remains enabled"
 
@@ -947,6 +952,7 @@ jobs:
           cp "$ROOT/drivers/a52_display/msm/sde/sde_fence.c" "$OUT/source/sde_fence.c"
           cp scripts/crash1_fix_gki_dma_fence_union.py "$OUT/source/crash1_fix_gki_dma_fence_union.py"
           cp scripts/fence1b_disable_sde_dbg_panic.py "$OUT/source/fence1b_disable_sde_dbg_panic.py"
+          cp scripts/fence1c_quiet_sde_evtlog.py "$OUT/source/fence1c_quiet_sde_evtlog.py"
           cp "$ROOT/arch/arm64/mm/fault.c" "$OUT/source/arm64_fault.c"
           cp scripts/crash1_apply_fault_and_frameevent.py "$OUT/source/crash1_apply_fault_and_frameevent.py"
           cp "$ROOT/drivers/a52_display/msm/msm_atomic.c" "$OUT/source/msm_atomic.c"
@@ -1091,7 +1097,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-FENCE1B-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-FENCE1C-GKI-FAIL-DIAG-${{ github.run_number }}
           path: |
             gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
             gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
@@ -1127,7 +1133,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-FENCE1B-GKI-${{ github.run_number }}
+          name: A52XQ-FENCE1C-GKI-${{ github.run_number }}
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
@@ -1137,7 +1143,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-FENCE1B-GKI-${{ github.run_number }}-BOOT
+          name: A52XQ-FENCE1C-GKI-${{ github.run_number }}-BOOT
           path: f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
           if-no-files-found: error
           compression-level: 0

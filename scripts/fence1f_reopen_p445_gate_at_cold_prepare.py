@@ -85,9 +85,7 @@ def patch_display(s):
         "\t\ta52_fence1f_cold_reopen();\n"
         "\tmutex_unlock(&display->display_lock);\n")
     fn = fn.replace(anchor,hook,1)
-    return s[:start] + fn + s[end:].replace(sig, DECL + sig, 1) if False else \
-           s[:start] + fn + s[end:] if DECL in s else \
-           s[:start] + fn.replace(sig, DECL + sig, 1) + s[end:]
+    return s[:start] + fn.replace(sig, DECL + sig, 1) + s[end:]
 
 def patch_p445(s):
     if RMARK in s:

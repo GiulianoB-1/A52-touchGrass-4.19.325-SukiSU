@@ -624,6 +624,36 @@ jobs:
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT"
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki
           python3 scripts/446j_apply_dispcc_misc.py --root "$ROOT" --kind gki
+          # The object/source caches may contain a previously patched CRASH1
+          # tree with its FINAL F0B_ACTIVE_STAGE 0 already set. The intermediate
+          # F0B probe audit requires stage 6; CRASH1 restores 0 below.
+          # Normalize only a complete, verified inherited F0B probe.
+          python3 - "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          target = Path(sys.argv[1])
+          source = target.read_text()
+          stages = re.findall(r"(?m)^#define F0B_ACTIVE_STAGE ([0-9]+)\\s*$", source)
+          if stages == ["0"]:
+              required = ('F0B_GUARD_V2', '"F0BISECT"', 'f0b_snap(display, 6,')
+              missing = [name for name in required if source.count(name) != 1]
+              if missing:
+                  raise SystemExit("CRASH1 cached F0B stage 0 is incomplete: " + str(missing))
+              source = source.replace("#define F0B_ACTIVE_STAGE 0",
+                                      "#define F0B_ACTIVE_STAGE 6", 1)
+              target.write_text(source)
+              print("CRASH1 cached F0B stage 0 -> 6 for guard audit; final stage returns to 0")
+          elif stages == ["6"]:
+              print("CRASH1 F0B stage 6 already present")
+          elif not stages:
+              if 'F0B_GUARD_V2' in source or '"F0BISECT"' in source:
+                  raise SystemExit("CRASH1 F0B payload present without stage definition")
+              print("CRASH1 F0B probe not yet installed; guard will inject stage 6")
+          else:
+              raise SystemExit("CRASH1 unexpected F0B stage definitions: " + str(stages))
+          PY
           python3 scripts/f0_bisect_stage_guard.py --root "$ROOT" --mode gki --active-stage 6
           python3 scripts/f0_bisect_stage_guard.py --root "$ROOT" --mode gki --active-stage 6 --check-only
           python3 scripts/f0_bisect_ar_idle.py --root "$ROOT" --mode gki

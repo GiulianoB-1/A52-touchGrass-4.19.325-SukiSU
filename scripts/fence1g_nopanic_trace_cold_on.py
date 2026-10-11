@@ -122,7 +122,8 @@ def audit(root):
         raise RuntimeError("FENCE1G markers absent or duplicated")
     ca=a.index("/* "+MARK)
     cb=a.find("\n}",ca)
-    if cb<0 or "panic(" in a[ca:cb]:
+    if cb<0 or 'panic("A52P439' in a[ca:cb] or \
+            "static __noreturn void\na52_p411_timeout_panic" in a:
         raise RuntimeError("FENCE1G diagnostic timeout is still fatal")
     if a.count("a52_p411_timeout_panic(dsi_ctrl);")!=1:
         raise RuntimeError("FENCE1G missing original timeout call")

@@ -20,7 +20,7 @@ extern bool a52_p445_samsung_blocked(void);
 extern void a52_p445_gate_off(void);
 static atomic_t a52_fence1f_cold_once = ATOMIC_INIT(0);
 '''
-HOOK = r'''\t/* FENCE1F: the failed Phase445 ladder must not veto a real cold
+HOOK = '''\t/* FENCE1F: the failed Phase445 ladder must not veto a real cold
 \t * recovery. Do not touch the initial continuous-splash F0 attempt.
 \t * Re-arm at most once, allowing a single decisive cold-ON test.
 \t */
@@ -28,7 +28,7 @@ HOOK = r'''\t/* FENCE1F: the failed Phase445 ladder must not veto a real cold
 \t    a52_p445_samsung_blocked() &&
 \t    atomic_cmpxchg(&a52_fence1f_cold_once, 0, 1) == 0) {
 \t\ta52_p445_gate_off();
-\t\tpr_warn("FENCE1F cold prepare: Phase445 BLOCK reopened once; real Samsung ON commands allowed\n");
+\t\tpr_warn("FENCE1F cold prepare: Phase445 BLOCK reopened once; real Samsung ON commands allowed\\n");
 \t}
 '''
 

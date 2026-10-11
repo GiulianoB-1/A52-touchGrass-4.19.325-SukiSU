@@ -95,7 +95,7 @@ void a52_crash1_fault(unsigned long far, unsigned int esr,
     r.pid = task_pid_nr(current);
     r.esr = esr;
     r.far = far;
-    r.pc = instruction_pointer(regs);
+    r.pc = regs->pc;
     r.lr = regs->regs[30];
     r.sp = regs->sp;
     r.pstate = regs->pstate;

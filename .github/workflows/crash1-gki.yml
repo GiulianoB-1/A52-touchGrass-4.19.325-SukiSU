@@ -1042,6 +1042,15 @@ jobs:
             --report "$OUT/package/phase446-cb2-cmdline-report.json" \
             --append a52.cb2_reuse=1
           rm -f "$FINAL.base"
+          # Keep ttyGS0 running through later Android/display suspend.
+          # This is an extra_cmdline request; confirm presence in the live
+          # /proc/cmdline because some Samsung bootloaders ignore that field.
+          python3 scripts/446_append_boot_cmdline.py \
+            --source "$FINAL" --output "$FINAL.ncs" \
+            --report "$OUT/package/fence1f-no-console-suspend-report.json" \
+            --append no_console_suspend
+          mv "$FINAL.ncs" "$FINAL"
+          grep -Fq '"token": "no_console_suspend"' "$OUT/package/fence1f-no-console-suspend-report.json"
           # Keep the only early serial console ttyGS0; do not request ttyGS1.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"

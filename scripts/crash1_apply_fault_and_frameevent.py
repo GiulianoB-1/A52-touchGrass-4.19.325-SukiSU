@@ -163,22 +163,34 @@ def modify_crtc(s):
     if "A52_CRASH1_CB_HOOK_V1" in s:
         return s
     anchor = "static void sde_crtc_frame_event_cb(void *data, u32 event)\n"
-    s = exactly(s, anchor,
-         "/* A52_CRASH1_CB_HOOK_V1 */\n"
-         "extern void a52_crash1_event(u32, u32, const void *, const void *,\n"
-         "                             const void *, u32);\n" + anchor, "callback")
-    s = exactly(s, "\tcrtc_id = drm_crtc_index(crtc);\n",
+    # The source has more than one 'crtc_id = drm_crtc_index(crtc)'.
+    # Scope all event hooks strictly to this specific callback.
+    if s.count(anchor) != 1:
+        raise RuntimeError("CRASH1 frame-event callback: expected one function, found %d" % s.count(anchor))
+    start = s.index(anchor)
+    brace = s.find("{\n", start + len(anchor))
+    close = s.find("\n}\n", brace + 2) if brace >= 0 else -1
+    if brace < 0 or close < 0:
+        raise RuntimeError("CRASH1 cannot isolate frame-event callback body")
+    end = close + len("\n}\n")
+    callback = s[start:end]
+    callback = exactly(callback, "\tcrtc_id = drm_crtc_index(crtc);\n",
          "\tcrtc_id = drm_crtc_index(crtc);\n"
          "\ta52_crash1_event(1U, event, cb_data, crtc, NULL, crtc_id);\n",
          "callback valid crtc")
-    s = exactly(s, '\t/* log and clear plane ubwc errors if any */',
+    callback = exactly(callback, '\t/* log and clear plane ubwc errors if any */',
          '\ta52_crash1_event(2U, event, cb_data, crtc, fevent, crtc_id);\n'
          '\t/* log and clear plane ubwc errors if any */', "popped event")
-    s = exactly(s,
+    callback = exactly(callback,
          "\tfevent->ts = ktime_get();\n\tkthread_queue_work(",
          "\tfevent->ts = ktime_get();\n"
          "\ta52_crash1_event(3U, event, cb_data, crtc, fevent, crtc_id);\n"
          "\tkthread_queue_work(", "timestamp write")
+    s = s[:start] + callback + s[end:]
+    s = exactly(s, anchor,
+         "/* A52_CRASH1_CB_HOOK_V1 */\n"
+         "extern void a52_crash1_event(u32, u32, const void *, const void *,\n"
+         "                             const void *, u32);\n" + anchor, "callback")
     return s
 
 def modify_fault(s):

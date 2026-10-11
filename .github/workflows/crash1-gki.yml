@@ -635,7 +635,7 @@ jobs:
 
           target = Path(sys.argv[1])
           source = target.read_text()
-          stages = re.findall(r"(?m)^#define F0B_ACTIVE_STAGE ([0-9]+)\\s*$", source)
+          stages = re.findall(r"(?m)^#define F0B_ACTIVE_STAGE ([0-9]+)\s*$", source)
           if stages == ["0"]:
               required = ('F0B_GUARD_V2', '"F0BISECT"', 'f0b_snap(display, 6,')
               missing = [name for name in required if source.count(name) != 1]

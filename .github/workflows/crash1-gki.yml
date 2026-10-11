@@ -678,7 +678,9 @@ jobs:
           python3 scripts/446h_apply_panel_f0_microscope.py --root "$ROOT" --check-only
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446j_apply_dispcc_misc.py --root "$ROOT" --kind gki --check-only
-          python3 scripts/f0_bisect_stage_guard.py --root "$ROOT" --mode gki --active-stage 6 --check-only
+          # This is AFTER CRASH1 disables its synthetic F0 probe; stage 6
+          # would be incorrect here. Check the final no-raw-F0 invariant.
+          grep -Fxq '#define F0B_ACTIVE_STAGE 0' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
           python3 scripts/446i_apply_passive_f0_twin.py --root "$ROOT" --kind gki --check-only
           python3 scripts/crash1_apply_fault_and_frameevent.py --root "$ROOT" --check-only
 

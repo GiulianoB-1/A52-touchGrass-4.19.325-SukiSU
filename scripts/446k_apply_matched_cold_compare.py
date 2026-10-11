@@ -109,7 +109,7 @@ def patch(root,kind):
            "    /* A52_PHASE446K_PREPARED */\n"
            "    if (!rc && !display->is_cont_splash_enabled && display->ctrl[0].ctrl)\n"
            "        a52_p446k_capture(&display->ctrl[0].ctrl->hw,1U);\n","prepare success")
-        dis.write_text("extern void a52_p446k_capture(struct dsi_ctrl_hw *,u32);\n"+s[:start]+fn+s[end:])
+        dis.write_text(s[:start]+"extern void a52_p446k_capture(struct dsi_ctrl_hw *,u32);\n"+fn+s[end:])
     s=pan.read_text()
     if "A52_PHASE446K_ON" not in s:
         pre=('''        /* A52_PHASE446K_ON */
@@ -119,9 +119,11 @@ def patch(root,kind):
             a52_p446k_capture(&display->ctrl[0].ctrl->hw,2U);
 #endif
 ''')
-        pan.write_text("extern void a52_p446k_capture(struct dsi_ctrl_hw *,u32);\n"+
-            one(s,"\t\tlen = ops->transfer(panel->host, &cmds->msg);\n",
-                pre+"\t\tlen = ops->transfer(panel->host, &cmds->msg);\n","ON transfer"))
+        s=one(s,"\t\tlen = ops->transfer(panel->host, &cmds->msg);\n",
+              pre+"\t\tlen = ops->transfer(panel->host, &cmds->msg);\n","ON transfer")
+        anchor=s.find("int dsi_panel_tx_cmd_set(")
+        if anchor<0: raise RuntimeError("446K panel declaration missing")
+        pan.write_text(s[:anchor]+"extern void a52_p446k_capture(struct dsi_ctrl_hw *,u32);\n"+s[anchor:])
 def audit(root,kind):
     d=root/("drivers/a52_display/msm" if kind=="gki" else "techpack/display/msm")
     c=(d/("a52_phase445.c" if kind=="gki" else "a52_phase444.c")).read_text()

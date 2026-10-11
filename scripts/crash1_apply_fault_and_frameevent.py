@@ -194,26 +194,52 @@ def modify_crtc(s):
     return s
 
 def modify_fault(s):
-    if "A52_CRASH1_FAULT_HOOK_V1" in s:
-        return s
+    # A52_CRASH1_FAULT_DECL_ORDER_V2
+    # do_mem_abort starts with two variable declarations. Do NOT inject a
+    # statement before them: kernel builds forbid declarations after statements.
     expression = r"(?m)^(?:asmlinkage\s+)?void\s+do_mem_abort\s*\(\s*unsigned long\s+far\s*,\s*unsigned int\s+esr\s*,\s*struct\s+pt_regs\s*\*\s*regs\s*\)\s*\{"
     hits = list(re.finditer(expression, s))
     if len(hits) != 1:
         raise RuntimeError("CRASH1 ARM64 do_mem_abort signature: %d matches" % len(hits))
     start = hits[0].end()
-    hook = """
-    /* A52_CRASH1_FAULT_HOOK_V1: persist FAR/PC/LR before printk may freeze */
-    if (!user_mode(regs))
-        a52_crash1_fault(far, esr, regs);
-"""
-    s = s[:start] + hook + s[start:]
-    first_include = s.find("#include ")
-    if first_include < 0:
-        raise RuntimeError("CRASH1 cannot place fault declaration")
-    s = s[:first_include] + ("/* A52_CRASH1_ARM64_DECL */\n"
-         "struct pt_regs;\n"
-         "extern void a52_crash1_fault(unsigned long, unsigned int,\n"
-         "                             const struct pt_regs *);\n") + s[first_include:]
+    end = s.find("\n}\n", start)
+    if end < 0:
+        raise RuntimeError("CRASH1 ARM64 do_mem_abort closing brace missing")
+    body = s[start:end]
+
+    hook = (
+        "\t/* A52_CRASH1_FAULT_HOOK_V1: persist FAR/PC/LR before fault dispatch */\n"
+        "\tif (!user_mode(regs))\n"
+        "\t\ta52_crash1_fault(far, esr, regs);\n"
+    )
+    # Repair older cached source with the old hook placed before declarations.
+    if "A52_CRASH1_FAULT_HOOK_V1" in body:
+        old = re.compile(
+            r"[ \t]*/\* A52_CRASH1_FAULT_HOOK_V1:[^\n]*\*/\n"
+            r"[ \t]*if \(!user_mode\(regs\)\)\n"
+            r"[ \t]*a52_crash1_fault\(far, esr, regs\);\n"
+        )
+        body, n = old.subn("", body)
+        if n != 1:
+            raise RuntimeError("CRASH1 existing ARM64 hook cannot be safely migrated: %d" % n)
+
+    decl = "\tunsigned long addr = untagged_addr(far);\n"
+    if body.count(decl) != 1:
+        raise RuntimeError("CRASH1 ARM64 declaration anchor count %d" % body.count(decl))
+    # This is after BOTH function-local declarations and before inf->fn().
+    body = body.replace(decl, decl + "\n" + hook, 1)
+    s = s[:start] + body + s[end:]
+
+    if "A52_CRASH1_ARM64_DECL" not in s:
+        first_include = s.find("#include ")
+        if first_include < 0:
+            raise RuntimeError("CRASH1 cannot place fault declaration")
+        s = s[:first_include] + (
+            "/* A52_CRASH1_ARM64_DECL */\n"
+            "struct pt_regs;\n"
+            "extern void a52_crash1_fault(unsigned long, unsigned int,\n"
+            "                             const struct pt_regs *);\n"
+        ) + s[first_include:]
     return s
 
 def check(root):

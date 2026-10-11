@@ -721,7 +721,6 @@ def validate(root: Path, variant: str) -> None:
         "P439 S i=%u e=%u p=%u",
         "P439 Q i=%u e=%u",
         "P439 B b=%u t=%u c=%x v=%x",
-        "A52P439 DSI F0 DMA_DONE timeout",
         "A52_P439_DMA_SCHED_CTRL2",
         "0x0ae94000ULL",
         "0x0171",
@@ -731,6 +730,13 @@ def validate(root: Path, variant: str) -> None:
     ):
         if token not in all_text:
             die("missing token: " + token)
+
+    # The final FENCE1G build intentionally replaces the diagnostic panic
+    # with a bounded, nonfatal timeout report; the Phase439 patch stage
+    # itself still retains its original marker and behavior.
+    if ("A52P439 DSI F0 DMA_DONE timeout" not in all_text and
+            "A52_FENCE1G_NO_TIMEOUT_PANIC_V1" not in all_text):
+        die("P439/FENCE1G DMA timeout handler missing")
 
     if variant == "B":
         for token in (

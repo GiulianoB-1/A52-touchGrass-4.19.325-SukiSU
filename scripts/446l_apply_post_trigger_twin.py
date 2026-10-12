@@ -203,16 +203,16 @@ void a52_p446l_after_trigger(struct dsi_ctrl_hw *hw,u32 hw_flags)
     __STORE__(0x446c0046U,16U,"L_T4_PLATFORM",4U,p446l_t4.cal_l,
         &p446l_t4.gdsc,offsetof(struct p446l_sample,bus)-
         offsetof(struct p446l_sample,gdsc));
-    pr_warn("P446L FAST 0us st=%08x irq=%08x lane=%08x clk=%08x; 5us st=%08x irq=%08x lane=%08x clk=%08x; 50us st=%08x irq=%08x lane=%08x clk=%08x\\n",
+    pr_warn("P446L FAST 0us st=%08x irq=%08x lane=%08x clk=%08x; 5us st=%08x irq=%08x lane=%08x clk=%08x; 50us st=%08x irq=%08x lane=%08x clk=%08x\n",
         p446l_fast[0].status,p446l_fast[0].irq,p446l_fast[0].lane,p446l_fast[0].clk,
         p446l_fast[3].status,p446l_fast[3].irq,p446l_fast[3].lane,p446l_fast[3].clk,
         p446l_fast[6].status,p446l_fast[6].irq,p446l_fast[6].lane,p446l_fast[6].clk);
-    pr_warn("P446L PLATFORM cal=%08x/%08x gdsc=%08x/%08x hf_vote=%08x/%08x sf_vote=%08x/%08x hf0=%08x/%08x gcc_ahb=%08x/%08x gcc_axi=%08x/%08x\\n",
+    pr_warn("P446L PLATFORM cal=%08x/%08x gdsc=%08x/%08x hf_vote=%08x/%08x sf_vote=%08x/%08x hf0=%08x/%08x gcc_ahb=%08x/%08x gcc_axi=%08x/%08x\n",
         p446l_t3.cal_l,p446l_t4.cal_l,p446l_t3.gdsc,p446l_t4.gdsc,
         p446l_t3.gcc[0],p446l_t4.gcc[0],p446l_t3.gcc[1],p446l_t4.gcc[1],
         p446l_t3.hf0_tbu,p446l_t4.hf0_tbu,p446l_t3.gcc[2],p446l_t4.gcc[2],
         p446l_t3.gcc[3],p446l_t4.gcc[3]);
-    pr_warn("P446L CB2 t3 route=%08x fsr=%08x fsynr=%08x far=%llx sctlr=%08x ttbr=%llx t4 fsr=%08x fsynr=%08x\\n",
+    pr_warn("P446L CB2 t3 route=%08x fsr=%08x fsynr=%08x far=%llx sctlr=%08x ttbr=%llx t4 fsr=%08x fsynr=%08x\n",
         p446l_t3.cb2_route,p446l_t3.cb2_fsr,p446l_t3.cb2_fsynr0,
         (unsigned long long)p446l_t3.cb2_far,p446l_t3.cb2_sctlr,
         (unsigned long long)p446l_t3.cb2_ttbr0,

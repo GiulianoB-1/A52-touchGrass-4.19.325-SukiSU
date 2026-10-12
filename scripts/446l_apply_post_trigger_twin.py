@@ -38,7 +38,7 @@ struct p446l_sample {
     u32 cb2_route,cb2_fsr,cb2_fsynr0,cb2_sctlr;
     u64 cb2_far,cb2_ttbr0;
     struct p446i_bus_pair bus[ARRAY_SIZE(p446i_sel)];
-} __packed;
+}; /* live CB2 fields are passed by address; retain native alignment */
 static struct p446l_meta p446l_cmd;
 static struct p446l_sample p446l_t3,p446l_t4;
 struct p446l_fast {

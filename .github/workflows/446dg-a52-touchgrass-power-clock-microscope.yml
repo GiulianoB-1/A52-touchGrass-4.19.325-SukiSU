@@ -17,6 +17,7 @@ on:
       - scripts/446j_apply_dispcc_misc.py
       - scripts/446k_apply_matched_cold_compare.py
       - scripts/446l_apply_post_trigger_twin.py
+      - scripts/446l_apply_smmu_cb2_live.py
       - scripts/446d_collect_boot_identity.sh
       - scripts/decode_phase446d.py
       - scripts/decode_phase446d.py.z64
@@ -81,7 +82,7 @@ jobs:
             install -y --no-install-recommends \
             git curl xz-utils gzip zip unzip make gcc g++ bc bison flex ccache patch \
             libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar
-          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/446i_apply_passive_f0_twin.py scripts/446j_apply_dispcc_misc.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
+          python3 -m py_compile scripts/444_apply_deep_passive_compare.py scripts/445g_apply_golden_sync_pre.py scripts/446g_apply_golden_heartbeat.py scripts/446b_apply_heartbeat_fixes.py scripts/446d_apply_power_clock_microscope.py scripts/446d_apply_capacity_guard.py scripts/446d_apply_extra_observers.py scripts/446i_apply_passive_f0_twin.py scripts/446j_apply_dispcc_misc.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/decode_phase444.py scripts/decode_phase446.py scripts/decode_phase446d.py scripts/decode_phase446_pair.py
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/decode_phase444.py --help >/dev/null
           python3 scripts/446g_apply_golden_heartbeat.py --help >/dev/null
@@ -119,6 +120,7 @@ jobs:
              scripts/446j_apply_dispcc_misc.py \
              scripts/446k_apply_matched_cold_compare.py \
              scripts/446l_apply_post_trigger_twin.py \
+             scripts/446l_apply_smmu_cb2_live.py \
              scripts/446d_collect_boot_identity.sh \
              scripts/446_apply_heartbeat_cb2.py.z64 \
              scripts/decode_phase446.py \
@@ -230,6 +232,8 @@ jobs:
           python3 scripts/446j_apply_dispcc_misc.py --root "$K" --kind tg --check-only
           python3 scripts/446k_apply_matched_cold_compare.py --root "$K" --kind tg --check-only
           python3 scripts/446l_apply_post_trigger_twin.py --root "$K" --kind tg --check-only
+          python3 scripts/446l_apply_smmu_cb2_live.py --root "$K" --kind tg
+          python3 scripts/446l_apply_smmu_cb2_live.py --root "$K" --kind tg --check-only
 
           git -C "$K" diff --check -- \
             techpack/display/msm/Makefile \

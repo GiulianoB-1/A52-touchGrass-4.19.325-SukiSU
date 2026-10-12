@@ -34,7 +34,7 @@ struct p446l_sample {
     u32 cal_l; /* actual Fabia CAL_L readback */
     u32 gcc[6]; /* 1b7040/44 votes, 1700c/1c/70/34 CBCRs */
     u32 hf0_tbu; /* 0x15182210 */
-    u32 tcs[2][2][6]; /* disp/apps, first 2 TCS: ctl/st/en/cmd0 addr/data/status */
+    u32 tcs[2][2][4+16*4]; /* each: ctl/st/en/wait + 16 CMD message/address/data/status */
     u32 cb2_route,cb2_fsr,cb2_fsynr0,cb2_sctlr;
     u64 cb2_far,cb2_ttbr0;
     struct p446i_bus_pair bus[ARRAY_SIZE(p446i_sel)];
@@ -79,15 +79,20 @@ static void p446l_take_tcs(struct p446l_sample *s)
 {
     void __iomem *base[2]={p446l_disp_rsc,p446l_apps_rsc};
     const u32 off[2]={0x1c00U,0x0d00U};
-    u32 i,t;
+    u32 i,t,j;
     for (i=0;i<2;i++) for(t=0;t<2;t++) {
         u32 o=off[i]+t*672U;
         s->tcs[i][t][0]=p446i_r(base[i],o+0x14U);
         s->tcs[i][t][1]=p446i_r(base[i],o+0x18U);
         s->tcs[i][t][2]=p446i_r(base[i],o+0x1cU);
-        s->tcs[i][t][3]=p446i_r(base[i],o+0x34U);
-        s->tcs[i][t][4]=p446i_r(base[i],o+0x38U);
-        s->tcs[i][t][5]=p446i_r(base[i],o+0x3cU);
+        s->tcs[i][t][3]=p446i_r(base[i],o+0x10U);
+        for(j=0;j<16U;j++) {
+            u32 cmd=o+j*20U;
+            s->tcs[i][t][4+4*j+0]=p446i_r(base[i],cmd+0x30U);
+            s->tcs[i][t][4+4*j+1]=p446i_r(base[i],cmd+0x34U);
+            s->tcs[i][t][4+4*j+2]=p446i_r(base[i],cmd+0x38U);
+            s->tcs[i][t][4+4*j+3]=p446i_r(base[i],cmd+0x3cU);
+        }
     }
 }
 

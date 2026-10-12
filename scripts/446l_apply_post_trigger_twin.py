@@ -205,7 +205,12 @@ static void p446l_note_cmd(struct dsi_ctrl *c,
         occurrences=s.count(token)
         if occurrences!=3:
             raise RuntimeError(f"446L hardware trigger count {occurrences}, expected 3")
-        s=s.replace(token,token+"\n\t\ta52_p446l_after_trigger(ctrl,flags);",2)
+        conditional="if (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER))\n\t\t"+token
+        wrapped=("if (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER)) {\n\t\t"
+                 +token+"\n\t\ta52_p446l_after_trigger(ctrl,flags);\n\t}")
+        if s.count(conditional)!=2:
+            raise RuntimeError("446L expected exactly 2 conditional trigger sites")
+        s=s.replace(conditional,wrapped)
         # Deferred trigger function has no flags parameter.
         s=one(s,"void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);",
               "void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\ta52_p446l_after_trigger(ctrl,0x80000000U);",

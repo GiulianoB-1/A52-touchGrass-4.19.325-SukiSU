@@ -110,12 +110,16 @@ void a52_p446l_after_trigger(struct dsi_ctrl_hw *hw,u32 hw_flags)
         p446l_t3.dispcc,sizeof(p446l_t3.dispcc));
     __STORE__(0x446c0033U,16U,"L_T3_BUS",3U,ARRAY_SIZE(p446i_sel),
         p446l_t3.bus,sizeof(p446l_t3.bus));
+    __STORE__(0x446c0034U,16U,"L_T3_META",3U,p446l_t3.elapsed_us,
+        &p446l_t3,offsetof(struct p446l_sample,ctrl));
     __STORE__(0x446c0041U,16U,"L_T4_CTRL",4U,c4,
         p446l_t4.ctrl,sizeof(p446l_t4.ctrl));
     __STORE__(0x446c0042U,16U,"L_T4_CLK",4U,p446l_t4.elapsed_us,
         p446l_t4.dispcc,sizeof(p446l_t4.dispcc));
     __STORE__(0x446c0043U,16U,"L_T4_BUS",4U,ARRAY_SIZE(p446i_sel),
         p446l_t4.bus,sizeof(p446l_t4.bus));
+    __STORE__(0x446c0044U,16U,"L_T4_META",4U,p446l_t4.elapsed_us,
+        &p446l_t4,offsetof(struct p446l_sample,ctrl));
     pr_warn("P446L post-SW_TRIGGER +%lluus t3=%llu..%llu t4=%llu..%llu st=%08x/%08x clk=%08x/%08x lane=%08x/%08x int=%08x/%08x CTRL=%08x/%08x IOVA=%llx PHYS=%llx valid=%u len=%u flags=%08x\n",
         (unsigned long long)((p446l_t4.ns_begin-trigger_ns)/1000ULL),
         (unsigned long long)p446l_t3.ns_begin,
@@ -223,7 +227,7 @@ def check(root,kind):
     p=(base/"dsi/dsi_panel.c").read_text()
     d=(base/"dsi/dsi_ctrl.c").read_text()
     h=(base/"dsi/dsi_ctrl_hw_cmn.c").read_text()
-    for tok in (MARK,"L_CMD_META","L_T3_CTRL","L_T4_CTRL","L_T3_BUS","L_T4_BUS","P446L post-SW_TRIGGER"):
+    for tok in (MARK,"L_CMD_META","L_T3_CTRL","L_T4_CTRL","L_T3_BUS","L_T4_BUS","L_T3_META","L_T4_META","P446L post-SW_TRIGGER"):
         if tok not in c: raise RuntimeError("446L central missing "+tok)
     if p.count("A52_PHASE446L_ARM_ON")!=1: raise RuntimeError("446L ON arm not unique")
     if d.count("A52_PHASE446L_IOVA_CONTEXT")!=1: raise RuntimeError("446L IOVA helper not unique")

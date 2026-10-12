@@ -101,6 +101,11 @@ void a52_p446l_arm(struct dsi_ctrl_hw *ctrl)
 }
 EXPORT_SYMBOL_GPL(a52_p446l_arm);
 
+bool a52_p446l_is_armed(void)
+{
+    return atomic_read(&p446l_state)==1;
+}
+EXPORT_SYMBOL_GPL(a52_p446l_is_armed);
 void a52_p446l_note(struct dsi_ctrl_hw *ctrl, u64 iova, u64 phys,
                     u32 len, u32 flags, u32 msg_flags,
                     u32 domain_found, const u8 *prefix)
@@ -264,6 +269,7 @@ def patch(root, kind):
         # The actual display GEM memory domain is accessed before triggering,
         # never from the MMIO snapshot's time-critical section.
         helper=r'''/* A52_PHASE446L_IOVA_CONTEXT */
+extern bool a52_p446l_is_armed(void);
 extern void a52_p446l_note(struct dsi_ctrl_hw *,u64,u64,u32,u32,u32,u32,const u8 *);
 static void p446l_note_cmd(struct dsi_ctrl *c,
     const struct dsi_ctrl_cmd_dma_info *cmd,
@@ -273,7 +279,7 @@ static void p446l_note_cmd(struct dsi_ctrl *c,
     struct iommu_domain *domain=NULL;
     phys_addr_t phys=0;
     u32 found=0;
-    if (!c || !cmd || !msg)
+    if (!c || !cmd || !msg || !a52_p446l_is_armed())
         return;
     as=dsi_ctrl_get_aspace(c,MSM_SMMU_DOMAIN_UNSECURE);
     if (as && as->mmu && as->mmu->dev)

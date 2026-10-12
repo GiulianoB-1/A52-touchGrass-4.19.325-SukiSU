@@ -1,12 +1,12 @@
 name: CRASH1 GKI - no raw F0, retained frame-event and oops diagnostics
-run-name: Phase446L GKI first cold-ON post-SW_TRIGGER matched twin
+run-name: Phase446L GKI CAL_L=0x31 treatment plus post-trigger matched twin
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
   push:
     branches:
-      - agent/a52-phase446l-post-trigger-twin-v1
+      - agent/a52-phase446l-cal31-ab-v1
   workflow_dispatch:
 
 permissions:
@@ -69,7 +69,7 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_align_dispcc_cal31.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
           python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
@@ -690,6 +690,8 @@ jobs:
           python3 scripts/446k_apply_matched_cold_compare.py --root "$ROOT" --kind gki --check-only
           python3 scripts/446l_apply_post_trigger_twin.py --root "$ROOT" --kind gki
           python3 scripts/446l_apply_post_trigger_twin.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446l_align_dispcc_cal31.py --root "$ROOT"
+          python3 scripts/446l_align_dispcc_cal31.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" -e USB_G_SERIAL -e USB_CONFIGFS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_F_FS -e U_SERIAL_CONSOLE
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do
@@ -980,6 +982,7 @@ jobs:
           cp scripts/fence1g_nopanic_trace_cold_on.py "$OUT/source/fence1g_nopanic_trace_cold_on.py"
           cp scripts/446k_apply_matched_cold_compare.py "$OUT/source/446k_apply_matched_cold_compare.py"
           cp scripts/446l_apply_post_trigger_twin.py "$OUT/source/446l_apply_post_trigger_twin.py"
+          cp scripts/446l_align_dispcc_cal31.py "$OUT/source/446l_align_dispcc_cal31.py"
           cp "$ROOT/drivers/a52_display/pll/dsi_pll_10nm.c" "$OUT/source/dsi_pll_10nm.c"
           for p in dsi_pll_7nm.c dsi_pll_14nm_util.c; do
             test ! -f "$ROOT/drivers/a52_display/pll/$p" || cp "$ROOT/drivers/a52_display/pll/$p" "$OUT/source/$p"

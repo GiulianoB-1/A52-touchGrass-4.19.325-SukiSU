@@ -35,6 +35,8 @@ struct p446l_sample {
     u32 gcc[6]; /* 1b7040/44 votes, 1700c/1c/70/34 CBCRs */
     u32 hf0_tbu; /* 0x15182210 */
     u32 tcs[2][2][6]; /* disp/apps, first 2 TCS: ctl/st/en/cmd0 addr/data/status */
+    u32 cb2_route,cb2_fsr,cb2_fsynr0,cb2_sctlr;
+    u64 cb2_far,cb2_ttbr0;
     struct p446i_bus_pair bus[ARRAY_SIZE(p446i_sel)];
 } __packed;
 static struct p446l_meta p446l_cmd;
@@ -99,6 +101,11 @@ void a52_p446l_arm(struct dsi_ctrl_hw *ctrl)
 }
 EXPORT_SYMBOL_GPL(a52_p446l_arm);
 
+bool a52_p446l_is_armed(void)
+{
+    return atomic_read(&p446l_state)==1;
+}
+EXPORT_SYMBOL_GPL(a52_p446l_is_armed);
 void a52_p446l_note(struct dsi_ctrl_hw *ctrl, u64 iova, u64 phys,
                     u32 len, u32 flags, u32 msg_flags,
                     u32 domain_found, const u8 *prefix)
@@ -118,6 +125,7 @@ void a52_p446l_note(struct dsi_ctrl_hw *ctrl, u64 iova, u64 phys,
 }
 EXPORT_SYMBOL_GPL(a52_p446l_note);
 
+extern void a52_p446l_cb2_live(u32 *,u32 *,u64 *,u32 *,u32 *,u64 *);
 static void p446l_take(struct dsi_ctrl_hw *hw,
                         struct p446l_sample *s,u32 tag,u32 flags)
 {
@@ -143,6 +151,14 @@ static void p446l_take(struct dsi_ctrl_hw *hw,
     s->gcc[5]=p446i_r(p446l_gcc,0x034U); /* disp XO */
     s->hf0_tbu=p446i_r(p446l_hf0,0x210U);
     p446l_take_tcs(s);
+    s->cb2_route=~0U;
+    s->cb2_fsr=~0U;
+    s->cb2_fsynr0=~0U;
+    s->cb2_sctlr=~0U;
+    s->cb2_far=~0ULL;
+    s->cb2_ttbr0=~0ULL;
+    a52_p446l_cb2_live(&s->cb2_route,&s->cb2_fsr,&s->cb2_far,
+                        &s->cb2_fsynr0,&s->cb2_sctlr,&s->cb2_ttbr0);
     p446i_sweep(s->bus,hw);
     s->ns_end=ktime_get_ns();
     s->elapsed_us=(u32)((s->ns_end-s->ns_begin)/1000ULL);
@@ -192,15 +208,20 @@ void a52_p446l_after_trigger(struct dsi_ctrl_hw *hw,u32 hw_flags)
     __STORE__(0x446c0046U,16U,"L_T4_PLATFORM",4U,p446l_t4.cal_l,
         &p446l_t4.gdsc,offsetof(struct p446l_sample,bus)-
         offsetof(struct p446l_sample,gdsc));
-    pr_warn("P446L FAST 0us st=%08x irq=%08x lane=%08x clk=%08x; 5us st=%08x irq=%08x lane=%08x clk=%08x; 50us st=%08x irq=%08x lane=%08x clk=%08x\\n",
+    pr_warn("P446L FAST 0us st=%08x irq=%08x lane=%08x clk=%08x; 5us st=%08x irq=%08x lane=%08x clk=%08x; 50us st=%08x irq=%08x lane=%08x clk=%08x\n",
         p446l_fast[0].status,p446l_fast[0].irq,p446l_fast[0].lane,p446l_fast[0].clk,
         p446l_fast[3].status,p446l_fast[3].irq,p446l_fast[3].lane,p446l_fast[3].clk,
         p446l_fast[6].status,p446l_fast[6].irq,p446l_fast[6].lane,p446l_fast[6].clk);
-    pr_warn("P446L PLATFORM cal=%08x/%08x gdsc=%08x/%08x hf_vote=%08x/%08x sf_vote=%08x/%08x hf0=%08x/%08x gcc_ahb=%08x/%08x gcc_axi=%08x/%08x\\n",
+    pr_warn("P446L PLATFORM cal=%08x/%08x gdsc=%08x/%08x hf_vote=%08x/%08x sf_vote=%08x/%08x hf0=%08x/%08x gcc_ahb=%08x/%08x gcc_axi=%08x/%08x\n",
         p446l_t3.cal_l,p446l_t4.cal_l,p446l_t3.gdsc,p446l_t4.gdsc,
         p446l_t3.gcc[0],p446l_t4.gcc[0],p446l_t3.gcc[1],p446l_t4.gcc[1],
         p446l_t3.hf0_tbu,p446l_t4.hf0_tbu,p446l_t3.gcc[2],p446l_t4.gcc[2],
         p446l_t3.gcc[3],p446l_t4.gcc[3]);
+    pr_warn("P446L CB2 t3 route=%08x fsr=%08x fsynr=%08x far=%llx sctlr=%08x ttbr=%llx t4 fsr=%08x fsynr=%08x\n",
+        p446l_t3.cb2_route,p446l_t3.cb2_fsr,p446l_t3.cb2_fsynr0,
+        (unsigned long long)p446l_t3.cb2_far,p446l_t3.cb2_sctlr,
+        (unsigned long long)p446l_t3.cb2_ttbr0,
+        p446l_t4.cb2_fsr,p446l_t4.cb2_fsynr0);
     pr_warn("P446L post-SW_TRIGGER +%lluus t3=%llu..%llu t4=%llu..%llu st=%08x/%08x clk=%08x/%08x lane=%08x/%08x int=%08x/%08x CTRL=%08x/%08x IOVA=%llx PHYS=%llx valid=%u len=%u flags=%08x\n",
         (unsigned long long)((p446l_t4.ns_begin-trigger_ns)/1000ULL),
         (unsigned long long)p446l_t3.ns_begin,
@@ -248,6 +269,7 @@ def patch(root, kind):
         # The actual display GEM memory domain is accessed before triggering,
         # never from the MMIO snapshot's time-critical section.
         helper=r'''/* A52_PHASE446L_IOVA_CONTEXT */
+extern bool a52_p446l_is_armed(void);
 extern void a52_p446l_note(struct dsi_ctrl_hw *,u64,u64,u32,u32,u32,u32,const u8 *);
 static void p446l_note_cmd(struct dsi_ctrl *c,
     const struct dsi_ctrl_cmd_dma_info *cmd,
@@ -257,7 +279,7 @@ static void p446l_note_cmd(struct dsi_ctrl *c,
     struct iommu_domain *domain=NULL;
     phys_addr_t phys=0;
     u32 found=0;
-    if (!c || !cmd || !msg)
+    if (!c || !cmd || !msg || !a52_p446l_is_armed())
         return;
     as=dsi_ctrl_get_aspace(c,MSM_SMMU_DOMAIN_UNSECURE);
     if (as && as->mmu && as->mmu->dev)

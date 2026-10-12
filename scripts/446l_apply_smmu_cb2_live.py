@@ -67,18 +67,9 @@ def patch(root,kind):
     else:
         anchor="/* A52_PHASE446_TG_ARM_SMMU"
         s=one(s,anchor,TG+anchor,"TG SMMU api")
-        start=s.find("static void a52_p446g_emit_smmu(struct arm_smmu_device *smmu, u32 event,")
-        # The first occurrence is a prototype; find the definition with '{'.
-        begin=s.find("{",start)
-        if begin<0:raise RuntimeError("TG emit helper missing")
-        end=s.find("\n}",begin)
-        if end<0:raise RuntimeError("TG emit helper end missing")
-        block=s[start:end]
-        # insert after validation, within the actual helper body
         old="    cb_base = ARM_SMMU_CB(smmu, cb);"
-        if old not in block:raise RuntimeError("TG SMMU helper missing CB read")
-        block=block.replace(old,"    WRITE_ONCE(a52_p446l_apps_smmu,smmu);\n"+old,1)
-        s=s[:start]+block+s[end:]
+        new="    WRITE_ONCE(a52_p446l_apps_smmu,smmu);\n"+old
+        s=one(s,old,new,"TG helper saves apps SMMU pointer")
     path.write_text(s)
 
 def check(root,kind):

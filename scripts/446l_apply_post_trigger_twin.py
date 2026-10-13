@@ -312,21 +312,72 @@ static void p446l_note_cmd(struct dsi_ctrl *c,
         s=one(s,"void dsi_ctrl_hw_cmn_kickoff_command(",
               decl+"void dsi_ctrl_hw_cmn_kickoff_command(",
               "hardware declaration")
-        # Three physical trigger points: memory, FIFO, deferred.
+        # Phase446L hardware trigger insertion: respect the already patched
+        # Phase444/Phase445 observer layout; keep WAIT_FOR_TRIGGER semantics.
         token="DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);"
-        occurrences=s.count(token)
-        if occurrences!=3:
-            raise RuntimeError(f"446L hardware trigger count {occurrences}, expected 3")
-        conditional="if (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER))\n\t\t"+token
-        wrapped=("if (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER)) {\n\t\t"
-                 +token+"\n\t\ta52_p446l_after_trigger(ctrl,flags);\n\t}")
-        if s.count(conditional)!=2:
-            raise RuntimeError("446L expected exactly 2 conditional trigger sites")
-        s=s.replace(conditional,wrapped)
-        # Deferred trigger function has no flags parameter.
-        s=one(s,"void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);",
-              "void dsi_ctrl_hw_cmn_trigger_command_dma(struct dsi_ctrl_hw *ctrl)\n{\n\tDSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);\n\ta52_p446l_after_trigger(ctrl,0x80000000U);",
-              "deferred trigger")
+        wait="if (!(flags & DSI_CTRL_HW_CMD_WAIT_FOR_TRIGGER))"
+        if s.count(token)!=3:
+            raise RuntimeError(f"446L hardware trigger count {s.count(token)}, expected 3")
+
+        def edit_region(src,first,last,old,new,why):
+            a=src.index(first)
+            b=src.index(last,a)
+            region=src[a:b]
+            if region.count(old)!=1:
+                raise RuntimeError(f"446L {why}: matching observer/trigger layout count={region.count(old)}")
+            return src[:a]+region.replace(old,new,1)+src[b:]
+
+        mem="void dsi_ctrl_hw_cmn_kickoff_command("
+        fifo="void dsi_ctrl_hw_cmn_kickoff_fifo_command("
+        reset="void dsi_ctrl_hw_cmn_reset_cmd_fifo("
+        deferred="void dsi_ctrl_hw_cmn_trigger_command_dma("
+
+        if kind=="tg":
+            # Phase444 inserted its pre/post observer without adding braces:
+            # the bare SW_TRIGGER accidentally escaped WAIT_FOR_TRIGGER.
+            # Restore stock conditional semantics and keep both observers.
+            old=("\t"+wait+"\n"
+                 "\t\tif (a52_p444_active()) a52_p444_pre_trigger(ctrl);\n"
+                 "\t"+token+"\n"
+                 "\tif (a52_p444_active()) a52_p444_post_trigger(ctrl);")
+            new=("\t"+wait+" {\n"
+                 "\t\tif (a52_p444_active()) a52_p444_pre_trigger(ctrl);\n"
+                 "\t\t"+token+"\n"
+                 "\t\ta52_p446l_after_trigger(ctrl,flags);\n"
+                 "\t\tif (a52_p444_active()) a52_p444_post_trigger(ctrl);\n"
+                 "\t}")
+            s=edit_region(s,mem,fifo,old,new,"TG memory")
+        else:
+            # GKI has the correct braced conditional, but previous
+            # observers sit between the conditional and trigger.
+            old=("\t\tif (a52_p445_active()) a52_p445_pre_trigger(ctrl);\n"
+                 "\t"+token+"\n"
+                 "\tif (a52_p445_active()) a52_p445_post_trigger(ctrl);")
+            new=("\t\tif (a52_p445_active()) a52_p445_pre_trigger(ctrl);\n"
+                 "\t"+token+"\n"
+                 "\t\ta52_p446l_after_trigger(ctrl,flags);\n"
+                 "\tif (a52_p445_active()) a52_p445_post_trigger(ctrl);")
+            s=edit_region(s,mem,fifo,old,new,"GKI memory")
+
+        # FIFO still has the original single-statement conditional on
+        # both kernels; add braces so the trigger and hook share the guard.
+        old="\t"+wait+"\n\t\t"+token
+        new=("\t"+wait+" {\n\t\t"+token+
+             "\n\t\ta52_p446l_after_trigger(ctrl,flags);\n\t}")
+        s=edit_region(s,fifo,reset,old,new,"FIFO")
+
+        # The deferred trigger has no flags argument and contains
+        # Phase444/445 observers; inject after its actual write.
+        a=s.index(deferred)
+        b=s.index("\n}\n",a)+3
+        region=s[a:b]
+        if region.count(token)!=1:
+            raise RuntimeError("446L deferred trigger: expected one actual write")
+        region=region.replace(token,token+
+            "\n\ta52_p446l_after_trigger(ctrl,0x80000000U);",1)
+        s=s[:a]+region+s[b:]
+        if s.count("a52_p446l_after_trigger(ctrl,")!=3:
+            raise RuntimeError("446L did not install all three hardware hooks")
         hw.write_text(s)
 
 def check(root,kind):

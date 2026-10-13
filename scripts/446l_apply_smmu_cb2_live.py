@@ -58,6 +58,10 @@ def patch(root,kind):
           else root/"drivers/iommu/arm-smmu.c")
     s=path.read_text()
     if MARK in s:return
+    if "#include <linux/pm_runtime.h>" not in s:
+        s=one(s,"#include <linux/device.h>\n",
+              "#include <linux/device.h>\n#include <linux/pm_runtime.h>\n",
+              "runtime PM helper header")
     if kind=="gki":
         if "static struct arm_smmu_device *a52_p426_apps_smmu;" not in s:
             raise RuntimeError("GKI 426 retained SMMU pointer missing")

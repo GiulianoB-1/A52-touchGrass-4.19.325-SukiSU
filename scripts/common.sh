@@ -31,18 +31,29 @@ kernel_version() {
 }
 
 configure_toolchain() {
+  local clang="$KERNEL_DIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
+
   export ARCH=arm64
   export PROJECT_NAME=a52xq
   export PATH="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin:$PATH"
   export CROSS_COMPILE="$KERNEL_DIR/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-"
-  export CC="$KERNEL_DIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang"
   export CLANG_TRIPLE=aarch64-linux-gnu-
   export KCFLAGS=-w
   export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
   export CONFIG_DRV_BUILD_IN=Y
 
-  test -x "$CC" || fail "Bundled clang was not found: $CC"
+  test -x "$clang" || fail "Bundled clang was not found: $clang"
   test -x "${CROSS_COMPILE}gcc" || fail "Bundled cross compiler was not found: ${CROSS_COMPILE}gcc"
+
+  if command -v ccache >/dev/null 2>&1; then
+    export CC="ccache $clang"
+    export CCACHE_BASEDIR="$KERNEL_DIR"
+    export CCACHE_NOHASHDIR=true
+    export CCACHE_COMPILERCHECK=content
+    ccache --max-size "${CCACHE_MAXSIZE:-5G}" >/dev/null
+  else
+    export CC="$clang"
+  fi
 }
 
 build_kernel() {
@@ -50,6 +61,11 @@ build_kernel() {
   local jobs="${JOBS:-$(nproc)}"
   local log="$LOG_DIR/build-$label.log"
   local status="$ARTIFACTS_DIR/build-$label.status"
+  local -a keep_going=()
+
+  if [ "${MAKE_KEEP_GOING:-0}" = "1" ]; then
+    keep_going=(-k)
+  fi
 
   configure_toolchain
   rm -rf "$KERNEL_DIR/out"
@@ -67,10 +83,14 @@ build_kernel() {
       DTC_EXT="$KERNEL_DIR/tools/dtc" \
       CONFIG_BUILD_ARM64_DT_OVERLAY=y \
       KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-      -j"$jobs"
+      "${keep_going[@]}" -j"$jobs"
   } 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
   set -e
+
+  if command -v ccache >/dev/null 2>&1; then
+    ccache --show-stats > "$ARTIFACTS_DIR/ccache-$label.txt" 2>&1 || true
+  fi
 
   printf '%s\n' "$rc" > "$status"
   test "$rc" -eq 0 || fail "Build failed. See $log"

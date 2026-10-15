@@ -1,0 +1,74 @@
+name: 07 - ReSukiSU Linux 4.19.325 rebase probe (NON-FLASHABLE)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-resukisu-4.19.325-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rebase-probe:
+    name: Probe touchGrass + ReSukiSU against Linux 4.19.325
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install source and probe dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio gzip file binutils
+
+      - name: Prepare exact touchGrass baseline source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Verify exact pinned ReSukiSU baseline
+        run: ./scripts/07_probe_resukisu_baseline.sh
+
+      - name: Probe full Linux 4.19.152 to 4.19.325 stable delta
+        id: stable-probe
+        continue-on-error: true
+        run: ./scripts/03_probe_linux_4.19.325.sh
+
+      - name: Record runner and project state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git rev-parse HEAD > artifacts/project-commit.txt
+          git status --short > artifacts/project-status.txt || true
+
+      - name: Upload ReSukiSU and Linux rebase diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-resukisu-linux-4.19.325-probe-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report unresolved stable-update conflicts
+        if: steps.stable-probe.outcome != 'success'
+        run: |
+          echo 'The full Linux 4.19.325 delta produced conflicts.' >&2
+          echo 'Use the uploaded reject list, logs and archive for the resolution pass.' >&2
+          exit 1

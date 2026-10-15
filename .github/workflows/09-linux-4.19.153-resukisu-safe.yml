@@ -1,0 +1,91 @@
+name: 09 - Linux 4.19.153 + safe ReSukiSU checkpoint (NON-FLASHABLE)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/09-linux-4.19.153-resukisu-safe.yml'
+      - 'scripts/common.sh'
+      - 'scripts/01_prepare_source.sh'
+      - 'scripts/03_apply_linux_4.19.153.sh'
+      - 'scripts/07_patch_resukisu_exec_hook.sh'
+      - 'scripts/08_build_linux_4.19.153_resukisu_safe.sh'
+      - 'sources.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a52-linux-4.19.153-resukisu-safe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOBS: '4'
+
+jobs:
+  build-checkpoint:
+    name: Build Linux 4.19.153 + ReSukiSU with unmount disabled
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils zip unzip make gcc g++ bc bison flex \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils
+
+      - name: Prepare exact touchGrass v1.5.1 source
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/01_prepare_source.sh
+
+      - name: Apply and resolve official Linux 4.19.153 update
+        run: ./scripts/03_apply_linux_4.19.153.sh
+
+      - name: Replace legacy exec dispatch with ReSukiSU manual hook
+        run: ./scripts/07_patch_resukisu_exec_hook.sh
+
+      - name: Integrate safe ReSukiSU and build checkpoint
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          ./scripts/08_build_linux_4.19.153_resukisu_safe.sh 2>&1 | tee artifacts/linux-4.19.153-resukisu-safe.log
+
+      - name: Record runner and source state
+        if: always()
+        run: |
+          mkdir -p artifacts
+          df -h > artifacts/runner-disk.txt
+          free -h > artifacts/runner-memory.txt
+          uname -a > artifacts/runner-uname.txt
+          git --version > artifacts/tool-versions.txt
+          make --version | head -n 1 >> artifacts/tool-versions.txt
+          if [ -d workspace/touchgrass-a52xq/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/kernel-source-status.txt || true
+            git -C workspace/touchgrass-a52xq diff --stat > artifacts/kernel-source-diff.stat.txt || true
+          fi
+          if [ -d workspace/touchgrass-a52xq/KernelSU/.git ]; then
+            git -C workspace/touchgrass-a52xq status --short > artifacts/resukisu-source-status.txt || true
+            git -C workspace/touchgrass-a52xq/KernelSU rev-parse HEAD > artifacts/resukisu-head.txt || true
+          fi
+
+      - name: Upload checkpoint build and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-linux-4.19.153-resukisu-safe-${{ github.run_number }}-NON-FLASHABLE
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

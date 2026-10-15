@@ -1,0 +1,163 @@
+name: 97 - A52 TouchGrass recorder anchor preflight
+
+run-name: Validate TouchGrass 4.19.206 recorder source anchors
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-ufs-reference-recorder
+    paths:
+      - '.github/workflows/97-a52-touchgrass-recorder-anchor-preflight.yml'
+      - 'scripts/96_stage_touchgrass_ufs_reference_recorder.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: a52-touchgrass-recorder-anchor-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Reconstruct 4.19.206 and validate recorder anchors
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out kernel project branch
+        uses: actions/checkout@v4
+        with:
+          ref: rebase/resukisu-linux-4.19.325
+
+      - name: Hydrate recorder staging script
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAG_REF: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p scripts artifacts/recorder-anchor-preflight
+          gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/96_stage_touchgrass_ufs_reference_recorder.py?ref=${DIAG_REF}" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > scripts/96_stage_touchgrass_ufs_reference_recorder.py
+          chmod +x scripts/96_stage_touchgrass_ufs_reference_recorder.py
+          python3 -m py_compile scripts/96_stage_touchgrass_ufs_reference_recorder.py
+
+      - name: Install source preparation dependencies
+        run: |
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y --no-install-recommends \
+            git curl xz-utils gzip make gcc g++ bc bison flex patch \
+            libssl-dev libelf-dev python3 rsync cpio lz4 binutils file tar >/dev/null
+
+      - name: Reconstruct exact TouchGrass Linux 4.19.206 quietly
+        run: |
+          set -Eeuo pipefail
+          LOG=artifacts/recorder-anchor-preflight/source-reconstruction.log
+          exec > >(tee "$LOG") 2>&1
+          chmod +x scripts/*.sh scripts/*.py
+
+          quiet_run() {
+            local label="$1"
+            shift
+            echo "PREFLIGHT begin ${label}"
+            "$@" >"artifacts/recorder-anchor-preflight/${label}.log" 2>&1
+            echo "PREFLIGHT pass ${label}"
+          }
+
+          quiet_run prepare_source ./scripts/01_prepare_source.sh
+          quiet_run apply_4_19_153 ./scripts/03_apply_linux_4.19.153.sh
+          quiet_run apply_4_19_154 ./scripts/04_apply_linux_4.19.154.sh
+          quiet_run diagnose_159 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.154 4.19.159
+          quiet_run resolve_159 ./scripts/checkpoint_resolve_linux_4.19.159.sh
+          quiet_run diagnose_164 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.159 4.19.164
+          quiet_run resolve_164 ./scripts/checkpoint_resolve_linux_4.19.164.sh
+          quiet_run diagnose_180 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.164 4.19.180
+          quiet_run resolve_180 ./scripts/checkpoint_resolve_linux_4.19.180.sh
+          quiet_run diagnose_200 ./scripts/05a_diagnose_linux_checkpoint.sh 4.19.180 4.19.200
+          quiet_run resolve_200 ./scripts/checkpoint_resolve_linux_4.19.200.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.200
+
+          cp scripts/checkpoint_merge_linux_4.19.210.sh \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          sed -i \
+            -e 's/TO_TAG=v4.19.210/TO_TAG=v4.19.206/' \
+            -e '/^TARGET_COMMIT=/d' \
+            -e '/test "$to_sha" = "$TARGET_COMMIT"/d' \
+            scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          quiet_run merge_206 ./scripts/checkpoint_merge_linux_4.19.206.generated.sh
+          test "$(make -s -C workspace/touchgrass-a52xq kernelversion)" = 4.19.206
+
+          cp scripts/checkpoint_fix_linux_4.19.210_compile.sh \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          sed -i 's/TARGET_VERSION=4.19.210/TARGET_VERSION=4.19.206/' \
+            scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          chmod +x scripts/checkpoint_fix_linux_4.19.206.generated.sh
+          quiet_run fix_206 ./scripts/checkpoint_fix_linux_4.19.206.generated.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('workspace/touchgrass-a52xq')
+          header = (root / 'include/linux/timerqueue.h').read_text()
+          path = root / 'drivers/soc/qcom/event_timer.c'
+          text = path.read_text()
+          newer = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.rb_root = RB_ROOT_CACHED,
+          };
+          '''
+          older = '''static DEFINE_PER_CPU(struct timerqueue_head, timer_head) = {
+          \t.head = RB_ROOT,
+          \t.next = NULL,
+          };
+          '''
+          wants_newer = 'struct rb_root_cached rb_root;' in header
+          desired = newer if wants_newer else older
+          obsolete = older if wants_newer else newer
+          if desired not in text:
+              if obsolete not in text:
+                  raise SystemExit('event_timer initializer shape is unrecognized')
+              path.write_text(text.replace(obsolete, desired, 1))
+
+          path = root / 'kernel/sched/cpufreq_schedutil.c'
+          text = path.read_text()
+          call = 'sugov_clear_global_tunables();'
+          definition = 'static void sugov_clear_global_tunables(void)'
+          anchor = 'static void sugov_exit('
+          if call in text and definition not in text:
+              if anchor not in text:
+                  raise SystemExit('schedutil exit anchor missing')
+              helper = '''static void sugov_clear_global_tunables(void)
+          {
+          \tif (!have_governor_per_policy())
+          \t\tglobal_tunables = NULL;
+          }
+
+          '''
+              path.write_text(text.replace(anchor, helper + anchor, 1))
+          elif call not in text:
+              raise SystemExit('schedutil cleanup call missing after generic repair')
+          PY
+
+          echo "PREFLIGHT source_ready version=$(make -s -C workspace/touchgrass-a52xq kernelversion)"
+
+      - name: Run recorder anchor audit
+        run: |
+          set -Eeuo pipefail
+          OUT=artifacts/recorder-anchor-preflight
+          python3 scripts/96_stage_touchgrass_ufs_reference_recorder.py \
+            --kernel workspace/touchgrass-a52xq \
+            --output "$OUT" 2>&1 | tee "$OUT/stage.log"
+          git -C workspace/touchgrass-a52xq diff --check
+          echo 'PREFLIGHT recorder_anchor_audit=passed'
+
+      - name: Upload anchor preflight diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a52xq-touchgrass-recorder-anchor-preflight-${{ github.run_number }}
+          path: artifacts/recorder-anchor-preflight
+          if-no-files-found: warn
+          retention-days: 14

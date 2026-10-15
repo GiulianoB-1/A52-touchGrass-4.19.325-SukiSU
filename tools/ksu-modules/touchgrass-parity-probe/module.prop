@@ -1,0 +1,6 @@
+id=touchgrass_parity_probe
+name=A52 TouchGrass Runtime Parity Probe
+version=1.1.0
+versionCode=110
+author=OpenAI + GiulianoB-1
+description=Broad, read-only runtime capture of the working TouchGrass kernel for ACK/GKI parity: secure memory, display, power, clocks, regulators, IOMMU, firmware, device tree, drivers and Android services.

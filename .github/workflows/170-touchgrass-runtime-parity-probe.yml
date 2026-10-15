@@ -1,0 +1,86 @@
+name: 170 - TouchGrass runtime parity probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/touchgrass-runtime-parity-probe
+    paths:
+      - tools/ksu-modules/touchgrass-parity-probe/**
+      - .github/workflows/170-touchgrass-runtime-parity-probe.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - tools/ksu-modules/touchgrass-parity-probe/**
+      - .github/workflows/170-touchgrass-runtime-parity-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-module:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate bounded broad-capture module
+        run: |
+          set -Eeuo pipefail
+          MOD=tools/ksu-modules/touchgrass-parity-probe
+          test -s "$MOD/module.prop"
+          grep -Fxq 'id=touchgrass_parity_probe' "$MOD/module.prop"
+          grep -Fxq 'version=1.1.0' "$MOD/module.prop"
+          grep -Fq 'profile=touchgrass-parity-probe-v1.1' "$MOD/bin/collect.sh"
+          grep -Fq 'active tracer detected' "$MOD/bin/trace-session.sh"
+          grep -Fq 'restore_trace' "$MOD/bin/trace-session.sh"
+          grep -Fq 'buffer_size_kb' "$MOD/bin/trace-session.sh"
+          grep -Fq 'copy_tree_capped' "$MOD/bin/snapshot.sh"
+          grep -Fq 'privacy=archive-may-contain' "$MOD/bin/collect.sh"
+          test -s "$MOD/config/event-patterns.txt"
+          test -s "$MOD/config/return-probes.txt"
+          for f in \
+            customize.sh post-fs-data.sh service.sh action.sh \
+            bin/common.sh bin/collect.sh bin/snapshot.sh \
+            bin/trace-session.sh bin/package-result.sh; do
+            sh -n "$MOD/$f"
+          done
+          if grep -RInE \
+              '(^|[[:space:]])(insmod|rmmod|devmem|setenforce)[[:space:]]|dd[[:space:]].*of=/dev/' \
+              "$MOD"; then
+            echo 'unsafe mutating command detected'
+            exit 1
+          fi
+
+      - name: Build installable KernelSU ZIP
+        run: |
+          set -Eeuo pipefail
+          MOD=tools/ksu-modules/touchgrass-parity-probe
+          OUT=artifacts/touchgrass-parity-probe
+          ZIP=TouchGrass-Parity-Probe-v1.1.0.zip
+          mkdir -p "$OUT"
+          chmod 0755 \
+            "$MOD/customize.sh" "$MOD/post-fs-data.sh" "$MOD/service.sh" \
+            "$MOD/action.sh" "$MOD/bin/"*.sh
+          (
+            cd "$MOD"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS
+            zip -9 -r "$GITHUB_WORKSPACE/$OUT/$ZIP" .
+          )
+          unzip -t "$OUT/$ZIP"
+          unzip -p "$OUT/$ZIP" module.prop | grep -Fxq 'id=touchgrass_parity_probe'
+          unzip -p "$OUT/$ZIP" module.prop | grep -Fxq 'version=1.1.0'
+          (
+            cd "$OUT"
+            sha256sum "$ZIP" > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          cp "$MOD/README.md" "$OUT/README.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TouchGrass-Parity-Probe-v1.1.0
+          path: artifacts/touchgrass-parity-probe
+          if-no-files-found: error
+          retention-days: 30

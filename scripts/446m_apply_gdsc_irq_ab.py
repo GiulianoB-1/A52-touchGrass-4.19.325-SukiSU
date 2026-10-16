@@ -83,7 +83,7 @@ def apply_gdsc(src, variant):
         f=before_final_return(f,
             '    pr_warn("P446M GDSC enable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
-            '        readl_relaxed(gdsc->gdscr));\n'
+            '        readl_relaxed(gdsc->gdscr));\n',
             "GDSC enable return")
         return f
     def patch_disable(f):
@@ -95,7 +95,7 @@ def apply_gdsc(src, variant):
         f=before_final_return(f,
             '    pr_warn("P446M GDSC disable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
-            '        readl_relaxed(gdsc->gdscr));\n'
+            '        readl_relaxed(gdsc->gdscr));\n',
             "GDSC disable return")
         return f
     def patch_mode(f):
@@ -107,7 +107,7 @@ def apply_gdsc(src, variant):
         f=before_final_return(f,
             '    pr_warn("P446M GDSC mode exit name=%s use=%d mode=%u rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, mode, ret,\n'
-            '        readl_relaxed(gdsc->gdscr));\n'
+            '        readl_relaxed(gdsc->gdscr));\n',
             "GDSC set_mode return")
         return f
     src=rework_fn(src,en,patch_enable)

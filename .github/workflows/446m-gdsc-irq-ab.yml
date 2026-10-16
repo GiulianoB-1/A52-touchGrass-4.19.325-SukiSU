@@ -7,6 +7,9 @@ on:
   push:
     branches:
       - agent/a52-phase446m-gdsc-irq-ab-v1
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
   workflow_dispatch:
 
 permissions:

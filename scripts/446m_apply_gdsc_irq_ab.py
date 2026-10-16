@@ -231,11 +231,17 @@ def apply_dsi(src):
     # whereas plain dsi_ctrl_clear_slave_dma_status is a different path.
     func="static void dsi_ctrl_dma_cmd_wait_for_done("
     a,b,f=getfn(src,func)
-    anchor="\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n"
+    # Phase445 changes the terminal timeout if-statement to an unbraced
+    # a52_p411_timeout_panic() check and often jumps to 'done' earlier.
+    # Hook the first completion wait, prior to the Phase445 rescue ladder.
+    anchor=("\tret = wait_for_completion_timeout(\n"
+            "\t\t\t&dsi_ctrl->irq_info.cmd_dma_done,\n"
+            "\t\t\tmsecs_to_jiffies(DSI_CTRL_TX_TO_MS));\n")
     if f.count(anchor)!=1:
-        raise RuntimeError("446M DMA timeout anchor missing or ambiguous")
-    f=f.replace(anchor,
-        anchor+"\t\ta52_p446m_snapshot_irq_timeout();\n",1)
+        raise RuntimeError("446M first DMA completion wait missing or ambiguous")
+    f=f.replace(anchor,anchor+
+        "\tif (!ret && !atomic_read(&dsi_ctrl->dma_irq_trig))\n"
+        "\t\ta52_p446m_snapshot_irq_timeout();\n",1)
     src=src[:a]+f+src[b:]
     include_at="\n/* "+TAG+" */\nextern void a52_p446m_snapshot_irq_timeout(void);\n"
     return include_at+src

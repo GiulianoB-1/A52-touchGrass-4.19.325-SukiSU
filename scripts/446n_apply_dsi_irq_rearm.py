@@ -126,9 +126,10 @@ def patch_dsi(s,variant):
     s=fn(s,'void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,',enable)
     def trigger(f):
         a='\tif (!(flags & DSI_CTRL_CMD_BROADCAST_MASTER))\n\t\tdsi_hw_ops.trigger_command_dma(&dsi_ctrl->hw);'
-        b='''    if (atomic_read(&a52_p446n_isr_registrations) >= 2 &&
-        atomic_cmpxchg(&a52_p446n_cold_trigger_logged, 0, 1) == 0)
-        a52_p446n_dsi_snapshot(dsi_ctrl, "cold-before-SW_TRIGGER");
+        b='''\tif (atomic_read(&a52_p446n_isr_registrations) >= 2 &&
+\t    atomic_cmpxchg(&a52_p446n_cold_trigger_logged, 0, 1) == 0) {
+\t\ta52_p446n_dsi_snapshot(dsi_ctrl, "cold-before-SW_TRIGGER");
+\t}
 '''+a
         return one(f,a,b,"cold SW_TRIGGER")
     s=fn(s,'int dsi_ctrl_cmd_tx_trigger(struct dsi_ctrl *dsi_ctrl, u32 flags)',trigger)

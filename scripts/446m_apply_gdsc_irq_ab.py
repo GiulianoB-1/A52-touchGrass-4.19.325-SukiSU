@@ -49,7 +49,7 @@ def apply_gdsc(src, variant):
     def patch_enable(f):
         f=one(f,"    before = readl_relaxed(gdsc->gdscr);\n",
                 "    before = readl_relaxed(gdsc->gdscr);\n"
-                "    pr_warn(\"P446M GDSC enable enter name=%s caller=%pS use=%u before=%08x mode=%s\\n\",\n"
+                "    pr_warn(\"P446M GDSC enable enter name=%s caller=%pS use=%d before=%08x mode=%s\\n\",\n"
                 "        gdsc->desc.name, __builtin_return_address(0), rdev->use_count,\n"
                 "        before, (before & A52_GDSC_HW_CONTROL) ? \"HW\" : \"SW\");\n",
                 "GDSC enable entry")
@@ -62,19 +62,19 @@ def apply_gdsc(src, variant):
                 "        writel_relaxed(val, gdsc->gdscr);\n"
                 "        mb();\n"
                 "        udelay(1);\n"
-                "        pr_warn(\"P446M GDSC reclaim name=%s use=%u old=%08x new=%08x\\n\",\n"
+                "        pr_warn(\"P446M GDSC reclaim name=%s use=%d old=%08x new=%08x\\n\",\n"
                 "            gdsc->desc.name, rdev->use_count, before,\n"
                 "            readl_relaxed(gdsc->gdscr));\n")
             f=one(f,blocked,fix,"MDSS-only -EBUSY treatment")
         else:
             f=one(f,blocked,
-                '        pr_warn("P446M GDSC blocked name=%s use=%u before=%08x rc=%d\\n",\n'
+                '        pr_warn("P446M GDSC blocked name=%s use=%d before=%08x rc=%d\\n",\n'
                 '            gdsc->desc.name, rdev->use_count, before, -EBUSY);\n'
                 +blocked,"MDSS-only -EBUSY diagnostic")
         if "return ret;" not in f:
             raise RuntimeError("446M GDSC enable tail missing")
         f=one(f,"    return ret;\n",
-            '    pr_warn("P446M GDSC enable exit name=%s use=%u rc=%d after=%08x\\n",\n'
+            '    pr_warn("P446M GDSC enable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
             '    return ret;\n',"GDSC enable return")
@@ -82,11 +82,11 @@ def apply_gdsc(src, variant):
     def patch_disable(f):
         f=one(f,"    before = readl_relaxed(gdsc->gdscr);\n",
             '    before = readl_relaxed(gdsc->gdscr);\n'
-            '    pr_warn("P446M GDSC disable enter name=%s caller=%pS use=%u before=%08x\\n",\n'
+            '    pr_warn("P446M GDSC disable enter name=%s caller=%pS use=%d before=%08x\\n",\n'
             '        gdsc->desc.name, __builtin_return_address(0),\n'
             '        rdev->use_count, before);\n',"GDSC disable entry")
         f=one(f,"    return ret;\n",
-            '    pr_warn("P446M GDSC disable exit name=%s use=%u rc=%d after=%08x\\n",\n'
+            '    pr_warn("P446M GDSC disable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
             '    return ret;\n',"GDSC disable return")
@@ -94,11 +94,11 @@ def apply_gdsc(src, variant):
     def patch_mode(f):
         f=one(f,"    before = readl_relaxed(gdsc->gdscr);\n",
             '    before = readl_relaxed(gdsc->gdscr);\n'
-            '    pr_warn("P446M GDSC mode enter name=%s caller=%pS use=%u mode=%u before=%08x\\n",\n'
+            '    pr_warn("P446M GDSC mode enter name=%s caller=%pS use=%d mode=%u before=%08x\\n",\n'
             '        gdsc->desc.name, __builtin_return_address(0),\n'
             '        rdev->use_count, mode, before);\n',"GDSC set_mode entry")
         f=one(f,"    return ret;\n",
-            '    pr_warn("P446M GDSC mode exit name=%s use=%u mode=%u rc=%d after=%08x\\n",\n'
+            '    pr_warn("P446M GDSC mode exit name=%s use=%d mode=%u rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, mode, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
             '    return ret;\n',"GDSC set_mode return")
@@ -222,7 +222,7 @@ def apply_dsi(src):
     if TAG in src: return src
     # The worker timeout is reached only after failing completion waiting,
     # whereas plain dsi_ctrl_clear_slave_dma_status is a different path.
-    func="static void dsi_ctrl_wait4dma_cmd_done("
+    func="static void dsi_ctrl_dma_cmd_wait_for_done("
     a,b,f=getfn(src,func)
     anchor="\tif (ret == 0 && !atomic_read(&dsi_ctrl->dma_irq_trig)) {\n"
     if f.count(anchor)!=1:

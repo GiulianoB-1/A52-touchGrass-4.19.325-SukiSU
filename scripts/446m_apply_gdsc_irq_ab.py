@@ -26,6 +26,13 @@ def one(src, old, new, context):
         raise RuntimeError("446M %s: expected 1 anchor, found %d" % (context,n))
     return src.replace(old,new,1)
 
+def before_final_return(fn, trace, why):
+    marker="    return ret;\n"
+    pos=fn.rfind(marker)
+    if pos<0 or fn[pos+len(marker):].strip() != "}":
+        raise RuntimeError("446M missing final return: "+why)
+    return fn[:pos]+trace+fn[pos:]
+
 def rework_fn(source, name, callback):
     a,b,f=getfn(source,name)
     f=callback(f)
@@ -73,11 +80,11 @@ def apply_gdsc(src, variant):
                 +blocked,"MDSS-only -EBUSY diagnostic")
         if "return ret;" not in f:
             raise RuntimeError("446M GDSC enable tail missing")
-        f=one(f,"    return ret;\n",
+        f=before_final_return(f,
             '    pr_warn("P446M GDSC enable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
-            '    return ret;\n',"GDSC enable return")
+            "GDSC enable return")
         return f
     def patch_disable(f):
         f=one(f,"    before = readl_relaxed(gdsc->gdscr);\n",
@@ -85,11 +92,11 @@ def apply_gdsc(src, variant):
             '    pr_warn("P446M GDSC disable enter name=%s caller=%pS use=%d before=%08x\\n",\n'
             '        gdsc->desc.name, __builtin_return_address(0),\n'
             '        rdev->use_count, before);\n',"GDSC disable entry")
-        f=one(f,"    return ret;\n",
+        f=before_final_return(f,
             '    pr_warn("P446M GDSC disable exit name=%s use=%d rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
-            '    return ret;\n',"GDSC disable return")
+            "GDSC disable return")
         return f
     def patch_mode(f):
         f=one(f,"    before = readl_relaxed(gdsc->gdscr);\n",
@@ -97,11 +104,11 @@ def apply_gdsc(src, variant):
             '    pr_warn("P446M GDSC mode enter name=%s caller=%pS use=%d mode=%u before=%08x\\n",\n'
             '        gdsc->desc.name, __builtin_return_address(0),\n'
             '        rdev->use_count, mode, before);\n',"GDSC set_mode entry")
-        f=one(f,"    return ret;\n",
+        f=before_final_return(f,
             '    pr_warn("P446M GDSC mode exit name=%s use=%d mode=%u rc=%d after=%08x\\n",\n'
             '        gdsc->desc.name, rdev->use_count, mode, ret,\n'
             '        readl_relaxed(gdsc->gdscr));\n'
-            '    return ret;\n',"GDSC set_mode return")
+            "GDSC set_mode return")
         return f
     src=rework_fn(src,en,patch_enable)
     src=rework_fn(src,dis,patch_disable)

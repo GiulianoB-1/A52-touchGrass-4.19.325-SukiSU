@@ -82,7 +82,12 @@ def patch_prop(s):
     needle='''	blob = drm_property_lookup_blob(dev, out_resp->blob_id);
 	if (!blob)
 		return -ENOENT;'''
-    s=one(s,needle,r'''	blob = drm_property_lookup_blob(dev, out_resp->blob_id);
+    # property.c includes two identical blob lookups (get vs destroy).
+    # Restrict the instrumentation to MODE_GETPROPBLOB, never destroy.
+    blob_start=s.index("int drm_mode_getblob_ioctl(")
+    blob_end=s.index("\n}",blob_start)+2
+    blob_fn=s[blob_start:blob_end]
+    blob_fn=one(blob_fn,needle,r'''	blob = drm_property_lookup_blob(dev, out_resp->blob_id);
 	if (!blob)
 		return -ENOENT;
 	/* Full capability/info payload up to 32KiB, then explicit truncate. */
@@ -103,6 +108,7 @@ def patch_prop(s):
 				blob->base.id,nbytes,blob->length);
 	}
 ''',"GETBLOB content")
+    s=s[:blob_start]+blob_fn+s[blob_end:]
     s=s.replace("int drm_mode_getproperty_ioctl(", "/* "+TAG+" */\nint drm_mode_getproperty_ioctl(",1)
     return s
 

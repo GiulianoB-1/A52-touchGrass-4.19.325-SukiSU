@@ -27,7 +27,7 @@ def patch_u(s):
               "static int a52_gs_console_thread(void *data)",
               "int gserial_alloc_line(unsigned char *line_num)"):
         if t not in s: raise RuntimeError("U446 missing 446T USB prerequisite: "+t)
-    s='#include <linux/completion.h>\n#include <linux/fdtable.h>\n#include <linux/rcupdate.h>\n#include <linux/tty.h>\n#include <linux/a52_ack_secure_flight_recorder.h>\n'+s
+    s='#include <linux/completion.h>\n#include <linux/fdtable.h>\n#include <linux/rcupdate.h>\n#include <linux/sched/signal.h>\n#include <linux/tty.h>\n#include <linux/a52_ack_secure_flight_recorder.h>\n'+s
     s=once(s,"\tstruct task_struct\t*task;\n\twait_queue_head_t\twait;",
         "\tstruct task_struct\t*task;\n\tstruct completion\ta52u_worker_ack;\n\tstruct completion\ta52u_request_ack;\n\tbool\t\t\ta52u_stopping;\n\tbool\t\t\ta52u_detached;\n\tbool\t\t\ta52u_req_pending;\n\twait_queue_head_t\twait;","console fields")
     s=once(s,"\tstruct tty_port\t\tport;\n\tspinlock_t\t\tport_lock;",

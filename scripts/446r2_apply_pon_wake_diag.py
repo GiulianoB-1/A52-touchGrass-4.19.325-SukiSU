@@ -220,7 +220,7 @@ def main():
                    (c,"IRQF_TRIGGER_RISING"),(c,"IRQF_TRIGGER_FALLING"),
                    (c,"!!(val & BIT(0))"),(c,"P446S PON EV_KEY"),
                    (c,"enable_irq_wake(irq)"),
-                   (c,"P446R2 PON_KEY_IRQ"),(c,"KEY_POWER"),
+                   (c,"P446S PON edge="),(c,"KEY_POWER"),
                    (m,"a52_pon_wake_diag.o")]:
         if not p.is_file() or need not in p.read_text():
             raise RuntimeError("R2 PON expected "+need)

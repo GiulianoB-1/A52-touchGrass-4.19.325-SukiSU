@@ -48,6 +48,69 @@ jobs:
             echo 'PASS: patcher applied and check-only passed against archived R2 arm-smmu.c.'
             echo 'This job intentionally does NOT certify kernel compilation or the final-tree manifest.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Inventory surviving historical GKI caches (read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          repo=os.environ['GITHUB_REPOSITORY']
+          items=[]
+          for page in range(1, 6):
+              url=f"repos/{repo}/actions/caches?per_page=100&page={page}"
+              p=subprocess.run(["gh", "api", url], text=True, capture_output=True)
+              if p.returncode:
+                  print("P446S cache inventory unavailable:",p.stderr.strip()[:350])
+                  sys.exit(0)
+              data=json.loads(p.stdout)
+              current=data.get("actions_caches",[])
+              items.extend(current)
+              if len(current)<100: break
+          prefixes=("a52xq-phase429","a52xq-phase357","a52xq-phase346",
+                    "a52xq-phase345","a52xq-phase227",
+                    "a52xq-phase206","a52xq-gki","android12-5.10-gki-source")
+          found=sorted((c for c in items if c.get("key","").startswith(prefixes)),
+                       key=lambda c: c.get("last_accessed_at",""),reverse=True)
+          print(f"P446S CACHE INVENTORY total={len(items)} candidates={len(found)}")
+          for c in found[:80]:
+              print("P446S CACHE",json.dumps({k:c.get(k) for k in
+                  ("id","key","ref","size_in_bytes","last_accessed_at")},sort_keys=True))
+          with open("a52-446s-cache-inventory.json","w") as f:
+              json.dump({"found":found,"caches_scanned":len(items)},f,indent=2)
+          PY
+      - name: Inventory surviving source artifacts (read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          repo=os.environ['GITHUB_REPOSITORY']
+          found=[];scanned=0
+          for page in range(1,9):
+              p=subprocess.run(["gh","api",f"repos/{repo}/actions/artifacts?per_page=100&page={page}"],
+                               text=True,capture_output=True)
+              if p.returncode:
+                  print("P446S artifact inventory unavailable:",p.stderr.strip()[:350])
+                  break
+              arr=json.loads(p.stdout).get("artifacts",[])
+              scanned+=len(arr)
+              for a in arr:
+                  name=a.get("name","").lower()
+                  if ("source" in name or "baseline" in name or
+                      "seed" in name or "phase346" in name or
+                      "phase429" in name or "archive" in name):
+                      found.append({k:a.get(k) for k in
+                                    ("id","name","size_in_bytes","expired","created_at","expires_at")})
+              if len(arr)<100:break
+          print(f"P446S ARTIFACT INVENTORY scanned={scanned} candidates={len(found)}")
+          for a in found[:100]:print("P446S ARTIFACT",json.dumps(a,sort_keys=True))
+          with open("a52-446s-artifact-inventory.json","w") as f:
+              json.dump({"found":found,"artifacts_scanned":scanned},f,indent=2)
+          PY
       - name: Publish source smoke result
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,6 +118,8 @@ jobs:
           name: A52-446S-SMMU-SOURCE-SMOKE-${{ github.run_number }}
           path: |
             a52-446s-smmu-smoke-result.txt
+            a52-446s-cache-inventory.json
+            a52-446s-artifact-inventory.json
             smmu-smoke-tree/drivers/iommu/arm/arm-smmu/arm-smmu.c
           if-no-files-found: warn
           retention-days: 7

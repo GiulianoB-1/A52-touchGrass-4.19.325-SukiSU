@@ -91,7 +91,9 @@ def patch_uapi(s):
 	}
 '''
     s=once(s,sig,inject+sig,"ioctl diagnostics")
-    s=once(s,"#include <linux/", "#include <linux/ktime.h>\n#include <linux/sched.h>\n#include <linux/", "uapi includes")
+    inc="#include <linux/"
+    if inc not in s:raise RuntimeError("446S missing linux include")
+    s=s.replace(inc, "#include <linux/ktime.h>\n#include <linux/sched.h>\n"+inc,1)
     return s
 def check(root):
     a=(root/PATH).read_text()

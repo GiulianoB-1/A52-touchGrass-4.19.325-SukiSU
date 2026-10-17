@@ -69,12 +69,17 @@ static int a52_pon_pm_notifier(struct notifier_block *nb,
                               unsigned long event, void *unused)
 {
     struct a52_pon_diag *p=container_of(nb,struct a52_pon_diag,pm_nb);
-    if (event==PM_SUSPEND_PREPARE)
-        pr_warn("P446R2 SUSPEND_PREPARE key_irq=%d edges=%d wake_enabled=%u\n",
-            p->key_irq,atomic_read(&p->edges),p->wake_enabled);
+    if (event==PM_SUSPEND_PREPARE) {
+        char wakes[192]={0};
+        pm_get_active_wakeup_sources(wakes,sizeof(wakes));
+        pr_warn("P446R2 SUSPEND_PREPARE mem_sleep=%d key_irq=%d edges=%d wake=%u success=%u fail=%u active_wakes=%s\n",
+            mem_sleep_current,p->key_irq,atomic_read(&p->edges),
+            p->wake_enabled,suspend_stats.success,suspend_stats.fail,wakes);
+    }
     if (event==PM_POST_SUSPEND)
-        pr_warn("P446R2 POST_SUSPEND key_irq=%d edges=%d\n",
-            p->key_irq,atomic_read(&p->edges));
+        pr_warn("P446R2 POST_SUSPEND mem_sleep=%d key_irq=%d edges=%d success=%u fail=%u\n",
+            mem_sleep_current,p->key_irq,atomic_read(&p->edges),
+            suspend_stats.success,suspend_stats.fail);
     return NOTIFY_OK;
 }
 static void a52_pon_irq_chain(int irq)

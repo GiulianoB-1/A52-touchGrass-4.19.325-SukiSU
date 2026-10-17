@@ -838,6 +838,8 @@ jobs:
           python3 -m py_compile scripts/446t_apply_smmu_hold_no_nested.py
           python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT"
           python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT"
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT" --check-only
           # Always rebuild every affected object even when a restored cache
           # contains successful 446S objects compiled before the new source.
           for obj in \
@@ -845,7 +847,8 @@ jobs:
             drivers/gpu/msm/kgsl_pwrctrl.o \
             drivers/gpu/msm/kgsl_gmu.o \
             drivers/iommu/arm/arm-smmu/arm-smmu.o \
-            drivers/gpu/msm/kgsl_iommu.o; do
+            drivers/gpu/msm/kgsl_iommu.o \
+            drivers/a52_display/msm/msm_atomic.o; do
             rm -f "$BUILD/$obj"
           done
           echo "P446T exact source marker and object invalidation PASS"
@@ -998,6 +1001,7 @@ jobs:
           python3 scripts/446s_apply_gpu_slumber_trace.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
           python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.

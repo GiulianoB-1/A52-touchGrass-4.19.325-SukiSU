@@ -1,0 +1,72 @@
+name: Phase446T exact Phase446S source-contract smoke
+on:
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-446t-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  exact-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover the exact successful Phase446S final patched source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ZIP="$RUNNER_TEMP/phase446s-inputs-55.zip"
+          SRC="$RUNNER_TEMP/phase446s-final-source.tar.zst"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/12106509365/zip" \
+            -o "$ZIP"
+          printf '%s  %s\n' 2c7e02b424df29f17ef16087864dacd2068293fb70d6be823de0c85ab7715533 "$ZIP" | sha256sum -c -
+          unzip -p "$ZIP" final-patched-gki-source.tar.zst > "$SRC"
+          printf '%s  %s\n' 6e585b523aff2b7bb997b71ab485889b4499158532646132741cf4edd23b504e "$SRC" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/p446t-source"
+          tar --zstd -xf "$SRC" -C "$RUNNER_TEMP/p446t-source" \
+            ./drivers/gpu/msm/kgsl_pwrctrl.c \
+            ./drivers/gpu/msm/kgsl_device.h \
+            ./drivers/gpu/msm/kgsl_gmu.c \
+            ./drivers/regulator/a52-legacy-gdsc-regulator.c \
+            ./drivers/iommu/arm/arm-smmu/arm-smmu.c \
+            ./drivers/a52_display/msm/msm_atomic.c
+          echo "P446T exact original booted 446S source SHA checks PASS"
+      - name: Apply and audit 446T GPU/SMMU, GDSC, and early frame traces
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,zlib
+          from pathlib import Path
+          carrier=Path("scripts/446t_apply_smmu_hold_no_nested.py.z64")
+          decoded=zlib.decompress(base64.b64decode(carrier.read_text().strip(),validate=True))
+          assert hashlib.sha256(decoded).hexdigest()=="c589faa4a829d56a394a839349b8d23f250c467522aa3781927504c2873edc37"
+          Path("scripts/446t_apply_smmu_hold_no_nested.py").write_bytes(decoded)
+          PY
+          python3 -m py_compile scripts/446t_apply_smmu_hold_no_nested.py scripts/446t_early_frame_trace.py
+          ROOT="$RUNNER_TEMP/p446t-source"
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT"
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT"
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT"
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT" --check-only
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT"
+          python3 scripts/446t_early_frame_trace.py --root "$ROOT" --check-only
+          {
+            echo "### Phase446T exact Phase446S source regression"
+            echo "PASS: SHA-pinned 446S full final-source artifact, Phase446T patcher idempotence, 446S SMMU compatibility, no nested GDSC regulator ops, early unsampled frame window."
+            echo "This is a source-only contract test, NOT compiled and NOT boot-verified."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "P446T EXACT_BOOTED_446S_SOURCE_SMOKE PASS"

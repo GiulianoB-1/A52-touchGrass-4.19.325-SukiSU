@@ -112,6 +112,11 @@ jobs:
                                     ("id","name","size_in_bytes","expired","created_at","expires_at")})
               if len(arr)<100:break
           print(f"P446S ARTIFACT INVENTORY scanned={scanned} candidates={len(found)}")
+          # Inventory every live historical artifact, even those without
+          # source/baseline/seed keywords.
+          with open("a52-446s-all-artifacts.json","w") as f:
+              json.dump({"candidates":found,"count":scanned},f,indent=2)
+
           for a in found[:100]:print("P446S ARTIFACT",json.dumps(a,sort_keys=True))
           with open("a52-446s-artifact-inventory.json","w") as f:
               json.dump({"found":found,"artifacts_scanned":scanned},f,indent=2)
@@ -125,6 +130,7 @@ jobs:
             a52-446s-smmu-smoke-result.txt
             a52-446s-cache-inventory.json
             a52-446s-artifact-inventory.json
+            a52-446s-all-artifacts.json
             smmu-smoke-tree/drivers/iommu/arm/arm-smmu/arm-smmu.c
           if-no-files-found: warn
           retention-days: 7

@@ -62,7 +62,7 @@ static void a52u_req_set(int req)
            "ioctl local")
     # Assign after initial ioctl validation/state allocation, before retry.
     anchor="retry:\n\tcopied_objs = 0;"
-    s=once(s,anchor,'''if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL) {
+    s=once(s,anchor,r'''if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL) {
 		a52u_req = atomic_inc_return(&a52u_ioctl_seq);
 		if (a52u_req <= 300) {
 			a52u_req_set(a52u_req);
@@ -76,7 +76,7 @@ static void a52u_req_set(int req)
 '''+anchor,"request begin")
     needle="ret = drm_atomic_set_property(state, file_priv,"
     # Only log properties after successful get_user/copy_from_user.
-    injected='''if (a52u_req && a52u_req <= 300)
+    injected=r'''if (a52u_req && a52u_req <= 300)
 				pr_info("P446U PROP seq=%d pid=%d obj=%u type=%#x prop=%s val=%llu hex=%#llx\n",
 					a52u_req, task_pid_nr(current), obj_id, obj->type,
 					prop->name, (unsigned long long)prop_value,
@@ -88,7 +88,7 @@ static void a52u_req_set(int req)
     s=once(s,needle,"if (a52u_req && a52u_req <= 300)\n\t\ta52u_req_set(0);\n\n\t"+needle,"clear request id")
     for func,needle,inject in (
         ("FB","void\ndrm_atomic_set_fb_for_plane(struct drm_plane_state *plane_state,\n\t\t\t    struct drm_framebuffer *fb)\n{",
-         '''
+         r'''
 	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL &&
 	    plane_state && plane_state->plane &&
 	    plane_state->plane->base.id == 91)
@@ -129,7 +129,7 @@ def patch_msm(s):
     if TAG in s:return s
     # 446S already introduced win and p446r_commit_snapshot at swap.
     anchor='    if (win > 0 && win <= 300) {'
-    s=once(s,anchor,'''
+    s=once(s,anchor,r'''
     if (win > 0 && win <= 300)
         pr_info("P446U FRAME_JOIN seq=%d req=%d pid=%d\n",
             win, a52_446u_request_id(), task_pid_nr(current));
@@ -182,7 +182,7 @@ def patch_sde_plane(s):
     start=s.index(chk);end=s.index('\n}',start)+2
     sub=s[start:end]
     sub=once(sub,"\treturn ret;\n}",
-        '''	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
+        r'''	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U SDE_PLANE_CHECK seq=%d p=91 rc=%d fb=%u crtc=%u visible=%u\n",
 			a52_446u_request_id(), ret,
 			state && state->fb ? state->fb->base.id : 0,
@@ -193,7 +193,7 @@ def patch_sde_plane(s):
     s=s[:start]+sub+s[end:]
     start=s.index(prep);end=s.index('\n}',start)+2;sub=s[start:end]
     anchor='struct drm_framebuffer *fb = new_state->fb;'
-    sub=once(sub,anchor,anchor+'''
+    sub=once(sub,anchor,anchor+r'''
 	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U PREPARE_FB seq=%d plane=91 fb=%u crtc=%u\n",
 			a52_446u_request_id(), fb ? fb->base.id : 0,
@@ -208,7 +208,7 @@ def patch_sde_crtc(s):
     if sig not in s:raise RuntimeError("446U SDE CRTC atomic check absent")
     p=s.index(sig);end=s.index('\n}',p)+2;part=s[p:end]
     part=once(part,"end:\n\tkfree(pstates);",
-        '''end:
+        r'''end:
 	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U SDE_CRTC_CHECK seq=%d crtc=%u rc=%d active=%u enable=%u\n",
 			a52_446u_request_id(), crtc ? crtc->base.id : 0,
@@ -222,7 +222,7 @@ def patch_panel(s):
     sig="int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)"
     if sig not in s:raise RuntimeError("446U Samsung panel brightness entry missing")
     anchor="struct dsi_backlight_config *bl = &panel->bl_config;"
-    snippet='''	/* A52_PHASE446U_BRIGHTNESS_TRACE_V1: no brightness override */
+    snippet=r'''	/* A52_PHASE446U_BRIGHTNESS_TRACE_V1: no brightness override */
 	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U BRIGHTNESS ts=%llu pid=%d comm=%s level=%u\n",
 			(unsigned long long)ktime_get_boottime_ns(),

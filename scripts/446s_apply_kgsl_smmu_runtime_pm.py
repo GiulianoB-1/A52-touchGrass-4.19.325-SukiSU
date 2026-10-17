@@ -304,10 +304,12 @@ def patch(s):
     # System suspend/resume must keep the pre-existing PM state decisions.
     # Log whether it was already runtime-suspended without changing returns.
     def system_pm_diag(body,which):
+        # 5.10 avoids declarations after statements; QSMMUv500's early
+        # unmanaged-TBU guard executes before the sleep-state check.
+        body=once(body,"{\n","{\n\tstruct arm_smmu_device *smmu = dev_get_drvdata(dev);\n",
+                  "system PM declaration "+which)
         marker='\tif (pm_runtime_suspended(dev))'
-        replacement=r'''	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
-
-	if (smmu && a52_kgsl_smmu_has_phase250_vdd(smmu))
+        replacement=r'''	if (smmu && a52_kgsl_smmu_has_phase250_vdd(smmu))
 		a52_kgsl_smmu_pm_diag(dev, "WHICH");
 
 	if (pm_runtime_suspended(dev))'''.replace("WHICH",which)

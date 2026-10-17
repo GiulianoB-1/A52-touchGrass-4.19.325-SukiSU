@@ -57,19 +57,30 @@ def patch_u(s):
 	int status = req->status;
 
 	spin_lock(&cons->lock);
-	cons->a52u_req_pending = false;
-	req->length = 0;
 	stopping = cons->a52u_stopping;
 	spin_unlock(&cons->lock);
 	if (stopping) {
 		a52_ackfr_record("U446 request-complete status=%d", status);
-		/* No read or write to cons/req after signalling acknowledgement. */
-		complete(&cons->a52u_request_ack);
-		return;
+		goto a52u_complete_done;
 	}
-	complete(&cons->a52u_request_ack);
 
-	switch (req->status) {''',"request complete ack")
+	switch (req->status) {''',"request complete prologue")
+    # Completion is the final operation in the callback. The worker may
+    # free req/cons only after this signal, never while callback runs.
+    begin=s.index("static void gs_console_complete_out(")
+    end=s.index("\n}",begin)
+    fragment=s[begin:end]
+    if "a52u_complete_done:" in fragment:
+        raise RuntimeError("U446 unexpected callback layout")
+    fragment += r'''
+a52u_complete_done:
+	spin_lock(&cons->lock);
+	cons->a52u_req_pending = false;
+	req->length = 0;
+	spin_unlock(&cons->lock);
+	complete(&cons->a52u_request_ack);
+'''
+    s=s[:begin]+fragment+s[end:]
     s=once(s,"\twhile (!kthread_should_stop()) {\n\t\twait_event_interruptible(cons->wait,\n\t\t\tkthread_should_stop() || atomic_xchg(&cons->kick, 0));\n\t\tif (kthread_should_stop())\n\t\t\tbreak;",
         r'''	while (!kthread_should_stop() && !READ_ONCE(cons->a52u_stopping)) {
 		wait_event_interruptible(cons->wait,

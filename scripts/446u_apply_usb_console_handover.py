@@ -94,6 +94,17 @@ a52u_complete_done:
         "\tspin_lock_irqsave(&cons->lock, flags);\n\tif (unlikely(cons->a52u_stopping))\n\t\tgoto a52u_write_out;\n\n\tn = kfifo_in(&cons->buf, buf, count);","console FIFO write gate")
     s=once(s,"\tif (cons->req && !cons->req->length)\n\t\ta52_gs_console_kick(cons);\n\n\tspin_unlock_irqrestore(&cons->lock, flags);",
         "\tif (cons->req && !cons->req->length)\n\t\ta52_gs_console_kick(cons);\na52u_write_out:\n\tspin_unlock_irqrestore(&cons->lock, flags);","write gate unlock")
+    # While teardown owns the console request, a cable disconnect must not
+    # free it under port_lock. USB ep_disable will still complete the request;
+    # the coordinator is the sole owner of request dequeue/free.
+    s=once(s,
+           "static void gs_console_disconnect(struct gs_port *port)\n{\n\tstruct gs_console *cons = port->console;\n\tstruct usb_request *req;\n\tstruct usb_ep *ep;\n\n\tif (!cons)\n\t\treturn;",
+           "static void gs_console_disconnect(struct gs_port *port)\n{\n\tstruct gs_console *cons = port->console;\n\tstruct usb_request *req;\n\tstruct usb_ep *ep;\n\n\tif (!cons)\n\t\treturn;\n\tif (READ_ONCE(cons->a52u_stopping))\n\t\treturn; /* request owned by U446 coordinator */",
+           "guard disconnect against request double-free")
+    s=once(s,
+           "\tif (!cons)\n\t\treturn 0;\n\n\tep = port->port_usb->in;",
+           "\tif (!cons)\n\t\treturn 0;\n\tif (READ_ONCE(cons->a52u_stopping))\n\t\treturn -EBUSY;\n\n\tep = port->port_usb->in;",
+           "guard reconnect against new request allocation")
     s=once(s,"\tinit_waitqueue_head(&cons->wait);\n\tatomic_set(&cons->kick, 0);",
         "\tinit_waitqueue_head(&cons->wait);\n\tinit_completion(&cons->a52u_worker_ack);\n\tinit_completion(&cons->a52u_request_ack);\n\tcons->a52u_stopping = false;\n\tcons->a52u_detached = false;\n\tcons->a52u_req_pending = false;\n\tatomic_set(&cons->kick, 0);","console init")
     s=once(s,"\tunregister_console(&cons->console);\n\n\tspin_lock_irq(&port->port_lock);",

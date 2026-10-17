@@ -46,6 +46,18 @@ EXPECT={
      ("A52_PHASE446R2_BOUNDED_RPMH_TCS_V1","P446R2 RPMH_FLUSH_EBUSY")),
  "P446R2 PON":("drivers/a52_secure/a52_pon_wake_diag.c",
      ("A52_PHASE446R2_PON_WAKE_DIAG_V1","enable_irq_wake","KEY_POWER")),
+ "P446S PON state":("drivers/a52_secure/a52_pon_wake_diag.c",
+     ("A52_PHASE446S_PON_KEY_STATE_V1","!!(val & BIT(0))",
+      "IRQF_TRIGGER_RISING","IRQF_TRIGGER_FALLING","P446S PON EV_KEY")),
+ "P446S memlat ownership":("drivers/devfreq/governor_memlat.c",
+     ("A52_PHASE446S_MEMLAT_LIFECYCLE_V1","monitor_ready",
+      "p446s_memlat_owner(df)","P446S MEMLAT skip_monitor")),
+ "P446S devfreq timer":("drivers/devfreq/devfreq.c",
+     ("A52_PHASE446S_DEVFREQ_TIMER_GUARD_V1","!devfreq->work.work.func")),
+ "P446S unsampled frames":("drivers/a52_display/msm/msm_atomic.c",
+     ("A52_PHASE446S_UNSAMPLED_COMMIT_V1","P446S FRAME seq=")),
+ "P446S ioctl caller":("drivers/gpu/drm/drm_atomic_uapi.c",
+     ("A52_PHASE446S_ATOMIC_IOCTL_TRACE_V1","P446S IOCTL seq=")),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",

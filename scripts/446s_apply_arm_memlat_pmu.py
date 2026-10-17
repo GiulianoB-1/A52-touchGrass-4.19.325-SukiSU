@@ -19,7 +19,7 @@ def patch(s):
            "\tattr->exclude_idle = 0;","exclude_idle")
     s=once(s,'''	if (IS_ERR(pevent))
 		return PTR_ERR(pevent);''',
-         '''	if (IS_ERR(pevent)) {
+         r'''	if (IS_ERR(pevent)) {
 		int err = PTR_ERR(pevent);
 		pr_err_ratelimited("P446S MEMLAT PERF_FAIL cpu=%d event=%#x exclude_idle=%u rc=%d\n",
 				   cpu, event_id, attr->exclude_idle, err);
@@ -33,7 +33,7 @@ def patch(s):
 }
 
 static void stop_hwmon''',
-         '''unlock_out:
+         r'''unlock_out:
 	/* The legacy path increments num_active_mons before allocating PMU
 	 * counters. Roll back partial allocations and count on EVERY failure.
 	 * Never queue the delayed work on these failure paths.
@@ -70,6 +70,18 @@ def check(s):
                   "cpu_grp->num_active_mons--;"):
         if token not in s:
             raise RuntimeError("446S arm memlat missing "+token)
+    # The diagnostic strings must contain C's escaped newline, never a
+    # physical newline inside a quoted literal. A former Python triple-string
+    # generator emitted invalid C that --check-only failed to detect.
+    for label in ("P446S MEMLAT PERF_FAIL", "P446S MEMLAT START_ROLLBACK"):
+        begin=s.find('"' + label)
+        if begin < 0:
+            raise RuntimeError("446S arm memlat missing diagnostic " + label)
+        closing=s.find('"',begin+1)
+        if closing < 0 or "\n" in s[begin:closing]:
+            raise RuntimeError("446S arm memlat malformed C diagnostic literal " + label)
+        if not s[begin:closing].endswith(r"\n"):
+            raise RuntimeError("446S arm memlat diagnostic missing escaped newline " + label)
     if "attr->exclude_idle = 1;" in s:
         raise RuntimeError("446S arm memlat still requests exclude_idle")
     print("P446S PMU contract PASS: exclude_idle=0, balanced failed monitor start")

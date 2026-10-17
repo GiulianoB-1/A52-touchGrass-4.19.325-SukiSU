@@ -256,6 +256,40 @@ def patch(s):
     s=once(s,"static bool using_legacy_binding, using_generic_binding;",
            "static bool using_legacy_binding, using_generic_binding;\n"+TARGET,
            "helper placement")
+    # 5.10 fault IRQ handlers touch registers without arm_smmu_rpm_get.
+    # Log this risk if a fault arrives while A52 runtime PM is suspended.
+    # Do not call the sleeping pm_runtime resume path in IRQ context.
+    def fault_context(body):
+        anchor='int idx = smmu_domain->cfg.cbndx;'
+        addition=anchor+r'''
+
+	if (unlikely(a52_kgsl_smmu_has_phase250_vdd(smmu) &&
+		     pm_runtime_suspended(smmu->dev)))
+		dev_warn_ratelimited(smmu->dev,
+			"P446S KGSL_SMMU_RPM FAULT_IRQ context while suspended irq=%d\n",
+			irq);'''
+        return once(body,anchor,addition,"context IRQ audit")
+    def fault_global(body):
+        anchor='static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,'
+        if anchor not in body:
+            raise RuntimeError("446S SMMU fault global ratelimit anchor absent")
+        insert_before=r'''
+	if (unlikely(a52_kgsl_smmu_has_phase250_vdd(smmu) &&
+		     pm_runtime_suspended(smmu->dev)))
+		dev_warn_ratelimited(smmu->dev,
+			"P446S KGSL_SMMU_RPM FAULT_IRQ global while suspended irq=%d\n",
+			irq);
+
+'''
+        # Insert before the first MMIO read, without changing existing reads.
+        return once(body,"\tgfsr = arm_smmu_gr0_read(smmu,",
+                    insert_before+"\tgfsr = arm_smmu_gr0_read(smmu,",
+                    "global IRQ audit")
+    for sig,fn in (
+        ("static irqreturn_t arm_smmu_context_fault(int irq, void *dev)",fault_context),
+        ("static irqreturn_t arm_smmu_global_fault(int irq, void *dev)",fault_global),
+    ):
+        s=replace_block(s,sig,fn,sig)
     for sig,fn in (
         ("static int arm_smmu_device_probe(struct platform_device *pdev)",patch_probe),
         ("static int arm_smmu_device_remove(struct platform_device *pdev)",patch_remove),
@@ -272,7 +306,9 @@ def audit(root):
               "pm_runtime_put_autosuspend(dev)",
               "pm_runtime_set_autosuspend_delay(dev, 20)",
               "a52_probe_error:",
-              "runtime_suspend_vdd_off","runtime_resume_vdd_on"):
+              "runtime_suspend_vdd_off","runtime_resume_vdd_on",
+              "FAULT_IRQ context while suspended",
+              "FAULT_IRQ global while suspended"):
         if t not in s:
             raise RuntimeError("446S SMMU audit missing "+t)
     if s.count("if (dev->pm_domain || a52_kgsl_smmu_has_phase250_vdd(smmu))")!=1:

@@ -19,14 +19,15 @@ def apply_central(s,kind):
     if TAG in s:return s
     if "A52_PHASE446L_FIRST_COLD_ON_TRIGGER_V1" not in s:
         raise RuntimeError("446O requires Phase446L")
+    store="a52_p445_store_section" if kind=="gki" else "a52_p444_store_section"
     s=one(s,"static struct p446l_fast p446l_fast[7];",
         "static struct p446l_fast p446l_fast[10];","fast array")
     s=one(s,
         "static const u32 p446l_deadline_us[7]={0U,1U,2U,5U,10U,20U,50U};",
         "static const u32 p446l_deadline_us[10]={0U,1U,2U,5U,10U,20U,50U,100U,150U,200U};",
         "fast sample times")
-    s=one(s,'__STORE__(0x446c0035U,16U,"L_FAST_0_50",7U,50U,',
-        '__STORE__(0x446c0035U,16U,(second ? "O_FAST_0_200" : "L_FAST_0_50"),10U,200U,',
+    s=one(s,store+'(0x446c0035U,16U,"L_FAST_0_50",7U,50U,',
+        store+'(0x446c0035U,16U,(second ? "O_FAST_0_200" : "L_FAST_0_50"),10U,200U,',
         "fast raw storage")
     # The first capture stays compatible (same ID and data layout extended).
     s=one(s,"return atomic_read(&p446l_state)==1;",
@@ -96,7 +97,7 @@ EXPORT_SYMBOL_GPL(a52_p446o_pre);
             raise RuntimeError("446O raw twin anchor "+name)
         s=s.replace('"'+name+'"',
                     '(second ? "'+name.replace("L_","O_",1)+'" : "'+name+'")',1)
-    anchor='    __STORE__(0x446c0030U,16U,(second ? "O_CMD_META" : "L_CMD_META"),'
+    anchor='    '+store+'(0x446c0030U,16U,(second ? "O_CMD_META" : "L_CMD_META"),'
     s=one(s,anchor,
 """    __STORE__(0x446f0001U,16U,second ? "O_PRE_CTRL" : "L_PRE_CTRL",
         second ? 2U : 1U,p446k_hash(p446o_pre_ctrl,256U),
@@ -124,6 +125,7 @@ EXPORT_SYMBOL_GPL(a52_p446o_pre);
     }
 """
     s=one(s,anchor,insert+anchor,"second-transfer text fallback")
+    s=s.replace("__STORE__(",store+"(")
     return s+"\n/* "+TAG+" */\n"
 
 def apply_hw(s):

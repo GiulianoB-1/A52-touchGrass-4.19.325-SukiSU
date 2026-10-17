@@ -102,7 +102,7 @@ void a52v_sde_snapshot(struct drm_device *dev,const char *phase)
 			sde_encoder_in_cont_splash(encoder));
 		a52v_encoder_dump(encoder,phase);
 	}
-	drm_for_each_connector(conn,&dev->mode_config) {
+	list_for_each_entry(conn,&dev->mode_config.connector_list,head) {
 		if (conn->base.id!=32)continue;
 		sc=to_sde_connector(conn);
 		pr_info("P446V SNAP_CONN phase=%s id=%u status=%d encoder=%u dpms=%d lp=%d last_power=%d autorefresh=%llu caps_blob=%u info_blob_len=%zu\n",

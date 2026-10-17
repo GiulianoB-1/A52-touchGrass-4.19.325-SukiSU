@@ -126,8 +126,43 @@ static bool p446s_memlat_owner(struct devfreq *df)
 	switch (event) {
 	case DEVFREQ_GOV_START:'''
     s=once(s,anchor,guard,"failed START event guard")
-    s=once(s,"\t\tif (!hw->should_ignore_df_monitor)\n\t\t\tdevfreq_interval_update(df, &sample_ms);",
-          "\t\tif (node->monitor_ready && !hw->should_ignore_df_monitor)\n\t\t\tdevfreq_interval_update(df, &sample_ms);","interval guard")
+    # The imported 5.10 memlat governor can differ from original TG 4.19:
+    # some historical Phase429 replay branches have no interval-update call
+    # at all. Scope this check to the EVENT interval case, not an exact
+    # two-line 4.19 formatting anchor. Never bypass a call that still exists.
+    begin = s.find("\tcase DEVFREQ_GOV_INTERVAL:")
+    if begin < 0 or s.find("\tcase DEVFREQ_GOV_INTERVAL:", begin + 1) != -1:
+        raise RuntimeError("446S interval guard: missing/duplicate interval case")
+    tail = s[begin:]
+    stop = __import__("re").search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", tail[1:])
+    end = begin + 1 + stop.start() if stop else len(s)
+    interval = s[begin:end]
+    import re
+    calls = list(re.finditer(r"\bdevfreq_interval_update\s*\(", interval))
+    if len(calls) > 1:
+        raise RuntimeError("446S interval guard: multiple update calls in interval case")
+    if not calls:
+        # The legacy 4.19 interval hook is absent in this final 5.10 source.
+        # No devfreq_interval_update to invoke on uninitialized work here.
+        print("P446S MEMLAT interval update ABSENT in final source; no guard needed")
+    else:
+        # Verify the call is a standalone C statement so a conditional guard
+        # does not accidentally change a return value or a compound expression.
+        matches = list(re.finditer(
+            r"(?m)^(?P<indent>[ \t]*)devfreq_interval_update\(\s*df\s*,\s*&sample_ms\s*\);[ \t]*$",
+            interval))
+        if len(matches) != 1:
+            raise RuntimeError(
+                "446S interval guard: unsupported interval call syntax: " +
+                repr(interval[max(0,calls[0].start()-100):calls[0].start()+110]))
+        m = matches[0]
+        guard = (m.group("indent") + "if (node->monitor_ready) {\n"
+                 + m.group(0) + "\n"
+                 + m.group("indent") + "}")
+        interval = interval[:m.start()] + guard + interval[m.end():]
+        s = s[:begin] + interval + s[end:]
+        print("P446S MEMLAT interval update guarded in final source")
+
     return s
 
 def patch_core(s):

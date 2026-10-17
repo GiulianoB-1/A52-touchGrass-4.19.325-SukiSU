@@ -211,7 +211,7 @@ jobs:
           if ! git -C gki/common -c protocol.version=2 fetch --depth=1 --filter=blob:none --no-tags origin "refs/tags/$GKI_COMMON_TAG"; then
             git -C gki/common fetch --depth=1 --no-tags origin "refs/tags/$GKI_COMMON_TAG"
           fi
-          test "$(git -C gki/common rev-parse FETCH_HEAD)" = "$GKI_COMMON_SHA"
+          test "$(git -C gki/common rev-parse 'FETCH_HEAD^{commit}')" = "$GKI_COMMON_SHA"
           git -C gki/common reset --mixed "$GKI_COMMON_SHA"
           test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
           grep -Fq 'A52_PHASE446R_COMMIT_GEM_LIFETIME_V1' gki/common/drivers/a52_display/msm/msm_atomic.c

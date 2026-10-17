@@ -70,6 +70,15 @@ EXPECT={
       "qcom,gpios-disallowed","platform_get_irq(pdev, pin_idx)")),
  "P446S PMIC GPIO Kbuild":("drivers/pinctrl/qcom/Makefile",
      ("obj-y += a52-pinctrl-spmi-gpio.o",)),
+ "P446S GPU CX votes":("drivers/regulator/core.c",
+     ("A52_PHASE446S_GPU_CX_VOTES_V1","P446S GPU_CX_CONSUMER")),
+ "P446S GMU 5s poll":("drivers/gpu/msm/kgsl_gmu.c",
+     ("A52_PHASE446S_GMU_SLUMBER_DIAG_V1","P446S GMU_CX POLL",
+      "msecs_to_jiffies(CX_GDSC_TIMEOUT)")),
+ "P446S KGSL lock timing":("drivers/gpu/msm/kgsl_device.h",
+     ("A52_PHASE446S_KGSL_MUTEX_100MS_V1","P446S KGSL_MUTEX")),
+ "P446S GPU vote API":("include/linux/a52_gpu_cx_trace.h",
+     ("A52_PHASE446S_GPU_CX_VOTES_V1",)),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",

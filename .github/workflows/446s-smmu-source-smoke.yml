@@ -173,3 +173,47 @@ jobs:
             smmu-smoke-tree/drivers/iommu/arm/arm-smmu/arm-smmu.c
           if-no-files-found: warn
           retention-days: 7
+
+  # Directly exercise the Phase446S timer lifecycle patch against the actual
+  # reconstructed Phase429 5.10 tree. This is source-only: no misleading Image.
+  memlat-phase429-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore exact Phase429 patched 5.10 source
+        id: phase429
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-f960ed27302b1ff8e61e152fc202554d778deccd-6f6e3fa9
+      - name: Verify GPU memlat patch against reconstructed Phase429 tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase429.outputs.cache-hit }}" = true || {
+            echo "::error::Exact Phase429 source cache missing; cannot claim 5.10 source test"
+            exit 1
+          }
+          SRC=gki/common
+          test -s "$SRC/drivers/devfreq/governor_memlat.c"
+          test -s "$SRC/drivers/devfreq/devfreq.c"
+          ROOT="$RUNNER_TEMP/phase446s-memlat-source"
+          mkdir -p "$ROOT/drivers/devfreq"
+          cp "$SRC/drivers/devfreq/governor_memlat.c" "$ROOT/drivers/devfreq/"
+          cp "$SRC/drivers/devfreq/devfreq.c" "$ROOT/drivers/devfreq/"
+          sha256sum "$ROOT/drivers/devfreq/"*.c
+          python3 -m py_compile scripts/446s_apply_memlat_guards.py
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT"
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT"
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          {
+            echo '### Phase446S memlat exact GKI 5.10 preflight'
+            echo 'PASS: 446S memlat patch applied and idempotence verified on reconstructed Phase429 source.'
+            echo 'This is NOT a compiled kernel or complete strict final-tree audit.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'P446S EXACT_PHASE429_MEMLAT_SOURCE_SMOKE PASS'

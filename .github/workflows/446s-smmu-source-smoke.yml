@@ -245,6 +245,47 @@ jobs:
             echo 'This is NOT a compiled kernel or complete strict final-tree audit.'
           } >> "$GITHUB_STEP_SUMMARY"
           echo 'P446S EXACT_PHASE429_MEMLAT_SOURCE_SMOKE PASS'
+      - name: Verify generated ARM memlat PMU C string literals against pinned TG
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$RUNNER_TEMP/phase446s-arm-memlat"
+          mkdir -p "$ROOT/drivers/devfreq"
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/arm-memlat-mon.c' \
+            -o "$ROOT/drivers/devfreq/arm-memlat-mon.c"
+          python3 -m py_compile scripts/446s_apply_arm_memlat_pmu.py
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT"
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT"
+          python3 - "$ROOT/drivers/devfreq/arm-memlat-mon.c" <<'PY'
+          from pathlib import Path
+          import importlib.util
+          import sys
+          p=Path(sys.argv[1])
+          s=p.read_text()
+          spec=importlib.util.spec_from_file_location(
+              "pmu","scripts/446s_apply_arm_memlat_pmu.py")
+          m=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          assert m.patch(s)==s
+          for label in ("P446S MEMLAT PERF_FAIL","P446S MEMLAT START_ROLLBACK"):
+              at=s.index('"' + label)
+              end=s.index('"',at+1)
+              assert s[at:end].endswith(r'\\n'),repr(s[at:end])
+              assert '\n' not in s[at:end]
+          # Regression witness: the pre-fix generator emitted a physical
+          # newline inside a diagnostic C string and must fail audit.
+          broken=s.replace(r'\\n",', '\n",',1)
+          assert broken!=s
+          try:
+              m.check(broken)
+          except RuntimeError as e:
+              assert "malformed C diagnostic" in str(e)
+          else:
+              raise AssertionError("unescaped diagnostic newline not rejected")
+          print("P446S ARM_MEMLAT_C_STRING_SMOKE PASS: escaped C logs, bad fixture rejected")
+          PY
       - name: Verify GKI 5.10 regulator vote trace field ABI on reconstructed kernel
         shell: bash
         run: |

@@ -290,6 +290,21 @@ def patch(s):
         ("static irqreturn_t arm_smmu_global_fault(int irq, void *dev)",fault_global),
     ):
         s=replace_block(s,sig,fn,sig)
+    # System suspend/resume must keep the pre-existing PM state decisions.
+    # Log whether it was already runtime-suspended without changing returns.
+    def system_pm_diag(body,which):
+        marker='\tif (pm_runtime_suspended(dev))'
+        replacement=r'''	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
+
+	if (smmu && a52_kgsl_smmu_has_phase250_vdd(smmu))
+		a52_kgsl_smmu_pm_diag(dev, "WHICH");
+
+	if (pm_runtime_suspended(dev))'''.replace("WHICH",which)
+        return once(body,marker,replacement,"system PM "+which)
+    s=replace_block(s,"static int __maybe_unused arm_smmu_pm_suspend(struct device *dev)",
+                    lambda body:system_pm_diag(body,"system_suspend"),"system suspend")
+    s=replace_block(s,"static int __maybe_unused arm_smmu_pm_resume(struct device *dev)",
+                    lambda body:system_pm_diag(body,"system_resume"),"system resume")
     for sig,fn in (
         ("static int arm_smmu_device_probe(struct platform_device *pdev)",patch_probe),
         ("static int arm_smmu_device_remove(struct platform_device *pdev)",patch_remove),
@@ -308,7 +323,8 @@ def audit(root):
               "a52_probe_error:",
               "runtime_suspend_vdd_off","runtime_resume_vdd_on",
               "FAULT_IRQ context while suspended",
-              "FAULT_IRQ global while suspended"):
+              "FAULT_IRQ global while suspended",
+              "system_suspend","system_resume"):
         if t not in s:
             raise RuntimeError("446S SMMU audit missing "+t)
     if s.count("if (dev->pm_domain || a52_kgsl_smmu_has_phase250_vdd(smmu))")!=1:

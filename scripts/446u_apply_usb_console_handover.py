@@ -460,16 +460,18 @@ EXPORT_SYMBOL_GPL(a52_446u_release_early_serial);
 	a52_ackfr_record("U446 UNBIND gs_unbind enter");
 '''
     s=once(s,orig,new,"gs_unbind enter after declarations")
-    s=once(s,"\t\tusb_put_function(f_serial[i]);\n\t\tusb_put_function_instance(fi_serial[i]);",
+    # Two identical function-put pairs exist in serial.c. Only the
+    # gs_unbind() pair belongs to this diagnostic, never the error unwind.
+    begin=s.index("static int gs_unbind(")
+    end=s.index("\n}",begin)
+    part=s[begin:end]
+    part=once(part,"\t\tusb_put_function(f_serial[i]);\n\t\tusb_put_function_instance(fi_serial[i]);",
         r'''		a52_ackfr_record("U446 UNBIND func_put enter i=%d",i);
 		usb_put_function(f_serial[i]);
 		a52_ackfr_record("U446 UNBIND func_put exit i=%d",i);
 		a52_ackfr_record("U446 UNBIND inst_put enter i=%d",i);
 		usb_put_function_instance(fi_serial[i]);
-		a52_ackfr_record("U446 UNBIND inst_put exit i=%d",i);''',"function release witness")
-    begin=s.index("static int gs_unbind(")
-    end=s.index("\n}",begin)
-    part=s[begin:end]
+		a52_ackfr_record("U446 UNBIND inst_put exit i=%d",i);''',"gs_unbind-only function release witness")
     part=once(part,"\treturn 0;",'\ta52_ackfr_record("U446 UNBIND gs_unbind exit");\n\treturn 0;',"gs_unbind exit")
     s=s[:begin]+part+s[end:]
     return s

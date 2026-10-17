@@ -93,19 +93,25 @@ def reconcile(root,output,repair):
     if "if (heap->buf_ops.get_flags)" not in ion:
         out["missing_after"].append("148_heap_callback_override")
 
-    # 152/153 heap ID19+27 combined stage exists in the current lineage:
-    # do not instantiate an additional competing 166 heap driver.
-    heap_rel="drivers/a52_secure/a52_qseecom_ion_heap.c"
+    # Earlier 152/153/166 heaps were consolidated and then extended in
+    # Phase214. The final Phase429 tree has ONE combined heap19+heap27 driver
+    # under staging/ion/heaps, not the retired a52_secure heap source.
+    heap_rel="drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c"
     heap=root/heap_rel
-    core=root/"drivers/a52_secure/Makefile"
-    if not heap.exists() or not core.exists() or \
-       "a52_qseecom_ion_heap.o" not in core.read_text() or \
-       "qsecom_ta" not in heap.read_text(errors="replace") or \
-       "qsecom" not in heap.read_text(errors="replace"):
-        out["missing_after"].append("153_combined_secure_heaps_19_27")
-    out["stages"]["153_combined_heap"]={
-        "file":heap_rel,"present":heap.exists() and
-        "a52_qseecom_ion_heap.o" in (core.read_text() if core.exists() else "")
+    core=root/"drivers/staging/android/ion/heaps/Makefile"
+    heap_src=heap.read_text(errors="replace") if heap.exists() else ""
+    make_src=core.read_text() if core.exists() else ""
+    ion_core=(root/"drivers/staging/android/ion/ion.c").read_text()
+    present=(heap.exists() and
+        "a52_qseecom_ta_heap.o" in make_src and
+        "A52_QSECOM_TA_HEAP_ID" in heap_src and
+        "A52_QSECOM_HEAP_ID" in heap_src and
+        "A52_QSECOM_DMA_ID19_ID27_COMPAT" in ion_core)
+    if not present:
+        out["missing_after"].append("combined_secure_heaps_19_27")
+    out["stages"]["153_166_214_combined_heaps"]={
+        "file":heap_rel,"present":bool(present),
+        "consolidated_from":["153","166","214"]
     }
     for name,(rel,mark) in REQUIRED.items():
         hit=marker_present(root,rel,mark)

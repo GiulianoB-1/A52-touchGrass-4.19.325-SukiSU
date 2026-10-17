@@ -42,8 +42,9 @@ def patch_console(s):
            "thread stopped completion")
     # Avoid *any* new FIFO writes after requesting detach. The rest of
     # Phase380 normal console write behavior remains untouched.
-    needle="struct gs_console *cons = container_of(co, struct gs_console, console);"
+    needle="struct gs_console *cons = container_of(co, struct gs_console, console);\n\tunsigned long flags;\n\tsize_t n;"
     s=once(s,needle,needle+'''
+	/* Phase380 declaration order preserved. */
 	if (unlikely(READ_ONCE(cons->a52u_stopping)))
 		return;
 ''',"console no-write gate")

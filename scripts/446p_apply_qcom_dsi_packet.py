@@ -141,7 +141,43 @@ def patch(s):
             DSI_SINT_CMD_MODE_DMA_DONE);
     }'''
     if f.count(old)!=1:raise RuntimeError("446P Phase411 timeout branch unexpected")
-    s=s[:start]+f.replace(old,new,1)+s[end:]
+    f=f.replace(old,new,1)
+    # The separate P445 cold-R1 recovery retries by calling enable_status
+    # a second time. On exit it currently releases only one subscription;
+    # balance the extra reference whether the retry times out or completes.
+    f=once(f,"\tstruct dsi_ctrl_hw_ops dsi_hw_ops;\n",
+           "\tstruct dsi_ctrl_hw_ops dsi_hw_ops;\n"+
+           "\tbool a52_p446p_r1_rearmed = false;\n","R1 scope guard")
+    arm=("\t\t\tatomic_set(&dsi_ctrl->dma_irq_trig, 0);\n"+
+         "\t\t\tdsi_ctrl_enable_status_interrupt(dsi_ctrl,\n"+
+         "\t\t\t\t\tDSI_SINT_CMD_MODE_DMA_DONE, NULL);")
+    f=once(f,arm,arm+
+           "\n\t\t\ta52_p446p_r1_rearmed = true;","mark R1 subscription")
+    cleanup=("\t\tif (!atomic_read(&dsi_ctrl->dma_irq_trig))\n"+
+             "\t\t\tdsi_ctrl_disable_status_interrupt(dsi_ctrl, DSI_SINT_CMD_MODE_DMA_DONE);\n"+
+             "\t\tgoto done;")
+    repair='''        if (!ret && !atomic_read(&dsi_ctrl->dma_irq_trig)) {
+            u32 status = dsi_hw_ops.get_interrupt_status(&dsi_ctrl->hw);
+            if (status & DSI_CMD_MODE_DMA_DONE) {
+                status |= DSI_CMD_MODE_DMA_DONE | DSI_BTA_DONE;
+                dsi_hw_ops.clear_interrupt_status(&dsi_ctrl->hw, status);
+                DSI_CTRL_WARN(dsi_ctrl,
+                    "dma_tx done but irq not triggered (P446P cold R1)\\n");
+            }
+        }
+        if (!atomic_read(&dsi_ctrl->dma_irq_trig))
+            dsi_ctrl_disable_status_interrupt(dsi_ctrl,
+                DSI_SINT_CMD_MODE_DMA_DONE);
+        /* R1 added a second status-interrupt subscription. The second ISR
+         * can only release its own; explicitly release the original one.
+         * If both timed out, the lines above release both subscriptions.
+         */
+        if (a52_p446p_r1_rearmed)
+            dsi_ctrl_disable_status_interrupt(dsi_ctrl,
+                DSI_SINT_CMD_MODE_DMA_DONE);
+        goto done;'''
+    f=once(f,cleanup,repair,"cold R1 balanced cleanup")
+    s=s[:start]+f+s[end:]
     return s+"\n/* "+MARK+": local Qualcomm-format helper, no global DRM changes. */\n"
 
 def audit(root):
@@ -156,8 +192,10 @@ def audit(root):
     if "dma_tx done but irq not triggered (P446P fallback)" not in s:
         raise RuntimeError("446P missed-IRQ fallback absent")
     start,end,worker=fn(s,"static void dsi_ctrl_dma_cmd_wait_for_done(struct work_struct *work)")
-    if worker.count("dsi_ctrl_disable_status_interrupt(dsi_ctrl,")!=1:
-        raise RuntimeError("446P unbalanced/double DMA completion decrement")
+    if worker.count("dsi_ctrl_disable_status_interrupt(dsi_ctrl,")!=3:
+        raise RuntimeError("446P expected 1 normal timeout + 2 cold R1 reference releases")
+    if "a52_p446p_r1_rearmed = true" not in worker or "P446P cold R1" not in worker:
+        raise RuntimeError("446P cold R1 balancing or fallback absent")
     if worker.count("a52_p411_timeout_panic(dsi_ctrl);")!=1:
         raise RuntimeError("446P FENCE1G timeout witness missing")
     if "A52_PHASE446N_DSI_IRQ_REARM_V1" not in s:

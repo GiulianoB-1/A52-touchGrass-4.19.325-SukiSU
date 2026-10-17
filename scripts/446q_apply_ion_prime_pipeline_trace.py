@@ -113,8 +113,8 @@ def patch_fb(s):
     if MARK in s:return s
     def change(f):
         a="\tint ret, i, n = drm_format_num_planes(mode_cmd->pixel_format);\n"
-        b=a+"\tstatic atomic_t a52_fb_count = ATOMIC_INIT(0);\n"+
-        "\tint a52_fb_n = atomic_inc_return(&a52_fb_count);\n"
+        b=(a+"\tstatic atomic_t a52_fb_count = ATOMIC_INIT(0);\n"
+           "\tint a52_fb_n = atomic_inc_return(&a52_fb_count);\n")
         f=swap(f,a,b,"FB count")
         a="\treturn fb;\n"
         b='''    if (a52_fb_n <= 12)

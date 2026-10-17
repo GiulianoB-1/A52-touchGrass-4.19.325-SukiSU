@@ -50,6 +50,17 @@ void a52_p446o_pre(struct dsi_ctrl_hw *hw)
         p446o_pre_ctrl[i]=DSI_R32(hw,i*4U);
 }
 EXPORT_SYMBOL_GPL(a52_p446o_pre);
+void a52_p446o_note_buffer(struct dsi_ctrl_hw *hw,
+                          u64 iova, const u8 *src, u32 bytes)
+{
+    if (!hw || hw->index!=0 || !src || !a52_p446l_is_armed())
+        return;
+    p446l_cmd.iova=iova;
+    p446l_cmd.len=bytes;
+    p446o_packet_len=min(bytes,(u32)sizeof(p446o_packet));
+    memcpy(p446o_packet,src,p446o_packet_len);
+}
+EXPORT_SYMBOL_GPL(a52_p446o_note_buffer);
 ""","central pre-sample")
     # a52_p446l_is_armed() is defined below this point. Its prototype must
     # exist before calling it in a52_p446o_pre().
@@ -190,6 +201,19 @@ def apply_panel(s,variant):
 
 def apply_ctrl(s,kind):
     if TAG in s:return s
+    # Accumulated embedded DMA buffer, including packets without LASTCOMMAND.
+    inject=r'''/* A52_PHASE446O_BUFFER_APPEND */
+extern void a52_p446o_note_buffer(struct dsi_ctrl_hw *,u64,const u8 *,u32);
+'''
+    s=one(s,"static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,",
+          inject+"static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,",
+          "DMA packed buffer declaration")
+    s=one(s,"\t\tdsi_ctrl->cmd_len += length;\n",
+          "\t\tdsi_ctrl->cmd_len += length;\n"+
+          "\t\ta52_p446o_note_buffer(&dsi_ctrl->hw,\n"+
+          "\t\t\tdsi_ctrl->cmd_buffer_iova,dsi_ctrl->vaddr,\n"+
+          "\t\t\tdsi_ctrl->cmd_len);\n",
+          "DMA append capture")
     if kind=="tg":return s+"\n/* "+TAG+" TG passive */\n"
     # Read-only proof of whether TIMEOUT actually releases DMA IRQ refcounts;
     # do not add an extra decrement while the 4.19 timeout worker already has one.
@@ -217,7 +241,7 @@ def audit(root,kind,variant):
     for p in [central,base/"dsi/dsi_ctrl_hw_cmn.c",base/"dsi/dsi_ctrl.c",base/"dsi/dsi_panel.c"]:
         if TAG not in p.read_text():raise RuntimeError("446O missing "+str(p))
     z=central.read_text()
-    for needle in ("O_CMD_FULL","O_PRE_CTRL","O_FAST_0_200","P446O SECOND","P446O CMD:","100U,150U,200U"):
+    for needle in ("O_CMD_FULL","O_PRE_CTRL","O_FAST_0_200","P446O SECOND","P446O CMD:","100U,150U,200U","a52_p446o_note_buffer"):
         if needle not in z:raise RuntimeError("446O missing "+needle)
     h=(base/"dsi/dsi_ctrl_hw_cmn.c").read_text()
     if h.count("a52_p446o_pre(ctrl);")!=3:raise RuntimeError("446O pretrigger sites mismatch")

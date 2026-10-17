@@ -74,6 +74,11 @@ jobs:
           found=sorted((c for c in items if c.get("key","").startswith(prefixes)),
                        key=lambda c: c.get("last_accessed_at",""),reverse=True)
           print(f"P446S CACHE INVENTORY total={len(items)} candidates={len(found)}")
+          print("P446S FULL CACHE KEY INVENTORY BEGIN")
+          for c in sorted(items,key=lambda c: c.get("key","")):
+              print("P446S CACHE ALL",json.dumps({k:c.get(k) for k in
+                  ("id","key","ref","size_in_bytes")},sort_keys=True))
+          print("P446S FULL CACHE KEY INVENTORY END")
           for c in found[:80]:
               print("P446S CACHE",json.dumps({k:c.get(k) for k in
                   ("id","key","ref","size_in_bytes","last_accessed_at")},sort_keys=True))

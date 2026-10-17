@@ -1185,6 +1185,8 @@ jobs:
             scripts/446q_apply_ion_prime_pipeline_trace.py
             phase446q-ion-audit/phase446q-final-tree-marker-audit.json
             gki/common/drivers/staging/android/ion/ion_dma_buf.c
+            gki/common/drivers/staging/android/ion/ion.c
+            gki/common/include/linux/a52_ack_secure_flight_recorder.h
             gki/common/drivers/a52_display/msm/msm_gem_prime.c
             gki/common/drivers/a52_display/msm/msm_fb.c
             gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c

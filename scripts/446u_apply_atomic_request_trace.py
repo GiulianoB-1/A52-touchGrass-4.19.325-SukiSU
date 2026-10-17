@@ -181,15 +181,15 @@ def patch_sde_plane(s):
     if chk not in s or prep not in s:raise RuntimeError("446U SDE plane hooks absent")
     start=s.index(chk);end=s.index('\n}',start)+2
     sub=s[start:end]
-    sub=once(sub,"exit:\n\treturn ret;",
-        '''exit:
-	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
+    sub=once(sub,"\treturn ret;\n}",
+        '''	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U SDE_PLANE_CHECK seq=%d p=91 rc=%d fb=%u crtc=%u visible=%u\n",
 			a52_446u_request_id(), ret,
 			state && state->fb ? state->fb->base.id : 0,
 			state && state->crtc ? state->crtc->base.id : 0,
 			state ? state->visible : 0);
-	return ret;''',"sde_plane check exit")
+	return ret;
+}''',"sde_plane check exit")
     s=s[:start]+sub+s[end:]
     start=s.index(prep);end=s.index('\n}',start)+2;sub=s[start:end]
     anchor='struct drm_framebuffer *fb = new_state->fb;'
@@ -218,24 +218,24 @@ def patch_sde_crtc(s):
     return '#include <linux/a52_446u_trace.h>\n#include <linux/ktime.h>\n'+s
 
 def patch_panel(s):
-    if TAG in s:return s
+    if "A52_PHASE446U_BRIGHTNESS_TRACE_V1" in s:return s
     sig="int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)"
     if sig not in s:raise RuntimeError("446U Samsung panel brightness entry missing")
-    return once(s,sig+"\n{",sig+'''
-{
-	/* A52_PHASE446U_BRIGHTNESS_TRACE_V1: command level, no override */
+    anchor="struct dsi_backlight_config *bl = &panel->bl_config;"
+    snippet='''	/* A52_PHASE446U_BRIGHTNESS_TRACE_V1: no brightness override */
 	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U BRIGHTNESS ts=%llu pid=%d comm=%s level=%u\n",
 			(unsigned long long)ktime_get_boottime_ns(),
 			task_pid_nr(current), current->comm, bl_lvl);
-''',"brightness") if "#include <linux/ktime.h>" in s else '#include <linux/ktime.h>\n#include <linux/sched.h>\n'+once(s,sig+"\n{",sig+'''
-{
-	/* A52_PHASE446U_BRIGHTNESS_TRACE_V1 */
-	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
-		pr_info("P446U BRIGHTNESS ts=%llu pid=%d comm=%s level=%u\n",
-			(unsigned long long)ktime_get_boottime_ns(),
-			task_pid_nr(current), current->comm, bl_lvl);
-''',"brightness")
+'''
+    x=s.index(sig)
+    y=s.find("\n}",x)
+    if y<0:raise RuntimeError("446U brightness function incomplete")
+    body=s[x:y]
+    if body.count(anchor)!=1:raise RuntimeError("446U brightness declaration anchor count")
+    body=body.replace(anchor,anchor+"\n"+snippet,1)
+    s=s[:x]+body+s[y:]
+    return '#include <linux/ktime.h>\n#include <linux/sched.h>\n'+s
 
 def check(root):
     checks={

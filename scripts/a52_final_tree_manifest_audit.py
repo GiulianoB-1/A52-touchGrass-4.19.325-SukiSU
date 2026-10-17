@@ -124,7 +124,7 @@ EXPECT={
      ("U446 UDC request","U446 UDC configfs probe-enter",
       "U446 UDC configfs probe-exit","U446 UDC adb-bound")),
  "P446U recorder persistence":("drivers/a52_secure/a52_ack_secure_flight_recorder.c",
-     ('strncmp(fmt, "U446", 4)',)),, 
+     ('strncmp(fmt, "U446", 4)',)), 
  "P446V GETPROPERTIES GETPROPERTY and SETPROPERTY":("drivers/gpu/drm/drm_mode_object.c",
      ("A52_PHASE446V_HWC_READ_SIDE_V1","P446V READ_PROP","P446V READ_OBJ","P446V SETPROPERTY")),
  "P446V property metadata and blobs":("drivers/gpu/drm/drm_property.c",

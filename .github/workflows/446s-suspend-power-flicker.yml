@@ -69,7 +69,7 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py scripts/446r_apply_commit_gem_lifetime.py scripts/446r2_bound_rpmh_tcs.py scripts/446r2_apply_pon_wake_diag.py scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py scripts/a52_final_tree_manifest_audit.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py scripts/446r_apply_commit_gem_lifetime.py scripts/446r2_bound_rpmh_tcs.py scripts/446r2_apply_pon_wake_diag.py scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py scripts/446s_apply_kgsl_smmu_runtime_pm.py scripts/a52_final_tree_manifest_audit.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
           python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
@@ -737,6 +737,10 @@ jobs:
           # unchanged 5000 ms poll and KGSL mutex holders over 100 ms.
           python3 scripts/446s_apply_gpu_slumber_trace.py --root "$ROOT"
           python3 scripts/446s_apply_gpu_slumber_trace.py --root "$ROOT" --check-only
+          # Only the Phase250-powered KGSL SMMU gets runtime PM. No global SMMU
+          # changes and no GDSC timeout bypass or forced supply disable.
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT"
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE446P_QCOM_DSI_PACKET_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' "$ROOT/drivers/staging/android/ion/ion_dma_buf.c"
           grep -Fq 'A52_PHASE446N_DSI_IRQ_REARM_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
@@ -884,6 +888,7 @@ jobs:
           python3 scripts/446s_apply_suspend_timing.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_gpu_slumber_trace.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.
@@ -945,6 +950,7 @@ jobs:
           grep -aFq 'P446S GPU_CX_CONSUMER' "$IMAGE"
           grep -aFq 'P446S KGSL_MUTEX held_ms=' "$IMAGE"
           grep -aFq 'P446S GMU_CX POLL' "$IMAGE"
+          grep -aFq 'P446S KGSL_SMMU_RPM' "$IMAGE"
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
           echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           test -s "$P445"
@@ -1103,7 +1109,7 @@ jobs:
           cp scripts/446r2_bound_rpmh_tcs.py "$OUT/source/446r2_bound_rpmh_tcs.py"
           cp scripts/446r2_apply_pon_wake_diag.py "$OUT/source/446r2_apply_pon_wake_diag.py"
           cp scripts/a52_final_tree_manifest_audit.py "$OUT/source/a52_final_tree_manifest_audit.py"
-          cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py "$OUT/source/"
+          cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py scripts/446s_apply_kgsl_smmu_runtime_pm.py "$OUT/source/"
           cp "$ROOT/drivers/devfreq/arm-memlat-mon.c" "$ROOT/drivers/pinctrl/qcom/a52-pinctrl-spmi-gpio.c" "$OUT/source/"
           cp "$ROOT/drivers/gpu/msm/kgsl_gmu.c" "$ROOT/drivers/gpu/msm/kgsl_device.h" "$ROOT/drivers/regulator/core.c" "$ROOT/include/linux/a52_gpu_cx_trace.h" "$OUT/source/"
           cp "$ROOT/drivers/devfreq/governor_memlat.c" "$ROOT/drivers/devfreq/devfreq.c" "$ROOT/drivers/gpu/drm/drm_atomic_uapi.c" "$ROOT/drivers/base/power/main.c" "$OUT/source/"
@@ -1313,6 +1319,7 @@ jobs:
             scripts/446s_port_legacy_pmic_gpio.py
             scripts/446s_publish_final_inputs.py
             scripts/446s_apply_gpu_slumber_trace.py
+            scripts/446s_apply_kgsl_smmu_runtime_pm.py
             vendor/phase446s/a52-pinctrl-spmi-gpio.c
             phase446r2-manifest/final-tree.json
             gki/common/drivers/soc/qcom/rpmh-rsc.c

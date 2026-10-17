@@ -13,6 +13,7 @@ paths, not blind mutation of panel, crtc, or encoder flags.
 import argparse
 from pathlib import Path
 P=Path("drivers/a52_display/msm/sde/sde_kms.c")
+SS=Path("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c")
 H=Path("include/linux/a52_446w_splash.h")
 TAG="A52_PHASE446W_SPLASH_SELECT_V1"
 
@@ -72,8 +73,32 @@ EXPORT_SYMBOL_GPL(a52w_handoff_selected);
 			sde_kms->splash_data.num_splash_displays);
 	}'''
     return one(s,anchor,repl,"safe splash data bypass")
+def patch_samsung(s):
+    if "P446W_FULL_POST_NORMAL_ON" in s:return s
+    if "a52v_display_event(true);" not in s:
+        raise RuntimeError("446W requires Phase446V Samsung normal-on event")
+    s='#include <linux/a52_446w_splash.h>\n'+s
+    hook=r'''			a52v_display_event(true);'''
+    replacement=r'''			a52v_display_event(true);
+		/* Always print the COMPLETE state after the first NORMAL DISPLAY_ON.
+		 * 446V's first post HWC snapshot may be drowned by GETBLOB dumps.
+		 * Keep a separate immediate snapshot at the transition.
+		 */
+		if (a52v_display_stage()==2) {
+			static bool a52w_post_snapshot_done;
+			if (!a52w_post_snapshot_done) {
+				a52w_post_snapshot_done=true;
+				pr_info("P446W FULL_POST_NORMAL_ON first transition stage=2\n");
+				a52v_sde_snapshot(GET_DRM_DEV(vdd),
+						"P446W_FULL_POST_NORMAL_ON");
+			}
+		}'''
+    return one(s,hook,replacement,"post cold-cycle full snapshot")
+
 def check(root):
     s=(root/P).read_text()
+    if "P446W_FULL_POST_NORMAL_ON" not in (root/SS).read_text():
+        raise RuntimeError("446W post-cycle complete snapshot missing")
     for a in (TAG,'early_param("a52.446w_cold"','early_param("a52.446w_handoff"',
               "P446W SPLASH COLD_SELECTED=1","sde_kms->splash_data.num_splash_regions",
               "a52w_handoff_selected"):
@@ -92,5 +117,6 @@ bool a52w_cold_selected(void);
 bool a52w_handoff_selected(void);
 #endif
 ''')
+        sf=args.root/SS;sf.write_text(patch_samsung(sf.read_text()))
     check(args.root)
 if __name__=="__main__":main()

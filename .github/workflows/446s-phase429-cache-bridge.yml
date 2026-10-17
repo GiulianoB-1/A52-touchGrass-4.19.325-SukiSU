@@ -1,0 +1,60 @@
+name: Phase446S Bridge - verified Phase429 cache export
+on:
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish-seed:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore exact known-good Phase429 R2 cache
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-6f6e3fa9
+      - name: Verify Phase429 and export reproducible bridge
+        if: steps.baseline.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -d gki/common/.git
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          test -s workspace/gki-phase199-out/.config
+          test -s workspace/gki-phase199-out/arch/arm64/boot/Image
+          test -s phase429-gki-out/package/boot.img
+          test "$(stat -c %s phase429-gki-out/package/boot.img)" -eq 100663296
+          mkdir -p phase446s-seed-bridge
+          tar -I 'zstd -3 -T0' -cf phase446s-seed-bridge/phase429-baseline.tar.zst \
+            gki/common workspace/gki-phase199-out phase429-gki-out
+          (
+            cd phase446s-seed-bridge
+            sha256sum phase429-baseline.tar.zst > SHA256SUMS
+            printf 'GKI_COMMON_SHA=%s\nPHASE429_CACHE_KEY=%s\nSOURCE_PR=182\n' \
+              "$GKI_COMMON_SHA" 'a52xq-phase429-reconstructed-v1-Linux-f960ed27302b1ff8e61e152fc202554d778deccd-6f6e3fa9' > PROVENANCE.txt
+          )
+          du -h phase446s-seed-bridge/phase429-baseline.tar.zst
+          echo "Phase446S bridge: exact pinned cached Phase429 PASS" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail closed if original Phase429 cache unavailable
+        if: steps.baseline.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::Original PR182 Phase429 cache unavailable; refusing to fabricate source."
+          exit 1
+      - name: Upload exact Phase429 cache bridge
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-P446S-PHASE429-SEED-BRIDGE
+          path: phase446s-seed-bridge/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

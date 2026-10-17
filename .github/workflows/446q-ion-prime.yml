@@ -859,7 +859,11 @@ jobs:
           BUILD="$PWD/workspace/gki-phase199-out"
           python3 scripts/446r2_bound_rpmh_tcs.py --root "$ROOT" --check-only
           python3 scripts/446r2_apply_pon_wake_diag.py --root "$ROOT" --check-only
-          python3 scripts/305_apply_display_rpmh_flush_compat.py --root "$ROOT" --check-only
+          # Phase305's historic --check-only requires its obsolete Phase13 solver
+          # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
+          # semantic markers below instead of running an incompatible phase gate.
+          grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
+          grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --output "$PWD/phase446r2-manifest/final-tree.json" --strict

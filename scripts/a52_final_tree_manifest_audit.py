@@ -79,6 +79,12 @@ EXPECT={
      ("A52_PHASE446S_KGSL_MUTEX_100MS_V1","P446S KGSL_MUTEX")),
  "P446S GPU vote API":("include/linux/a52_gpu_cx_trace.h",
      ("A52_PHASE446S_GPU_CX_VOTES_V1",)),
+ "P446S KGSL SMMU runtime PM":("drivers/iommu/arm/arm-smmu/arm-smmu.c",
+     ("A52_KGSL_SMMU_RPM_V1","smmu-kgsl@3d40000",
+      "pm_runtime_set_autosuspend_delay(dev, 20)",
+      "pm_runtime_get_noresume(dev)","pm_runtime_put_autosuspend(dev)",
+      "P446S KGSL_SMMU_RPM","runtime_suspend_vdd_off",
+      "runtime_resume_vdd_on")),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",

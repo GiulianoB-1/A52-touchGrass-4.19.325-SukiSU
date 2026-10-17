@@ -281,6 +281,24 @@ jobs:
           path: workspace/phase346-retained-seed
           key: a52xq-phase346-retained-seed-v1-${{ runner.os }}-10344752313
 
+      - name: Diagnose retained seed before legacy fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "P446S CACHE DIAG phase346_seed_hit=${{ steps.phase346-seed-cache.outputs.cache-hit }}"
+          for d in workspace/phase346-retained-seed /tmp/phase227-seed workspace/phase227-seed; do
+            if [ -d "$d" ]; then
+              echo "P446S CACHE DIAG PRESENT=$d"
+              du -sh "$d" || true
+              find "$d" -maxdepth 3 -type f -printf '%p %s bytes\\n' | head -70 || true
+            else
+              echo "P446S CACHE DIAG ABSENT=$d"
+            fi
+          done
+          echo "P446S CACHE DIAG phase227 expected before-phase216.config?"
+          find workspace/phase346-retained-seed -maxdepth 5 -iname '*phase*config' -o -name 'BUILD-IDENTITY.json' -o -name 'SHA256SUMS' 2>/dev/null | head -90 || true
+
       - name: Build Phase345 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         run: bash scripts/345_ci_build_gki.sh

@@ -1,0 +1,60 @@
+name: Phase446S - GPU SMMU source patch smoke test
+on:
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-446s-smmu-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  smmu-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore known successful Phase446R2 source snapshot (not a complete tree)
+        uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-PHASE446R2-WAKE-GKI-21
+          run-id: 39027208043
+          github-token: ${{ github.token }}
+          path: r2-evidence
+      - name: Check exact archived SMMU source provenance and apply 446S patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/smmu-smoke-tree"
+          mkdir -p "$ROOT/drivers/iommu/arm/arm-smmu"
+          test -s r2-evidence/source/arm-smmu.c
+          test -s r2-evidence/source/arm-smmu.h
+          cp r2-evidence/source/arm-smmu.c "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          cp r2-evidence/source/arm-smmu.h "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.h"
+          grep -Fq 'A52_PHASE250_GPU_SMMU_POWER_CONTRACT_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'A52_PHASE426' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          sha256sum "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          python3 -m py_compile scripts/446s_apply_kgsl_smmu_runtime_pm.py
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT"
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
+          grep -Fq 'A52_KGSL_SMMU_RPM_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'runtime_suspend_vdd_off' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'pm_runtime_set_autosuspend_delay(dev, 20)' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          echo 'P446S SOURCE SMOKE PASS (Phase446R2 archive, not a compiled kernel)' | tee a52-446s-smmu-smoke-result.txt
+          {
+            echo '### Phase446S SMMU patch vs successful Phase446R2 source'
+            echo 'PASS: patcher applied and check-only passed against archived R2 arm-smmu.c.'
+            echo 'This job intentionally does NOT certify kernel compilation or the final-tree manifest.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish source smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-446S-SMMU-SOURCE-SMOKE-${{ github.run_number }}
+          path: |
+            a52-446s-smmu-smoke-result.txt
+            smmu-smoke-tree/drivers/iommu/arm/arm-smmu/arm-smmu.c
+          if-no-files-found: warn
+          retention-days: 7

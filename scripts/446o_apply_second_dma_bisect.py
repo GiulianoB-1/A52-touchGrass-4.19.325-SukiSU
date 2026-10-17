@@ -130,6 +130,8 @@ EXPORT_SYMBOL_GPL(a52_p446o_note_buffer);
             16,4,p446o_pre_ctrl,sizeof(p446o_pre_ctrl),false);
         print_hex_dump(KERN_WARNING,"P446O POST: ",DUMP_PREFIX_OFFSET,
             16,4,p446l_t3.ctrl,sizeof(p446l_t3.ctrl),false);
+        print_hex_dump(KERN_WARNING,"P446O BUS: ",DUMP_PREFIX_OFFSET,
+            16,1,p446l_t3.bus,sizeof(p446l_t3.bus),false);
         if (p446o_packet_len)
             print_hex_dump(KERN_WARNING,"P446O CMD: ",DUMP_PREFIX_OFFSET,
                 16,1,p446o_packet,p446o_packet_len,false);

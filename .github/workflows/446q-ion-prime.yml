@@ -1,9 +1,12 @@
-name: Phase446Q - ION DMA-BUF flags and graphics import pipeline
-run-name: Phase446Q Phase148 ION exporter fallback + graphics pipeline witnesses
+name: Phase446R - Commit and GEM lifetime trace
+run-name: Phase446R capture frame composition, GEM lifetime and suspend console
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
   workflow_dispatch:
 
 permissions:
@@ -25,13 +28,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446q-${{ github.ref }}
+  group: a52-phase446r-base-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446Q GKI (ION+PRIME)
+    name: Build Phase446R GKI (frames/locking)
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -66,7 +69,7 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py scripts/446r_apply_commit_gem_lifetime.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
           python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
@@ -709,6 +712,11 @@ jobs:
           grep -Fq 'A52_QSEECOM_DMA_ID19_ID27_COMPAT' "$ROOT/drivers/staging/android/ion/ion.c"
           python3 scripts/446q_apply_ion_prime_pipeline_trace.py --root "$ROOT"
           python3 scripts/446q_apply_ion_prime_pipeline_trace.py --root "$ROOT" --check-only
+          python3 scripts/446r_apply_commit_gem_lifetime.py --root "$ROOT"
+          python3 scripts/446r_apply_commit_gem_lifetime.py --root "$ROOT" --check-only
+          grep -Fq 'A52_PHASE446P_QCOM_DSI_PACKET_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
+          grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' "$ROOT/drivers/staging/android/ion/ion_dma_buf.c"
+          grep -Fq 'A52_PHASE446N_DSI_IRQ_REARM_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           python3 scripts/446q_reconcile_phase_markers.py --root "$ROOT" --output "$PWD/phase446q-ion-audit"
           "$ROOT/scripts/config" --file "$BUILD/.config" -e USB_G_SERIAL -e USB_CONFIGFS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_F_FS -e U_SERIAL_CONSOLE
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
@@ -764,6 +772,7 @@ jobs:
             "$BUILD/drivers/a52_secure/a52_phase436_frontier.o" \
             "$BUILD/drivers/a52_secure/a52_phase437_open.o" \
             "$BUILD/drivers/a52_display/msm/msm_drv.o" \
+            "$BUILD/drivers/a52_display/msm/msm_gem.o" \
             "$BUILD/drivers/a52_display/msm/msm_gem_prime.o" \
             "$BUILD/drivers/a52_display/msm/msm_fb.o" \
             "$BUILD/drivers/staging/android/ion/ion_dma_buf.o" \
@@ -1011,6 +1020,8 @@ jobs:
           cp scripts/446p_apply_qcom_dsi_packet.py "$OUT/source/446p_apply_qcom_dsi_packet.py"
           cp scripts/446q_reconcile_phase_markers.py "$OUT/source/446q_reconcile_phase_markers.py"
           cp scripts/446q_apply_ion_prime_pipeline_trace.py "$OUT/source/446q_apply_ion_prime_pipeline_trace.py"
+          cp scripts/446r_apply_commit_gem_lifetime.py "$OUT/source/446r_apply_commit_gem_lifetime.py"
+          cp "$ROOT/drivers/a52_display/msm/msm_gem.c" "$OUT/source/446r-msm_gem.c"
           cp "$ROOT/drivers/staging/android/ion/ion_dma_buf.c" "$OUT/source/446q-ion_dma_buf.c"
           cp "$ROOT/drivers/a52_display/msm/msm_gem_prime.c" "$OUT/source/446q-msm_gem_prime.c"
           cp "$PWD/phase446q-ion-audit/phase446q-final-tree-marker-audit.json" "$OUT/audit/"
@@ -1099,6 +1110,157 @@ jobs:
             --append no_console_suspend
           mv "$FINAL.ncs" "$FINAL"
           grep -Fq '"token": "no_console_suspend"' "$OUT/package/fence1f-no-console-suspend-report.json"
+          cp "$FINAL" "$OUT/package/boot.img"
+          cmp -s "$FINAL" "$OUT/package/boot.img"
+          grep -aFq 'no_console_suspend' "$OUT/package/boot.img"
+          grep -aFq 'a52.cb2_reuse=1' "$OUT/package/boot.img"
+          test "$(grep -Ec '^(CONFIG_PSTORE_CONSOLE|CONFIG_PSTORE_RAM)=y          # Keep the only early serial console ttyGS0; do not request ttyGS1.
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+          grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
+
+          # Phase446i changes one variable only: skip the TE GPIO IRQ registration.
+          test "$(stat -c '%s' "$FINAL")" -eq 100663296
+          grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
+          cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
+          chmod +x "$OUT/package/446d_collect_boot_identity.sh"
+          sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
+
+          cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
+          F0BAR: actual autorefresh-disable path instrumented in sde_encoder_phys_cmd.c.
+          F0BAR 1=no SW autorefresh, 2=before existing disable, 3=after.
+          AR status bit7, pending kickoff, encoder state, rd/wr pointer recorded.
+          P1 still means DSI prepare ENTRY and cannot establish logo idle.
+          Missing F0BAR or unavailable HW read means quiescence NOT proven.
+          CRASH1 GKI: F0B ACTIVE stage ZERO, NEVER send raw FIFO F0.
+          Original Samsung F0 remains unmodified. Frame-event breadcrumbs, ARM64
+          FAR/PC/LR and OOPS/PANIC last 4KiB kmsg x16 go to P445 reserved RAM.
+          kmsg dumping requires kmsg_dump to actually run: a silent hard hang
+          does not guarantee a report. Fault hook runs before printk.
+          COM3 remains with g_serial. panic=0; no auto reboot.
+          F0-BISECT-GKI P6: same continuous-COM3 observer-quiet GKI.
+          Exactly ONE guarded hardware-FIFO F0 after DSI_LINK_CLK_ON per boot.
+          P1..P6 snapshots logged to PuTTY and P445 RAM (one 16-copy section per stage).
+          P1 is dsi_display_prepare entry, NOT proof autorefresh stopped.
+          P2..P6 are after core clock, clock source, controller init, host on, link clock on.
+          Early P1..P4 are PASSIVE (not valid standalone F0 probes).
+          F0 has side effects; PASS TG P6 is prerequisite before causal inferences.
+          Skipped raw probe (rc=3) means prereqs unverified, NOT an F0 failure.
+          No Android USB handover, so ADB will not attach on GKI debug build.
+          Disabled: known Phase446 heartbeat/burst MMIO reads, Phase446i pre/post F0 sweeps,
+          and legacy P430/P431/P385 diagnostic sampling threads where present.
+          Audit report: audit/u2-ab-quiet-report.json.
+          This is not an exhaustive audit of every historical observer; no hardware proof.
+
+          Intentional: Android ConfigFS is expected to fail with UDC busy.
+          USB ADB will NOT become available, by design for this debug build.
+          PuTTY COM3 should remain for the entire kernel boot, including F0.
+          Leave the Golden/TG image available for normal Android operation.
+
+          Phase446i GKI matched passive F0 environment twin
+          ==================================================
+          Established:
+            - Phase446g/h TE IRQ skip keeps the inherited splash streaming until Android handoff.
+            - F0 still enters DSI BUSY, lanes remain LP-11, DMA_DONE never asserts.
+            - R1 controller reset and R2 ctrl/PHY/PLL rebuild already failed.
+
+          Phase446i adds observation only:
+            - I_SW_ENTRY: cached DSI controller states and requested byte/pixel/byte_intf/esc rates.
+            - I_RAW_PRE / I_RAW_POST: full 0x88e7000..0x88e70ff refgen dump,
+              known DISPCC RCG CMD/CFG/M/N/D, PLL0 registers, selected MDP/INTF state,
+              direct DSI STATUS/LANE/CLK/INT and compact debug selectors.
+            - I_BUS_PRE / I_BUS_POST: full Kona DSI debug selector table.
+            - hot-path capture uses MMIO only: no clk API, regulator API, allocation, printk,
+              runtime-PM, reset, force-clock, or recovery write.
+
+          Refgen source audit:
+            - GKI port is Kona-only: qcom,refgen-kona-regulator + refgen_kona_ops.
+            - generic +0x08/+0x14 BIAS_EN/BG_CTRL path is absent.
+            - therefore the earlier generic-ops corruption theory is source-ruled-out.
+
+          GKI retains the proven TE IRQ skip solely so F0 is tested on a live display link.
+          Compare I_* sections directly against the Phase446i TouchGrass twin.
+          EOF
+
+          (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+            xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          sha256sum "$FINAL"
+
+      - name: Upload Phase446i GKI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446R-FRAME-GKI-FAIL-DIAG-${{ github.run_number }}
+          path: |
+            scripts/446m_apply_gdsc_irq_ab.py
+            scripts/446n_apply_dsi_irq_rearm.py
+            scripts/446p_apply_qcom_dsi_packet.py
+            scripts/446q_reconcile_phase_markers.py
+            scripts/446q_apply_ion_prime_pipeline_trace.py
+            scripts/446r_apply_commit_gem_lifetime.py
+            gki/common/drivers/a52_display/msm/msm_gem.c
+            gki/common/drivers/a52_display/msm/msm_atomic.c
+            phase446q-ion-audit/phase446q-final-tree-marker-audit.json
+            gki/common/drivers/staging/android/ion/ion_dma_buf.c
+            gki/common/drivers/staging/android/ion/ion.c
+            gki/common/include/linux/a52_ack_secure_flight_recorder.h
+            gki/common/drivers/a52_display/msm/msm_gem_prime.c
+            gki/common/drivers/a52_display/msm/msm_fb.c
+            gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+            gki/common/drivers/a52_display/msm/sde_power_handle.c
+            gki/common/drivers/a52_display/msm/sde/sde_irq.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/drivers/a52_display/msm/sde/sde_kms.c
+            scripts/446c_apply_takeover_window.py
+            scripts/446g_apply_te_irq_test.py
+            scripts/446h_apply_panel_f0_microscope.py
+            scripts/446i_apply_passive_f0_twin.py
+            gki/common/drivers/a52_display/msm/a52_phase445.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
+            gki/common/drivers/regulator/core.c
+            gki/common/drivers/regulator/refgen.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/439_apply_dsi_autopsy.py
+            scripts/440_apply_early_f0_cleanup_forensics.py
+            scripts/441_apply_vrr_state_compat.py
+            scripts/446d_apply_extra_observers.py
+            scripts/446d_collect_boot_identity.sh
+            gki/common/drivers/clk/qcom/dispcc-lagoon.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-msm.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+
+      - name: Upload Phase446i GKI
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446R-FRAME-GKI-${{ github.run_number }}
+          path: f0bisect-gki-p6-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase446i GKI boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446R-FRAME-GKI-${{ github.run_number }}-BOOT
+          path: f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+ "$BUILD/.config")" -eq 2
+          grep -Fq 'A52_PHASE446R_COMMIT_GEM_LIFETIME_V1' "$ROOT/drivers/a52_display/msm/msm_atomic.c"
+          grep -Fq 'A52_PHASE446R_COMMIT_GEM_LIFETIME_V1' "$ROOT/drivers/a52_display/msm/msm_gem.c"
           # Keep the only early serial console ttyGS0; do not request ttyGS1.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
@@ -1174,7 +1336,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446Q-ION-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446R-FRAME-GKI-FAIL-DIAG-${{ github.run_number }}
           path: |
             scripts/446m_apply_gdsc_irq_ab.py
             scripts/446n_apply_dsi_irq_rearm.py
@@ -1224,7 +1386,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446Q-ION-GKI-${{ github.run_number }}
+          name: A52XQ-PHASE446R-FRAME-GKI-${{ github.run_number }}
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
@@ -1234,7 +1396,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446Q-ION-GKI-${{ github.run_number }}-BOOT
+          name: A52XQ-PHASE446R-FRAME-GKI-${{ github.run_number }}-BOOT
           path: f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
           if-no-files-found: error
           compression-level: 0

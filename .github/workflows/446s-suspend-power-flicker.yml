@@ -388,6 +388,7 @@ jobs:
           grep -aFq 'P446U PLANE91 seq=' "$IMAGE"
           grep -aFq 'P446U MSM_CHECK seq=' "$IMAGE"
           grep -aFq 'P446U BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'P446U SAMSUNG_BRIGHTNESS ts=' "$IMAGE"
           grep -aFq 'P446U USB DETACH_BEGIN' "$IMAGE"
           grep -aFq 'P446U USB GS_UNBIND_BEGIN' "$IMAGE"
           grep -aFq 'P446U USB CONFIGFS_BIND' "$IMAGE"

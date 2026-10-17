@@ -103,7 +103,6 @@ def reconcile(root,output,repair):
     make_src=core.read_text() if core.exists() else ""
     ion_core=(root/"drivers/staging/android/ion/ion.c").read_text()
     present=(heap.exists() and
-        "a52_qseecom_ta_heap.o" in make_src and
         "A52_QSECOM_TA_HEAP_ID" in heap_src and
         "A52_QSECOM_HEAP_ID" in heap_src and
         "A52_QSECOM_DMA_ID19_ID27_COMPAT" in ion_core)

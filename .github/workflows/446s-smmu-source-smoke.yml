@@ -71,14 +71,27 @@ jobs:
           assert "if (node->monitor_ready)" in scope
           assert "devfreq_interval_update(df, &sample_ms);" in scope
           assert module.patch_memlat(guarded)==guarded
-          legacy="\t\tif (!hw->should_ignore_df_monitor)\n\t\t\tdevfreq_interval_update(df, &sample_ms);"
-          assert original.count(legacy)==1
-          absent=original.replace(legacy,
-              "\t\t/* No delayed-work interval update in this ACK variant. */")
-          patched=module.patch_memlat(absent)
-          assert "devfreq_interval_update(" not in patched
-          assert "A52_PHASE446S_MEMLAT_LIFECYCLE_V1" in patched
-          print("P446S MEMLAT unit smoke PASS: guarded TG call; absent ACK hook; idempotent")
+          # Phase433's actual GKI 5.10 import renames BOTH event and
+          # function. Verify that the renamed API cannot bypass this guard.
+          gki=original.replace("DEVFREQ_GOV_INTERVAL","DEVFREQ_GOV_UPDATE_INTERVAL")
+          gki=gki.replace("devfreq_interval_update","devfreq_update_interval")
+          assert "case DEVFREQ_GOV_UPDATE_INTERVAL:" in gki
+          assert "devfreq_update_interval(df, &sample_ms);" in gki
+          patched=module.patch_memlat(gki)
+          begin=patched.index("case DEVFREQ_GOV_UPDATE_INTERVAL:")
+          scope=patched[begin:patched.index("\n\t}",begin)]
+          assert "if (node->monitor_ready) {" in scope
+          assert "devfreq_update_interval(df, &sample_ms);" in scope
+          assert module.patch_memlat(patched)==patched
+          # An unknown source that loses its interval call must fail closed.
+          try:
+              module.patch_memlat(gki.replace("devfreq_update_interval(df, &sample_ms);",
+                                            "/* unsupported interval API */"))
+          except RuntimeError as e:
+              assert "interval guard" in str(e)
+          else:
+              raise AssertionError("missing 5.10 interval call was not rejected")
+          print("P446S MEMLAT unit smoke PASS: guarded TG 4.19 + Phase433 GKI5.10 API")
           PY
       - name: Inventory surviving historical GKI caches (read only)
         env:
@@ -199,11 +212,26 @@ jobs:
             exit 1
           }
           SRC=gki/common
-          test -s "$SRC/drivers/devfreq/governor_memlat.c"
           test -s "$SRC/drivers/devfreq/devfreq.c"
           ROOT="$RUNNER_TEMP/phase446s-memlat-source"
           mkdir -p "$ROOT/drivers/devfreq"
-          cp "$SRC/drivers/devfreq/governor_memlat.c" "$ROOT/drivers/devfreq/"
+          # Phase429 precedes Phase433: the governor is not imported until
+          # Phase433, which copies TG then renames its two interval API tokens.
+          # Reproduce those exact transformations for a cheap source test.
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/governor_memlat.c' \
+            -o "$ROOT/drivers/devfreq/governor_memlat.c"
+          python3 - "$ROOT/drivers/devfreq/governor_memlat.c" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]);s=p.read_text()
+          assert s.count("DEVFREQ_GOV_INTERVAL") == 1
+          assert s.count("devfreq_interval_update") == 1
+          s=s.replace("DEVFREQ_GOV_INTERVAL","DEVFREQ_GOV_UPDATE_INTERVAL")
+          s=s.replace("devfreq_interval_update","devfreq_update_interval")
+          p.write_text(s)
+          print("P446S Phase433 imported GKI5.10 governor interval ABI reproduced")
+          PY
           cp "$SRC/drivers/devfreq/devfreq.c" "$ROOT/drivers/devfreq/"
           sha256sum "$ROOT/drivers/devfreq/"*.c
           python3 -m py_compile scripts/446s_apply_memlat_guards.py

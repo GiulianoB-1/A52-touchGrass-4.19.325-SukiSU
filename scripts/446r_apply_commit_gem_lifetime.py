@@ -137,7 +137,7 @@ def audit(root):
         raise RuntimeError("446R stale 4.19 GEM-free lock assertion remains")
     if "WARN_ON(is_active(msm_obj));" not in gem:
         raise RuntimeError("446R active list validation lost")
-    if ".gem_free_object_unlocked = msm_gem_free_object" not in drv.read_text():
+    if ".gem_free_object_unlocked = msm_gem_free_object" not in drv:
         raise RuntimeError("446R 5.10 GEM destructor callback changed")
     print("P446R AUDIT PASS: post-swap layer/FB trace, 5.10 unlocked GEM free contract, active-list WARN retained")
 

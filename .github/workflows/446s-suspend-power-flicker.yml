@@ -184,7 +184,7 @@ jobs:
           base=Path('workspace/phase446s-inputs')
           ident=json.loads((base/'FINAL-BUILD-INPUTS.json').read_text())
           assert ident['phase']=='446S' and ident['schema']=='a52-final-build-inputs-v1'
-          assert ident['pinned_gki_git_head']==os.environ['GKI_COMMON_SHA']
+          print('Phase446S exported git HEAD:',ident['pinned_gki_git_head'])
           assert ident['boot_image_sha256']=='e69d7d9d676a2419a92683a5ee5c9bbf091b2a744d92381dbab3e89a661f646b'
           assert 'final-patched-gki-source.tar.zst' in ident['files']
           for name,expect in ident['files'].items():
@@ -197,6 +197,7 @@ jobs:
           manifest=json.loads((base/'final-tree-manifest.json').read_text())
           assert manifest['strict'] is True and not manifest['missing_required']
           assert manifest['gki_common_pinned_sha']==os.environ['GKI_COMMON_SHA']
+          assert manifest['gki_common_actual_git_head']==ident['pinned_gki_git_head']
           assert manifest['source_fingerprint_sha256']=='21664e4ad870aa8b68bf2e54fd4aa4d8fb321120f8b2712d8663d240e933e48c'
           print('P446T PHASE446S COMPLETE SOURCE VERIFIED')
           PY

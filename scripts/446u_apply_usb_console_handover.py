@@ -146,7 +146,7 @@ a52u_complete_done:
     }
     for opname,(ret_type,guard_ret) in guards.items():
         import re
-        pattern=r'static '+ret_type+r' '+opname+r'\(struct tty_struct \*tty,'
+        pattern=r'static '+ret_type+r' '+opname+r'\(struct tty_struct \*tty(?:,|\))'
         match=re.search(pattern,s)
         if not match:
             raise RuntimeError("U446 cannot find tty operation "+opname)

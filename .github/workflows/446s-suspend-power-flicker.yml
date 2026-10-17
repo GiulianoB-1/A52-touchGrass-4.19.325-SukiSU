@@ -6,7 +6,7 @@ run-name: Phase446S suspend recovery and framebuffer origin diagnostics
 on:
   pull_request:
     branches:
-      - agent/a52-phase446r2-strict-manifest-pon-v1
+      - agent/a52-phase446l-post-trigger-twin-v1
   workflow_dispatch:
 
 permissions:

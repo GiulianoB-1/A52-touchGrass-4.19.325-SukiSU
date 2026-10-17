@@ -1,5 +1,5 @@
-name: Phase446S - memlat guard, PON key and frame diagnostics
-run-name: Phase446S suspend recovery and framebuffer origin diagnostics
+name: Phase446T - GPU SMMU lifetime and GDSC lock repair
+run-name: Phase446T GPU SMMU active PM hold and no nested regulator ops
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
@@ -30,13 +30,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446s-${{ github.ref }}
+  group: a52-phase446t-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446S GKI (memlat/PON/frame)
+    name: Build Phase446T GKI (GPU SMMU hold and safe GDSC)
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -823,6 +823,32 @@ jobs:
           # changes and no GDSC timeout bypass or forced supply disable.
           python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT"
           python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
+          # Phase446T: reconstruct byte-exact reviewable patch generator from
+          # retained text carrier; prevent cached/modified payload substitution.
+          python3 - <<'PY'
+          from pathlib import Path
+          import zlib,base64,hashlib
+          carrier=Path("scripts/446t_apply_smmu_hold_no_nested.py.z64")
+          decoded=zlib.decompress(base64.b64decode(carrier.read_text().strip(), validate=True))
+          expected="c589faa4a829d56a394a839349b8d23f250c467522aa3781927504c2873edc37"
+          assert hashlib.sha256(decoded).hexdigest()==expected, "446T source SHA256 changed"
+          Path("scripts/446t_apply_smmu_hold_no_nested.py").write_bytes(decoded)
+          print("P446T generator SHA256 verified",expected)
+          PY
+          python3 -m py_compile scripts/446t_apply_smmu_hold_no_nested.py
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT"
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
+          # Always rebuild every affected object even when a restored cache
+          # contains successful 446S objects compiled before the new source.
+          for obj in \
+            drivers/regulator/a52-legacy-gdsc-regulator.o \
+            drivers/gpu/msm/kgsl_pwrctrl.o \
+            drivers/gpu/msm/kgsl_gmu.o \
+            drivers/iommu/arm/arm-smmu/arm-smmu.o \
+            drivers/gpu/msm/kgsl_iommu.o; do
+            rm -f "$BUILD/$obj"
+          done
+          echo "P446T exact source marker and object invalidation PASS"
           grep -Fq 'A52_PHASE446P_QCOM_DSI_PACKET_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' "$ROOT/drivers/staging/android/ion/ion_dma_buf.c"
           grep -Fq 'A52_PHASE446N_DSI_IRQ_REARM_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
@@ -971,6 +997,7 @@ jobs:
           python3 scripts/446s_apply_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_gpu_slumber_trace.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
+          python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.

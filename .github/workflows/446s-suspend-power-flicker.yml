@@ -344,6 +344,25 @@ jobs:
           printf '#define A52_446S_FINGERPRINT "%s"\n' "$FP" > "$ROOT/include/generated/a52_446s_manifest.h"
           printf 'P446S MANIFEST PASS %s\n' "$FP"
           echo "Source fingerprint: $FP" >> "$GITHUB_STEP_SUMMARY"
+      - name: Compile changed Phase446U objects first (fail-fast)
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 -j"$(nproc)" \
+            drivers/gpu/drm/drm_atomic_uapi.o \
+            drivers/a52_display/msm/msm_atomic.o \
+            drivers/a52_display/msm/msm_drv.o \
+            drivers/a52_display/msm/sde/sde_plane.o \
+            drivers/a52_display/msm/sde/sde_crtc.o \
+            drivers/a52_display/msm/dsi/dsi_panel.o \
+            drivers/a52_display/msm/samsung/ss_dsi_panel_common.o \
+            drivers/usb/gadget/function/u_serial.o \
+            drivers/usb/gadget/legacy/serial.o \
+            drivers/usb/gadget/configfs.o
+          echo 'P446U all changed atomic/display/USB compilation gates PASS' >> "$GITHUB_STEP_SUMMARY"
       - name: Audit display clock sync_state contracts
         run: |
           set -Eeuo pipefail

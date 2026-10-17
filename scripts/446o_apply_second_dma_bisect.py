@@ -160,6 +160,12 @@ def apply_panel(s,variant):
     if variant=="twin":
         return s+"\n/* "+TAG+" TG stock ON sequence */\n"
     anchor="\t\tlen = ops->transfer(panel->host, &cmds->msg);\n"
+    identity=('        if (type == DSI_CMD_SET_ON && i == 0 &&\n'
+              '            !display->is_cont_splash_enabled)\n'
+              '            pr_warn("P446O VARIANT=${variant} cold-ON start\\n");\n')
+    # Bake an unambiguous, runtime-visible identity into every experiment.
+    identity=identity.replace("${variant}",variant)
+    s=one(s,anchor,identity+anchor,"ON variant identity")
     if variant=="normal":
         replacement=anchor
     elif variant=="split":

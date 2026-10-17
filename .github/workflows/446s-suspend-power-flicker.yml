@@ -69,7 +69,7 @@ jobs:
           python3 scripts/444_apply_deep_passive_compare.py --help >/dev/null
           python3 scripts/445_apply_recovery_ladder.py --help >/dev/null
           python3 -m py_compile scripts/f0_bisect_v2_transform.py scripts/f0_bisect_stage_guard.py scripts/f0_bisect_ar_idle.py scripts/crash1_apply_fault_and_frameevent.py
-          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py scripts/446r_apply_commit_gem_lifetime.py scripts/446r2_bound_rpmh_tcs.py scripts/446r2_apply_pon_wake_diag.py scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/a52_final_tree_manifest_audit.py
+          python3 -m py_compile scripts/crash1_fix_gki_dma_fence_union.py scripts/fence1b_disable_sde_dbg_panic.py scripts/fence1c_quiet_sde_evtlog.py scripts/fence1c_fix_dsi_pll_hw_init.py scripts/fence1e_quiet_dump_record_f0.py scripts/fence1f_reopen_p445_gate_at_cold_prepare.py scripts/fence1g_nopanic_trace_cold_on.py scripts/446k_apply_matched_cold_compare.py scripts/446l_apply_post_trigger_twin.py scripts/446l_apply_smmu_cb2_live.py scripts/446m_apply_gdsc_irq_ab.py scripts/446n_apply_dsi_irq_rearm.py scripts/446p_apply_qcom_dsi_packet.py scripts/446q_reconcile_phase_markers.py scripts/446q_apply_ion_prime_pipeline_trace.py scripts/446r_apply_commit_gem_lifetime.py scripts/446r2_bound_rpmh_tcs.py scripts/446r2_apply_pon_wake_diag.py scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/a52_final_tree_manifest_audit.py
           python3 scripts/crash1_fix_gki_dma_fence_union.py --help >/dev/null
           python3 scripts/fence1b_disable_sde_dbg_panic.py --help >/dev/null
           python3 scripts/fence1c_quiet_sde_evtlog.py --help >/dev/null
@@ -721,6 +721,12 @@ jobs:
           # Phase446S: first fix failed memlat monitor startup/invalid delayed work.
           python3 scripts/446s_apply_memlat_guards.py --root "$ROOT"
           python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          # TG exclude_idle is rejected by ACK armv8 PMU.
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT"
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT" --check-only
+          # Restore TG legacy DT ABI (reg-size and per-pin IRQ).
+          python3 scripts/446s_port_legacy_pmic_gpio.py --root "$ROOT"
+          python3 scripts/446s_port_legacy_pmic_gpio.py --root "$ROOT" --check-only
           # Then key handling is already installed by updated R2 generator.
           # Device PM diagnostics and frame tracing NEVER change power/planes.
           python3 scripts/446s_apply_suspend_timing.py --root "$ROOT"
@@ -869,6 +875,8 @@ jobs:
           python3 scripts/446r2_bound_rpmh_tcs.py --root "$ROOT" --check-only
           python3 scripts/446r2_apply_pon_wake_diag.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT" --check-only
+          python3 scripts/446s_port_legacy_pmic_gpio.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_suspend_timing.py --root "$ROOT" --check-only
           python3 scripts/446s_apply_frame_trace.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
@@ -1087,7 +1095,8 @@ jobs:
           cp scripts/446r2_bound_rpmh_tcs.py "$OUT/source/446r2_bound_rpmh_tcs.py"
           cp scripts/446r2_apply_pon_wake_diag.py "$OUT/source/446r2_apply_pon_wake_diag.py"
           cp scripts/a52_final_tree_manifest_audit.py "$OUT/source/a52_final_tree_manifest_audit.py"
-          cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py "$OUT/source/"
+          cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py "$OUT/source/"
+          cp "$ROOT/drivers/devfreq/arm-memlat-mon.c" "$ROOT/drivers/pinctrl/qcom/a52-pinctrl-spmi-gpio.c" "$OUT/source/"
           cp "$ROOT/drivers/devfreq/governor_memlat.c" "$ROOT/drivers/devfreq/devfreq.c" "$ROOT/drivers/gpu/drm/drm_atomic_uapi.c" "$ROOT/drivers/base/power/main.c" "$OUT/source/"
           cp "$ROOT/include/generated/a52_446s_manifest.h" "$OUT/source/"
           cp "$ROOT/drivers/a52_secure/a52_pon_wake_diag.c" "$OUT/source/a52_pon_wake_diag.c"
@@ -1260,6 +1269,21 @@ jobs:
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
+          # Actual post-repack boot DTB, config/map, and full patched tree.
+          INPUTS="$PWD/phase446s-final-inputs"
+          python3 scripts/446s_publish_final_inputs.py \
+            --root "$ROOT" --build "$BUILD" --boot "$FINAL" \
+            --manifest "$PWD/phase446r2-manifest/final-tree.json" \
+            --output "$INPUTS"
+          test -s "$INPUTS/final-patched-gki-source.tar.zst"
+          test -s "$INPUTS/boot-final.dtb"
+          test -s "$INPUTS/boot-final.dts"
+          {
+            echo '### Phase446S final build inputs'
+            echo 'Artifact: A52XQ-PHASE446S-FINAL-INPUTS-${{ github.run_number }}'
+            echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
+            echo 'Any unavailable separate DTBO is explicitly documented.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
@@ -1276,6 +1300,10 @@ jobs:
             scripts/446r2_bound_rpmh_tcs.py
             scripts/446r2_apply_pon_wake_diag.py
             scripts/a52_final_tree_manifest_audit.py
+            scripts/446s_apply_arm_memlat_pmu.py
+            scripts/446s_port_legacy_pmic_gpio.py
+            scripts/446s_publish_final_inputs.py
+            vendor/phase446s/a52-pinctrl-spmi-gpio.c
             phase446r2-manifest/final-tree.json
             gki/common/drivers/soc/qcom/rpmh-rsc.c
             gki/common/drivers/a52_secure/a52_pon_wake_diag.c
@@ -1328,6 +1356,16 @@ jobs:
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
+          retention-days: 30
+
+      - name: Upload Phase446S final build inputs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446S-FINAL-INPUTS-${{ github.run_number }}
+          path: phase446s-final-inputs/
+          if-no-files-found: error
+          compression-level: 0
           retention-days: 30
 
       - name: Upload Phase446i GKI boot image

@@ -408,9 +408,12 @@ jobs:
           grep -aFq 'P446U MSM_CHECK seq=' "$IMAGE"
           grep -aFq 'P446U BRIGHTNESS ts=' "$IMAGE"
           grep -aFq 'P446U SAMSUNG_BRIGHTNESS ts=' "$IMAGE"
-          grep -aFq 'P446U USB DETACH_BEGIN' "$IMAGE"
-          grep -aFq 'P446U USB GS_UNBIND_BEGIN' "$IMAGE"
-          grep -aFq 'P446U USB CONFIGFS_BIND' "$IMAGE"
+          grep -aFq 'U446 CONSOLE worker-stop-ack' "$IMAGE"
+          grep -aFq 'U446 UNBIND gs_unbind enter' "$IMAGE"
+          grep -aFq 'U446 UDC configfs probe-exit' "$IMAGE"
+          grep -aFq 'U446 holder pid=' "$IMAGE"
+          grep -aFq 'U446 CONSOLE request-dequeue-enter' "$IMAGE"
+          grep -aFq 'U446 UDC adb-bound' "$IMAGE"
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
           echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           test -s "$P445"
@@ -489,8 +492,8 @@ jobs:
           # is present, with NO ttyGS1 console re-attachment.
           ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE"
           ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE"
-          grep -aFq 'P446U USB KTHREAD_STOPPED' "$IMAGE"
-          grep -aFq 'P446U USB HANDOVER_DISABLED' "$IMAGE"
+          grep -aFq 'U446 UNBIND free_port before_close_wait' "$IMAGE"
+          grep -aFq 'U446 HANDOVER_DISABLED' "$IMAGE"
           echo "P446U USB source/binary console-first audit PASS"
 
           ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
@@ -708,8 +711,10 @@ jobs:
           At 85s atomic ioctl property requests are logged with names, object
           types, values and join IDs. Plane91 pre/post, SDE validation, FB/CRTC
           setter and brightness traces are passive. P445 cap now 240.
-          USB: ttyGS0 console thread quiesces for up to 200ms, FIFO dropped,
-          console unregistered, g_serial unbound, Android ConfigFS binds UDC.
+          USB: single-flight work item outside ConfigFS gi->lock; ttyGS0 count preflight,
+          block new opens, 500ms bounded worker/request ack, console unregister,
+          g_serial unbind only on safe quiescence; Android ConfigFS binds UDC.
+          If ttyGS0 has an opener, return -EAGAIN (ConfigFS write must retry) and keep g_serial.
           Boot flag a52.usb_handover=1 (default); toggle to =0 for COM3
           using scripts/446u_toggle_usb_handover.py without repacking.
           F0BAR: actual autorefresh-disable path instrumented in sde_encoder_phys_cmd.c.

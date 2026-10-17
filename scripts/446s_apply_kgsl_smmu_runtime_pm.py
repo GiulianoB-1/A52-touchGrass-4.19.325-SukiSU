@@ -343,7 +343,15 @@ def audit(root):
               "system_suspend","system_resume"):
         if t not in s:
             raise RuntimeError("446S SMMU audit missing "+t)
-    if s.count("if ((dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) ||\n\t    a52_kgsl_smmu_has_phase250_vdd(smmu))")!=1:
+    original = "if ((dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) ||\n\t    a52_kgsl_smmu_has_phase250_vdd(smmu))"
+    phase446t = "if ((!a52_kgsl_smmu_has_phase250_vdd(smmu) &&\n\t     dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) ||\n\t    (a52_kgsl_smmu_has_phase250_vdd(smmu) && a52_kgsl_smmu_rpm))"
+    # Retain the Phase446S pre-patch audit for its own original source;
+    # the Phase446T post-patch audit additionally requires the precise
+    # GPU-only cmdline gate, without accepting arbitrary relaxed scopes.
+    if "A52_PHASE446T_KGSL_SMMU_RPM_SWITCH_V1" in s:
+        if s.count(phase446t) != 1 or original in s:
+            raise RuntimeError("446T GPU-only SMMU PM scope changed")
+    elif s.count(original) != 1:
         raise RuntimeError("446S SMMU global PM scope changed")
     if "gmu_disable_gdsc" in s:
         raise RuntimeError("446S SMMU must not modify GMU")

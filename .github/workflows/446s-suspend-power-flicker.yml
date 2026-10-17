@@ -221,6 +221,64 @@ jobs:
             phase345-gki-out
           key: a52xq-phase345-baseline-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-d7f4426
 
+      # PRE-FLIGHT SOURCE PROVENANCE GATE: do not restore multi-GB pinned
+      # sources or start historical build scripts when all baseline caches miss
+      # and the Phase346 carrier is unavailable. Preserve strict SHA gates.
+      - name: Restore retained Phase346 seed cache
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        id: phase346-seed-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace/phase346-retained-seed
+          key: a52xq-phase346-retained-seed-v2-${{ runner.os }}-10344752313
+
+      - name: Diagnose retained seed before legacy fallback
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "P446S CACHE DIAG phase346_seed_hit=${{ steps.phase346-seed-cache.outputs.cache-hit }}"
+          for d in workspace/phase346-retained-seed /tmp/phase227-seed workspace/phase227-seed; do
+            if [ -d "$d" ]; then
+              echo "P446S CACHE DIAG PRESENT=$d"
+              du -sh "$d" || true
+              find "$d" -maxdepth 3 -type f -printf '%p %s bytes\\n' | head -70 || true
+            else
+              echo "P446S CACHE DIAG ABSENT=$d"
+            fi
+          done
+          echo "P446S CACHE DIAG phase227 expected before-phase216.config?"
+          find workspace/phase346-retained-seed -maxdepth 5 -iname '*phase*config' -o -name 'BUILD-IDENTITY.json' -o -name 'SHA256SUMS' 2>/dev/null | head -90 || true
+
+      - name: Fail closed on missing historical Phase346 source carrier
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SEED=workspace/phase346-retained-seed
+          required=(SHA256SUMS BUILD-IDENTITY.json package/boot.img compile/Image config/final.config)
+          incomplete=0
+          for file in "${required[@]}"; do
+            if [ ! -s "$SEED/$file" ]; then
+              echo "::error::Phase446S baseline source carrier missing: $SEED/$file"
+              incomplete=1
+            fi
+          done
+          if [ "$incomplete" -ne 0 ]; then
+            echo "::error::Old Phase346 artifact 10344752313 is no longer available. The previous v1 Actions cache was an empty 4KB archive saved by 'always()' on failed fallback. This build requires an independently verified source/config carrier before historical replay."
+            {
+              echo '### Phase446S blocked: historical source carrier unavailable'
+              echo 'Pinned GKI and TG caches are present, but Phase429/357/346/345 baselines are gone.'
+              echo 'The Phase346 retained artifact is expired. A poisoned v1 seed cache contained only an empty directory.'
+              echo 'No Image was built. Mandatory final-tree manifest audit NOT RUN.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          (cd "$SEED" && sha256sum -c SHA256SUMS)
+          grep -Fq '"phase": "346"' "$SEED/BUILD-IDENTITY.json"
+          echo "11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df  $SEED/package/boot.img" | sha256sum -c -
+          echo 'P446S VERIFIED_PHASE346_SOURCE_CARRIER PASS'
+      
       - name: Restore pinned GKI source on baseline-cache miss
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         id: gki-source-cache
@@ -280,61 +338,6 @@ jobs:
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
           echo 'P446S TouchGrass pinned checkout PASS; 1.2GB duplicate cache SAVE DISABLED'
 
-      - name: Restore retained Phase346 seed cache
-        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
-        id: phase346-seed-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: workspace/phase346-retained-seed
-          key: a52xq-phase346-retained-seed-v2-${{ runner.os }}-10344752313
-
-      - name: Diagnose retained seed before legacy fallback
-        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          echo "P446S CACHE DIAG phase346_seed_hit=${{ steps.phase346-seed-cache.outputs.cache-hit }}"
-          for d in workspace/phase346-retained-seed /tmp/phase227-seed workspace/phase227-seed; do
-            if [ -d "$d" ]; then
-              echo "P446S CACHE DIAG PRESENT=$d"
-              du -sh "$d" || true
-              find "$d" -maxdepth 3 -type f -printf '%p %s bytes\\n' | head -70 || true
-            else
-              echo "P446S CACHE DIAG ABSENT=$d"
-            fi
-          done
-          echo "P446S CACHE DIAG phase227 expected before-phase216.config?"
-          find workspace/phase346-retained-seed -maxdepth 5 -iname '*phase*config' -o -name 'BUILD-IDENTITY.json' -o -name 'SHA256SUMS' 2>/dev/null | head -90 || true
-
-      - name: Fail closed on missing historical Phase346 source carrier
-        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          SEED=workspace/phase346-retained-seed
-          required=(SHA256SUMS BUILD-IDENTITY.json package/boot.img compile/Image config/final.config)
-          incomplete=0
-          for file in "${required[@]}"; do
-            if [ ! -s "$SEED/$file" ]; then
-              echo "::error::Phase446S baseline source carrier missing: $SEED/$file"
-              incomplete=1
-            fi
-          done
-          if [ "$incomplete" -ne 0 ]; then
-            echo "::error::Old Phase346 artifact 10344752313 is no longer available. The previous v1 Actions cache was an empty 4KB archive saved by 'always()' on failed fallback. This build requires an independently verified source/config carrier before historical replay."
-            {
-              echo '### Phase446S blocked: historical source carrier unavailable'
-              echo 'Pinned GKI and TG caches are present, but Phase429/357/346/345 baselines are gone.'
-              echo 'The Phase346 retained artifact is expired. A poisoned v1 seed cache contained only an empty directory.'
-              echo 'No Image was built. Mandatory final-tree manifest audit NOT RUN.'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          (cd "$SEED" && sha256sum -c SHA256SUMS)
-          grep -Fq '"phase": "346"' "$SEED/BUILD-IDENTITY.json"
-          echo "11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df  $SEED/package/boot.img" | sha256sum -c -
-          echo 'P446S VERIFIED_PHASE346_SOURCE_CARRIER PASS'
-      
       - name: Build Phase345 fallback
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
         run: bash scripts/345_ci_build_gki.sh

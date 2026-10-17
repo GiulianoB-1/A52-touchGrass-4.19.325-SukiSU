@@ -126,43 +126,37 @@ static bool p446s_memlat_owner(struct devfreq *df)
 	switch (event) {
 	case DEVFREQ_GOV_START:'''
     s=once(s,anchor,guard,"failed START event guard")
-    # The imported 5.10 memlat governor can differ from original TG 4.19:
-    # some historical Phase429 replay branches have no interval-update call
-    # at all. Scope this check to the EVENT interval case, not an exact
-    # two-line 4.19 formatting anchor. Never bypass a call that still exists.
-    begin = s.find("\tcase DEVFREQ_GOV_INTERVAL:")
-    if begin < 0 or s.find("\tcase DEVFREQ_GOV_INTERVAL:", begin + 1) != -1:
-        raise RuntimeError("446S interval guard: missing/duplicate interval case")
-    tail = s[begin:]
-    stop = __import__("re").search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", tail[1:])
+    # Phase433 ports TG 4.19 governor_memlat.c into ACK 5.10 and renames
+    # both DEVFREQ_GOV_INTERVAL -> DEVFREQ_GOV_UPDATE_INTERVAL and
+    # devfreq_interval_update -> devfreq_update_interval. Guard the actual
+    # 5.10 API, not merely the vanished legacy spelling. Fail closed if
+    # Phase433 semantics differ or an unexpected second invocation appears.
+    import re
+    cases = list(re.finditer(r"(?m)^\tcase DEVFREQ_GOV_(?:UPDATE_)?INTERVAL:", s))
+    if len(cases) != 1:
+        raise RuntimeError("446S interval guard: expected one 4.19/5.10 interval case, found %d" % len(cases))
+    begin = cases[0].start()
+    tail = s[begin + 1:]
+    stop = re.search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", tail)
     end = begin + 1 + stop.start() if stop else len(s)
     interval = s[begin:end]
-    import re
-    calls = list(re.finditer(r"\bdevfreq_interval_update\s*\(", interval))
-    if len(calls) > 1:
-        raise RuntimeError("446S interval guard: multiple update calls in interval case")
-    if not calls:
-        # The legacy 4.19 interval hook is absent in this final 5.10 source.
-        # No devfreq_interval_update to invoke on uninitialized work here.
-        print("P446S MEMLAT interval update ABSENT in final source; no guard needed")
-    else:
-        # Verify the call is a standalone C statement so a conditional guard
-        # does not accidentally change a return value or a compound expression.
-        matches = list(re.finditer(
-            r"(?m)^(?P<indent>[ \t]*)devfreq_interval_update\(\s*df\s*,\s*&sample_ms\s*\);[ \t]*$",
-            interval))
-        if len(matches) != 1:
-            raise RuntimeError(
-                "446S interval guard: unsupported interval call syntax: " +
-                repr(interval[max(0,calls[0].start()-100):calls[0].start()+110]))
-        m = matches[0]
-        guard = (m.group("indent") + "if (node->monitor_ready) {\n"
-                 + m.group("indent") + "\t" + m.group(0).lstrip() + "\n"
-                 + m.group("indent") + "}")
-        interval = interval[:m.start()] + guard + interval[m.end():]
-        s = s[:begin] + interval + s[end:]
-        print("P446S MEMLAT interval update guarded in final source")
-
+    calls = list(re.finditer(r"\bdevfreq_(?:update_interval|interval_update)\s*\(", interval))
+    if len(calls) != 1:
+        raise RuntimeError("446S interval guard: expected exactly one 4.19/5.10 update, found %d; case=%r"
+                           % (len(calls), interval[:380]))
+    matches = list(re.finditer(
+        r"(?m)^(?P<indent>[ \t]*)devfreq_(?:update_interval|interval_update)\(\s*df\s*,\s*&sample_ms\s*\);[ \t]*$",
+        interval))
+    if len(matches) != 1:
+        raise RuntimeError("446S interval guard: unsupported update syntax; case=%r" % interval[:380])
+    m = matches[0]
+    guard = (m.group("indent") + "if (node->monitor_ready) {\n"
+             + m.group("indent") + "\t" + m.group(0).lstrip() + "\n"
+             + m.group("indent") + "}")
+    interval = interval[:m.start()] + guard + interval[m.end():]
+    s = s[:begin] + interval + s[end:]
+    print("P446S MEMLAT interval guard PASS: %s" %
+          ("GKI 5.10" if "devfreq_update_interval(" in interval else "legacy TG"))
     return s
 
 def patch_core(s):
@@ -208,15 +202,16 @@ def check(root):
     for label,(src,tokens) in must.items():
         for token in tokens:
             if token not in src:raise RuntimeError("446S "+label+" missing "+token)
-    event = m.find("case DEVFREQ_GOV_INTERVAL:")
-    if event < 0:
-        raise RuntimeError("446S memlat source audit missing interval event")
-    event_tail = m[event:]
     import re
-    boundary = re.search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", event_tail[1:])
-    interval = event_tail[:1 + boundary.start()] if boundary else event_tail
-    if "devfreq_interval_update(" in interval and "if (node->monitor_ready)" not in interval:
-        raise RuntimeError("446S memlat interval update has no initialized-timer guard")
+    cases = list(re.finditer(r"(?m)^\tcase DEVFREQ_GOV_(?:UPDATE_)?INTERVAL:", m))
+    if len(cases) != 1:
+        raise RuntimeError("446S memlat source audit requires one interval case")
+    event_tail = m[cases[0].start()+1:]
+    boundary = re.search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", event_tail)
+    interval = event_tail[:boundary.start()] if boundary else event_tail
+    updates = list(re.finditer(r"\bdevfreq_(?:update_interval|interval_update)\s*\(", interval))
+    if len(updates) != 1 or "if (node->monitor_ready) {" not in interval:
+        raise RuntimeError("446S memlat interval update must be present and guarded (GKI 5.10 included)")
     print("P446S MEMLAT source audit PASS: failed-start ownership, initialized-work guards")
 
 def main():

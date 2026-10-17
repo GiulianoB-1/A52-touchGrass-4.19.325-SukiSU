@@ -379,6 +379,7 @@ jobs:
             drivers/a52_display/msm/sde/sde_plane.o \
             drivers/a52_display/msm/sde/sde_kms.o \
             drivers/a52_display/msm/sde/sde_encoder.o \
+            drivers/a52_display/msm/sde/sde_encoder_phys_cmd.o \
             drivers/a52_display/msm/sde/sde_crtc.o \
             drivers/a52_display/msm/dsi/dsi_panel.o \
             drivers/a52_display/msm/samsung/ss_dsi_panel_common.o \
@@ -449,6 +450,7 @@ jobs:
           grep -aFq 'P446V SNAP_DSI' "$IMAGE"
           grep -aFq 'P446V SNAP_SAMSUNG' "$IMAGE"
           grep -aFq 'P446V SNAP_ENC_DETAIL' "$IMAGE"
+          grep -aFq 'P446V SNAP_AUTORF' "$IMAGE"
           grep -aFq 'P446V POST_WINDOW_BEGIN' "$IMAGE"
           grep -aFq 'P446V RTC PROBE' "$IMAGE"
           grep -aFq 'P446V RTC REGISTER' "$IMAGE"

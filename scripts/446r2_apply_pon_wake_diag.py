@@ -44,24 +44,40 @@ struct a52_pon_diag {
     int key_irq;
     bool wake_enabled;
     atomic_t edges;
+    bool last_key_state;
 };
 static struct a52_pon_diag *a52_pon_primary;
 
-/* PM6350 PON RT status: KPDPWR_N active-low bit 0 (TouchGrass). */
+/* A52_PHASE446S_PON_KEY_STATE_V1: KPDPWR status uses BIT(0); CBLPWR is BIT(2). */
 static irqreturn_t a52_pon_key_irq(int irq, void *data)
 {
     struct a52_pon_diag *p=data;
     unsigned int val=0;
-    int ret=regmap_read(p->regmap,p->base+0x10U,&val);
+    unsigned int addr=p->base+0x10U;
+    int ret=regmap_read(p->regmap,addr,&val);
     int edge=atomic_inc_return(&p->edges);
-    if (edge<=48 || !(edge%100))
-        pr_warn("P446R2 PON_KEY_IRQ edge=%d irq=%d read_rc=%d rt_sts=%02x pressed=%u wake=%u\n",
-            edge,irq,ret,val,ret?0U:!(val&1U),p->wake_enabled);
-    if (!ret) {
-        input_report_key(p->input,KEY_POWER,!(val&1U));
+    bool key;
+    pr_warn("P446S PON edge=%d irq=%d addr=0x%x rt_sts=%02x read_rc=%d wake=%u\n",
+            edge,irq,addr,val,ret,p->wake_enabled);
+    if (ret)
+        return IRQ_HANDLED;
+    key=!!(val & BIT(0));
+    pr_warn("P446S PON edge=%d addr=0x%x rt_sts=%02x key=%u prev=%u\n",
+            edge,addr,val,key,p->last_key_state);
+    /* TouchGrass parity: recover a missing press when release arrives alone. */
+    if (!key && !p->last_key_state) {
+        input_report_key(p->input,KEY_POWER,1);
         input_sync(p->input);
-        pm_wakeup_event(p->dev,1000);
+        pr_warn("P446S PON EV_KEY code=%d value=1 synthesized=1 edge=%d\n",KEY_POWER,edge);
     }
+    if (key != p->last_key_state || !key) {
+        input_report_key(p->input,KEY_POWER,key);
+        input_sync(p->input);
+        pr_warn("P446S PON EV_KEY code=%d value=%u synthesized=0 edge=%d\n",
+            KEY_POWER,key,edge);
+        p->last_key_state=key;
+    }
+    pm_wakeup_event(p->dev,1000);
     return IRQ_HANDLED;
 }
 
@@ -102,6 +118,8 @@ static int a52_pon_probe(struct platform_device *pdev)
     int ret;
     int irq;
     u32 base;
+    unsigned int idle=0;
+    int idle_rc;
     if (a52_pon_primary)
         return -EBUSY;
     if (!of_device_is_compatible(pdev->dev.of_node,"qcom,qpnp-power-on"))
@@ -122,6 +140,9 @@ static int a52_pon_probe(struct platform_device *pdev)
         dev_warn(&pdev->dev,"P446R2 PON no parent SPMI regmap\n");
         return -EPROBE_DEFER;
     }
+    idle_rc=regmap_read(p->regmap,p->base+0x10U,&idle);
+    pr_warn("P446S PON PROBE_IDLE base=0x%x addr=0x%x rt_sts=%02x read_rc=%d parent=%s\n",
+            p->base,p->base+0x10U,idle,idle_rc,dev_name(pdev->dev.parent));
     in=devm_input_allocate_device(&pdev->dev);
     if (!in)return -ENOMEM;
     in->name="a52-qpnp-pon-pwrkey";
@@ -130,7 +151,8 @@ static int a52_pon_probe(struct platform_device *pdev)
     input_set_capability(in,EV_KEY,KEY_POWER);
     p->input=in;
     ret=devm_request_threaded_irq(&pdev->dev,irq,NULL,a52_pon_key_irq,
-                                   IRQF_ONESHOT,"a52-pon-key",p);
+                                   IRQF_ONESHOT | IRQF_TRIGGER_RISING |
+                                   IRQF_TRIGGER_FALLING,"a52-pon-key",p);
     if(ret)return ret;
     ret=input_register_device(in);
     if(ret)return ret;
@@ -194,10 +216,13 @@ def main():
         s=m.read_text()
         if "a52_pon_wake_diag.o" not in s:
             m.write_text(s+"\n# "+MARK+"\nobj-y += a52_pon_wake_diag.o\n")
-    for p,need in [(c,MARK),(c,"enable_irq_wake(irq)"),
+    for p,need in [(c,MARK),(c,"A52_PHASE446S_PON_KEY_STATE_V1"),
+                   (c,"IRQF_TRIGGER_RISING"),(c,"IRQF_TRIGGER_FALLING"),
+                   (c,"!!(val & BIT(0))"),(c,"P446S PON EV_KEY"),
+                   (c,"enable_irq_wake(irq)"),
                    (c,"P446R2 PON_KEY_IRQ"),(c,"KEY_POWER"),
                    (m,"a52_pon_wake_diag.o")]:
         if not p.is_file() or need not in p.read_text():
             raise RuntimeError("R2 PON expected "+need)
-    print("P446R2 PON source audit PASS: IRQ edge logging, wake enable, PM notifier")
+    print("P446S PON source audit PASS: BIT(0) state, both IRQ edges, emitted key event logs")
 if __name__=="__main__":main()

@@ -150,6 +150,21 @@ EXPECT={
      ("A52_PHASE446V_PMK8350_RTC_V1",'"qcom,pmk8350-rtc"',
       "0x6140","0x6240","P446V RTC PROBE","P446V RTC REGISTER")),
 
+ "P446W cold-first KMS and complete post-on snapshot":("drivers/a52_display/msm/sde/sde_kms.c",
+     ("A52_PHASE446W_SPLASH_SELECT_V1","P446W SPLASH COLD_SELECTED=1",
+      "a52w_handoff_selected","early_param(\"a52.446w_cold\"")),
+ "P446W opt-in full modeset, default OFF":("drivers/a52_display/msm/msm_drv.c",
+     ("A52_PHASE446W_SPLASH_HANDOFF_OPTION_B_V1","P446W HANDOFF_OPTION_B request full modeset")),
+ "P446W immediate full post-normal-on snapshot":("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c",
+     ("P446W_FULL_POST_NORMAL_ON","a52v_sde_snapshot")),
+ "P446W early port3 and isolated U446 tty gate":("drivers/usb/gadget/function/u_serial.c",
+     ("A52_PHASE446W_TTYGS3_EARLY_PORT_V1","P446W USB early legacy",
+      "a52w_early_console_line","P446W U446 DEFER")),
+ "P446W port-scoped coordinator":("drivers/usb/gadget/legacy/serial.c",
+     ("P446W U446 COORDINATOR START","a52_446u_preflight_port(a52w_early_console_line())")),
+ "P446W ConfigFS defer printk":("drivers/usb/gadget/configfs.c",
+     ("P446W U446 CONFIGFS defer","P446W U446 CONFIGFS probe")),
+
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",
@@ -200,6 +215,10 @@ def audit(root,build,out,strict,image):
             if t not in c:missing.append({"contract":"config "+t})
         if 'no_console_suspend' not in c:
             missing.append({"contract":"no_console_suspend built-in CMDLINE"})
+        if "CONFIG_CMDLINE_EXTEND=y" not in c or "console=ttyGS3,115200" not in c:
+            missing.append({"contract":"P446W CONFIG_CMDLINE ttyGS3 and extended boot cmdline"})
+        if "console=ttyGS0,115200" in c:
+            missing.append({"contract":"P446W no stale CONFIG_CMDLINE ttyGS0"})
         if "CONFIG_LOG_BUF_SHIFT=21" not in c:
             missing.append({"contract":"P446U >=2MiB printk ring for unsampled prop capture"})
         for required in ("CONFIG_RTC_DRV_PM8XXX=y","CONFIG_RTC_HCTOSYS=y",

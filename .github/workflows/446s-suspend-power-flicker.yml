@@ -981,8 +981,18 @@ jobs:
           # Generated runtime header is strictly derived from the validated
           # source manifest. It is excluded from the source-tree fingerprint to
           # avoid the self-referential hash circularity, not from the build.
-          mkdir -p "$ROOT/include/generated" "$ROOT/.git/info"
-          printf '\n/include/generated/a52_446s_manifest.h\n' >> "$ROOT/.git/info/exclude"
+          mkdir -p "$ROOT/include/generated"
+          # Exact Phase429 reconstructed source is a linked Git worktree:
+          # .git is a pointer FILE, not a directory. Resolve Git's real
+          # info/exclude location instead of attempting mkdir "$ROOT/.git".
+          GIT_EXCLUDE="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path info/exclude)"
+          test -n "$GIT_EXCLUDE"
+          mkdir -p "$(dirname "$GIT_EXCLUDE")"
+          if ! grep -Fxq '/include/generated/a52_446s_manifest.h' "$GIT_EXCLUDE" 2>/dev/null; then
+            printf '\n/include/generated/a52_446s_manifest.h\n' >> "$GIT_EXCLUDE"
+          fi
+          printf 'P446S GIT EXCLUDE resolved: %s\n' "$GIT_EXCLUDE"
+          test -f "$GIT_EXCLUDE"
           if python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --output "$PWD/phase446r2-manifest/final-tree.json" --strict; then
             echo "Phase446S strict precompile manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           else

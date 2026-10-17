@@ -43,9 +43,13 @@ struct a52_pon_diag {
     struct notifier_block pm_nb;
     u32 base;
     int key_irq;
+    int resin_irq;
     bool wake_enabled;
+    bool resin_wake_enabled;
     atomic_t edges;
+    atomic_t resin_edges;
     bool last_key_state;
+    bool last_resin_state;
 };
 static struct a52_pon_diag *a52_pon_primary;
 
@@ -77,6 +81,43 @@ static irqreturn_t a52_pon_key_irq(int irq, void *data)
         pr_warn("P446S PON EV_KEY code=%d value=%u synthesized=0 edge=%d\n",
             KEY_POWER,key,edge);
         p->last_key_state=key;
+    }
+    pm_wakeup_event(p->dev,1000);
+    return IRQ_HANDLED;
+}
+
+
+/* A52_PHASE446S_PON_RESIN_V1: RESIN is volume-down, not a second power key.
+ * TouchGrass PON RT_STS bit1 is RESIN; no PON reset timer writes.
+ */
+static irqreturn_t a52_pon_resin_irq(int irq, void *data)
+{
+    struct a52_pon_diag *p=data;
+    unsigned int val=0;
+    unsigned int addr=p->base+0x10U;
+    int ret=regmap_read(p->regmap,addr,&val);
+    int edge=atomic_inc_return(&p->resin_edges);
+    bool key;
+    if (ret) {
+        pr_warn("P446S RESIN edge=%d irq=%d addr=0x%x read_rc=%d\n",
+                edge,irq,addr,ret);
+        return IRQ_HANDLED;
+    }
+    key=!!(val & BIT(1));
+    pr_warn("P446S RESIN edge=%d irq=%d addr=0x%x rt_sts=%02x key=%u prev=%u\n",
+            edge,irq,addr,val,key,p->last_resin_state);
+    if (!key && !p->last_resin_state) {
+        input_report_key(p->input,KEY_VOLUMEDOWN,1);
+        input_sync(p->input);
+        pr_warn("P446S RESIN EV_KEY code=%d value=1 synthesized=1\n",
+                KEY_VOLUMEDOWN);
+    }
+    if (key != p->last_resin_state || !key) {
+        input_report_key(p->input,KEY_VOLUMEDOWN,key);
+        input_sync(p->input);
+        pr_warn("P446S RESIN EV_KEY code=%d value=%u synthesized=0\n",
+                KEY_VOLUMEDOWN,key);
+        p->last_resin_state=key;
     }
     pm_wakeup_event(p->dev,1000);
     return IRQ_HANDLED;
@@ -117,7 +158,7 @@ static int a52_pon_probe(struct platform_device *pdev)
     struct a52_pon_diag *p;
     struct input_dev *in;
     int ret;
-    int irq;
+    int irq, resin_irq;
     u32 base;
     unsigned int idle=0;
     int idle_rc;
@@ -132,10 +173,16 @@ static int a52_pon_probe(struct platform_device *pdev)
         dev_warn(&pdev->dev,"P446R2 PON no kpdpwr IRQ rc=%d\n",irq);
         return irq;
     }
+    resin_irq=platform_get_irq_byname(pdev,"resin");
+    if (resin_irq<0) {
+        dev_warn(&pdev->dev,"P446S PON no resin IRQ rc=%d\n",resin_irq);
+        return resin_irq;
+    }
     p=devm_kzalloc(&pdev->dev,sizeof(*p),GFP_KERNEL);
     if (!p)return -ENOMEM;
-    p->dev=&pdev->dev;p->base=base;p->key_irq=irq;
+    p->dev=&pdev->dev;p->base=base;p->key_irq=irq;p->resin_irq=resin_irq;
     atomic_set(&p->edges,0);
+    atomic_set(&p->resin_edges,0);
     p->regmap=dev_get_regmap(pdev->dev.parent,NULL);
     if (!p->regmap) {
         dev_warn(&pdev->dev,"P446R2 PON no parent SPMI regmap\n");
@@ -150,12 +197,17 @@ static int a52_pon_probe(struct platform_device *pdev)
     in->phys="pm6350-pon/input0";
     in->id.bustype=BUS_HOST;
     input_set_capability(in,EV_KEY,KEY_POWER);
+    input_set_capability(in,EV_KEY,KEY_VOLUMEDOWN);
     p->input=in;
+    ret=input_register_device(in);
+    if(ret)return ret;
     ret=devm_request_threaded_irq(&pdev->dev,irq,NULL,a52_pon_key_irq,
                                    IRQF_ONESHOT | IRQF_TRIGGER_RISING |
                                    IRQF_TRIGGER_FALLING,"a52-pon-key",p);
     if(ret)return ret;
-    ret=input_register_device(in);
+    ret=devm_request_threaded_irq(&pdev->dev,resin_irq,NULL,a52_pon_resin_irq,
+                                   IRQF_ONESHOT | IRQF_TRIGGER_RISING |
+                                   IRQF_TRIGGER_FALLING,"a52-pon-resin",p);
     if(ret)return ret;
     device_init_wakeup(&pdev->dev,true);
     ret=enable_irq_wake(irq);
@@ -163,6 +215,11 @@ static int a52_pon_probe(struct platform_device *pdev)
         dev_warn(&pdev->dev,"P446R2 PON enable_irq_wake failed rc=%d\n",ret);
     else
         p->wake_enabled=true;
+    ret=enable_irq_wake(resin_irq);
+    if(ret)
+        dev_warn(&pdev->dev,"P446S RESIN enable_irq_wake failed rc=%d\n",ret);
+    else
+        p->resin_wake_enabled=true;
     p->pm_nb.notifier_call=a52_pon_pm_notifier;
     ret=register_pm_notifier(&p->pm_nb);
     if (ret)
@@ -173,6 +230,9 @@ static int a52_pon_probe(struct platform_device *pdev)
     pr_warn("P446R2 PON_BOUND reg=%x irq=%d wake=%u pm_nb_rc=%d\n",
         base,irq,p->wake_enabled,ret);
     a52_pon_irq_chain(irq);
+    a52_pon_irq_chain(resin_irq);
+    pr_warn("P446S PON RESIN_BOUND irq=%d wake=%u code=%d\n",
+            resin_irq,p->resin_wake_enabled,KEY_VOLUMEDOWN);
     return 0;
 }
 static int a52_pon_remove(struct platform_device *pdev)
@@ -180,6 +240,7 @@ static int a52_pon_remove(struct platform_device *pdev)
     struct a52_pon_diag *p=platform_get_drvdata(pdev);
     if (a52_pon_primary==p)a52_pon_primary=NULL;
     if (p->wake_enabled)disable_irq_wake(p->key_irq);
+    if (p->resin_wake_enabled)disable_irq_wake(p->resin_irq);
     unregister_pm_notifier(&p->pm_nb);
     return 0;
 }
@@ -202,7 +263,7 @@ static int __init a52_pon_init(void)
 }
 device_initcall(a52_pon_init);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("A52 PM6350 PON KEY_POWER input and wake diagnostics");
+MODULE_DESCRIPTION("A52 PM6350 PON power and RESIN volume-down input diagnostics");
 '''
 
 def main():
@@ -220,7 +281,9 @@ def main():
             m.write_text(s+"\n# "+MARK+"\nobj-y += a52_pon_wake_diag.o\n")
     for p,need in [(c,MARK),(c,"A52_PHASE446S_PON_KEY_STATE_V1"),
                    (c,"IRQF_TRIGGER_RISING"),(c,"IRQF_TRIGGER_FALLING"),
-                   (c,"!!(val & BIT(0))"),(c,"P446S PON EV_KEY"),
+                   (c,"!!(val & BIT(0))"),(c,"A52_PHASE446S_PON_RESIN_V1"),
+                   (c,"!!(val & BIT(1))"),(c,"KEY_VOLUMEDOWN"),
+                   (c,"P446S RESIN EV_KEY"),(c,"P446S PON EV_KEY"),
                    (c,"enable_irq_wake(irq)"),
                    (c,"P446S PON edge="),(c,"KEY_POWER"),
                    (m,"a52_pon_wake_diag.o")]:

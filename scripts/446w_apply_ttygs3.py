@@ -123,7 +123,7 @@ def patch_configfs(s):
     return s
 
 def check(root):
-    want={U:(TAG,'early_param("a52.446w_tty"',
+    want={U:(TAG,'unsigned char a52w_early_console_line(void);','early_param("a52.446w_tty"'
                   'a52w_first_alloc','port_num=3','P446W USB early legacy',
                   'port_num == a52w_early_console_line()',
                   'MKDEV(gs_tty_driver->major, a52w_early_console_line())',

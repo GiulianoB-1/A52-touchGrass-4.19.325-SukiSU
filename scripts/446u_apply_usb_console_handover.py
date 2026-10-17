@@ -32,9 +32,18 @@ def patch_u(s):
         "\tstruct task_struct\t*task;\n\tstruct completion\ta52u_worker_ack;\n\tstruct completion\ta52u_request_ack;\n\twait_queue_head_t\ta52u_req_wait;\n\tatomic_t\ta52u_cb_active;\n\tbool\t\t\ta52u_stopping;\n\tbool\t\t\ta52u_detached;\n\tbool\t\t\ta52u_req_pending;\n\twait_queue_head_t\twait;","console fields")
     s=once(s,"\tstruct tty_port\t\tport;\n\tspinlock_t\t\tport_lock;",
         "\tstruct tty_port\t\tport;\n\tbool\t\t\ta52u_block_opens;\n\tspinlock_t\t\tport_lock;","port fields")
+    # The gate and port.count increment share port_lock. Restrict the gate
+    # to the legacy ttyGS0 line and log the attempted device index.
     anchor="\tif (!port) {\n\t\tstatus = -ENODEV;\n\t\tgoto out;\n\t}\n\n\tspin_lock_irq(&port->port_lock);"
-    s=once(s,anchor,anchor.replace("\n\n\tspin_lock_irq(&port->port_lock);",
-        "\n\t/* U446 closes the open-count race before composite unregister. */\n\tif (unlikely(READ_ONCE(port->a52u_block_opens))) {\n\t\tstatus = -EBUSY;\n\t\tgoto out;\n\t}\n\n\tspin_lock_irq(&port->port_lock);"),"reject new opens")
+    s=once(s,anchor,anchor+r'''
+	if (port_num == 0 && unlikely(port->a52u_block_opens)) {
+		spin_unlock_irq(&port->port_lock);
+		a52_ackfr_record("U446 OPEN_BLOCKED pid=%d comm=%s port=%d",
+				 task_pid_nr(current), current->comm, port_num);
+		status = -EBUSY;
+		goto out;
+	}
+''',"line-0-only open gate under count lock")
     s=once(s,"\tstruct usb_request *req = cons->req;\n\tstruct usb_ep *ep;\n\tsize_t size;",
         "\tstruct usb_request *req = cons->req;\n\tstruct usb_ep *ep;\n\tsize_t size;\n\tint queue_rc;","console queue local")
     s=once(s,"\tif (!req)\n\t\treturn;\t/* disconnected */",
@@ -112,6 +121,46 @@ a52u_complete_done:
         "\tinit_waitqueue_head(&cons->wait);\n\tinit_completion(&cons->a52u_worker_ack);\n\tinit_completion(&cons->a52u_request_ack);\n\tcons->a52u_stopping = false;\n\tcons->a52u_detached = false;\n\tcons->a52u_req_pending = false;\n\tinit_waitqueue_head(&cons->a52u_req_wait);\n\tatomic_set(&cons->a52u_cb_active, 0);\n\tatomic_set(&cons->kick, 0);","console init")
     s=once(s,"\tunregister_console(&cons->console);\n\n\tspin_lock_irq(&port->port_lock);",
         "\tif (!cons->a52u_detached)\n\t\tunregister_console(&cons->console);\n\n\tspin_lock_irq(&port->port_lock);","prevent duplicate console unregister")
+    # Any gs_open() failure can be followed by tty_release -> gs_close().
+    # Every tty op must be NULL-safe even when driver_data was never set.
+    guards={
+        "gs_close":("void","return;"),
+        "gs_write":("int","return -ENODEV;"),
+        "gs_put_char":("int","return 0;"),
+        "gs_flush_chars":("void","return;"),
+        "gs_write_room":("int","return 0;"),
+        "gs_chars_in_buffer":("int","return 0;"),
+        "gs_unthrottle":("void","return;"),
+        "gs_break_ctl":("int","return -ENODEV;"),
+    }
+    for opname,(ret_type,guard_ret) in guards.items():
+        import re
+        pattern=r'static '+ret_type+r' '+opname+r'\(struct tty_struct \*tty,'
+        match=re.search(pattern,s)
+        if not match:
+            raise RuntimeError("U446 cannot find tty operation "+opname)
+        begin=s.index("{",match.end())
+        end=s.index("\n}",begin)
+        sub=s[begin:end]
+        var=re.search(r'\bstruct gs_port\s*\*port = tty->driver_data;',sub)
+        if not var:
+            raise RuntimeError("U446 "+opname+" port declaration absent")
+        # Insert AFTER all original C89 locals and BEFORE the first action.
+        first_action=sub.find("\n\n",var.end())
+        if first_action<0 or first_action-var.end()>120:
+            raise RuntimeError("U446 "+opname+" unexpected declaration sequence")
+        sub=sub[:first_action]+r'''
+
+	/* A52_PHASE446U_TTY_NULLSAFE_V3: failed gs_open needs safe .close */
+	if (unlikely(!port))
+		'''+guard_ret+sub[first_action:]
+        s=s[:begin]+sub+s[end:]
+    # Null USB request and endpoint must NEVER enter usb_ep_dequeue/free.
+    # Other console teardown races are coordinated by a52u_stopping.
+    s=once(s,
+           "\tif (!req)\n\t\treturn;\n\n\tusb_ep_dequeue(ep, req);",
+           "\tif (!req || !ep) {\n\t\ta52_ackfr_record(\"U446 CONSOLE skip_dequeue req=%u ep=%u\",\n\t\t\t\t !!req, !!ep);\n\t\treturn;\n\t}\n\n\tusb_ep_dequeue(ep, req);",
+           "disconnect NULL request guard")
     # Normal disconnect is unchanged; successful handover has already detached
     # cons->req, so this legacy path sees NULL and never dequeues under lock.
     # Never change the generic runtime USB completion semantics of 446T.
@@ -469,7 +518,8 @@ def patch_recorder(s):
 
 def check(root):
     checks={
-      U:(TAG,"U446 PRE count=","U446 holder pid=",
+      U:(TAG,"A52_PHASE446U_TTY_NULLSAFE_V3","U446 OPEN_BLOCKED","U446 CONSOLE skip_dequeue",
+         "U446 PRE count=","U446 holder pid=",
          "U446 CONSOLE worker-stop-ack","U446 CONSOLE unregister-enter",
          "U446 CONSOLE request-dequeue-enter","U446 CONSOLE request-free",
          "U446 UNBIND free_port before_close_wait","a52u_block_opens",

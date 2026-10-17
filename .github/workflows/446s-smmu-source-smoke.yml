@@ -48,6 +48,38 @@ jobs:
             echo 'PASS: patcher applied and check-only passed against archived R2 arm-smmu.c.'
             echo 'This job intentionally does NOT certify kernel compilation or the final-tree manifest.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Unit smoke 446S memlat governor against pinned TG and no-interval GKI variant
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/governor_memlat.c' \
+            -o /tmp/a52-tg-governor_memlat.c
+          python3 - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          spec=importlib.util.spec_from_file_location(
+              "p446s_memlat","scripts/446s_apply_memlat_guards.py")
+          module=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          original=Path("/tmp/a52-tg-governor_memlat.c").read_text()
+          assert "case DEVFREQ_GOV_INTERVAL:" in original
+          assert "devfreq_interval_update(df, &sample_ms);" in original
+          guarded=module.patch_memlat(original)
+          begin=guarded.index("case DEVFREQ_GOV_INTERVAL:")
+          scope=guarded[begin:guarded.index("\n\t}",begin)]
+          assert "if (node->monitor_ready)" in scope
+          assert "devfreq_interval_update(df, &sample_ms);" in scope
+          assert module.patch_memlat(guarded)==guarded
+          legacy="\t\tif (!hw->should_ignore_df_monitor)\n\t\t\tdevfreq_interval_update(df, &sample_ms);"
+          assert original.count(legacy)==1
+          absent=original.replace(legacy,
+              "\t\t/* No delayed-work interval update in this ACK variant. */")
+          patched=module.patch_memlat(absent)
+          assert "devfreq_interval_update(" not in patched
+          assert "A52_PHASE446S_MEMLAT_LIFECYCLE_V1" in patched
+          print("P446S MEMLAT unit smoke PASS: guarded TG call; absent ACK hook; idempotent")
+          PY
       - name: Inventory surviving historical GKI caches (read only)
         env:
           GH_TOKEN: ${{ github.token }}

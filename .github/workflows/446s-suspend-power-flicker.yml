@@ -4,9 +4,9 @@ run-name: Phase446S suspend recovery and framebuffer origin diagnostics
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/a52-phase446s-suspend-power-frame-v1
+      - agent/a52-phase446r2-strict-manifest-pon-v1
   workflow_dispatch:
 
 permissions:

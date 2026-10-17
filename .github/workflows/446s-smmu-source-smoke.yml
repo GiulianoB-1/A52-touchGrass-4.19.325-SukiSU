@@ -95,6 +95,7 @@ jobs:
           import json,os,subprocess,sys
           repo=os.environ['GITHUB_REPOSITORY']
           found=[];scanned=0
+          candidates_by_phase=[]
           for page in range(1,9):
               p=subprocess.run(["gh","api",f"repos/{repo}/actions/artifacts?per_page=100&page={page}"],
                                text=True,capture_output=True)
@@ -105,6 +106,9 @@ jobs:
               scanned+=len(arr)
               for a in arr:
                   name=a.get("name","").lower()
+                  if not a.get("expired") and (("phase3" in name) or ("phase4" in name)):
+                      candidates_by_phase.append({k:a.get(k) for k in
+                          ("id","name","size_in_bytes","expires_at")})
                   if ("source" in name or "baseline" in name or
                       "seed" in name or "phase346" in name or
                       "phase429" in name or "archive" in name):
@@ -115,7 +119,10 @@ jobs:
           # Inventory every live historical artifact, even those without
           # source/baseline/seed keywords.
           with open("a52-446s-all-artifacts.json","w") as f:
-              json.dump({"candidates":found,"count":scanned},f,indent=2)
+              json.dump({"candidates":found,"phase_artifacts":candidates_by_phase,"count":scanned},f,indent=2)
+          for a in candidates_by_phase:
+              if a["size_in_bytes"] > 500000:
+                  print("P446S LIVE HISTORICAL",json.dumps(a,sort_keys=True))
 
           for a in found[:100]:print("P446S ARTIFACT",json.dumps(a,sort_keys=True))
           with open("a52-446s-artifact-inventory.json","w") as f:

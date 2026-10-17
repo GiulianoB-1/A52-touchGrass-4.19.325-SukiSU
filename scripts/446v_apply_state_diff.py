@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 KMS=Path("drivers/a52_display/msm/sde/sde_kms.c")
 ENC=Path("drivers/a52_display/msm/sde/sde_encoder.c")
+PHYS=Path("drivers/a52_display/msm/sde/sde_encoder_phys_cmd.c")
 MSM=Path("drivers/a52_display/msm/msm_atomic.c")
 UAPI=Path("drivers/gpu/drm/drm_atomic_uapi.c")
 SS=Path("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c")
@@ -165,6 +166,8 @@ def patch_encoder(s):
 void a52v_encoder_dump(struct drm_encoder *encoder,const char *phase)
 {
 	struct sde_encoder_virt *sde_enc;
+	int i;
+	extern void a52v_physcmd_dump(struct sde_encoder_phys *phys,const char *phase);
 	if (!encoder)return;
 	sde_enc=to_sde_encoder_virt(encoder);
 	pr_info("P446V SNAP_ENC_DETAIL phase=%s id=%u idle_pc=%d idle_pc_restore=%d rc_state=%d trigger_mode=%d phys=%u cur_master=%d vblank=%d\n",
@@ -172,10 +175,34 @@ void a52v_encoder_dump(struct drm_encoder *encoder,const char *phase)
 		sde_enc->idle_pc_restore,sde_enc->rc_state,
 		sde_enc->frame_trigger_mode,sde_enc->num_phys_encs,
 		!!sde_enc->cur_master,sde_enc->vblank_enabled);
+	for (i=0;i<MAX_PHYS_ENCODERS_PER_VIRTUAL;i++)
+		if (sde_enc->phys_cmd_encs[i])
+			a52v_physcmd_dump(sde_enc->phys_cmd_encs[i],phase);
 }
 EXPORT_SYMBOL_GPL(a52v_encoder_dump);
 '''
     return one(s,key,func+key,"encoder detailed state")
+
+def patch_phys(s):
+    if "P446V SNAP_AUTORF" in s:return s
+    anchor="static inline int _sde_encoder_phys_cmd_get_idle_timeout("
+    helper=r'''
+/* A52_PHASE446V_PHYS_CMD_AUTOREFRESH_STATE_V1 */
+void a52v_physcmd_dump(struct sde_encoder_phys *phys,const char *phase)
+{
+	struct sde_encoder_phys_cmd *cmd;
+	if (!phys)return;
+	cmd=to_sde_encoder_phys_cmd(phys);
+	pr_info("P446V SNAP_AUTORF phase=%s enc=%u intf=%d cont_splash=%d phys_enable=%d refresh_enable=%d refresh_frames=%u te=%d split_role=%d\n",
+		phase,phys->parent?phys->parent->base.id:0,
+		phys->intf_idx,phys->cont_splash_enabled,
+		phys->enable_state,cmd->autorefresh.cfg.enable,
+		cmd->autorefresh.cfg.frame_count,phys->has_intf_te,phys->split_role);
+}
+EXPORT_SYMBOL_GPL(a52v_physcmd_dump);
+
+'''
+    return one(s,anchor,helper+anchor,"phys cmd autorefresh state")
 
 def patch_msm(s):
     if TAG in s:return s
@@ -235,6 +262,7 @@ def check(root):
         KMS:(TAG,"P446V SNAP_CRTC","P446V SNAP_DSI","P446V SNAP_CONN","P446V SNAP_SAMSUNG",
              "P446V EVENT NORMAL_DISPLAY_ON","P446V SNAP_ENCODER"),
         ENC:(TAG,"P446V SNAP_ENC_DETAIL"),
+        PHYS:("P446V SNAP_AUTORF","A52_PHASE446V_PHYS_CMD_AUTOREFRESH_STATE_V1"),
         MSM:("a52v_atomic_snapshot(dev)",),
         UAPI:("P446V POST_WINDOW_BEGIN","a52v_post_window_next"),
         SS:("PRE_FIRST_PANEL_OFF","a52v_display_event(true)"),
@@ -262,7 +290,7 @@ int a52v_display_stage(void);
 int a52v_post_window_next(void);
 #endif
 ''')
-        for p,fn in ((KMS,patch_kms),(ENC,patch_encoder),(MSM,patch_msm),
+        for p,fn in ((KMS,patch_kms),(ENC,patch_encoder),(PHYS,patch_phys),(MSM,patch_msm),
                      (SS,patch_samsung),(UAPI,patch_uapi)):
             f=x.root/p;f.write_text(fn(f.read_text()))
     check(x.root)

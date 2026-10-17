@@ -245,3 +245,34 @@ jobs:
             echo 'This is NOT a compiled kernel or complete strict final-tree audit.'
           } >> "$GITHUB_STEP_SUMMARY"
           echo 'P446S EXACT_PHASE429_MEMLAT_SOURCE_SMOKE PASS'
+      - name: Verify GKI 5.10 regulator vote trace field ABI on reconstructed kernel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase429.outputs.cache-hit }}" = true
+          test -s gki/common/drivers/regulator/core.c
+          python3 - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          spec=importlib.util.spec_from_file_location(
+              "p446s_gpu","scripts/446s_apply_gpu_slumber_trace.py")
+          module=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          core=Path("gki/common/drivers/regulator/core.c").read_text()
+          assert "regulator->enable_count" in core
+          assert "consumer_list" in core
+          patched=module.patch_core(core)
+          assert "P446S GPU_CX_VOTES" in patched
+          assert patched.count("reg->enable_count") == 1
+          assert patched.count("consumer->enable_count") == 2
+          assert "reg->enabled" not in patched
+          assert "consumer->enabled" not in patched
+          assert module.patch_core(patched) == patched
+          try:
+              module.patch_core(core.replace("regulator->enable_count","regulator->unexpected",1))
+          except RuntimeError as e:
+              assert "incompatible ABI" in str(e)
+          else:
+              raise AssertionError("unknown regulator ABI did not fail closed")
+          print("P446S REGULATOR 5.10 FIELD ABI source smoke PASS: enable_count, idempotent")
+          PY

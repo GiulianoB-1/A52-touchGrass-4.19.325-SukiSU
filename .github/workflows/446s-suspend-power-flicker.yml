@@ -1,5 +1,5 @@
-name: Phase446U - atomic plane 91 forensics and console-first ADB handover
-run-name: Phase446U atomic request truth + bounded ttyGS0 to Android ADB
+name: Phase446V - HWC read-state comparison + PMK8350 RTC
+run-name: Phase446V HWC GETPROPERTIES and first-off state snapshots + RTC
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
@@ -30,13 +30,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446u-${{ github.ref }}
+  group: a52-phase446v-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446U GKI (atomic requests + ADB takeover)
+    name: Build Phase446V GKI (passive HWC property reads + PMK8350 RTC)
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -285,13 +285,25 @@ jobs:
           python3 scripts/446u_expand_p445_store.py --root "$ROOT" --check-only
           python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT"
           python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT" --check-only
+          # 446V: append to the verified 446U-v2 final tree (USB untouched).
+          python3 -m py_compile scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py
+          python3 scripts/446v_apply_hwc_read_trace.py --root "$ROOT"
+          python3 scripts/446v_apply_hwc_read_trace.py --root "$ROOT" --check-only
+          python3 scripts/446v_apply_state_diff.py --root "$ROOT"
+          python3 scripts/446v_apply_state_diff.py --root "$ROOT" --check-only
+          python3 scripts/446v_apply_pmk8350_rtc.py --root "$ROOT"
+          python3 scripts/446v_apply_pmk8350_rtc.py --root "$ROOT" --check-only
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable RTC_DRV_PM8XXX --enable RTC_HCTOSYS --set-str RTC_HCTOSYS_DEVICE rtc0
           # Full request property dump can exceed the old 512 KiB printk ring.
           # Increase only the log ring, no DRM, display or PM behavior change.
           sed -i 's/^CONFIG_LOG_BUF_SHIFT=19$/CONFIG_LOG_BUF_SHIFT=21/' "$BUILD/.config"
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
-          echo 'P446U combined Parts A+B delta applied; retained 446T precompile contracts PASS'
+          grep -Fxq CONFIG_RTC_DRV_PM8XXX=y "$BUILD/.config"
+          grep -Fxq CONFIG_RTC_HCTOSYS=y "$BUILD/.config"
+          grep -Fxq 'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"' "$BUILD/.config"
+          echo 'P446V source patches, RTC config, unchanged 446U-v2 and 446T contracts PASS'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -311,6 +323,9 @@ jobs:
           python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT" --check-only
           python3 scripts/446u_expand_p445_store.py --root "$ROOT" --check-only
           python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT" --check-only
+          python3 scripts/446v_apply_hwc_read_trace.py --root "$ROOT" --check-only
+          python3 scripts/446v_apply_state_diff.py --root "$ROOT" --check-only
+          python3 scripts/446v_apply_pmk8350_rtc.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.
@@ -344,7 +359,7 @@ jobs:
           printf '#define A52_446S_FINGERPRINT "%s"\n' "$FP" > "$ROOT/include/generated/a52_446s_manifest.h"
           printf 'P446S MANIFEST PASS %s\n' "$FP"
           echo "Source fingerprint: $FP" >> "$GITHUB_STEP_SUMMARY"
-      - name: Compile changed Phase446U objects first (fail-fast)
+      - name: Compile changed Phase446V and retained USB objects first (fail-fast)
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
@@ -352,17 +367,25 @@ jobs:
           make -C "$ROOT" O="$BUILD" ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 -j"$(nproc)" \
+            drivers/gpu/drm/drm_mode_object.o \
+            drivers/gpu/drm/drm_property.o \
+            drivers/gpu/drm/drm_connector.o \
+            drivers/gpu/drm/drm_crtc.o \
+            drivers/gpu/drm/drm_encoder.o \
+            drivers/rtc/rtc-pm8xxx.o \
             drivers/gpu/drm/drm_atomic_uapi.o \
             drivers/a52_display/msm/msm_atomic.o \
             drivers/a52_display/msm/msm_drv.o \
             drivers/a52_display/msm/sde/sde_plane.o \
+            drivers/a52_display/msm/sde/sde_kms.o \
+            drivers/a52_display/msm/sde/sde_encoder.o \
             drivers/a52_display/msm/sde/sde_crtc.o \
             drivers/a52_display/msm/dsi/dsi_panel.o \
             drivers/a52_display/msm/samsung/ss_dsi_panel_common.o \
             drivers/usb/gadget/function/u_serial.o \
             drivers/usb/gadget/legacy/serial.o \
             drivers/usb/gadget/configfs.o
-          echo 'P446U all changed atomic/display/USB compilation gates PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo 'P446V all changed DRM read, SDE, Samsung, USB and RTC compilation gates PASS' >> "$GITHUB_STEP_SUMMARY"
       - name: Audit display clock sync_state contracts
         run: |
           set -Eeuo pipefail
@@ -414,6 +437,21 @@ jobs:
           grep -aFq 'U446 holder pid=' "$IMAGE"
           grep -aFq 'U446 CONSOLE request-dequeue-enter' "$IMAGE"
           grep -aFq 'U446 UDC adb-bound' "$IMAGE"
+          grep -aFq 'P446V READ_PROP' "$IMAGE"
+          grep -aFq 'P446V GETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V GETBLOB_DATA' "$IMAGE"
+          grep -aFq 'P446V CONNECTOR_MODE' "$IMAGE"
+          grep -aFq 'P446V GETCRTC' "$IMAGE"
+          grep -aFq 'P446V GETENCODER' "$IMAGE"
+          grep -aFq 'P446V SETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V SNAP_CRTC' "$IMAGE"
+          grep -aFq 'P446V SNAP_CONN' "$IMAGE"
+          grep -aFq 'P446V SNAP_DSI' "$IMAGE"
+          grep -aFq 'P446V SNAP_SAMSUNG' "$IMAGE"
+          grep -aFq 'P446V SNAP_ENC_DETAIL' "$IMAGE"
+          grep -aFq 'P446V POST_WINDOW_BEGIN' "$IMAGE"
+          grep -aFq 'P446V RTC PROBE' "$IMAGE"
+          grep -aFq 'P446V RTC REGISTER' "$IMAGE"
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
           echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           test -s "$P445"
@@ -528,7 +566,7 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446U combined atomic diagnostics and ADB handover
+      - name: Package Phase446V read-state capture and RTC with unchanged 446U-v2
         if: success()
         run: |
           set -Eeuo pipefail
@@ -578,6 +616,10 @@ jobs:
           cp scripts/446r2_apply_pon_wake_diag.py "$OUT/source/446r2_apply_pon_wake_diag.py"
           cp scripts/a52_final_tree_manifest_audit.py "$OUT/source/a52_final_tree_manifest_audit.py"
           cp scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py scripts/446u_apply_usb_console_handover.py scripts/446u_toggle_usb_handover.py "$OUT/source/"
+          cp scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py "$OUT/source/"
+          for f in drivers/gpu/drm/drm_mode_object.c drivers/gpu/drm/drm_property.c drivers/gpu/drm/drm_connector.c drivers/gpu/drm/drm_crtc.c drivers/gpu/drm/drm_encoder.c drivers/rtc/rtc-pm8xxx.c drivers/a52_display/msm/sde/sde_encoder.c; do
+            cp "$ROOT/$f" "$OUT/source/$(basename "$f")"
+          done
           cp "$ROOT/drivers/usb/gadget/legacy/serial.c" "$ROOT/drivers/usb/gadget/configfs.c" "$ROOT/drivers/usb/gadget/function/u_serial.c" "$OUT/source/"
           cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py scripts/446s_apply_kgsl_smmu_runtime_pm.py "$OUT/source/"
           cp "$ROOT/drivers/devfreq/arm-memlat-mon.c" "$ROOT/drivers/pinctrl/qcom/a52-pinctrl-spmi-gpio.c" "$OUT/source/"
@@ -707,6 +749,12 @@ jobs:
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
+          Phase446V: retain Phase446T and 446U-v2 fixes. Passive read-side HWC GETPROPERTIES, GETPROPERTY, GETBLOB,
+          GETCONNECTOR, GETCRTC and GETENCODER with full property names/values, mode and blob contents.
+          Three SDE/DSI/Samsung state snapshots: first HWC atomic, before first panel off,
+          first HWC atomic after NORMAL DISPLAY_ON (not AOD/LP).
+          Second bounded full atomic window: 100 commits after normalized display on.
+          Minimal PMK8350 0x61xx RTC/0x62xx alarm register mapping; RTC built in and HCTOSYS rtc0.
           Phase446U: keep every Phase446T fix and run Parts A and B in one boot.
           At 85s atomic ioctl property requests are logged with names, object
           types, values and join IDs. Plane91 pre/post, SDE validation, FB/CRTC
@@ -785,7 +833,7 @@ jobs:
           test -s "$INPUTS/boot-final.dts"
           {
             echo '### Phase446S final build inputs'
-            echo 'Artifact: A52XQ-PHASE446U-FINAL-INPUTS-${{ github.run_number }}'
+            echo 'Artifact: A52XQ-PHASE446V-FINAL-INPUTS-${{ github.run_number }}'
             echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
             echo 'Any unavailable separate DTBO is explicitly documented.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -794,7 +842,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446U-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446V-GKI-FAIL-DIAG-${{ github.run_number }}
           path: |
             scripts/446m_apply_gdsc_irq_ab.py
             scripts/446n_apply_dsi_irq_rearm.py
@@ -859,7 +907,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446U-GKI-${{ github.run_number }}
+          name: A52XQ-PHASE446V-GKI-${{ github.run_number }}
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
@@ -869,7 +917,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446U-FINAL-INPUTS-${{ github.run_number }}
+          name: A52XQ-PHASE446V-FINAL-INPUTS-${{ github.run_number }}
           path: phase446s-final-inputs/
           if-no-files-found: error
           compression-level: 0
@@ -879,7 +927,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446U-GKI-${{ github.run_number }}-BOOT
+          name: A52XQ-PHASE446V-GKI-${{ github.run_number }}-BOOT
           path: |
             f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
             f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json

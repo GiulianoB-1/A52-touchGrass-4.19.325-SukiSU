@@ -1,12 +1,12 @@
-name: Phase446T - GPU SMMU lifetime and GDSC lock repair
-run-name: Phase446T GPU SMMU active PM hold and no nested regulator ops
+name: Phase446U - atomic plane 91 forensics and console-first ADB handover
+run-name: Phase446U atomic request truth + bounded ttyGS0 to Android ADB
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
   pull_request:
     branches:
-      - agent/a52-phase446l-post-trigger-twin-v1
+      - agent/a52-phase446t-gpu-smmu-lifetime-v1
     paths-ignore:
       - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
@@ -30,13 +30,13 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446t-${{ github.ref }}
+  group: a52-phase446u-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gki:
     if: true
-    name: Build Phase446T GKI (GPU SMMU hold and safe GDSC)
+    name: Build Phase446U GKI (atomic requests + ADB takeover)
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -277,7 +277,21 @@ jobs:
           for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do
             grep -Fxq "CONFIG_$opt=y" "$BUILD/.config"
           done
-          echo 'P446T exact delta and precompile contracts PASS'
+          # Preserve 446T *exactly*; append observational 446U A and USB B.
+          python3 -m py_compile scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py scripts/446u_apply_usb_console_handover.py scripts/446u_toggle_usb_handover.py
+          python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT"
+          python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT" --check-only
+          python3 scripts/446u_expand_p445_store.py --root "$ROOT"
+          python3 scripts/446u_expand_p445_store.py --root "$ROOT" --check-only
+          python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT"
+          python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT" --check-only
+          # Full request property dump can exceed the old 512 KiB printk ring.
+          # Increase only the log ring, no DRM, display or PM behavior change.
+          sed -i 's/^CONFIG_LOG_BUF_SHIFT=19$/CONFIG_LOG_BUF_SHIFT=21/' "$BUILD/.config"
+          grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
+          echo 'P446U combined Parts A+B delta applied; retained 446T precompile contracts PASS'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -294,6 +308,9 @@ jobs:
           python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
           python3 scripts/446t_apply_smmu_hold_no_nested.py --root "$ROOT" --check-only
           python3 scripts/446t_early_frame_trace.py --root "$ROOT" --check-only
+          python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT" --check-only
+          python3 scripts/446u_expand_p445_store.py --root "$ROOT" --check-only
+          python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.
@@ -366,6 +383,14 @@ jobs:
           grep -aFq 'P446S KGSL_MUTEX held_ms=' "$IMAGE"
           grep -aFq 'P446S GMU_CX POLL' "$IMAGE"
           grep -aFq 'P446S KGSL_SMMU_RPM' "$IMAGE"
+          grep -aFq 'P446U PROP seq=' "$IMAGE"
+          grep -aFq 'P446U FRAME_JOIN seq=' "$IMAGE"
+          grep -aFq 'P446U PLANE91 seq=' "$IMAGE"
+          grep -aFq 'P446U MSM_CHECK seq=' "$IMAGE"
+          grep -aFq 'P446U BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'P446U USB DETACH_BEGIN' "$IMAGE"
+          grep -aFq 'P446U USB GS_UNBIND_BEGIN' "$IMAGE"
+          grep -aFq 'P446U USB CONFIGFS_BIND' "$IMAGE"
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
           echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           test -s "$P445"
@@ -439,9 +464,14 @@ jobs:
           grep -aFq 'U1: optional USB3 PHY absent' "$IMAGE"
           grep -Fq ' a52_u1_usb2_only' "$MAP" || true
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
-          ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE" || { echo "U2 handover present unexpectedly"; exit 1; }
-          ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE" || { echo "U2 ConfigFS hook present unexpectedly"; exit 1; }
-          echo "U2-AB-COM source/binary audit PASS: no handover gadget hooks"
+          # 446U replaces the abandoned U2 ACM-console handover. Check that
+          # the legacy broken U2 hook is absent AND the console-first path
+          # is present, with NO ttyGS1 console re-attachment.
+          ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE"
+          ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE"
+          grep -aFq 'P446U USB KTHREAD_STOPPED' "$IMAGE"
+          grep -aFq 'P446U USB HANDOVER_DISABLED' "$IMAGE"
+          echo "P446U USB source/binary console-first audit PASS"
 
           ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
@@ -475,7 +505,7 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446i GKI matched passive twin
+      - name: Package Phase446U combined atomic diagnostics and ADB handover
         if: success()
         run: |
           set -Eeuo pipefail
@@ -524,6 +554,8 @@ jobs:
           cp scripts/446r2_bound_rpmh_tcs.py "$OUT/source/446r2_bound_rpmh_tcs.py"
           cp scripts/446r2_apply_pon_wake_diag.py "$OUT/source/446r2_apply_pon_wake_diag.py"
           cp scripts/a52_final_tree_manifest_audit.py "$OUT/source/a52_final_tree_manifest_audit.py"
+          cp scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py scripts/446u_apply_usb_console_handover.py scripts/446u_toggle_usb_handover.py "$OUT/source/"
+          cp "$ROOT/drivers/usb/gadget/legacy/serial.c" "$ROOT/drivers/usb/gadget/configfs.c" "$ROOT/drivers/usb/gadget/function/u_serial.c" "$OUT/source/"
           cp scripts/446s_apply_memlat_guards.py scripts/446s_apply_frame_trace.py scripts/446s_apply_suspend_timing.py scripts/446s_apply_arm_memlat_pmu.py scripts/446s_port_legacy_pmic_gpio.py scripts/446s_publish_final_inputs.py scripts/446s_apply_gpu_slumber_trace.py scripts/446s_apply_kgsl_smmu_runtime_pm.py "$OUT/source/"
           cp "$ROOT/drivers/devfreq/arm-memlat-mon.c" "$ROOT/drivers/pinctrl/qcom/a52-pinctrl-spmi-gpio.c" "$OUT/source/"
           cp "$ROOT/drivers/gpu/msm/kgsl_gmu.c" "$ROOT/drivers/gpu/msm/kgsl_device.h" "$ROOT/drivers/regulator/core.c" "$ROOT/include/linux/a52_gpu_cx_trace.h" "$OUT/source/"
@@ -609,6 +641,15 @@ jobs:
           python3 scripts/38_repack_a52_p1_boot.py \
             --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
             --output "$FINAL" --report "$OUT/package/phase446-repack-report.json"
+          # Versioned boot-header-v2 extra_cmdline flag. Only this token is
+          # appended; existing U1/QUSB2 DTB, ramdisk and the old tokens remain.
+          python3 scripts/446_append_boot_cmdline.py \
+            --source "$FINAL" --output "$FINAL.usb" \
+            --append "a52.usb_handover=1" \
+            --report "$OUT/package/phase446u-usb-cmdline-report.json"
+          mv "$FINAL.usb" "$FINAL"
+          grep -aFq 'a52.usb_handover=1' "$FINAL"
+          cp scripts/446u_toggle_usb_handover.py "$OUT/package/"
           python3 - "$SOURCE_BOOT" "$FINAL" "$OUT/package" <<'PY'
           import runpy,json,sys
           from pathlib import Path
@@ -643,6 +684,14 @@ jobs:
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
+          Phase446U: keep every Phase446T fix and run Parts A and B in one boot.
+          At 85s atomic ioctl property requests are logged with names, object
+          types, values and join IDs. Plane91 pre/post, SDE validation, FB/CRTC
+          setter and brightness traces are passive. P445 cap now 240.
+          USB: ttyGS0 console thread quiesces for up to 200ms, FIFO dropped,
+          console unregistered, g_serial unbound, Android ConfigFS binds UDC.
+          Boot flag a52.usb_handover=1 (default); toggle to =0 for COM3
+          using scripts/446u_toggle_usb_handover.py without repacking.
           F0BAR: actual autorefresh-disable path instrumented in sde_encoder_phys_cmd.c.
           F0BAR 1=no SW autorefresh, 2=before existing disable, 3=after.
           AR status bit7, pending kickoff, encoder state, rd/wr pointer recorded.
@@ -662,16 +711,15 @@ jobs:
           Early P1..P4 are PASSIVE (not valid standalone F0 probes).
           F0 has side effects; PASS TG P6 is prerequisite before causal inferences.
           Skipped raw probe (rc=3) means prereqs unverified, NOT an F0 failure.
-          No Android USB handover, so ADB will not attach on GKI debug build.
+          446U replaces this historical behavior with opt-out bounded USB handover.
           Disabled: known Phase446 heartbeat/burst MMIO reads, Phase446i pre/post F0 sweeps,
           and legacy P430/P431/P385 diagnostic sampling threads where present.
           Audit report: audit/u2-ab-quiet-report.json.
           This is not an exhaustive audit of every historical observer; no hardware proof.
 
-          Intentional: Android ConfigFS is expected to fail with UDC busy.
-          USB ADB will NOT become available, by design for this debug build.
-          PuTTY COM3 should remain for the entire kernel boot, including F0.
-          Leave the Golden/TG image available for normal Android operation.
+          With a52.usb_handover=1 Android ConfigFS should take the UDC after ttyGS0 quiesces.
+          With a52.usb_handover=0 PuTTY COM3 stays and ADB is unavailable.
+          Keep the known-good Phase446T image for hardware rollback.
 
           Phase446i GKI matched passive F0 environment twin
           ==================================================
@@ -712,7 +760,7 @@ jobs:
           test -s "$INPUTS/boot-final.dts"
           {
             echo '### Phase446S final build inputs'
-            echo 'Artifact: A52XQ-PHASE446S-FINAL-INPUTS-${{ github.run_number }}'
+            echo 'Artifact: A52XQ-PHASE446U-FINAL-INPUTS-${{ github.run_number }}'
             echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
             echo 'Any unavailable separate DTBO is explicitly documented.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -721,7 +769,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446S-SUSPEND-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446U-GKI-FAIL-DIAG-${{ github.run_number }}
           path: |
             scripts/446m_apply_gdsc_irq_ab.py
             scripts/446n_apply_dsi_irq_rearm.py
@@ -786,7 +834,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446S-SUSPEND-GKI-${{ github.run_number }}
+          name: A52XQ-PHASE446U-GKI-${{ github.run_number }}
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
@@ -796,7 +844,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446S-FINAL-INPUTS-${{ github.run_number }}
+          name: A52XQ-PHASE446U-FINAL-INPUTS-${{ github.run_number }}
           path: phase446s-final-inputs/
           if-no-files-found: error
           compression-level: 0
@@ -806,7 +854,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446S-SUSPEND-GKI-${{ github.run_number }}-BOOT
+          name: A52XQ-PHASE446U-GKI-${{ github.run_number }}-BOOT
           path: |
             f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
             f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json

@@ -29,7 +29,7 @@ def patch_u(s):
         if t not in s: raise RuntimeError("U446 missing 446T USB prerequisite: "+t)
     s='#include <linux/completion.h>\n#include <linux/fdtable.h>\n#include <linux/rcupdate.h>\n#include <linux/sched/signal.h>\n#include <linux/tty.h>\n#include <linux/a52_ack_secure_flight_recorder.h>\n'+s
     s=once(s,"\tstruct task_struct\t*task;\n\twait_queue_head_t\twait;",
-        "\tstruct task_struct\t*task;\n\tstruct completion\ta52u_worker_ack;\n\tstruct completion\ta52u_request_ack;\n\tbool\t\t\ta52u_stopping;\n\tbool\t\t\ta52u_detached;\n\tbool\t\t\ta52u_req_pending;\n\twait_queue_head_t\twait;","console fields")
+        "\tstruct task_struct\t*task;\n\tstruct completion\ta52u_worker_ack;\n\tstruct completion\ta52u_request_ack;\n\twait_queue_head_t\ta52u_req_wait;\n\tatomic_t\ta52u_cb_active;\n\tbool\t\t\ta52u_stopping;\n\tbool\t\t\ta52u_detached;\n\tbool\t\t\ta52u_req_pending;\n\twait_queue_head_t\twait;","console fields")
     s=once(s,"\tstruct tty_port\t\tport;\n\tspinlock_t\t\tport_lock;",
         "\tstruct tty_port\t\tport;\n\tbool\t\t\ta52u_block_opens;\n\tspinlock_t\t\tport_lock;","port fields")
     anchor="\tif (!port) {\n\t\tstatus = -ENODEV;\n\t\tgoto out;\n\t}\n\n\tspin_lock_irq(&port->port_lock);"
@@ -56,17 +56,21 @@ def patch_u(s):
 	bool stopping;
 	int status = req->status;
 
+	/* Mark callback active BEFORE clearing pending. The worker may queue
+	 * the next request during the callback; never clear its pending flag.
+	 */
+	atomic_inc(&cons->a52u_cb_active);
 	spin_lock(&cons->lock);
+	cons->a52u_req_pending = false;
+	req->length = 0;
 	stopping = cons->a52u_stopping;
 	spin_unlock(&cons->lock);
 	if (stopping) {
-		a52_ackfr_record("U446 request-complete status=%d", status);
+		a52_ackfr_record("U446 request-complete status=%d",status);
 		goto a52u_complete_done;
 	}
 
 	switch (req->status) {''',"request complete prologue")
-    # Completion is the final operation in the callback. The worker may
-    # free req/cons only after this signal, never while callback runs.
     begin=s.index("static void gs_console_complete_out(")
     end=s.index("\n}",begin)
     fragment=s[begin:end]
@@ -74,11 +78,10 @@ def patch_u(s):
         raise RuntimeError("U446 unexpected callback layout")
     fragment += r'''
 a52u_complete_done:
-	spin_lock(&cons->lock);
-	cons->a52u_req_pending = false;
-	req->length = 0;
-	spin_unlock(&cons->lock);
 	complete(&cons->a52u_request_ack);
+	atomic_dec(&cons->a52u_cb_active);
+	/* Last operation touching cons: coordinator only frees after ACK. */
+	wake_up_all(&cons->a52u_req_wait);
 '''
     s=s[:begin]+fragment+s[end:]
     s=once(s,"\twhile (!kthread_should_stop()) {\n\t\twait_event_interruptible(cons->wait,\n\t\t\tkthread_should_stop() || atomic_xchg(&cons->kick, 0));\n\t\tif (kthread_should_stop())\n\t\t\tbreak;",
@@ -106,7 +109,7 @@ a52u_complete_done:
            "\tif (!cons)\n\t\treturn 0;\n\tif (READ_ONCE(cons->a52u_stopping))\n\t\treturn -EBUSY;\n\n\tep = port->port_usb->in;",
            "guard reconnect against new request allocation")
     s=once(s,"\tinit_waitqueue_head(&cons->wait);\n\tatomic_set(&cons->kick, 0);",
-        "\tinit_waitqueue_head(&cons->wait);\n\tinit_completion(&cons->a52u_worker_ack);\n\tinit_completion(&cons->a52u_request_ack);\n\tcons->a52u_stopping = false;\n\tcons->a52u_detached = false;\n\tcons->a52u_req_pending = false;\n\tatomic_set(&cons->kick, 0);","console init")
+        "\tinit_waitqueue_head(&cons->wait);\n\tinit_completion(&cons->a52u_worker_ack);\n\tinit_completion(&cons->a52u_request_ack);\n\tcons->a52u_stopping = false;\n\tcons->a52u_detached = false;\n\tcons->a52u_req_pending = false;\n\tinit_waitqueue_head(&cons->a52u_req_wait);\n\tatomic_set(&cons->a52u_cb_active, 0);\n\tatomic_set(&cons->kick, 0);","console init")
     s=once(s,"\tunregister_console(&cons->console);\n\n\tspin_lock_irq(&port->port_lock);",
         "\tif (!cons->a52u_detached)\n\t\tunregister_console(&cons->console);\n\n\tspin_lock_irq(&port->port_lock);","prevent duplicate console unregister")
     # Normal disconnect is unchanged; successful handover has already detached
@@ -275,17 +278,23 @@ int a52_446u_detach_console(unsigned char port_num)
 		a52_ackfr_record("U446 CONSOLE request-dequeue-enter pending=1");
 		deq_rc=usb_ep_dequeue(ep,req);
 		a52_ackfr_record("U446 CONSOLE request-dequeue-exit rc=%d",deq_rc);
-		deadline=wait_for_completion_timeout(&cons->a52u_request_ack,
-						      msecs_to_jiffies(500));
+	}
+	/* Both the queued request AND every callback must have exited.
+	 * A completion event alone is insufficient if another request was
+	 * queued while a previous completion was still running.
+	 */
+	if (req && ep) {
+		deadline=wait_event_timeout(cons->a52u_req_wait,
+				!READ_ONCE(cons->a52u_req_pending) &&
+				atomic_read(&cons->a52u_cb_active)==0,
+				msecs_to_jiffies(500));
 		if (!deadline) {
-			a52_ackfr_record("U446 CONSOLE request-ack-timeout (ABORT)");
+			a52_ackfr_record("U446 CONSOLE callback-drain-timeout (ABORT)");
 			ret=-ETIMEDOUT;
 			goto out;
 		}
+		a52_ackfr_record("U446 CONSOLE request-drain-ack");
 	}
-	/* Even when pending was already cleared, completion is signalled before
-	 * callback returns from its stopping branch; do not free on timeout.
-	 */
 	if (req && ep) {
 		spin_lock_irqsave(&cons->lock,flags);
 		cons->req=NULL;

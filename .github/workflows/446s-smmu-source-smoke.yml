@@ -204,6 +204,7 @@ jobs:
             phase429-gki-out
           key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-f960ed27302b1ff8e61e152fc202554d778deccd-6f6e3fa9
       - name: Verify GPU memlat patch against reconstructed Phase429 tree
+        if: steps.phase429.outputs.cache-hit == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -245,6 +246,62 @@ jobs:
             echo 'This is NOT a compiled kernel or complete strict final-tree audit.'
           } >> "$GITHUB_STEP_SUMMARY"
           echo 'P446S EXACT_PHASE429_MEMLAT_SOURCE_SMOKE PASS'
+      # Exact Phase429 cache is scoped to another PR and may be evicted.
+      # Verify real Phase446S final source instead of failing on cache state.
+      - name: Verify Phase446S real 5.10 memlat and regulator source
+        if: steps.phase429.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BASE="$RUNNER_TEMP/phase446s-evidence"
+          ROOT="$RUNNER_TEMP/phase446s-kernel"
+          mkdir -p "$BASE" "$ROOT"
+          curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/12106509365/zip" \
+            -o "$RUNNER_TEMP/phase446s-source.zip"
+          printf '%s  %s\n' 2c7e02b424df29f17ef16087864dacd2068293fb70d6be823de0c85ab7715533 "$RUNNER_TEMP/phase446s-source.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/phase446s-source.zip" -d "$BASE"
+          python3 - "$BASE" <<'PY'
+          import json,sys,hashlib
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          identity=json.loads((root/'FINAL-BUILD-INPUTS.json').read_text())
+          tree=json.loads((root/'final-tree-manifest.json').read_text())
+          assert identity['phase']=='446S' and identity['schema']=='a52-final-build-inputs-v1'
+          assert tree['strict'] is True and not tree['missing_required']
+          assert tree['gki_common_pinned_sha']=='f960ed27302b1ff8e61e152fc202554d778deccd'
+          assert tree['source_fingerprint_sha256']=='21664e4ad870aa8b68bf2e54fd4aa4d8fb321120f8b2712d8663d240e933e48c'
+          source=root/'final-patched-gki-source.tar.zst'
+          h=hashlib.sha256()
+          with source.open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
+          assert h.hexdigest()==identity['files'][source.name]['sha256']
+          print('P446S final 5.10 source SHA verified')
+          PY
+          tar --use-compress-program=zstd -xf "$BASE/final-patched-gki-source.tar.zst" \
+            -C "$ROOT" ./drivers/devfreq/governor_memlat.c ./drivers/devfreq/devfreq.c ./drivers/regulator/core.c
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          python3 - "$ROOT/drivers/regulator/core.c" <<'PY'
+          import sys,importlib.util
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('gpu','scripts/446s_apply_gpu_slumber_trace.py')
+          module=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          code=Path(sys.argv[1]).read_text()
+          assert 'P446S GPU_CX_VOTES' in code
+          assert 'reg->enable_count' in code and 'consumer->enable_count' in code
+          assert 'reg->enabled' not in code and 'consumer->enabled' not in code
+          assert module.patch_core(code)==code
+          print('P446S regulator vote API from verified built source PASS')
+          PY
+          {
+            echo '### Phase446S source-only smoke on full final GKI snapshot'
+            echo 'Phase429 cache was unavailable; verified and tested the SHA-pinned successful Phase446S source.'
+            echo 'PASS: memlat guard, GKI 5.10 regulator fields and idempotence.'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify generated ARM memlat PMU C string literals against pinned TG
         shell: bash
         run: |
@@ -287,6 +344,7 @@ jobs:
           print("P446S ARM_MEMLAT_C_STRING_SMOKE PASS: escaped C logs, bad fixture rejected")
           PY
       - name: Verify GKI 5.10 regulator vote trace field ABI on reconstructed kernel
+        if: steps.phase429.outputs.cache-hit == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail

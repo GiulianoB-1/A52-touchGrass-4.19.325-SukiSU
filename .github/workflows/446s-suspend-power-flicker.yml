@@ -325,7 +325,7 @@ jobs:
           fi
           (cd "$SEED" && sha256sum -c SHA256SUMS)
           grep -Fq '"phase": "346"' "$SEED/BUILD-IDENTITY.json"
-          printf '%s  %s\\n' 11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df "$SEED/package/boot.img" | sha256sum -c -
+          echo "11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df  $SEED/package/boot.img" | sha256sum -c -
           echo 'P446S VERIFIED_PHASE346_SOURCE_CARRIER PASS'
       
       - name: Build Phase345 fallback

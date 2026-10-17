@@ -306,8 +306,11 @@ def patch(s):
     def system_pm_diag(body,which):
         # 5.10 avoids declarations after statements; QSMMUv500's early
         # unmanaged-TBU guard executes before the sleep-state check.
-        body=once(body,"{\n","{\n\tstruct arm_smmu_device *smmu = dev_get_drvdata(dev);\n",
-                  "system PM declaration "+which)
+        if not body.startswith("{\n"):
+            raise RuntimeError("446S SMMU invalid system PM body "+which)
+        # Only change the outer function opening brace: nested QSMMUv500
+        # guard blocks legitimately contain additional {\\n occurrences.
+        body="{\n\tstruct arm_smmu_device *smmu = dev_get_drvdata(dev);\n"+body[2:]
         marker='\tif (pm_runtime_suspended(dev))'
         replacement=r'''	if (smmu && a52_kgsl_smmu_has_phase250_vdd(smmu))
 		a52_kgsl_smmu_pm_diag(dev, "WHICH");

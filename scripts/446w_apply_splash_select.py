@@ -51,28 +51,21 @@ EXPORT_SYMBOL_GPL(a52w_cold_selected);
 EXPORT_SYMBOL_GPL(a52w_handoff_selected);
 '''
     s=one(s,anchor,anchor+"\n"+code,"cmdline switches")
-    anchor='''	rc = _sde_kms_get_splash_data(&sde_kms->splash_data);
-	if (rc)
-		SDE_DEBUG("sde splash data fetch failed: %d\\n", rc);'''
-    repl=r'''	if (a52w_cold_selected()) {
-		/*
-		 * Do not map/take ownership of bootloader splash. In particular,
-		 * DO NOT call _sde_kms_free_splash_region() because that path
-		 * needs a live one-to-one mapping and can memblock_free pages
-		 * while firmware scanout still references them.
-		 */
+    # The verified Phase446S source has P446 recorder markers BETWEEN
+    # the splash-fetch call and if(rc). Replace only the single call.
+    anchor="rc = _sde_kms_get_splash_data(&sde_kms->splash_data);"
+    repl=r'''if (a52w_cold_selected()) {
 		memset(&sde_kms->splash_data, 0,sizeof(sde_kms->splash_data));
-		pr_info("P446W SPLASH COLD_SELECTED=1 handoff=0: takeover bypassed, bootloader framebuffer remains RESERVED for boot; normal first DRM modeset must prepare DSI\n");
+		rc = 0;
+		pr_info("P446W SPLASH COLD_SELECTED=1 handoff=0: take-over bypassed; bootloader framebuffer remains RESERVED for boot, normal first DRM modeset must prepare DSI\n");
 	} else {
 		rc = _sde_kms_get_splash_data(&sde_kms->splash_data);
-		if (rc)
-			SDE_DEBUG("sde splash data fetch failed: %d\n", rc);
-		pr_info("P446W SPLASH COLD_SELECTED=0 handoff_requested=%d regions=%d displays=%d (TG splash path)\n",
-			a52w_handoff_selected(),
-			sde_kms->splash_data.num_splash_regions,
+		pr_info("P446W SPLASH COLD_SELECTED=0 handoff_requested=%d regions=%d displays=%d\n",
+			a52w_handoff_selected(),sde_kms->splash_data.num_splash_regions,
 			sde_kms->splash_data.num_splash_displays);
 	}'''
-    return one(s,anchor,repl,"safe splash data bypass")
+    return one(s,anchor,repl,"single splash fetch, keep P446 recorders")
+
 def patch_samsung(s):
     if "P446W_FULL_POST_NORMAL_ON" in s:return s
     if "a52v_display_event(true);" not in s:

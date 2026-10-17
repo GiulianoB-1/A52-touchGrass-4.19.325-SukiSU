@@ -41,15 +41,15 @@ void a52_gpu_cx_dump_votes(struct regulator *reg, const char *phase)
 	rdev = reg->rdev;
 	regulator_lock(rdev);
 	pr_warn("P446S GPU_CX_VOTES phase=%s name=%s rdev_use_count=%d caller_enable_count=%d\n",
-		phase, rdev_get_name(rdev), rdev->use_count, reg->enabled);
+		phase, rdev_get_name(rdev), rdev->use_count, reg->enable_count);
 	list_for_each_entry(consumer, &rdev->consumer_list, list) {
-		if (consumer->enabled <= 0)
+		if (consumer->enable_count <= 0)
 			continue;
 		active++;
 		pr_warn("P446S GPU_CX_CONSUMER phase=%s device=%s supply=%s enable_count=%d\n",
 			phase, consumer->dev ? dev_name(consumer->dev) : "(no-device)",
 			consumer->supply_name ? consumer->supply_name : "(no-supply)",
-			consumer->enabled);
+			consumer->enable_count);
 	}
 	if (!active)
 		pr_warn("P446S GPU_CX_CONSUMER phase=%s enabled=NONE\n", phase);
@@ -200,6 +200,11 @@ def replace_func(s,sig,body):
 
 def patch_core(s):
     if VOTES_TAG in s:return s
+    # Pinned GKI android12-5.10: consumers have enable_count, not 'enabled'.
+    # Fail closed before instrumentation if the final regulator ABI differs.
+    for fragment in ("regulator->enable_count", "consumer_list", "regulator_lock("):
+        if fragment not in s:
+            raise RuntimeError("446S GPU regulator core incompatible ABI: " + fragment)
     sig="int regulator_disable(struct regulator *regulator)"
     return once(s,sig,VOTES+"\n"+sig,"regulator core insertion")
 
@@ -263,7 +268,8 @@ def patch(root,repo_root):
 
 def check(root):
     for p,tokens in (
-        (CORE,(VOTES_TAG,"P446S GPU_CX_VOTES","P446S GPU_CX_CONSUMER")),
+        (CORE,(VOTES_TAG,"P446S GPU_CX_VOTES","P446S GPU_CX_CONSUMER",
+               "reg->enable_count", "consumer->enable_count")),
         (GMU,(TAG,"P446S GMU_CX BEGIN","P446S GMU_CX POLL",
               "#define CX_GDSC_TIMEOUT\t5000")),
         (DEVHDR,(MUTEX_TAG,"P446S KGSL_MUTEX","A52_KGSL_LOCK")),
@@ -273,6 +279,9 @@ def check(root):
         for token in tokens:
             if token not in content:
                 raise RuntimeError("446S GPU audit missing "+token+" in "+str(p))
+    core=(root/CORE).read_text()
+    if "reg->enabled" in core or "consumer->enabled" in core:
+        raise RuntimeError("446S GPU regulator 5.10 ABI regression: .enabled is invalid")
     g=(root/GMU).read_text()
     if "msecs_to_jiffies(CX_GDSC_TIMEOUT)" not in g:
         raise RuntimeError("446S GPU poll timeout changed")

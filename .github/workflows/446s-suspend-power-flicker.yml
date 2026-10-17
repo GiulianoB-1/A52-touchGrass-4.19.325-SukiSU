@@ -7,6 +7,8 @@ on:
   pull_request:
     branches:
       - agent/a52-phase446l-post-trigger-twin-v1
+    paths-ignore:
+      - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
 
 permissions:

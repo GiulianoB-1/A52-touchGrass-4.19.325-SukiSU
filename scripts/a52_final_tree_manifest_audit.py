@@ -6,7 +6,7 @@ Missing REQUIRED feature markers/logic fail closed. Experimental markers not
 enabled by this lineage are deliberately NOT required.
 """
 from __future__ import annotations
-import argparse,hashlib,json,os
+import argparse,hashlib,json,os,subprocess
 from pathlib import Path
 
 EXPECT={
@@ -100,9 +100,29 @@ def audit(root,build,out,strict,image):
             files.update(x for x in p.rglob("*") if x.is_file() and
                          x.suffix in (".c",".h",".S",".dts",".dtsi",".mk"))
     files.update(root/p for _,(p,_) in EXPECT.items() if (root/p).is_file())
+    # Cover the ENTIRE final tree by anchoring the pinned git object tree,
+    # and hashing every modified / staged / added / deleted path, even in
+    # otherwise omitted subsystems (USB, pinctrl, regulators, DT, etc).
+    proc=subprocess.run(
+        ["git","-C",str(root),"ls-files","-m","-o","-d",
+         "--exclude-standard","--full-name","-z"],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if proc.returncode:
+        raise RuntimeError("strict final-tree git inventory unavailable: "+
+                           proc.stderr.decode(errors="replace"))
+    git_head=subprocess.run(
+        ["git","-C",str(root),"rev-parse","HEAD"],
+        capture_output=True,text=True,check=True).stdout.strip()
+    touched={}
+    for rel in sorted(set(x.decode("utf-8","surrogateescape")
+                          for x in proc.stdout.split(b"\0") if x)):
+        p=root/rel
+        touched[rel]=digest(p) if p.is_file() else "<deleted>"
+        if p.is_file():files.add(p)
     hashes={str(p.relative_to(root)):digest(p) for p in sorted(files)}
     h=hashlib.sha256()
-    for p,v in sorted(hashes.items()):
+    h.update(("GKI_BASE_HEAD\0"+git_head+"\n").encode())
+    for p,v in sorted(touched.items()):
         h.update((p+"\0"+v+"\n").encode())
     # All phase scripts: record SHA256 even when an older phase is not active.
     script_dir=Path(__file__).resolve().parent
@@ -121,6 +141,9 @@ def audit(root,build,out,strict,image):
       "contracts":rows,
       "missing_required":missing,
       "source_fingerprint_sha256":h.hexdigest(),
+      "gki_common_actual_git_head":git_head,
+      "changed_or_added_or_removed_paths":len(touched),
+      "changed_tree_path_sha256":touched,
       "fingerprinted_files":len(hashes),
       "source_hashes":hashes,
       "phase_script_sha256":scripts,

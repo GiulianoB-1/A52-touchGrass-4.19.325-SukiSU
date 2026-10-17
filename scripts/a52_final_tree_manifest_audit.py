@@ -104,6 +104,8 @@ EXPECT={
      ("P446U SDE_CRTC_CHECK",)),
  "P446U brightness":("drivers/a52_display/msm/dsi/dsi_panel.c",
      ("P446U BRIGHTNESS ts=",)),
+ "P446U Samsung brightness":("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c",
+     ("P446U SAMSUNG_BRIGHTNESS ts=",)),
  "P446U P445 directory":("drivers/a52_display/msm/a52_phase445.c",
      ("A52_PHASE446U_P445_240_SECTIONS_V1",
       "#define P445_HEADER_BYTES SZ_16K",

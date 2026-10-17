@@ -62,13 +62,18 @@ GPU_FUNC=r'''static int gmu_disable_gdsc(struct kgsl_device *device)
 {
 	struct gmu_device *gmu = KGSL_GMU_DEVICE(device);
 	u64 start_ns = ktime_get_boottime_ns();
+	u64 poll_start_ns = 0;
 	u32 before = 0, after = 0;
 	bool pre_valid = false, post_valid = false;
 	int ret;
 	unsigned long t;
 
-	if (IS_ERR_OR_NULL(gmu->cx_gdsc))
+	if (IS_ERR_OR_NULL(gmu->cx_gdsc)) {
+		dev_warn(&gmu->pdev->dev,
+			 "P446S GMU_CX SKIP invalid_regulator=%ld\n",
+			 PTR_ERR_OR_ZERO(gmu->cx_gdsc));
 		return 0;
+	}
 
 	/* A52_PHASE446S_GMU_SLUMBER_DIAG_V1
 	 * Read CX GDSCR only when the existing GMU register mapping is valid.
@@ -103,12 +108,13 @@ GPU_FUNC=r'''static int gmu_disable_gdsc(struct kgsl_device *device)
 	}
 
 	/* Unchanged 5 SECOND POLL. No timeout shortening, no GDSC writes. */
+	poll_start_ns = ktime_get_boottime_ns();
 	t = jiffies + msecs_to_jiffies(CX_GDSC_TIMEOUT);
 	do {
 		if (!gmu_core_dev_cx_is_on(device)) {
 			dev_warn(&gmu->pdev->dev,
-				 "P446S GMU_CX POLL rc=0 elapsed_ms=%llu gdscr_post=%08x post_valid=%u\n",
-				 (unsigned long long)((ktime_get_boottime_ns() - start_ns) / 1000000),
+				 "P446S GMU_CX POLL rc=0 poll_ms=%llu gdscr_post=%08x post_valid=%u\n",
+				 (unsigned long long)((ktime_get_boottime_ns() - poll_start_ns) / 1000000),
 				 after, post_valid);
 			return 0;
 		}
@@ -117,8 +123,8 @@ GPU_FUNC=r'''static int gmu_disable_gdsc(struct kgsl_device *device)
 
 	if (!gmu_core_dev_cx_is_on(device)) {
 		dev_warn(&gmu->pdev->dev,
-			 "P446S GMU_CX POLL rc=0 boundary=1 elapsed_ms=%llu\n",
-			 (unsigned long long)((ktime_get_boottime_ns() - start_ns) / 1000000));
+			 "P446S GMU_CX POLL rc=0 boundary=1 poll_ms=%llu\n",
+			 (unsigned long long)((ktime_get_boottime_ns() - poll_start_ns) / 1000000));
 		return 0;
 	}
 	if (gmu_core_is_register_offset(device, A6XX_GPU_CC_CX_GDSCR) &&
@@ -127,8 +133,8 @@ GPU_FUNC=r'''static int gmu_disable_gdsc(struct kgsl_device *device)
 		post_valid = true;
 	}
 	dev_err(&gmu->pdev->dev,
-		"P446S GMU_CX POLL rc=-110 elapsed_ms=%llu timeout_ms=%u gdscr_pre=%08x gdscr_post=%08x post_valid=%u\n",
-		(unsigned long long)((ktime_get_boottime_ns() - start_ns) / 1000000),
+		"P446S GMU_CX POLL rc=-110 poll_ms=%llu timeout_ms=%u gdscr_pre=%08x gdscr_post=%08x post_valid=%u\n",
+		(unsigned long long)((ktime_get_boottime_ns() - poll_start_ns) / 1000000),
 		CX_GDSC_TIMEOUT, before, after, post_valid);
 	dev_err(&gmu->pdev->dev, "GMU CX gdsc off timeout\n");
 	return -ETIMEDOUT;

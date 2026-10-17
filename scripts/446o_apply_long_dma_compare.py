@@ -65,7 +65,7 @@ void a52_p446o_note(struct dsi_ctrl_hw *hw,u64 iova,u32 len,
             tx[1]!=0x5a || tx[2]!=0x5a)
             return;
         atomic_set(&p446o_splash_ready,1);
-    } else if (!(msgflags & MIPI_DSI_MSG_LASTCOMMAND)) {
+    } else if (!(msgflags & BIT(3) /* LASTCOMMAND */)) {
         /* The batch's final packet carries LASTCOMMAND. */
         return;
     }
@@ -188,9 +188,9 @@ def patch(root,kind,variant):
     s=panel.read_text()
     if "A52_PHASE446O_PANEL_ARM" not in s:
         a="a52_p446l_arm(&display->ctrl[0].ctrl->hw);"
-        b=a+"\n        /* A52_PHASE446O_PANEL_ARM */\n"+
+        b=(a+"\n        /* A52_PHASE446O_PANEL_ARM */\n"+
           "        if (type==DSI_CMD_SET_ON && !display->is_cont_splash_enabled)\n"+
-          "            a52_p446o_arm_cold();"
+          "            a52_p446o_arm_cold();")
         s=one(s,a,b,"panel cold arm")
         s=one(s,"extern void a52_p446l_arm(struct dsi_ctrl_hw *);\n",
               "extern void a52_p446l_arm(struct dsi_ctrl_hw *);\n"+
@@ -214,22 +214,19 @@ def patch(root,kind,variant):
               "extern void a52_p446o_hw_after(struct dsi_ctrl_hw *,u32);\n"+
               a,"hardware externs")
         # Match each of three 446L trigger sites; select actual MMIO writes only.
+        scan=0
         for flags in ("flags","flags","0x80000000U"):
             marker="a52_p446l_after_trigger(ctrl,"+flags+");"
-            pos=s.find(marker)
+            pos=s.find(marker,scan)
             if pos<0:raise RuntimeError("446O HW missing "+marker)
             wr="DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);"
-            start=s.rfind(wr,0,pos)
-            if start<0 or pos-start>250:
+            word=s.rfind(wr,0,pos)
+            if word<0 or pos-word>250:
                 raise RuntimeError("446O trigger not immediately preceding "+marker)
-            s=s[:start]+"a52_p446o_hw_before(ctrl,"+flags+");\n\t\t"+s[start:]
-            pos=s.find(marker,start)
+            s=s[:word]+"a52_p446o_hw_before(ctrl,"+flags+");\n\t\t"+s[word:]
+            pos=s.find(marker,word)
             s=s[:pos]+"a52_p446o_hw_after(ctrl,"+flags+");\n\t\t"+s[pos:]
-            # The second flags variant would search same first site; temporarily
-            # rename completed 446L marker to exclude it on next loop.
-            s=s[:s.find(marker,pos)] + s[s.find(marker,pos):].replace(marker,
-                "A52_P446O_TEMP_"+marker,1)
-        s=s.replace("A52_P446O_TEMP_","")
+            scan=s.find(marker,pos)+len(marker)
         if s.count("a52_p446o_hw_after(ctrl,")!=3:
             raise RuntimeError("446O expected 3 HW trigger hooks")
         hw.write_text(s)

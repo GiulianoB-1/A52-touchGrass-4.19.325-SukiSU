@@ -272,11 +272,11 @@ jobs:
           for label in ("P446S MEMLAT PERF_FAIL","P446S MEMLAT START_ROLLBACK"):
               at=s.index('"' + label)
               end=s.index('"',at+1)
-              assert s[at:end].endswith(r'\\n'),repr(s[at:end])
+              assert s[at:end].endswith(r'\n'),repr(s[at:end])
               assert '\n' not in s[at:end]
           # Regression witness: the pre-fix generator emitted a physical
           # newline inside a diagnostic C string and must fail audit.
-          broken=s.replace(r'\\n",', '\n",',1)
+          broken=s.replace(r'\n",', '\n",',1)
           assert broken!=s
           try:
               m.check(broken)

@@ -240,14 +240,63 @@ def patch(root,repo_root):
         lock=src.count("mutex_lock(&device->mutex)")
         unlock=src.count("mutex_unlock(&device->mutex)")
         if not lock and not unlock:continue
-        if not lock or not unlock:
-            raise RuntimeError("446S KGSL unpaired direct lock "+str(f))
-        # All inspected code paths already access device->mutex and have a
-        # declaration of kgsl_device; make the trace helpers visible explicitly.
+        # Lock and unlock can occur in different functions/files; instrument
+        # either side even when the lexical counts differ in one C file.
         if '#include "kgsl_device.h"' not in src:
-            src=once(src,'#include "adreno.h"',
-                     '#include "adreno.h"\n#include "kgsl_device.h"',
-                     "missing kgsl include in "+str(f))
+            if '#include "adreno.h"' in src:
+                src=once(src,'#include "adreno.h"',
+                         '#include "adreno.h"\n#include "kgsl_device.h"',
+                         "adreno include in "+str(f))
+            elif '#include "kgsl.h"' in src:
+                src=once(src,'#include "kgsl.h"',
+                         '#include "kgsl.h"\n#include "kgsl_device.h"',
+                         "kgsl include in "+str(f))
+            else:
+                match=re.search(r'^#include [<"][^\\n]+
+        src=src.replace("mutex_lock(&device->mutex)","A52_KGSL_LOCK(device)")
+        src=src.replace("mutex_unlock(&device->mutex)","A52_KGSL_UNLOCK(device)")
+        f.write_text(src)
+        count+=lock
+        files+=1
+    print("P446S KGSL_MUTEX patched_files=%d lock_sites=%d"%(files,count))
+
+def check(root):
+    for p,tokens in (
+        (CORE,(VOTES_TAG,"P446S GPU_CX_VOTES","P446S GPU_CX_CONSUMER")),
+        (GMU,(TAG,"P446S GMU_CX BEGIN","P446S GMU_CX POLL",
+              "#define CX_GDSC_TIMEOUT\t5000")),
+        (DEVHDR,(MUTEX_TAG,"P446S KGSL_MUTEX","A52_KGSL_LOCK")),
+        (API,(VOTES_TAG,"a52_gpu_cx_dump_votes")),
+    ):
+        content=(root/p).read_text()
+        for token in tokens:
+            if token not in content:
+                raise RuntimeError("446S GPU audit missing "+token+" in "+str(p))
+    # Ensure exact legacy 5 s timeout is retained.
+    g=(root/GMU).read_text()
+    if "msecs_to_jiffies(CX_GDSC_TIMEOUT)" not in g:
+        raise RuntimeError("446S GPU poll timeout changed")
+    # Reject accidentally changing GPU power behavior.
+    for fragment in ("regulator_disable(gmu->cx_gdsc)",
+                     "usleep_range(10, 100)","return -ETIMEDOUT"):
+        if fragment not in g:
+            raise RuntimeError("446S GPU legacy behavior lost: "+fragment)
+    print("P446S GPU diagnostic audit PASS: 5000ms poll preserved, votes, CX GDSCR, mutex timing")
+
+def main():
+    p=argparse.ArgumentParser()
+    p.add_argument("--root",type=Path,required=True)
+    p.add_argument("--check-only",action="store_true")
+    opt=p.parse_args()
+    if not opt.check_only:
+        patch(opt.root,Path(__file__).resolve().parent.parent)
+    check(opt.root)
+if __name__=="__main__":
+    main()
+,src,re.M)
+                if not match:
+                    raise RuntimeError("446S KGSL no include in "+str(f))
+                src=src[:match.start()]+ '#include "kgsl_device.h"\n' +src[match.start():]
         src=src.replace("mutex_lock(&device->mutex)","A52_KGSL_LOCK(device)")
         src=src.replace("mutex_unlock(&device->mutex)","A52_KGSL_UNLOCK(device)")
         f.write_text(src)

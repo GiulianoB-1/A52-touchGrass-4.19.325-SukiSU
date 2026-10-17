@@ -98,8 +98,8 @@ def patch(s):
     # The log is AFTER Qualcomm's LASTCOMMAND/long-packet flags were set.
     start,end,f=fn(s,"static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,")
     old="\tif ((msg->flags & MIPI_DSI_MSG_LASTCOMMAND))\n\t\tbuffer[3] |= BIT(7);//set the last cmd bit in header."
-    new=old+"\n\t/* P446P: actual padded bytes submitted to the DMA buffer. */\n"+
-    "\ta52_p446p_log_packet(msg,buffer,length,*flags);"
+    new=(old+"\n\t/* P446P: actual padded bytes submitted to the DMA buffer. */\n"
+         "\ta52_p446p_log_packet(msg,buffer,length,*flags);")
     if f.count(old)!=1:raise RuntimeError("446P header logger anchor absent")
     s=s[:start]+f.replace(old,new,1)+s[end:]
     # Capture complete batched memory before cmd_len is reset to zero.

@@ -84,8 +84,8 @@ def patch_probe(body):
         "cfg probe failure")
     # For the remaining errors, never convert return values for unrelated SMMUs.
     body=once(body,
-        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tnum_irqs, smmu->num_context_banks);\n\t\t\treturn -ENODEV;',
-        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tnum_irqs, smmu->num_context_banks);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu)) {\n\t\t\t\terr = -ENODEV;\n\t\t\t\tgoto a52_probe_error;\n\t\t\t}\n\t\t\treturn -ENODEV;',
+        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tsmmu->num_context_irqs, smmu->num_context_banks);\n\t\t\treturn -ENODEV;',
+        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tsmmu->num_context_irqs, smmu->num_context_banks);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu)) {\n\t\t\t\terr = -ENODEV;\n\t\t\t\tgoto a52_probe_error;\n\t\t\t}\n\t\t\treturn -ENODEV;',
         "context IRQ mismatch")
     body=once(body,
         'dev_err(dev, "failed to request global IRQ %d (%u)\\n",\n\t\t\t\ti, smmu->irqs[i]);\n\t\t\treturn err;',

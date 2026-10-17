@@ -33,7 +33,9 @@ concurrency:
 
 jobs:
   gki:
-    if: true
+    # Do not launch the inherited R2 build on Phase446S PR #183.
+    # Keep R2 validation when its own PR #182 is updated or manually dispatched.
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/a52-phase446r2-strict-manifest-pon-v1'
     name: Build Phase446R2 GKI (strict/PON/RPMh)
     runs-on: ubuntu-22.04
     timeout-minutes: 180

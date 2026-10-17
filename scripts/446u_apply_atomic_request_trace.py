@@ -113,16 +113,26 @@ static void a52u_req_set(int req)
 			crtc ? crtc->base.id : 0,
 			__builtin_return_address(0));
 ''')):
-        if s.count(needle)!=1:
-            # Some 5.10 ACKs have a different indentation. Same semantic
-            # anchor, replacing only the opening brace after exact signature.
-            import re
-            pattern=r'(?m)^(?:void|int)\s*\n'+re.escape("drm_atomic_set_"+("fb" if func=="FB" else "crtc")+"_for_plane")+r'\([^;]*?\)\s*\{'
-            hits=list(re.finditer(pattern,s,re.S))
-            if len(hits)!=1:raise RuntimeError("446U could not locate DRM "+func+" setter")
-            pos=hits[0].end()
-            s=s[:pos]+inject+s[pos:]
-        else:s=once(s,needle,needle+inject,"set "+func)
+        # Kernel 5.10 uses -Werror=declaration-after-statement.
+        # Keep every pre-existing declaration ahead of the new diagnostic.
+        import re
+        function="drm_atomic_set_"+("fb" if func=="FB" else "crtc")+"_for_plane"
+        pattern=r'(?m)^(?:void|int)\s*\n'+re.escape(function)+r'\([^;]*?\)\s*\{'
+        hits=list(re.finditer(pattern,s,re.S))
+        if len(hits)!=1:
+            raise RuntimeError("446U expected one DRM setter "+function)
+        header=hits[0].end()
+        declaration=('struct drm_plane *plane = plane_state->plane;' if func=="FB"
+                     else 'struct drm_crtc_state *crtc_state;')
+        # Require the exact kernel prologue, not some declaration later in
+        # an inner scope. Prevent accidental modifications to DRM semantics.
+        bodyhead=s[header:header+300]
+        if bodyhead.count(declaration)!=1:
+            raise RuntimeError("446U DRM setter declaration anchor missing "+func)
+        if func=="CRTC" and 'struct drm_plane *plane = plane_state->plane;' not in bodyhead.split(declaration)[0]:
+            raise RuntimeError("446U CRTC declaration order changed")
+        at=header+bodyhead.index(declaration)+len(declaration)
+        s=s[:at]+"\n"+inject+s[at:]
     if '#include <linux/a52_446u_trace.h>' not in s:
         s='#include <linux/a52_446u_trace.h>\n#include <linux/ktime.h>\n#include <linux/sched.h>\n#include <linux/spinlock.h>\n'+s
     return s

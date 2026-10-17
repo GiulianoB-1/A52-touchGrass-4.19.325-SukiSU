@@ -26,7 +26,7 @@ def apply_central(s,kind):
         "static const u32 p446l_deadline_us[10]={0U,1U,2U,5U,10U,20U,50U,100U,150U,200U};",
         "fast sample times")
     s=one(s,'__STORE__(0x446c0035U,16U,"L_FAST_0_50",7U,50U,',
-        '__STORE__(0x446c0035U,16U,(second ? "O_FAST_0_200" : "L_FAST_0_200"),10U,200U,',
+        '__STORE__(0x446c0035U,16U,(second ? "O_FAST_0_200" : "L_FAST_0_50"),10U,200U,',
         "fast raw storage")
     # The first capture stays compatible (same ID and data layout extended).
     s=one(s,"return atomic_read(&p446l_state)==1;",

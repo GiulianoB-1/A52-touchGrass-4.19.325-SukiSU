@@ -34,6 +34,7 @@ CODE=r'''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/suspend.h>
 #include <linux/notifier.h>
 #include <linux/slab.h>
+#include <generated/a52_446s_manifest.h>
 
 struct a52_pon_diag {
     struct device *dev;
@@ -168,6 +169,7 @@ static int a52_pon_probe(struct platform_device *pdev)
         dev_warn(&pdev->dev,"P446R2 PM notifier rc=%d\n",ret);
     platform_set_drvdata(pdev,p);
     a52_pon_primary=p;
+    pr_warn("P446S MANIFEST PASS %s\\n", A52_446S_FINGERPRINT);
     pr_warn("P446R2 PON_BOUND reg=%x irq=%d wake=%u pm_nb_rc=%d\n",
         base,irq,p->wake_enabled,ret);
     a52_pon_irq_chain(irq);

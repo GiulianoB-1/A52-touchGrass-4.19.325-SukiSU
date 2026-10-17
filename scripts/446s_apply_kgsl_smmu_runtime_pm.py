@@ -57,103 +57,119 @@ def replace_block(src,sig,transform,where):
     return src[:begin]+rewritten+src[i+1:]
 
 def patch_probe(body):
-    if "dev->pm_domain" not in body or PHASE250 not in body:
-        # Phase250 marker appears in helper, not necessarily in this function.
-        if "a52_arm_smmu_enable_gdscs(smmu)" not in body:
-            raise RuntimeError("446S missing Phase250 regulator enable")
-    # Validate rollback scopes before inserting code.
-    required=(
-      "err = arm_smmu_device_cfg_probe(smmu);",
-      "err = iommu_device_sysfs_add(&smmu->iommu",
-      "err = iommu_device_register(&smmu->iommu);",
-      "platform_set_drvdata(pdev, smmu);",
-      "if (dev->pm_domain) {",
-      "return arm_smmu_bus_init(&arm_smmu_ops);",
-    )
-    for anchor in required:
-        if anchor not in body:
-            raise RuntimeError("446S SMMU probe anchor missing "+anchor)
-    # Correct Phase250's error lifetime on the KGSL SMMU without changing
-    # preexisting error returns on unrelated SMMU nodes.
+    # Based on the ACTUAL Phase446R2 tree, which includes K249 tracing,
+    # Phase253 ASIDs, Phase426 CB routing and QSMMUv500 unmanaged-TBU guards.
+    # Do not replace probe from vanilla ACK source.
+    for token in ("a52_arm_smmu_enable_gdscs(smmu)",
+                  "a52_p426_cache_boot_routes(smmu)",
+                  "if (dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev))",
+                  'a52_ackfr_record("K249 S bus rc=%d", err)'):
+        if token not in body:
+            raise RuntimeError("446S SMMU Phase446R2 probe missing "+token)
     body=once(body,"int num_irqs, i, err;",
-              "int num_irqs, i, err;\n\tbool a52_pm_owned = false;\n\tbool a52_pm_ref = false;\n\tbool a52_sysfs_added = false;\n\tbool a52_iommu_registered = false;",
-              "probe locals")
+      "int num_irqs, i, err;\n\tbool a52_pm_owned = false;\n\tbool a52_pm_ref = false;\n\tbool a52_sysfs_added = false;\n\tbool a52_iommu_registered = false;",
+      "probe local state")
+    # Failure after Phase250 regulator enable must release the same vote.
     body=once(body,
-        "err = arm_smmu_device_cfg_probe(smmu);\n\tif (err)\n\t\treturn err;",
-        "err = arm_smmu_device_cfg_probe(smmu);\n\tif (err) {\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;\n\t}",
-        "cfg probe failure")
-    # For the remaining errors, never convert return values for unrelated SMMUs.
+      '\tif (err)\n\t\treturn err;\n\n\ta52_p426_cache_boot_routes(smmu);',
+      '\tif (err) {\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;\n\t}\n\n\ta52_p426_cache_boot_routes(smmu);',
+      "cfg probe failure")
     body=once(body,
-        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tsmmu->num_context_irqs, smmu->num_context_banks);\n\t\t\treturn -ENODEV;',
-        'dev_err(dev,\n\t\t\t      "found only %d context irq(s) but %d required\\n",\n\t\t\t\tsmmu->num_context_irqs, smmu->num_context_banks);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu)) {\n\t\t\t\terr = -ENODEV;\n\t\t\t\tgoto a52_probe_error;\n\t\t\t}\n\t\t\treturn -ENODEV;',
-        "context IRQ mismatch")
+      '\t\t\t      smmu->num_context_irqs, smmu->num_context_banks);\n\t\t\treturn -ENODEV;',
+      '\t\t\t      smmu->num_context_irqs, smmu->num_context_banks);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu)) {\n\t\t\t\terr = -ENODEV;\n\t\t\t\tgoto a52_probe_error;\n\t\t\t}\n\t\t\treturn -ENODEV;',
+      "context IRQ failure")
     body=once(body,
-        'dev_err(dev, "failed to request global IRQ %d (%u)\\n",\n\t\t\t\ti, smmu->irqs[i]);\n\t\t\treturn err;',
-        'dev_err(dev, "failed to request global IRQ %d (%u)\\n",\n\t\t\t\ti, smmu->irqs[i]);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\t\tgoto a52_probe_error;\n\t\t\treturn err;',
-        "global IRQ failure")
+      '\t\t\tdev_err(dev, "failed to request global IRQ %d (%u)\\n",\n\t\t\t\ti, smmu->irqs[i]);\n\t\t\treturn err;',
+      '\t\t\tdev_err(dev, "failed to request global IRQ %d (%u)\\n",\n\t\t\t\ti, smmu->irqs[i]);\n\t\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\t\tgoto a52_probe_error;\n\t\t\treturn err;',
+      "global IRQ failure")
     body=once(body,
-        'dev_err(dev, "Failed to register iommu in sysfs\\n");\n\t\treturn err;',
-        'dev_err(dev, "Failed to register iommu in sysfs\\n");\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;',
-        "iommu sysfs error")
+      '\t\tdev_err(dev, "Failed to register iommu in sysfs\\n");\n\t\treturn err;',
+      '\t\tdev_err(dev, "Failed to register iommu in sysfs\\n");\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;',
+      "sysfs failure")
+    body=once(body,"\tiommu_device_set_ops(&smmu->iommu, &arm_smmu_ops);",
+      "\ta52_sysfs_added = true;\n\tiommu_device_set_ops(&smmu->iommu, &arm_smmu_ops);",
+      "sysfs added state")
     body=once(body,
-        'iommu_device_set_ops(&smmu->iommu, &arm_smmu_ops);',
-        'a52_sysfs_added = true;\n\tiommu_device_set_ops(&smmu->iommu, &arm_smmu_ops);',
-        "sysfs flag")
-    body=once(body,
-        'dev_err(dev, "Failed to register iommu\\n");\n\t\treturn err;',
-        'dev_err(dev, "Failed to register iommu\\n");\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;',
-        "iommu register error")
-    body=once(body,
-        'platform_set_drvdata(pdev, smmu);',
-        'a52_iommu_registered = true;\n\tplatform_set_drvdata(pdev, smmu);',
-        "iommu registered flag")
-    old=r'''	if (dev->pm_domain) {
+      '\t\tdev_err(dev, "Failed to register iommu\\n");\n\t\treturn err;',
+      '\t\tdev_err(dev, "Failed to register iommu\\n");\n\t\tif (a52_kgsl_smmu_has_phase250_vdd(smmu))\n\t\t\tgoto a52_probe_error;\n\t\treturn err;',
+      "iommu registration failure")
+    body=once(body,"\tplatform_set_drvdata(pdev, smmu);",
+      "\ta52_iommu_registered = true;\n\tplatform_set_drvdata(pdev, smmu);",
+      "registered state")
+    original=r'''	if (dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) {
 		pm_runtime_set_active(dev);
 		pm_runtime_enable(dev);
-	}
-
-	/*
-	 * For ACPI and generic DT bindings, an SMMU will be probed before
-	 * any device which might need it, so we want the bus ops in place
-	 * ready to handle default domain setup as soon as any SMMU exists.
+	} else if (a52_apps_smmu_has_unmanaged_tbus(dev)) {
+		dev_warn(dev,
+			 "runtime PM disabled until qsmmuv500 TBU support is ported\n");
+	}'''
+    replacement=r'''	/* A52_KGSL_SMMU_RPM_V1: target solely the Phase250 vdd SMMU.
+	 * Preserve the separate QSMMUv500 unmanaged-TBU guard unchanged.
 	 */
-	if (!using_legacy_binding)
-		return arm_smmu_bus_init(&arm_smmu_ops);
-
-	return 0;'''
-    new=r'''	/* Only SMMU with the Phase250 GPU vdd supply, not all SMMUs.
-	 * Probe's regulator and clocks are currently ON. Hold a runtime PM
-	 * usage reference through bus registration and release it with a
-	 * 20 ms autosuspend once probe is finished.
-	 */
-	if (dev->pm_domain || a52_kgsl_smmu_has_phase250_vdd(smmu)) {
+	if (dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev) ||
+	    a52_kgsl_smmu_has_phase250_vdd(smmu)) {
 		if (a52_kgsl_smmu_has_phase250_vdd(smmu)) {
 			pm_runtime_set_autosuspend_delay(dev, 20);
 			pm_runtime_use_autosuspend(dev);
 			a52_kgsl_smmu_pm_diag(dev, "probe_before_pm");
 		}
 		err = pm_runtime_set_active(dev);
-		if (err) {
-			if (a52_kgsl_smmu_has_phase250_vdd(smmu))
-				goto a52_probe_error;
-			return err;
-		}
+		if (err && a52_kgsl_smmu_has_phase250_vdd(smmu))
+			goto a52_probe_error;
 		if (a52_kgsl_smmu_has_phase250_vdd(smmu)) {
 			pm_runtime_get_noresume(dev);
 			a52_pm_ref = true;
 		}
 		pm_runtime_enable(dev);
 		a52_pm_owned = a52_kgsl_smmu_has_phase250_vdd(smmu);
+	} else if (a52_apps_smmu_has_unmanaged_tbus(dev)) {
+		dev_warn(dev,
+			 "runtime PM disabled until qsmmuv500 TBU support is ported\n");
+	}'''
+    # Parenthesize the logic explicitly to avoid precedence ambiguity.
+    replacement=replacement.replace(
+        'if (dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev) ||\n\t    a52_kgsl_smmu_has_phase250_vdd(smmu)) {',
+        'if ((dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) ||\n\t    a52_kgsl_smmu_has_phase250_vdd(smmu)) {')
+    body=once(body,original,replacement,"real R2 PM guard")
+    end=r'''	if (!using_legacy_binding) {
+		if (k249)
+			a52_ackfr_record("K249 S bus in");
+		err = arm_smmu_bus_init(&arm_smmu_ops);
+		if (k249)
+			a52_ackfr_record("K249 S bus rc=%d", err);
+		if (trace)
+			a52_ackfr_record("SMMU parent-probe exit rc=%d", err);
+		return err;
 	}
 
-	if (!using_legacy_binding) {
+	if (trace)
+		a52_ackfr_record("SMMU parent-probe exit rc=0");
+	if (k249)
+		a52_ackfr_record("K249 S exit rc=0");
+	return 0;'''
+    new=r'''	if (!using_legacy_binding) {
+		if (k249)
+			a52_ackfr_record("K249 S bus in");
 		err = arm_smmu_bus_init(&arm_smmu_ops);
-		if (err) {
-			if (a52_kgsl_smmu_has_phase250_vdd(smmu))
-				goto a52_probe_error;
-			return err;
+		if (k249)
+			a52_ackfr_record("K249 S bus rc=%d", err);
+		if (trace)
+			a52_ackfr_record("SMMU parent-probe exit rc=%d", err);
+		if (err && a52_kgsl_smmu_has_phase250_vdd(smmu))
+			goto a52_probe_error;
+		if (a52_pm_ref) {
+			a52_kgsl_smmu_pm_diag(dev, "probe_before_autosuspend");
+			pm_runtime_mark_last_busy(dev);
+			pm_runtime_put_autosuspend(dev);
+			a52_kgsl_smmu_pm_diag(dev, "probe_after_autosuspend");
 		}
+		return err;
 	}
+
+	if (trace)
+		a52_ackfr_record("SMMU parent-probe exit rc=0");
+	if (k249)
+		a52_ackfr_record("K249 S exit rc=0");
 	if (a52_pm_ref) {
 		a52_kgsl_smmu_pm_diag(dev, "probe_before_autosuspend");
 		pm_runtime_mark_last_busy(dev);
@@ -163,18 +179,16 @@ def patch_probe(body):
 	return 0;
 
 a52_probe_error:
-	/* Correct Phase250's post-regulator probe-failure leak. No forced
-	 * regulator-off during normal SMMU usage, only unwind of a failed
-	 * probe after this instance's successful regulator enable.
+	/* Only unwind the regulators acquired by this failed A52 probe.
+	 * Do not change successful runtime behavior or other SMMU nodes.
 	 */
 	pr_err("P446S KGSL_SMMU_RPM probe_error dev=%s rc=%d pm_owned=%u\n",
-		dev_name(dev), err, a52_pm_owned);
+	       dev_name(dev), err, a52_pm_owned);
 	if (a52_pm_owned)
 		pm_runtime_disable(dev);
 	if (a52_pm_ref)
 		pm_runtime_put_noidle(dev);
-	if (a52_pm_owned || pm_runtime_use_autosuspend)
-		pm_runtime_dont_use_autosuspend(dev);
+	pm_runtime_dont_use_autosuspend(dev);
 	if (a52_iommu_registered)
 		iommu_device_unregister(&smmu->iommu);
 	if (a52_sysfs_added)
@@ -183,10 +197,7 @@ a52_probe_error:
 	a52_arm_smmu_disable_gdscs(smmu);
 	clk_bulk_unprepare(smmu->num_clks, smmu->clks);
 	return err;'''
-    # Eliminate a function pointer expression by using scope-safe DT test.
-    new=new.replace("if (a52_pm_owned || pm_runtime_use_autosuspend)",
-                    "if (a52_kgsl_smmu_has_phase250_vdd(smmu))")
-    return once(body,old,new,"probe PM policy")
+    return once(body,end,new,"real Phase446R2 probe exit/rollback")
 
 def patch_remove(body):
     old=r'''	if (pm_runtime_enabled(smmu->dev))
@@ -247,7 +258,7 @@ def patch(s):
     for anchor in (PHASE250,"a52_arm_smmu_enable_gdscs",
                    "a52_arm_smmu_disable_gdscs",
                    "pm_runtime_set_active", "arm_smmu_rpm_get",
-                   "arm_smmu_rpm_put", "if (dev->pm_domain)"):
+                   "arm_smmu_rpm_put", "if (dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev))"):
         if anchor not in s:
             raise RuntimeError("446S SMMU missing 5.10/Phase250 "+anchor)
     include="#include <linux/pm_runtime.h>"
@@ -327,7 +338,7 @@ def audit(root):
               "system_suspend","system_resume"):
         if t not in s:
             raise RuntimeError("446S SMMU audit missing "+t)
-    if s.count("if (dev->pm_domain || a52_kgsl_smmu_has_phase250_vdd(smmu))")!=1:
+    if s.count("if ((dev->pm_domain && !a52_apps_smmu_has_unmanaged_tbus(dev)) ||\n\t    a52_kgsl_smmu_has_phase250_vdd(smmu))")!=1:
         raise RuntimeError("446S SMMU global PM scope changed")
     if "gmu_disable_gdsc" in s:
         raise RuntimeError("446S SMMU must not modify GMU")

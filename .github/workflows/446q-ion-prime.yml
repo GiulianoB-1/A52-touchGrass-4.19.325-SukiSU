@@ -718,6 +718,16 @@ jobs:
           grep -Fq 'A52_ION_DMABUF_FLAGS_FALLBACK' "$ROOT/drivers/staging/android/ion/ion_dma_buf.c"
           grep -Fq 'A52_PHASE446N_DSI_IRQ_REARM_V1' "$ROOT/drivers/a52_display/msm/dsi/dsi_ctrl.c"
           python3 scripts/446q_reconcile_phase_markers.py --root "$ROOT" --output "$PWD/phase446q-ion-audit"
+          # Phase446R: ensure no_console_suspend is honored even if Samsung
+          # bootloader silently ignores the boot image extra_cmdline suffix.
+          BUILTIN_CMDLINE="$(sed -n 's/^CONFIG_CMDLINE="\(.*\)"$/\1/p' "$BUILD/.config")"
+          test -n "$BUILTIN_CMDLINE"
+          case " $BUILTIN_CMDLINE " in
+            *" no_console_suspend "*) ;;
+            *) BUILTIN_CMDLINE="$BUILTIN_CMDLINE no_console_suspend" ;;
+          esac
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-str CMDLINE "$BUILTIN_CMDLINE"
+          grep -Eq '^CONFIG_CMDLINE=".*no_console_suspend"' "$BUILD/.config"
           "$ROOT/scripts/config" --file "$BUILD/.config" -e USB_G_SERIAL -e USB_CONFIGFS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_F_FS -e U_SERIAL_CONSOLE
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do

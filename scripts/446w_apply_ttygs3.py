@@ -21,7 +21,7 @@ def patch_u(s):
     if TAG in s:return s
     if "A52_PHASE446U_USB_SAFE_COORDINATOR_V2" not in s:
         raise RuntimeError("U446 v2 must precede W")
-    s='#include <linux/ratelimit.h>\n#include <linux/atomic.h>\n'+s
+    s='#include <linux/ratelimit.h>\n#include <linux/atomic.h>\nunsigned char a52w_early_console_line(void);\n'+s
     anchor="int gserial_alloc_line_no_console(unsigned char *line_num)"
     block=r'''/* A52_PHASE446W_TTYGS3_EARLY_PORT_V1 */
 static unsigned char a52w_console_port=3;

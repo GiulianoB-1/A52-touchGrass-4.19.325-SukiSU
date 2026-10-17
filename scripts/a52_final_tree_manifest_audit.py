@@ -140,6 +140,8 @@ EXPECT={
       "P446V SNAP_SAMSUNG","P446V EVENT NORMAL_DISPLAY_ON")),
  "P446V SDE encoder details":("drivers/a52_display/msm/sde/sde_encoder.c",
      ("A52_PHASE446V_SDE_AOD_STATE_DIFF_V1","P446V SNAP_ENC_DETAIL")),
+ "P446V physical command autorefresh":("drivers/a52_display/msm/sde/sde_encoder_phys_cmd.c",
+     ("A52_PHASE446V_PHYS_CMD_AUTOREFRESH_STATE_V1","P446V SNAP_AUTORF")),
  "P446V normal-on request window":("drivers/gpu/drm/drm_atomic_uapi.c",
      ("P446V POST_WINDOW_BEGIN","a52v_post_window_next")),
  "P446V pre-off and after normal-on":("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c",

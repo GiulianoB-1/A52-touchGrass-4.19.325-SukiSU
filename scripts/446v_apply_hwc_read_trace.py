@@ -26,7 +26,7 @@ def patch_mode(s):
 			if (ret)
 				return ret;'''
     inject=r'''			ret = __drm_object_property_get_value(obj, prop, &val);
-			if (obj->id == 32 || obj->id == 107)
+			if (!ret && (obj->id == 32 || obj->id == 107))
 				pr_info("P446V READ_PROP ts=%llu pid=%d comm=%s obj=%u type=%#x property=%s propid=%u rc=%d value=%llu hex=%#llx\n",
 					(unsigned long long)ktime_get_boottime_ns(),
 					task_pid_nr(current),current->comm,obj->id,obj->type,
@@ -70,6 +70,15 @@ def patch_prop(s):
 			task_pid_nr(current),property->base.id,i,
 			(unsigned long long)property->values[i]);
 '''+needle,"GETPROPERTY enumerated values")
+    # Show enum/bitmask option labels returned to HWC.
+    s=one(s,"\t\t\tenum_count++;\n\t\t\tif (out_resp->count_enum_blobs < enum_count)",
+        r'''			enum_count++;
+			pr_info("P446V GETPROPERTY_ENUM ts=%llu pid=%d property=%s enum=%s value=%llu\n",
+				(unsigned long long)ktime_get_boottime_ns(),
+				task_pid_nr(current),property->name,prop_enum->name,
+				(unsigned long long)prop_enum->value);
+			if (out_resp->count_enum_blobs < enum_count)''',
+        "GETPROPERTY enum/bitmask values")
     needle='''	blob = drm_property_lookup_blob(dev, out_resp->blob_id);
 	if (!blob)
 		return -ENOENT;'''

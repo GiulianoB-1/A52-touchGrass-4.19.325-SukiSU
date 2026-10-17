@@ -183,14 +183,15 @@ EXPORT_SYMBOL_GPL(a52_446u_release_early_serial);
 
 '''
     s=once(s,anchor,block+anchor,"serial handover exported helper")
-    # gs_unbind must be documented durably even when it hangs.
-    import re
-    pattern=r'static int gs_unbind\(struct usb_composite_dev \*cdev\)\s*\{'
-    m=re.search(pattern,s)
-    if not m:raise RuntimeError("446U gs_unbind function signature missing")
-    s=s[:m.end()]+'''
-	a52_ackfr_record("P446U USB GS_UNBIND_BEGIN");
-'''+s[m.end():]
+    # 5.10 gs_unbind declares 'int i;' first. Do not insert a statement
+    # before it: -Werror=declaration-after-statement. Fail closed if that
+    # function prologue ever changes in the reconstructed GKI tree.
+    gs_prologue="static int gs_unbind(struct usb_composite_dev *cdev)\\n{\\n\\tint i;\\n"
+    if s.count(gs_prologue)!=1:
+        raise RuntimeError("446U gs_unbind exact declaration prologue mismatch")
+    s=s.replace(gs_prologue,
+                gs_prologue+'\\n\\ta52_ackfr_record("P446U USB GS_UNBIND_BEGIN");\\n',
+                1)
     start=s.index("static int gs_unbind(")
     end=s.index("\n}",start)
     part=s[start:end]

@@ -23,7 +23,7 @@ PHASES={
 # 166/169 heap19 implementations. Require heap *functionality*, not conflicting
 # old markers from implementations that are intentionally not built together.
 REQUIRED = {
- "154_failure_window":("drivers/a52_secure/a52_ack_secure_flight_recorder.c",
+ "154_failure_window":("include/linux/a52_ack_secure_flight_recorder.h",
                        "A52_FAILURE_WINDOW_PROBE_V1"),
 }
 def marker_present(root,rel,mark):

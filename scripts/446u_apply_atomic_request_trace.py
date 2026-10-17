@@ -15,6 +15,7 @@ MSMDRV=Path("drivers/a52_display/msm/msm_drv.c")
 SDEPLANE=Path("drivers/a52_display/msm/sde/sde_plane.c")
 SDECRTC=Path("drivers/a52_display/msm/sde/sde_crtc.c")
 DSIPANEL=Path("drivers/a52_display/msm/dsi/dsi_panel.c")
+SAMSUNG=Path("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c")
 
 def once(src,old,new,label):
     n=src.count(old)
@@ -266,6 +267,27 @@ def patch_panel(s):
     s=s[:x]+body+s[y:]
     return '#include <linux/ktime.h>\n#include <linux/sched.h>\n'+s
 
+def patch_samsung_brightness(s):
+    if "P446U SAMSUNG_BRIGHTNESS" in s:return s
+    sig="int ss_brightness_dcs(struct samsung_display_driver_data *vdd, int level, int backlight_origin)"
+    if sig not in s:raise RuntimeError("446U Samsung direct brightness entry missing")
+    anchor="static int backup_bl_level, backup_acl;"
+    start=s.index(sig)
+    end=s.find("\n}",start)
+    if end<0 or s[start:end].count(anchor)!=1:
+        raise RuntimeError("446U Samsung brightness prologue ambiguous")
+    fragment=r'''
+	/* 446U: all Samsung brightness entrypoints incl sysfs/fingerprint/VRR. */
+	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
+		pr_info("P446U SAMSUNG_BRIGHTNESS ts=%llu pid=%d comm=%s level=%d origin=%d\n",
+			(unsigned long long)ktime_get_boottime_ns(),
+			task_pid_nr(current), current->comm,
+			level, backlight_origin);
+'''
+    chunk=s[start:end].replace(anchor,anchor+"\n"+fragment,1)
+    s=s[:start]+chunk+s[end:]
+    return '#include <linux/ktime.h>\n#include <linux/sched.h>\n'+s
+
 def check(root):
     checks={
         HDR:("a52_446u_request_id",),
@@ -274,7 +296,8 @@ def check(root):
         MSMDRV:("P446U MSM_CHECK",),
         SDEPLANE:("P446U SDE_PLANE_CHECK","P446U PREPARE_FB"),
         SDECRTC:("P446U SDE_CRTC_CHECK",),
-        DSIPANEL:("P446U BRIGHTNESS",)
+        DSIPANEL:("P446U BRIGHTNESS",),
+        SAMSUNG:("P446U SAMSUNG_BRIGHTNESS",)
     }
     for path,words in checks.items():
         txt=(root/path).read_text()
@@ -298,7 +321,7 @@ int a52_446u_request_id(void);
         for p,fn in ((UAPI,patch_uapi),(ATOMIC,patch_msm),
                      (MSMDRV,patch_msm_drv),
                      (SDEPLANE,patch_sde_plane),(SDECRTC,patch_sde_crtc),
-                     (DSIPANEL,patch_panel)):
+                     (DSIPANEL,patch_panel),(SAMSUNG,patch_samsung_brightness)):
             f=root/p
             f.write_text(fn(f.read_text()))
     check(root)

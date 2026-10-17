@@ -32,6 +32,17 @@ def patch_u(s):
         "\tstruct task_struct\t*task;\n\tstruct completion\ta52u_worker_ack;\n\tstruct completion\ta52u_request_ack;\n\twait_queue_head_t\ta52u_req_wait;\n\tatomic_t\ta52u_cb_active;\n\tbool\t\t\ta52u_stopping;\n\tbool\t\t\ta52u_detached;\n\tbool\t\t\ta52u_req_pending;\n\twait_queue_head_t\twait;","console fields")
     s=once(s,"\tstruct tty_port\t\tport;\n\tspinlock_t\t\tport_lock;",
         "\tstruct tty_port\t\tport;\n\tbool\t\t\ta52u_block_opens;\n\tspinlock_t\t\tport_lock;","port fields")
+    # Record smdexe's tty->index BEFORE any possible -ENODEV/-EBUSY
+    # exit. Crash stack alone cannot reveal the selected ttyGS line.
+    s=once(s,
+        "\tint\t\tstatus = 0;\n\n\tmutex_lock(&ports[port_num].lock);",
+        r'''	int		status = 0;
+
+	if (!strncmp(current->comm, "smdexe", 6))
+		a52_ackfr_record("U446 SMD_OPEN pid=%d comm=%s port=ttyGS%d",
+				 task_pid_nr(current), current->comm, port_num);
+	mutex_lock(&ports[port_num].lock);''',
+        "smdexe tty index diagnostic")
     # The gate and port.count increment share port_lock. Restrict the gate
     # to the legacy ttyGS0 line and log the attempted device index.
     anchor="\tif (!port) {\n\t\tstatus = -ENODEV;\n\t\tgoto out;\n\t}\n\n\tspin_lock_irq(&port->port_lock);"
@@ -520,7 +531,7 @@ def patch_recorder(s):
 
 def check(root):
     checks={
-      U:(TAG,"A52_PHASE446U_TTY_NULLSAFE_V3","U446 OPEN_BLOCKED","U446 CONSOLE skip_dequeue",
+      U:(TAG,"A52_PHASE446U_TTY_NULLSAFE_V3","U446 SMD_OPEN","U446 OPEN_BLOCKED","U446 CONSOLE skip_dequeue",
          "U446 PRE count=","U446 holder pid=",
          "U446 CONSOLE worker-stop-ack","U446 CONSOLE unregister-enter",
          "U446 CONSOLE request-dequeue-enter","U446 CONSOLE request-free",

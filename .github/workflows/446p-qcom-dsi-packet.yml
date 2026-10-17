@@ -4,9 +4,6 @@ run-name: Phase446P Qualcomm header order restore + DMA_DONE timeout cleanup
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
-  pull_request:
-    branches:
-      - agent/a52-phase446l-post-trigger-twin-v1
   workflow_dispatch:
 
 permissions:

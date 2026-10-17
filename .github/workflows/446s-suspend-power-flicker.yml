@@ -242,12 +242,17 @@ jobs:
           git -C common checkout --detach FETCH_HEAD
           test "$(git -C common rev-parse HEAD)" = "$GKI_COMMON_SHA"
 
-      - name: Cache pinned GKI source after sync
-        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.gki-source-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: gki
-          key: android12-5.10-gki-source-v1-${{ runner.os }}-${{ env.GKI_COMMON_TAG }}-${{ env.GKI_COMMON_SHA }}
+      # GitHub's default repo cache budget is 10 GB. Two PR scopes each stored
+      # 4 GB of pinned GKI source and 1.2 GB of TG source, exceeding that cap and
+      # evicting the hard-to-reconstruct Phase429/346 kernel checkpoints.
+      # Still RESTORE historical source caches if present; on a miss, sync the
+      # immutable upstream SHA but do not re-cache this reproducible 4 GB input.
+      - name: Validate pinned GKI checkout without duplicating large source cache
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C gki/common rev-parse HEAD)" = "$GKI_COMMON_SHA"
+          echo 'P446S GKI pinned checkout PASS; 4GB duplicate cache SAVE DISABLED'
 
       - name: Restore exact TouchGrass source on baseline-cache miss
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
@@ -268,12 +273,12 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
 
-      - name: Cache TouchGrass source after clone
-        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true' && steps.touchgrass-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: workspace/touchgrass-a52xq
-          key: a52xq-touchgrass-linux-4.19.200-main-v2-${{ runner.os }}-${{ env.TOUCHGRASS_COMMIT }}
+      - name: Validate pinned TG checkout without duplicating large source cache
+        if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
+          echo 'P446S TouchGrass pinned checkout PASS; 1.2GB duplicate cache SAVE DISABLED'
 
       - name: Restore retained Phase346 seed cache
         if: steps.phase429-baseline-cache.outputs.cache-hit != 'true' && steps.phase357-cache.outputs.cache-hit != 'true' && steps.phase346-v2.outputs.cache-hit != 'true' && steps.phase346-v1.outputs.cache-hit != 'true' && steps.phase345-cache.outputs.cache-hit != 'true'

@@ -4,9 +4,6 @@ run-name: Phase446Q Phase148 ION exporter fallback + graphics pipeline witnesses
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
-  pull_request:
-    branches:
-      - agent/a52-phase446l-post-trigger-twin-v1
   workflow_dispatch:
 
 permissions:

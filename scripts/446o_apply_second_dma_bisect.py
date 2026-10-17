@@ -132,7 +132,7 @@ def apply_hw(s):
     a="extern void a52_p446l_after_trigger(struct dsi_ctrl_hw *,u32);\n"
     s=one(s,a,a+"extern void a52_p446o_pre(struct dsi_ctrl_hw *);\n","pre prototype")
     import re
-    patt=r"(?m)^([ \\t]*)DSI_W32\\(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1\\);"
+    patt=r"(?m)^([ \t]*)DSI_W32\(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1\);"
     def transform(match):
         indent=match.group(1)
         return indent+"a52_p446o_pre(ctrl);\n"+match.group(0)

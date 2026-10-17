@@ -58,6 +58,18 @@ EXPECT={
      ("A52_PHASE446S_UNSAMPLED_COMMIT_V1","P446S FRAME seq=")),
  "P446S ioctl caller":("drivers/gpu/drm/drm_atomic_uapi.c",
      ("A52_PHASE446S_ATOMIC_IOCTL_TRACE_V1","P446S IOCTL seq=")),
+ "P446S ARM memlat PMU":("drivers/devfreq/arm-memlat-mon.c",
+     ("A52_MEMLAT_NO_EXCLUDE_IDLE","attr->exclude_idle = 0;",
+      "P446S MEMLAT PERF_FAIL","P446S MEMLAT START_ROLLBACK")),
+ "P446S PON RESIN":("drivers/a52_secure/a52_pon_wake_diag.c",
+     ("A52_PHASE446S_PON_RESIN_V1","KEY_VOLUMEDOWN",
+      "!!(val & BIT(1))","P446S RESIN EV_KEY")),
+ "P446S PMIC GPIO vendor":("drivers/pinctrl/qcom/a52-pinctrl-spmi-gpio.c",
+     ("A52_PHASE446S_LEGACY_PMIC_GPIO_V1","P446T PMIC_GPIO probe",
+      '.compatible = "qcom,spmi-gpio"','a52-qcom-spmi-gpio',
+      "qcom,gpios-disallowed","platform_get_irq(pdev, pin_idx)")),
+ "P446S PMIC GPIO Kbuild":("drivers/pinctrl/qcom/Makefile",
+     ("obj-y += a52-pinctrl-spmi-gpio.o",)),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",
@@ -85,6 +97,13 @@ def audit(root,build,out,strict,image):
         rows.append({"contract":label,"path":rel,"present":not absent,
                      "missing":absent})
         if absent:missing.append({"contract":label,"missing":absent})
+    # Legacy qcom,spmi-gpio compatible may be handled by ONE driver only.
+    ack_gpio=root/"drivers/pinctrl/qcom/pinctrl-spmi-gpio.c"
+    if ack_gpio.is_file():
+        import re
+        ack_text=ack_gpio.read_text(errors="replace")
+        if re.search(r'\.compatible\s*=\s*"qcom,spmi-gpio"',ack_text):
+            missing.append({"contract":"no native SPMI GPIO legacy compatible collision"})
     # Security-sensitive negative checks.
     g=(root/"drivers/a52_display/msm/msm_gem_prime.c")
     if g.is_file():

@@ -157,7 +157,7 @@ static bool p446s_memlat_owner(struct devfreq *df)
                 repr(interval[max(0,calls[0].start()-100):calls[0].start()+110]))
         m = matches[0]
         guard = (m.group("indent") + "if (node->monitor_ready) {\n"
-                 + m.group(0) + "\n"
+                 + m.group("indent") + "\t" + m.group(0).lstrip() + "\n"
                  + m.group("indent") + "}")
         interval = interval[:m.start()] + guard + interval[m.end():]
         s = s[:begin] + interval + s[end:]
@@ -208,6 +208,15 @@ def check(root):
     for label,(src,tokens) in must.items():
         for token in tokens:
             if token not in src:raise RuntimeError("446S "+label+" missing "+token)
+    event = m.find("case DEVFREQ_GOV_INTERVAL:")
+    if event < 0:
+        raise RuntimeError("446S memlat source audit missing interval event")
+    event_tail = m[event:]
+    import re
+    boundary = re.search(r"(?m)^\t(?:case [A-Z0-9_]+:|default:|})", event_tail[1:])
+    interval = event_tail[:1 + boundary.start()] if boundary else event_tail
+    if "devfreq_interval_update(" in interval and "if (node->monitor_ready)" not in interval:
+        raise RuntimeError("446S memlat interval update has no initialized-timer guard")
     print("P446S MEMLAT source audit PASS: failed-start ownership, initialized-work guards")
 
 def main():

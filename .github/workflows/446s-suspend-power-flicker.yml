@@ -295,6 +295,7 @@ jobs:
           python3 scripts/446v_apply_pmk8350_rtc.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable RTC_DRV_PM8XXX --enable RTC_HCTOSYS --set-str RTC_HCTOSYS_DEVICE rtc0
           python3 -m py_compile scripts/446w_apply_splash_select.py scripts/446w_apply_handoff_option_b.py scripts/446w_apply_ttygs3.py scripts/446w_retarget_boot_console.py
+          python3 scripts/446w_retarget_boot_console.py --self-test
           python3 scripts/446w_apply_splash_select.py --root "$ROOT"
           python3 scripts/446w_apply_splash_select.py --root "$ROOT" --check-only
           python3 scripts/446w_apply_handoff_option_b.py --root "$ROOT"
@@ -740,12 +741,17 @@ jobs:
             --report "$OUT/package/phase446u-usb-cmdline-report.json"
           mv "$FINAL.usb" "$FINAL"
           grep -aFq 'a52.usb_handover=1' "$FINAL"
-          # Exact header-v2 ttyGS0 -> ttyGS3 rewrite (same length, one token).
+          # Actual Samsung boot header has console=null. It MUST remain unchanged.
+          # Kernel CONFIG_CMDLINE_EXTEND supplies console=ttyGS3,115200.
+          # Verifier audits config, preserves console=null and never rewrites it.
           python3 scripts/446w_retarget_boot_console.py \
             --source "$FINAL" --output "$FINAL.tty3" \
+            --kernel-config "$BUILD/.config" \
             --from-line 0 --to-line 3 \
             --report "$OUT/package/phase446w-console-retarget.json"
           mv "$FINAL.tty3" "$FINAL"
+          grep -Fq '"status": "bootloader-console-null-preserved"' "$OUT/package/phase446w-console-retarget.json"
+          grep -Fq '"image_all_bytes_unchanged": true' "$OUT/package/phase446w-console-retarget.json"
           python3 scripts/446_append_boot_cmdline.py \
             --source "$FINAL" --output "$FINAL.cold" \
             --append "a52.446w_cold=1" \
@@ -761,7 +767,11 @@ jobs:
             --append "a52.446w_tty=3" \
             --report "$OUT/package/phase446w-port3.json"
           mv "$FINAL.port" "$FINAL"
-          grep -aFq 'console=ttyGS3,115200' "$FINAL"
+          # Header console=null is intentional; ttyGS3 comes from built-in config.
+          grep -aFq 'console=null' "$FINAL"
+          grep -Fq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
+          grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
+          grep -aFq 'console=ttyGS3,115200' "$BUILD/arch/arm64/boot/Image"
           grep -aFq 'a52.446w_cold=1' "$FINAL"
           grep -aFq 'a52.446w_handoff=0' "$FINAL"
           grep -aFq 'a52.446w_tty=3' "$FINAL"

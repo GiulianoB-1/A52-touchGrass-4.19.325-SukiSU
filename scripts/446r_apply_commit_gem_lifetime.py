@@ -130,16 +130,15 @@ def audit(root):
         if x not in atomic:raise RuntimeError("446R atomic audit missing "+x)
     if TAG not in gem or "P446R GEM_FREE" not in gem:
         raise RuntimeError("446R GEM free audit missing")
-    if "WARN_ON(!mutex_is_locked(&dev->struct_mutex));" in gem:
-        raise RuntimeError("446R stale 4.19 GEM lock assertion remains")
+    start=gem.index("void msm_gem_free_object(struct drm_gem_object *obj)")
+    end=gem.index("\n}\n",start)
+    free_body=gem[start:end]
+    if "WARN_ON(!mutex_is_locked(&dev->struct_mutex));" in free_body:
+        raise RuntimeError("446R stale 4.19 GEM-free lock assertion remains")
     if "WARN_ON(is_active(msm_obj));" not in gem:
         raise RuntimeError("446R active list validation lost")
     if ".gem_free_object_unlocked = msm_gem_free_object" not in drv.read_text():
         raise RuntimeError("446R 5.10 GEM destructor callback changed")
-    for unchanged in ("A52_PHASE446P_QCOM_DSI_PACKET_V1",
-                      "A52_ION_DMABUF_FLAGS_FALLBACK"):
-        file=(root/(MSM+"dsi/dsi_ctrl.c" if "P_QCOM" in unchanged else
-                    "drivers/staging/android/ion/ion_dma_buf.c")) if False else None
     print("P446R AUDIT PASS: post-swap layer/FB trace, 5.10 unlocked GEM free contract, active-list WARN retained")
 
 def main():

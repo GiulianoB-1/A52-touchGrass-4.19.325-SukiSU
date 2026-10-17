@@ -32,9 +32,41 @@ def marker_present(root,rel,mark):
 
 def run_stage(name,root,output):
     rel,mark,script=PHASES[name]
-    cmd=[sys.executable,str(Path("scripts")/script),"--gki",str(root),
-         "--output",str(output)]
-    subprocess.run(cmd,check=True)
+    if name in ("146","149"):
+        path=root/"drivers/staging/android/ion/ion.c"
+        s=path.read_text()
+        # The Phase213 allocator rewrote the Phase146/149 block but retained
+        # exactly one conditional heap25->ION_HEAP_SYSTEM retry.
+        prefix="\t\tif (fd == -ENODEV &&\n\t\t    (data.allocation.heap_id_mask & (1U << 25))) {"
+        if s.count(prefix)!=1 or s.count("fd == -ENODEV")!=1:
+            raise RuntimeError("P446Q unexpected allocator gate; refusing duplicate retry")
+        i=s.index(prefix)
+        tail=s[i:i+700]
+        for required in ("effective_mask =", "(data.allocation.heap_id_mask & ~(1U << 25)) |",
+                         "ION_HEAP_SYSTEM", "fd = ion_alloc_fd(", "data.allocation.flags);"):
+            if required not in tail:
+                raise RuntimeError("P446Q legacy translation invariant missing: "+required)
+        if name=="146":
+            # No new retry: the Phase213 implementation preserved Phase146.
+            comment=("\t\t/* A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT\n"
+                     "\t\t * Preserved Phase213 one-retry allocation path.\n"
+                     "\t\t */\n")
+            s=s.replace(prefix,comment+prefix,1)
+        else:
+            # Phase149: secure/CP allocations MUST NOT be translated to
+            # non-secure HLOS generic system memory.
+            guarded=("\t\t/* A52_ION_SYSTEM_HEAP_NONSECURE_GATE\n"
+                     "\t\t * Secure/CP allocations cannot retry in HLOS system heap.\n"
+                     "\t\t */\n"
+                     "\t\tif (fd == -ENODEV &&\n"
+                     "\t\t    (data.allocation.heap_id_mask & (1U << 25)) &&\n"
+                     "\t\t    !(data.allocation.flags & (0x6FFE0000U | (1U << 31)))) {")
+            s=s.replace(prefix,guarded,1)
+        path.write_text(s)
+    else:
+        cmd=[sys.executable,str(Path("scripts")/script),"--gki",str(root),
+             "--output",str(output)]
+        subprocess.run(cmd,check=True)
     if not marker_present(root,rel,mark):
         raise RuntimeError("P446Q repair did not leave marker: "+name+"/"+mark)
 

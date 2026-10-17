@@ -11,6 +11,7 @@ TAG="A52_PHASE446U_ATOMIC_REQUEST_PLANE91_V1"
 HDR=Path("include/linux/a52_446u_trace.h")
 UAPI=Path("drivers/gpu/drm/drm_atomic_uapi.c")
 ATOMIC=Path("drivers/a52_display/msm/msm_atomic.c")
+MSMDRV=Path("drivers/a52_display/msm/msm_drv.c")
 SDEPLANE=Path("drivers/a52_display/msm/sde/sde_plane.c")
 SDECRTC=Path("drivers/a52_display/msm/sde/sde_crtc.c")
 DSIPANEL=Path("drivers/a52_display/msm/dsi/dsi_panel.c")
@@ -173,6 +174,34 @@ static void a52u_snapshot_plane91(struct drm_device *dev, const char *when)
     s='#include <linux/a52_446u_trace.h>\n'+s
     return s
 
+def patch_msm_drv(s):
+    if "P446U MSM_CHECK" in s:return s
+    sig="int msm_atomic_check(struct drm_device *dev,"
+    if sig not in s:raise RuntimeError("446U msm_atomic_check wrapper not found")
+    start=s.index(sig)
+    end=s.index("\n}",start)+2
+    fn=s[start:end]
+    tail='''	a52_ackfr_record("P276 296A x r=%d", rc);
+	return rc;'''
+    if fn.count(tail)!=1:raise RuntimeError("446U msm_atomic_check return changed")
+    logger=r'''	/* A52_PHASE446U_ATOMIC_REQUEST_PLANE91_V1: check outcome */
+	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL) {
+		struct drm_plane *p;
+		struct drm_plane_state *new_state;
+		int i;
+		for_each_new_plane_in_state(state, p, new_state, i) {
+			if (p->base.id == 91)
+				pr_info("P446U MSM_CHECK seq=%d plane=91 rc=%d new_fb=%u new_crtc=%u visible=%u\n",
+					a52_446u_request_id(), rc,
+					new_state->fb ? new_state->fb->base.id : 0,
+					new_state->crtc ? new_state->crtc->base.id : 0,
+					new_state->visible);
+		}
+	}
+'''
+    fn=fn.replace(tail,tail.replace("\treturn rc;",logger+"\treturn rc;"),1)
+    return '#include <linux/a52_446u_trace.h>\n#include <linux/ktime.h>\n'+s[:start]+fn+s[end:]
+
 def patch_sde_plane(s):
     if TAG in s:return s
     # Observational checks: capture arguments plus return code at exit.
@@ -242,6 +271,7 @@ def check(root):
         HDR:("a52_446u_request_id",),
         UAPI:(TAG,"P446U PROP seq=","P446U REQUEST seq=","P446U SET_FB","P446U SET_CRTC"),
         ATOMIC:(TAG,"P446U PLANE91 seq=","P446U FRAME_JOIN seq="),
+        MSMDRV:("P446U MSM_CHECK",),
         SDEPLANE:("P446U SDE_PLANE_CHECK","P446U PREPARE_FB"),
         SDECRTC:("P446U SDE_CRTC_CHECK",),
         DSIPANEL:("P446U BRIGHTNESS",)
@@ -266,6 +296,7 @@ int a52_446u_request_id(void);
 #endif
 ''')
         for p,fn in ((UAPI,patch_uapi),(ATOMIC,patch_msm),
+                     (MSMDRV,patch_msm_drv),
                      (SDEPLANE,patch_sde_plane),(SDECRTC,patch_sde_crtc),
                      (DSIPANEL,patch_panel)):
             f=root/p

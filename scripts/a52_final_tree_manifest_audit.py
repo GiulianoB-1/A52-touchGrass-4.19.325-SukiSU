@@ -200,6 +200,10 @@ def audit(root,build,out,strict,image):
             missing.append({"contract":"no_console_suspend built-in CMDLINE"})
         if "CONFIG_LOG_BUF_SHIFT=21" not in c:
             missing.append({"contract":"P446U >=2MiB printk ring for unsampled prop capture"})
+        for required in ("CONFIG_RTC_DRV_PM8XXX=y","CONFIG_RTC_HCTOSYS=y",
+                         'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"'):
+            if required not in c:
+                missing.append({"contract":"P446V RTC config "+required})
     # Source fingerprint: enumerates full imported-display/secure code plus
     # explicit external contracts, then sorts path + SHA256 deterministically.
     roots=["drivers/a52_display","drivers/a52_secure",

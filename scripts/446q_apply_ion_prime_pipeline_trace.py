@@ -162,7 +162,7 @@ def patch_kms(s):
 def patch_plane(s):
     if MARK in s:return s
     def change(f):
-        a='exit:\n\treturn ret;\n'
+        a='exit:\n'
         b='''exit:
     if (ret) {
         static atomic_t errors = ATOMIC_INIT(0);
@@ -172,7 +172,6 @@ def patch_plane(s):
                 n,plane ? plane->base.id : 0,
                 state && state->fb ? state->fb->base.id : 0,ret);
     }
-    return ret;
 '''
         return swap(f,a,b,"plane exit")
     return function(s,"static int sde_plane_atomic_check(struct drm_plane *plane,",change)+f"\n/* {MARK}: plane stage. */\n"

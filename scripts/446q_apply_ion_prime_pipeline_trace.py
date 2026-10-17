@@ -140,8 +140,8 @@ def patch_kms(s):
         a='\tint ret;\n'
         b=a+'\tconst char *a52_stage = "entry";\n'
         f=swap(f,a,b,"KMS local")
-        f=swap(f,"\tret = drm_atomic_helper_check(dev, state);",
-            '\ta52_stage = "helper";\n\tret = drm_atomic_helper_check(dev, state);',"KMS helper")
+        f=swap(f,"\t{\n\t\t/* A52_PHASE337_ATOMIC_CHECK_STAGE_PROBE_V1",
+            '\ta52_stage = "helper";\n\t{\n\t\t/* A52_PHASE337_ATOMIC_CHECK_STAGE_PROBE_V1',"KMS Phase337 helper")
         f=swap(f,"\tret = sde_kms_check_secure_transition(kms, state);",
             '\ta52_stage = "secure";\n\tret = sde_kms_check_secure_transition(kms, state);',"KMS secure")
         f=swap(f,'\t\tret = -EBUSY;\n\t\tgoto end;',

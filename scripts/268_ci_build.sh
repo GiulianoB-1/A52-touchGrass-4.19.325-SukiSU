@@ -86,6 +86,14 @@ test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT
 # depend on the Actions artifact remaining online.
 PHASE346_RETAINED_ARTIFACT_ID=10344752313
 PHASE346_RETAINED_ZIP_SHA256=9c42a3ff550255807595a20d0dcf05ecc6f3210fc635cafe11ad7807af0267b1
+# The Phase346 artifact expired, but successful Phase351 is its proven
+# unchanged-config descendant (BUILD-IDENTITY base_phase=346). Its embedded
+# SHA256SUMS verifies the seed and its final config hashes exactly to Phase346.
+PHASE351_RETAINED_ARTIFACT_ID=10506463195
+PHASE351_RETAINED_ZIP_SHA256=707aeaf39c87e0103ed55fd1b678f708e7c786ebd0e5ee74c8d0915d7f0b490f
+PHASE351_RETAINED_BOOT_SHA256=6fea32050db50071ebf1f7b910f89fdafa8abe7bf1822646da38797f54ef91c5
+PHASE351_RETAINED_IMAGE_SHA256=6a09bca8d6289c03e32edf4dc9249fc0511511d89f54dfe7af6b0bf22aa5664c
+PHASE346_CONFIG_SHA256=de5d637d0b7fa088f3dfd1cce40401c5cb9b334413669787168fd2f4352c8b20
 PHASE346_RETAINED_BOOT_SHA256=11c0f5aa358e1de788cc0c9aa39531d98225314693d6f245f559e8df6fefe2df
 PHASE209_PATCH_REF=b0b2c73eea4ce59abed7cf3b70d236613a9b5e85
 RETAINED="$PWD/workspace/phase346-retained-seed"
@@ -99,23 +107,51 @@ if [ -s "$RETAINED/SHA256SUMS" ] && \
    [ -s "$RETAINED/compile/Image" ] && \
    [ -s "$RETAINED/config/final.config" ] && \
    (cd "$RETAINED" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
-  echo "Phase441 retained Phase346 seed cache: HIT"
+  echo "Phase446S verified historical seed carrier: HIT"
 else
-  echo "Phase441 retained Phase346 seed cache: MISS"
+  echo "Phase446S historical seed carrier: MISS; recover verified Phase351 descendant"
   rm -rf "$RETAINED" "$ZIP"
   mkdir -p "$RETAINED"
   curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
     -H "Authorization: Bearer ${GH_TOKEN}" \
     -H 'Accept: application/vnd.github+json' \
-    "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE346_RETAINED_ARTIFACT_ID}/zip" \
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PHASE351_RETAINED_ARTIFACT_ID}/zip" \
     --output "$ZIP"
-  printf '%s  %s\n' "$PHASE346_RETAINED_ZIP_SHA256" "$ZIP" | sha256sum -c -
+  printf '%s  %s\n' "$PHASE351_RETAINED_ZIP_SHA256" "$ZIP" | sha256sum -c -
   unzip -q "$ZIP" -d "$RETAINED"
   (cd "$RETAINED" && sha256sum -c SHA256SUMS)
 fi
 
-grep -Fq '"phase": "346"' "$RETAINED/BUILD-IDENTITY.json"
-printf '%s  %s\n' "$PHASE346_RETAINED_BOOT_SHA256" "$RETAINED/package/boot.img" | sha256sum -c -
+# Accept a literal Phase346 seed or a manifest-verified Phase351 descendant.
+# Phase351 was built directly from Phase346 and did not change .config. The
+# historical pre217 rollback below must STILL reproduce its exact d698... hash.
+CARRIER_BOOT_SHA256="$PHASE346_RETAINED_BOOT_SHA256"
+if python3 - "$RETAINED/BUILD-IDENTITY.json" <<'PY'
+import json,sys
+meta=json.load(open(sys.argv[1]))
+assert str(meta.get('phase')) == '351' and str(meta.get('base_phase')) == '346', meta
+print("P446S Phase351 descendant identity: PASS base_phase=346")
+PY
+then
+  CARRIER_BOOT_SHA256="$PHASE351_RETAINED_BOOT_SHA256"
+  printf '%s  %s\n' "$PHASE346_CONFIG_SHA256" "$RETAINED/config/final.config" | sha256sum -c -
+  printf '%s  %s\n' "$PHASE351_RETAINED_IMAGE_SHA256" "$RETAINED/compile/Image" | sha256sum -c -
+  # This boot has the same audited DTB/ramdisk as the Phase357 and Phase429
+  # descendants. Only its kernel is replaced in the Phase268 repack.
+  python3 - "$RETAINED/package/repack-report.json" <<'PY'
+import json,sys
+j=json.load(open(sys.argv[1]))
+assert j.get("dtb_sha256") == "dc088959df2882143768baf8c99114f9312e6da64f75d322ed6c221651a6d0f7"
+assert j.get("ramdisk_sha256") == "54f7891881a755536e908acd66fa2cf48bb24ed5f9f8d2fc4b0bf259f395a4c1"
+assert j.get("header_version")==2 and j.get("page_size")==4096
+assert j.get("invariants",{}).get("ramdisk_preserved") is True
+assert j.get("invariants",{}).get("dtb_preserved") is True
+print("P446S Phase351 boot container inheritance: PASS")
+PY
+else
+  grep -Fq '"phase": "346"' "$RETAINED/BUILD-IDENTITY.json"
+fi
+printf '%s  %s\n' "$CARRIER_BOOT_SHA256" "$RETAINED/package/boot.img" | sha256sum -c -
 cp "$RETAINED/package/boot.img" "$SEED/package/boot.img"
 cp "$RETAINED/compile/Image" "$SEED/compile/Image"
 cp "$RETAINED/config/final.config" "$SEED/config/before-phase216.config"
@@ -202,10 +238,10 @@ for path in \
 done
 printf '%s  %s\n' d698dea506375ed96c0fc447151681268228b0494747f4cb5ad1a340b9362c2f \
   "$SEED/config/before-phase216.config" | sha256sum -c -
-printf '%s  %s\n' "$PHASE346_RETAINED_BOOT_SHA256" \
+printf '%s  %s\n' "$CARRIER_BOOT_SHA256" \
   "$SEED/package/boot.img" | sha256sum -c -
 grep -Fq 'SPLCFG209 enter kms=%d' "$SEED/stage/phase209-splash-takeover-trace.patch"
-echo 'Phase441 retained Phase346 seed bridge: PASS'
+echo 'Phase446S verified Phase351/346 historical config+boot carrier bridge: PASS'
 
 python3 scripts/199_runtime_fix_crc_anchor_v2.py
 python3 scripts/199_runtime_fix_binary_audit.py

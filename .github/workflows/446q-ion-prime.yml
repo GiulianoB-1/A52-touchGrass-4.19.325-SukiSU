@@ -708,7 +708,8 @@ jobs:
           grep -Fq '*flags = buffer->flags;' "$ION_DMA" || { echo 'FAIL Phase148 flags assignment missing'; exit 1; }
           grep -Fq 'A52_ION_LEGACY_SYSTEM_HEAP_MASK_COMPAT' "$ROOT/drivers/staging/android/ion/ion.c"
           grep -Fq 'A52_ION_SYSTEM_HEAP_NONSECURE_GATE' "$ROOT/drivers/staging/android/ion/ion.c"
-          grep -Fq 'a52_qseecom_ion_heap.o' "$ROOT/drivers/a52_secure/Makefile"
+          test -s "$ROOT/drivers/staging/android/ion/heaps/a52_qseecom_ta_heap.c"
+          grep -Fq 'A52_QSECOM_DMA_ID19_ID27_COMPAT' "$ROOT/drivers/staging/android/ion/ion.c"
           python3 scripts/446q_apply_ion_prime_pipeline_trace.py --root "$ROOT"
           python3 scripts/446q_apply_ion_prime_pipeline_trace.py --root "$ROOT" --check-only
           python3 scripts/446q_reconcile_phase_markers.py --root "$ROOT" --output "$PWD/phase446q-ion-audit"

@@ -1,0 +1,321 @@
+name: Phase446S - GPU SMMU source patch smoke test
+on:
+  pull_request:
+    branches:
+      - agent/a52-phase446l-post-trigger-twin-v1
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: a52-446s-smmu-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  smmu-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore known successful Phase446R2 source snapshot (not a complete tree)
+        uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-PHASE446R2-WAKE-GKI-21
+          run-id: 39027208043
+          github-token: ${{ github.token }}
+          path: r2-evidence
+      - name: Check exact archived SMMU source provenance and apply 446S patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/smmu-smoke-tree"
+          mkdir -p "$ROOT/drivers/iommu/arm/arm-smmu"
+          test -s r2-evidence/source/arm-smmu.c
+          test -s r2-evidence/source/arm-smmu.h
+          cp r2-evidence/source/arm-smmu.c "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          cp r2-evidence/source/arm-smmu.h "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.h"
+          grep -Fq 'A52_PHASE250_GPU_SMMU_POWER_CONTRACT_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'A52_PHASE426' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          sha256sum "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          python3 -m py_compile scripts/446s_apply_kgsl_smmu_runtime_pm.py
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT"
+          python3 scripts/446s_apply_kgsl_smmu_runtime_pm.py --root "$ROOT" --check-only
+          grep -Fq 'A52_KGSL_SMMU_RPM_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'runtime_suspend_vdd_off' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          grep -Fq 'pm_runtime_set_autosuspend_delay(dev, 20)' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu.c"
+          echo 'P446S SOURCE SMOKE PASS (Phase446R2 archive, not a compiled kernel)' | tee a52-446s-smmu-smoke-result.txt
+          {
+            echo '### Phase446S SMMU patch vs successful Phase446R2 source'
+            echo 'PASS: patcher applied and check-only passed against archived R2 arm-smmu.c.'
+            echo 'This job intentionally does NOT certify kernel compilation or the final-tree manifest.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Unit smoke 446S memlat governor against pinned TG and no-interval GKI variant
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/governor_memlat.c' \
+            -o /tmp/a52-tg-governor_memlat.c
+          python3 - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          spec=importlib.util.spec_from_file_location(
+              "p446s_memlat","scripts/446s_apply_memlat_guards.py")
+          module=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          original=Path("/tmp/a52-tg-governor_memlat.c").read_text()
+          assert "case DEVFREQ_GOV_INTERVAL:" in original
+          assert "devfreq_interval_update(df, &sample_ms);" in original
+          guarded=module.patch_memlat(original)
+          begin=guarded.index("case DEVFREQ_GOV_INTERVAL:")
+          scope=guarded[begin:guarded.index("\n\t}",begin)]
+          assert "if (node->monitor_ready)" in scope
+          assert "devfreq_interval_update(df, &sample_ms);" in scope
+          assert module.patch_memlat(guarded)==guarded
+          # Phase433's actual GKI 5.10 import renames BOTH event and
+          # function. Verify that the renamed API cannot bypass this guard.
+          gki=original.replace("DEVFREQ_GOV_INTERVAL","DEVFREQ_GOV_UPDATE_INTERVAL")
+          gki=gki.replace("devfreq_interval_update","devfreq_update_interval")
+          assert "case DEVFREQ_GOV_UPDATE_INTERVAL:" in gki
+          assert "devfreq_update_interval(df, &sample_ms);" in gki
+          patched=module.patch_memlat(gki)
+          begin=patched.index("case DEVFREQ_GOV_UPDATE_INTERVAL:")
+          scope=patched[begin:patched.index("\n\t}",begin)]
+          assert "if (node->monitor_ready) {" in scope
+          assert "devfreq_update_interval(df, &sample_ms);" in scope
+          assert module.patch_memlat(patched)==patched
+          # An unknown source that loses its interval call must fail closed.
+          try:
+              module.patch_memlat(gki.replace("devfreq_update_interval(df, &sample_ms);",
+                                            "/* unsupported interval API */"))
+          except RuntimeError as e:
+              assert "interval guard" in str(e)
+          else:
+              raise AssertionError("missing 5.10 interval call was not rejected")
+          print("P446S MEMLAT unit smoke PASS: guarded TG 4.19 + Phase433 GKI5.10 API")
+          PY
+      - name: Inventory surviving historical GKI caches (read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          repo=os.environ['GITHUB_REPOSITORY']
+          items=[]
+          for page in range(1, 6):
+              url=f"repos/{repo}/actions/caches?per_page=100&page={page}"
+              p=subprocess.run(["gh", "api", url], text=True, capture_output=True)
+              if p.returncode:
+                  print("P446S cache inventory unavailable:",p.stderr.strip()[:350])
+                  sys.exit(0)
+              data=json.loads(p.stdout)
+              current=data.get("actions_caches",[])
+              items.extend(current)
+              if len(current)<100: break
+          prefixes=("a52xq-phase429","a52xq-phase357","a52xq-phase346",
+                    "a52xq-phase345","a52xq-phase227",
+                    "a52xq-phase206","a52xq-gki","android12-5.10-gki-source")
+          found=sorted((c for c in items if c.get("key","").startswith(prefixes)),
+                       key=lambda c: c.get("last_accessed_at",""),reverse=True)
+          print(f"P446S CACHE INVENTORY total={len(items)} candidates={len(found)}")
+          print("P446S FULL CACHE KEY INVENTORY BEGIN")
+          for c in sorted(items,key=lambda c: c.get("key","")):
+              print("P446S CACHE ALL",json.dumps({k:c.get(k) for k in
+                  ("id","key","ref","size_in_bytes")},sort_keys=True))
+          print("P446S FULL CACHE KEY INVENTORY END")
+          for c in found[:80]:
+              print("P446S CACHE",json.dumps({k:c.get(k) for k in
+                  ("id","key","ref","size_in_bytes","last_accessed_at")},sort_keys=True))
+          with open("a52-446s-cache-inventory.json","w") as f:
+              json.dump({"found":found,"caches_scanned":len(items)},f,indent=2)
+          PY
+      - name: Inventory surviving source artifacts (read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          repo=os.environ['GITHUB_REPOSITORY']
+          found=[];scanned=0
+          candidates_by_phase=[]
+          for page in range(1,9):
+              p=subprocess.run(["gh","api",f"repos/{repo}/actions/artifacts?per_page=100&page={page}"],
+                               text=True,capture_output=True)
+              if p.returncode:
+                  print("P446S artifact inventory unavailable:",p.stderr.strip()[:350])
+                  break
+              arr=json.loads(p.stdout).get("artifacts",[])
+              scanned+=len(arr)
+              for a in arr:
+                  name=a.get("name","").lower()
+                  if not a.get("expired") and (("phase3" in name) or ("phase4" in name)):
+                      candidates_by_phase.append({k:a.get(k) for k in
+                          ("id","name","size_in_bytes","expires_at")})
+                  if ("source" in name or "baseline" in name or
+                      "seed" in name or "phase346" in name or
+                      "phase429" in name or "archive" in name):
+                      found.append({k:a.get(k) for k in
+                                    ("id","name","size_in_bytes","expired","created_at","expires_at")})
+              if len(arr)<100:break
+          print(f"P446S ARTIFACT INVENTORY scanned={scanned} candidates={len(found)}")
+          # Inventory every live historical artifact, even those without
+          # source/baseline/seed keywords.
+          with open("a52-446s-all-artifacts.json","w") as f:
+              json.dump({"candidates":found,"phase_artifacts":candidates_by_phase,"count":scanned},f,indent=2)
+          for a in candidates_by_phase:
+              if a["size_in_bytes"] > 500000:
+                  print("P446S LIVE HISTORICAL",json.dumps(a,sort_keys=True))
+
+          for a in found[:100]:print("P446S ARTIFACT",json.dumps(a,sort_keys=True))
+          with open("a52-446s-artifact-inventory.json","w") as f:
+              json.dump({"found":found,"artifacts_scanned":scanned},f,indent=2)
+          PY
+      - name: Publish source smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52-446S-SMMU-SOURCE-SMOKE-${{ github.run_number }}
+          path: |
+            a52-446s-smmu-smoke-result.txt
+            a52-446s-cache-inventory.json
+            a52-446s-artifact-inventory.json
+            a52-446s-all-artifacts.json
+            smmu-smoke-tree/drivers/iommu/arm/arm-smmu/arm-smmu.c
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Directly exercise the Phase446S timer lifecycle patch against the actual
+  # reconstructed Phase429 5.10 tree. This is source-only: no misleading Image.
+  memlat-phase429-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore exact Phase429 patched 5.10 source
+        id: phase429
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            gki/common
+            workspace/gki-phase199-out
+            phase429-gki-out
+          key: a52xq-phase429-reconstructed-v1-${{ runner.os }}-f960ed27302b1ff8e61e152fc202554d778deccd-6f6e3fa9
+      - name: Verify GPU memlat patch against reconstructed Phase429 tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase429.outputs.cache-hit }}" = true || {
+            echo "::error::Exact Phase429 source cache missing; cannot claim 5.10 source test"
+            exit 1
+          }
+          SRC=gki/common
+          test -s "$SRC/drivers/devfreq/devfreq.c"
+          ROOT="$RUNNER_TEMP/phase446s-memlat-source"
+          mkdir -p "$ROOT/drivers/devfreq"
+          # Phase429 precedes Phase433: the governor is not imported until
+          # Phase433, which copies TG then renames its two interval API tokens.
+          # Reproduce those exact transformations for a cheap source test.
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/governor_memlat.c' \
+            -o "$ROOT/drivers/devfreq/governor_memlat.c"
+          python3 - "$ROOT/drivers/devfreq/governor_memlat.c" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]);s=p.read_text()
+          assert s.count("DEVFREQ_GOV_INTERVAL") == 1
+          assert s.count("devfreq_interval_update") == 1
+          s=s.replace("DEVFREQ_GOV_INTERVAL","DEVFREQ_GOV_UPDATE_INTERVAL")
+          s=s.replace("devfreq_interval_update","devfreq_update_interval")
+          p.write_text(s)
+          print("P446S Phase433 imported GKI5.10 governor interval ABI reproduced")
+          PY
+          cp "$SRC/drivers/devfreq/devfreq.c" "$ROOT/drivers/devfreq/"
+          sha256sum "$ROOT/drivers/devfreq/"*.c
+          python3 -m py_compile scripts/446s_apply_memlat_guards.py
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT"
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT"
+          python3 scripts/446s_apply_memlat_guards.py --root "$ROOT" --check-only
+          {
+            echo '### Phase446S memlat exact GKI 5.10 preflight'
+            echo 'PASS: 446S memlat patch applied and idempotence verified on reconstructed Phase429 source.'
+            echo 'This is NOT a compiled kernel or complete strict final-tree audit.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'P446S EXACT_PHASE429_MEMLAT_SOURCE_SMOKE PASS'
+      - name: Verify generated ARM memlat PMU C string literals against pinned TG
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$RUNNER_TEMP/phase446s-arm-memlat"
+          mkdir -p "$ROOT/drivers/devfreq"
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://raw.githubusercontent.com/micr0softstore/samsung_android_kernel_a52xq/6bf351bdf18bdb228db79e66f14a7a9c0178e5d7/drivers/devfreq/arm-memlat-mon.c' \
+            -o "$ROOT/drivers/devfreq/arm-memlat-mon.c"
+          python3 -m py_compile scripts/446s_apply_arm_memlat_pmu.py
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT"
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT" --check-only
+          python3 scripts/446s_apply_arm_memlat_pmu.py --root "$ROOT"
+          python3 - "$ROOT/drivers/devfreq/arm-memlat-mon.c" <<'PY'
+          from pathlib import Path
+          import importlib.util
+          import sys
+          p=Path(sys.argv[1])
+          s=p.read_text()
+          spec=importlib.util.spec_from_file_location(
+              "pmu","scripts/446s_apply_arm_memlat_pmu.py")
+          m=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          assert m.patch(s)==s
+          for label in ("P446S MEMLAT PERF_FAIL","P446S MEMLAT START_ROLLBACK"):
+              at=s.index('"' + label)
+              end=s.index('"',at+1)
+              assert s[at:end].endswith(r'\n'),repr(s[at:end])
+              assert '\n' not in s[at:end]
+          # Regression witness: the pre-fix generator emitted a physical
+          # newline inside a diagnostic C string and must fail audit.
+          broken=s.replace(r'\n",', '\n",',1)
+          assert broken!=s
+          try:
+              m.check(broken)
+          except RuntimeError as e:
+              assert "malformed C diagnostic" in str(e)
+          else:
+              raise AssertionError("unescaped diagnostic newline not rejected")
+          print("P446S ARM_MEMLAT_C_STRING_SMOKE PASS: escaped C logs, bad fixture rejected")
+          PY
+      - name: Verify GKI 5.10 regulator vote trace field ABI on reconstructed kernel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${{ steps.phase429.outputs.cache-hit }}" = true
+          test -s gki/common/drivers/regulator/core.c
+          python3 - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          spec=importlib.util.spec_from_file_location(
+              "p446s_gpu","scripts/446s_apply_gpu_slumber_trace.py")
+          module=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          core=Path("gki/common/drivers/regulator/core.c").read_text()
+          assert "regulator->enable_count" in core
+          assert "consumer_list" in core
+          patched=module.patch_core(core)
+          assert "P446S GPU_CX_VOTES" in patched
+          # Count only the delta introduced by P446S; the native regulator
+          # implementation can already contain consumer->enable_count references.
+          assert patched.count("reg->enable_count")-core.count("reg->enable_count") == 1
+          assert patched.count("consumer->enable_count")-core.count("consumer->enable_count") == 2
+          assert "reg->enabled" not in module.VOTES
+          assert "consumer->enabled" not in module.VOTES
+          assert module.patch_core(patched) == patched
+          try:
+              module.patch_core(core.replace("regulator->enable_count","regulator->unexpected"))
+          except RuntimeError as e:
+              assert "incompatible ABI" in str(e)
+          else:
+              raise AssertionError("unknown regulator ABI did not fail closed")
+          print("P446S REGULATOR 5.10 FIELD ABI source smoke PASS: enable_count, idempotent")
+          PY

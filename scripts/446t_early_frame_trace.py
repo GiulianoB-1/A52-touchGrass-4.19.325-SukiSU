@@ -13,6 +13,9 @@ TAG="A52_PHASE446T_EARLY_UNSAMPLED_FRAME_V1"
 def patch(s):
     if TAG in s:
         return s
+    if "#include <linux/string.h>" not in s:
+        s=s.replace("#include <linux/ktime.h>",
+                    "#include <linux/ktime.h>\n#include <linux/string.h>",1)
     anchor="static atomic_t p446s_frame_seq = ATOMIC_INIT(0);"
     if s.count(anchor)!=1:
         raise RuntimeError("446T early frame expected one 446S counter")

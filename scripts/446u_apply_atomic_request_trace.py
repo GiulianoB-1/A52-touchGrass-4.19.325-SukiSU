@@ -102,7 +102,7 @@ static void a52u_req_set(int req)
 			__builtin_return_address(0));
 '''),
         ("CRTC","int\ndrm_atomic_set_crtc_for_plane(struct drm_plane_state *plane_state,\n\t\t\t      struct drm_crtc *crtc)\n{",
-         '''
+         r'''
 	if (ktime_get_boottime_ns() >= 85ULL * 1000000000ULL &&
 	    plane_state && plane_state->plane &&
 	    plane_state->plane->base.id == 91)
@@ -222,7 +222,8 @@ def patch_sde_plane(s):
 }''',"sde_plane check exit")
     s=s[:start]+sub+s[end:]
     start=s.index(prep);end=s.index('\n}',start)+2;sub=s[start:end]
-    anchor='struct drm_framebuffer *fb = new_state->fb;'
+    # Inject only after ALL declarations to preserve kernel C declaration order.
+    anchor='int ret;'
     sub=once(sub,anchor,anchor+r'''
 	if (plane && plane->base.id == 91 && ktime_get_boottime_ns() >= 85ULL * 1000000000ULL)
 		pr_info("P446U PREPARE_FB seq=%d plane=91 fb=%u crtc=%u\n",

@@ -85,6 +85,46 @@ EXPECT={
       "pm_runtime_get_noresume(dev)","pm_runtime_put_autosuspend(dev)",
       "P446S KGSL_SMMU_RPM","runtime_suspend_vdd_off",
       "runtime_resume_vdd_on")),
+ "P446T KGSL hold":("drivers/gpu/msm/kgsl_pwrctrl.c",
+     ("A52_PHASE446T_KGSL_SMMU_ACTIVE_HOLD_V1","P446T KGSL_SMMU_HOLD")),
+ "P446T SMMU release":("drivers/gpu/msm/kgsl_gmu.c",
+     ("A52_PHASE446T_SMMU_RELEASE_BEFORE_CX_POLL_V1",)),
+ "P446T no nested GDSC":("drivers/regulator/a52-legacy-gdsc-regulator.c",
+     ("A52_GDSC_NO_NESTED_REGULATOR",)),
+ "P446U request all properties":("drivers/gpu/drm/drm_atomic_uapi.c",
+     ("A52_PHASE446U_ATOMIC_REQUEST_PLANE91_V1","P446U PROP seq=",
+      "P446U SET_FB seq=","P446U SET_CRTC seq=")),
+ "P446U plane 91 swap":("drivers/a52_display/msm/msm_atomic.c",
+     ("P446U FRAME_JOIN seq=","P446U PLANE91 seq=")),
+ "P446U msm check":("drivers/a52_display/msm/msm_drv.c",
+     ("P446U MSM_CHECK seq=",)),
+ "P446U SDE plane check and prepare":("drivers/a52_display/msm/sde/sde_plane.c",
+     ("P446U SDE_PLANE_CHECK","P446U PREPARE_FB")),
+ "P446U SDE crtc check":("drivers/a52_display/msm/sde/sde_crtc.c",
+     ("P446U SDE_CRTC_CHECK",)),
+ "P446U brightness":("drivers/a52_display/msm/dsi/dsi_panel.c",
+     ("P446U BRIGHTNESS ts=",)),
+ "P446U Samsung brightness":("drivers/a52_display/msm/samsung/ss_dsi_panel_common.c",
+     ("P446U SAMSUNG_BRIGHTNESS ts=",)),
+ "P446U P445 directory":("drivers/a52_display/msm/a52_phase445.c",
+     ("A52_PHASE446U_P445_240_SECTIONS_V1",
+      "#define P445_HEADER_BYTES SZ_16K",
+      "#define P445_MAX_SECTIONS 240U",
+      "BUILD_BUG_ON(sizeof(struct p445_header)>P445_HEADER_BYTES)")),
+ "P446U safe console and tty gate":("drivers/usb/gadget/function/u_serial.c",
+     ("A52_PHASE446U_USB_SAFE_COORDINATOR_V2","U446 PRE count=",
+      "U446 CONSOLE worker-stop-ack","U446 CONSOLE request-dequeue-enter",
+      "U446 CONSOLE request-free","U446 UNBIND free_port before_close_wait",
+      "a52u_block_opens","a52u_log_tty_holders")),
+ "P446U safe gserial coordinator":("drivers/usb/gadget/legacy/serial.c",
+     ('early_param("a52.usb_handover"',"U446 coordinator",
+      "U446 UNBIND gs_unbind enter","U446 UNBIND func_put enter",
+      "U446 UDC legacy-unregistered","U446 HANDOVER_DISABLED")),
+ "P446U outside-lock ConfigFS":("drivers/usb/gadget/configfs.c",
+     ("U446 UDC request","U446 UDC configfs probe-enter",
+      "U446 UDC configfs probe-exit","U446 UDC adb-bound")),
+ "P446U recorder persistence":("drivers/a52_secure/a52_ack_secure_flight_recorder.c",
+     ('strncmp(fmt, "U446", 4)',)),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",
@@ -135,6 +175,8 @@ def audit(root,build,out,strict,image):
             if t not in c:missing.append({"contract":"config "+t})
         if 'no_console_suspend' not in c:
             missing.append({"contract":"no_console_suspend built-in CMDLINE"})
+        if "CONFIG_LOG_BUF_SHIFT=21" not in c:
+            missing.append({"contract":"P446U >=2MiB printk ring for unsampled prop capture"})
     # Source fingerprint: enumerates full imported-display/secure code plus
     # explicit external contracts, then sorts path + SHA256 deterministically.
     roots=["drivers/a52_display","drivers/a52_secure",

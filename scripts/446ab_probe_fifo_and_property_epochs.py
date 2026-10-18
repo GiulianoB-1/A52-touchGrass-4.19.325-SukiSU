@@ -161,6 +161,11 @@ def drm(s):
            "\t\ta52aa_seq=atomic_inc_return(&a52aa_req_no);\n"
            "\t\t\ta52ab_count_hwc_ioctl(arg);",
            "count atomic ioctl once not on retry")
+    s=once(s,"int drm_atomic_set_property(struct drm_atomic_state *state,",
+           "void a52ab_trace_set(struct drm_mode_object *obj,\n"
+           "                    struct drm_property *prop, u64 val);\n"
+           "int drm_atomic_set_property(struct drm_atomic_state *state,",
+           "forward declaration before atomic setter")
     s=once(s,"\tif (!drm_property_change_valid_get(prop, prop_value, &ref))",
            "\ta52ab_trace_set(obj,prop,prop_value);\n"
            "\tif (!drm_property_change_valid_get(prop, prop_value, &ref))",

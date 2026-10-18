@@ -131,6 +131,7 @@ static int a52w_try_handoff_modeset(struct drm_atomic_state *state)
     old='''	struct msm_drm_private *priv;
 
 	priv = dev->dev_private;
+	a52w_try_handoff_modeset(state);
 	if (priv && priv->kms'''
     new='''	struct msm_drm_private *priv;
 	int a52w_rc;

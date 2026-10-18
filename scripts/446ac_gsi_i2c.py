@@ -123,6 +123,8 @@ static int a52ac_gsi_xfer(struct geni_i2c_dev *gi2c,
 		struct dma_async_tx_descriptor *td,*rd;
 		dma_addr_t phys;
 		u8 *buf;
+		u32 a52ac_stretch=(i<num-1) ? 4 : 0;
+		u32 a52ac_op=(msg->flags & I2C_M_RD) ? 2 : 1;
 		bool rdmsg=!!(msg->flags & I2C_M_RD);
 		int n=0;
 		unsigned long timeout;
@@ -144,7 +146,7 @@ static int a52ac_gsi_xfer(struct geni_i2c_dev *gi2c,
 		cfg.dword[2]=MSM_GPI_I2C_CONFIG0_TRE_DWORD2(0,clk->clk_div);
 		cfg.dword[3]=MSM_GPI_I2C_CONFIG0_TRE_DWORD3(0,0,0,0,1);
 		go.dword[0]=MSM_GPI_I2C_GO_TRE_DWORD0(
-			    (i<num-1) ? 4 : 0,msg->addr,rdmsg ? 2 : 1);
+			    a52ac_stretch,msg->addr,a52ac_op);
 		go.dword[1]=MSM_GPI_I2C_GO_TRE_DWORD1;
 		go.dword[2]=MSM_GPI_I2C_GO_TRE_DWORD2(rdmsg ? msg->len : 0);
 		go.dword[3]=rdmsg ?
@@ -204,7 +206,7 @@ def patch(s):
     if TAG in s:return s
     if "P446AB SE8_CAP" not in s or "P446Z I2C BUS_VOTE" not in s:
         raise RuntimeError("P446AC GSI needs 446AB source")
-    s="#include <linux/msm_gpi.h>\n#include <linux/dmaengine.h>\n#include <linux/scatterlist.h>\n"+s
+    s="#include <linux/types.h>\n#include <linux/dmaengine.h>\n#include <linux/msm_gpi.h>\n#include <linux/scatterlist.h>\n"+s
     a="struct geni_i2c_dev {"
     b=a+"""
 	bool a52ac_gsi;

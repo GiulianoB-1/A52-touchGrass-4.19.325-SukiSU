@@ -176,6 +176,25 @@ EXPECT={
  "P446W ConfigFS defer printk":("drivers/usb/gadget/configfs.c",
      ("P446W U446 CONFIGFS defer","P446W U446 CONFIGFS probe")),
 
+ "P446X STM FTS touchscreen":("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c",
+     ("A52_PHASE446X_STM_FTS_READ_ONLY_V1",
+      "P446X TOUCH probe-rc=0","P446X TOUCH I2C_ID",
+      "P446X TOUCH EVENT","P446X TOUCH I2C_READ_ERR",
+      "P446X TOUCH REGULATOR_ENABLE","early_param(\"a52.touch\"",
+      "struct proc_ops","wakeup_source_register")),
+ "P446X firmware irrevocably blocked":("drivers/input/touchscreen/stm/fts5cu56a/fts_fwu.c",
+     ("A52_PHASE446X_STM_FTS_READ_ONLY_V1","FW_WRITE_BLOCKED","P446X TOUCH FW_VERSIONS")),
+ "P446X fts_sec.c factory included":("drivers/input/touchscreen/stm/fts5cu56a/fts_sec.c",
+     ("ft_commands",)),
+ "P446X Samsung input command helper":("drivers/input/common/sec_cmd.c",
+     ("sec_cmd_init(",)),
+ "P446X Samsung TCLM helper":("drivers/input/common/sec_tclm_v2.c",
+     ("sec_tclm_initialize(",)),
+ "P446X secure helper copied":("drivers/input/common/sec_secure_touch.c",
+     ("sec_secure_touch_register(",)),
+ "P446X wakeup-source header":("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.h",
+     ("struct wakeup_source *wakelock;",)),
+
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",
@@ -183,6 +202,10 @@ FILES_EXTRA=[
  "drivers/a52_display/msm/sde/sde_kms.c",
  "drivers/a52_display/msm/sde/sde_plane.c",
  "drivers/a52_display/msm/msm_smmu.c",
+ "drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c",
+ "drivers/input/touchscreen/stm/fts5cu56a/fts_fwu.c",
+ "drivers/input/touchscreen/stm/fts5cu56a/fts_sec.c",
+ "drivers/input/common/sec_cmd.c",
  "drivers/soc/qcom/rpmh.c",
  "drivers/regulator/refgen.c",
  "arch/arm64/boot/dts/vendor/qcom/lagoon.dtsi",
@@ -232,6 +255,16 @@ def audit(root,build,out,strict,image):
             missing.append({"contract":"P446W no stale CONFIG_CMDLINE ttyGS0"})
         if "CONFIG_LOG_BUF_SHIFT=21" not in c:
             missing.append({"contract":"P446U >=2MiB printk ring for unsampled prop capture"})
+        for required in ("CONFIG_INPUT_TOUCHSCREEN=y",
+                         "CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y",
+                         "CONFIG_INPUT_TOUCHSCREEN_TCLMV2=y"):
+            if required not in c:
+                missing.append({"contract":"P446X built-in touchscreen "+required})
+        for prohibited in ("CONFIG_TOUCHSCREEN_DUMP_MODE=y",
+                           "CONFIG_SEC_DEBUG_TSP_LOG=y",
+                           "CONFIG_TOUCHSCREEN_DUAL_FOLDABLE=y"):
+            if prohibited in c:
+                missing.append({"contract":"P446X forbidden legacy helper "+prohibited})
         for required in ("CONFIG_RTC_DRV_PM8XXX=y","CONFIG_RTC_HCTOSYS=y",
                          'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"'):
             if required not in c:

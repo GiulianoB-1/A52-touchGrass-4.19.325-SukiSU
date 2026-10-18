@@ -1,5 +1,5 @@
-name: Phase446AB FIFO/GSI diagnostic and HWC property epochs
-run-name: Phase446AB SE8 FIFO/GSI and composer first20/post-cycle
+name: Phase446AC GPI/GSI touchscreen and HWC onset request ring
+run-name: Phase446AC pinned TG GPI/GSI port and HWC request ring
 on:
   push:
     branches:
@@ -317,6 +317,14 @@ jobs:
           python3 -m py_compile scripts/446ab_probe_fifo_and_property_epochs.py
           python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT"
           python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/446ac_stage_gpi.py scripts/446ac_gsi_i2c.py scripts/446ac_hwc_ring.py
+          python3 scripts/446ac_stage_gpi.py --root "$ROOT"
+          python3 scripts/446ac_stage_gpi.py --root "$ROOT" --check-only
+          python3 scripts/446ac_gsi_i2c.py --root "$ROOT"
+          python3 scripts/446ac_gsi_i2c.py --root "$ROOT" --check-only
+          python3 scripts/446ac_hwc_ring.py --root "$ROOT"
+          python3 scripts/446ac_hwc_ring.py --root "$ROOT" --check-only
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
             --enable INPUT_TOUCHSCREEN \
@@ -338,6 +346,7 @@ jobs:
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
           grep -Fxq CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y "$BUILD/.config"
           grep -Fxq CONFIG_I2C_QCOM_GENI=y "$BUILD/.config"
+          grep -Fxq CONFIG_QCOM_GPI_DMA=y "$BUILD/.config"
           grep -Fxq CONFIG_KSU=y "$BUILD/.config"
           grep -Fxq CONFIG_KSU_TRACEPOINT_HOOK=y "$BUILD/.config"
           grep -Fxq CONFIG_KALLSYMS_ALL=y "$BUILD/.config"
@@ -349,7 +358,7 @@ jobs:
           grep -Fxq CONFIG_RTC_HCTOSYS=y "$BUILD/.config"
           grep -Fxq 'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
-          echo 'P446W-B default cold=0 handoff=1, ttyGS3 and PMK8350 RTC PASS'
+          echo 'P446AC default cold=0 handoff=0, GPI DMA built-in, KSU rc3, ttyGS3 and PMK8350 RTC PASS'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -383,6 +392,9 @@ jobs:
           python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT" --check-only
           python3 scripts/446aa_trace_touch_drm.py --root "$ROOT" --check-only
           python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT" --check-only
+          python3 scripts/446ac_stage_gpi.py --root "$ROOT" --check-only
+          python3 scripts/446ac_gsi_i2c.py --root "$ROOT" --check-only
+          python3 scripts/446ac_hwc_ring.py --root "$ROOT" --check-only
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -449,6 +461,7 @@ jobs:
             drivers/input/common/sec_cmd.o \
             drivers/input/common/sec_tclm_v2.o \
             drivers/input/touchscreen/stm/fts5cu56a/fts_ts.o \
+            drivers/dma/qcom/gpi.o \
             drivers/i2c/busses/i2c-qcom-geni.o \
             drivers/kernelsu/ \
             drivers/soc/qcom/qcom-geni-se.o \
@@ -492,6 +505,9 @@ jobs:
           grep -aFq "P446AB SE8_CAP" "$IMAGE"
           grep -aFq "P446AB PROP_GET" "$IMAGE"
           grep -aFq "P446AB PROP_SET" "$IMAGE"
+          grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P446AC HWC_RING READY" "$IMAGE"
+          grep -aFq "a52_446ac_hwc_requests" "$IMAGE"
           grep -aFq "P446AC KSU version=" "$IMAGE"
           grep -aFq "driver=%u commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a hooks=tracepoint" "$IMAGE"
           grep -aFq "P446Z TOUCH INIT_ABORT" "$IMAGE"

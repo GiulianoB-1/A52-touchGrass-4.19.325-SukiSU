@@ -148,7 +148,7 @@ def main():
     import re
     ti = root / "arch/arm64/include/asm/thread_info.h"
     ti_text = ti.read_text()
-    if not re.search(r"struct thread_info\\s*\\{\\s*unsigned long\\s+flags\\s*;", ti_text):
+    if not re.search(r"struct thread_info\s*\{\s*unsigned long\s+flags\s*;", ti_text):
         raise RuntimeError("P171 ARM64 thread_info.flags layout unexpected")
     candidates = list((root / "arch/arm64/include").rglob("*.h"))
     candidates += list((root / "include/linux").rglob("*.h"))
@@ -156,7 +156,7 @@ def main():
     occupied = []
     for item in candidates:
         body = item.read_text(errors="replace")
-        if re.search(r"^\\s*#\\s*define\\s+TIF_[A-Za-z0-9_]+\\s+34(?:\\s|$)", body, re.M):
+        if re.search(r"^\s*#\s*define\s+TIF_[A-Za-z0-9_]+\s+34(?:\s|$)", body, re.M):
             occupied.append(str(item))
     if occupied:
         raise RuntimeError("P171 ARM64 TIF bit34 collision: " + ", ".join(occupied))
@@ -164,9 +164,9 @@ def main():
     header = susfs_header.read_text()
     if "TIF_PROC_NO_SU" in header:
         raise RuntimeError("P171 pinned SuSFS header already has no_su state")
-    include_anchor = "#include <linux/types.h>\\n"
+    include_anchor = "#include <linux/types.h>\n"
     assert header.count(include_anchor) == 1, "P171 pinned SuSFS include anchor mismatch"
-    header = header.replace(include_anchor, include_anchor + "#include <linux/thread_info.h>\\n", 1)
+    header = header.replace(include_anchor, include_anchor + "#include <linux/thread_info.h>\n", 1)
     code = """
 /* P171: real SuSFS per-thread no-su state for BakaSU manual hooks.
  * Bit 34 is used by upstream's 4.14+ SuSFS implementation and is
@@ -190,9 +190,11 @@ static inline void susfs_clear_current_proc_no_su(void)
     clear_thread_flag(TIF_PROC_NO_SU);
 }
 """
-    guard = "#define KSU_SUSFS_H\\n"
-    assert header.count(guard) == 1, "P171 pinned SuSFS header guard mismatch"
-    header = header.replace(guard, guard + code + "\\n", 1)
+    # Header functions require bool, thread-info accessors and TIF defines:
+    # insert only after the legacy header's last common include.
+    insert_after = "#include <linux/hashtable.h>\n"
+    assert header.count(insert_after) == 1, "P171 pinned SuSFS include block mismatch"
+    header = header.replace(insert_after, insert_after + code + "\n", 1)
     susfs_header.write_text(header)
     for fn in ("susfs_is_current_proc_no_su", "susfs_set_current_proc_no_su",
                "susfs_clear_current_proc_no_su"):

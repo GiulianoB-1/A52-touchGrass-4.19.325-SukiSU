@@ -133,11 +133,11 @@ static int a52w_try_handoff_modeset(struct drm_atomic_state *state)
     # Change only the original 446W helper call inside msm_atomic_check,
     # keeping C89 declarations BEFORE those existing trace statements.
     at=s.index("int msm_atomic_check(struct drm_device *dev,")
-    en=s.index("\\n}",at)+2
+    en=s.index("\n}",at)+2
     sub=s[at:en]
-    sub=one(sub,"\\tint rc;","\\tint rc;\\n\\tint a52w_rc;","C89 declaration after rc")
-    sub=one(sub,"\\ta52w_try_handoff_modeset(state);",
-      "\\ta52w_rc=a52w_try_handoff_modeset(state);\\n\\tif (a52w_rc)\\n\\t\\treturn a52w_rc;",
+    sub=one(sub,"\tint rc;","\tint rc;\n\tint a52w_rc;","C89 declaration after rc")
+    sub=one(sub,"\ta52w_try_handoff_modeset(state);",
+      "\ta52w_rc=a52w_try_handoff_modeset(state);\n\tif (a52w_rc)\n\t\treturn a52w_rc;",
       "replace original option-B helper invocation")
     return s[:at]+sub+s[en:]
 

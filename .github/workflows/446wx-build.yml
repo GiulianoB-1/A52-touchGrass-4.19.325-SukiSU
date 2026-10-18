@@ -1,8 +1,5 @@
 name: Phase446WX full kernel build
 run-name: Phase446WX first-HWC modeset + STM FTS no-write + RTC
-# Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
-# It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
-
 on:
   push:
     branches:
@@ -13,11 +10,9 @@ on:
     paths-ignore:
       - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
   actions: read
-
 env:
   GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
   GKI_COMMON_TAG: android12-5.10-2026-04_r1
@@ -31,11 +26,9 @@ env:
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: 'true'
   CCACHE_PATH: /usr/bin:/usr/local/bin
-
 concurrency:
   group: a52-phase446w-x-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   gki:
     if: true
@@ -50,7 +43,6 @@ jobs:
         variant: [qcom]
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate Phase441 payload
         run: |
           set -Eeuo pipefail
@@ -105,16 +97,12 @@ jobs:
           python3 scripts/decode_phase445.py --help >/dev/null
           python3 scripts/decode_phase439_dsi.py --help >/dev/null
           python3 scripts/decode_phase437_open.py --help >/dev/null
-
-          # Cheap contract audit before apt/source reconstruction/compilation.
           python3 - <<'PY'
           import base64, zlib
           from pathlib import Path
-
           src = zlib.decompress(base64.b64decode(
               Path("scripts/444_apply_deep_passive_compare.py.z64").read_text().strip()
           )).decode("utf-8", "replace")
-
           required = (
               "A52_PHASE444_DEEP_PASSIVE_COMPARE_V1",
               "PRE_DEEP",
@@ -129,9 +117,6 @@ jobs:
           missing = [x for x in required if x not in src]
           if missing:
               raise SystemExit("Phase444 expanded-source contract missing: " + ", ".join(missing))
-
-          # TG ramoops text is known to suffer clear-bit corruption. Require
-          # either CRC-tagged summary records or duplicated key hex fields.
           has_crc = ("crc=%" in src.lower()) or ("crc32" in src.lower())
           duplicate_sets = (
               ("st=%x/%x", "ck=%x/%x", "in=%x/%x", "ln=%x/%x", "db=%x/%x"),
@@ -141,12 +126,10 @@ jobs:
           has_dups = any(all(tok in src for tok in toks) for toks in duplicate_sets)
           if not (has_crc or has_dups):
               raise SystemExit("Phase444 TG summary integrity missing: need CRC32 or duplicated key fields")
-
           print("Phase444 expanded-source contract: PASS",
                 "integrity=crc" if has_crc else "integrity=duplicates")
           PY
           echo "Phase441 payload: PASS"
-
       - name: Prepare runner and ccache wrappers
         run: |
           set -Eeuo pipefail
@@ -167,10 +150,6 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
           echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
-
-      # Cache restores are PR-scoped and the old Phase351 source artifact expired.
-      # Bootstrap from the byte-verified complete post-patch Phase446S source
-      # published by successful run 39048474873, then apply ONLY Phase446T.
       - name: Restore SHA-pinned Phase446S full source and boot
         run: |
           set -Eeuo pipefail
@@ -206,9 +185,6 @@ jobs:
           PY
           tar --use-compress-program=zstd -xf workspace/phase446s-inputs/final-patched-gki-source.tar.zst -C gki/common
           test -s gki/common/Makefile
-          # Attach real pinned Git history to the full pre-patched tree without
-          # checking out (overwriting) original source files. Required for
-          # strict git ls-files -m/-o/-d inventory and source fingerprint.
           git -C gki/common init -q
           git -C gki/common remote add origin https://android.googlesource.com/kernel/common
           if ! git -C gki/common -c protocol.version=2 fetch --depth=1 --filter=blob:none --no-tags origin "refs/tags/$GKI_COMMON_TAG"; then
@@ -244,7 +220,6 @@ jobs:
             LLVM=1 LLVM_IAS=1 olddefconfig
           cmp workspace/phase446s-inputs/final.config workspace/gki-phase199-out/.config
           echo 'P446T exact Phase446S source recovery PASS' >> "$GITHUB_STEP_SUMMARY"
-
       - name: Restore exact pinned TouchGrass audit reference
         run: |
           set -Eeuo pipefail
@@ -254,7 +229,6 @@ jobs:
           git -C workspace/touchgrass-a52xq fetch --depth=1 origin "$TOUCHGRASS_COMMIT"
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
-
       - name: Apply Phase446T delta, retain earlier source contracts
         run: |
           set -Eeuo pipefail
@@ -280,7 +254,6 @@ jobs:
           for opt in USB_G_SERIAL USB_CONFIGFS USB_CONFIGFS_ACM USB_CONFIGFS_F_FS U_SERIAL_CONSOLE; do
             grep -Fxq "CONFIG_$opt=y" "$BUILD/.config"
           done
-          # Preserve 446T *exactly*; append observational 446U A and USB B.
           python3 -m py_compile scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py scripts/446u_apply_usb_console_handover.py scripts/446u_toggle_usb_handover.py
           python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT"
           python3 scripts/446u_apply_atomic_request_trace.py --root "$ROOT" --check-only
@@ -288,7 +261,6 @@ jobs:
           python3 scripts/446u_expand_p445_store.py --root "$ROOT" --check-only
           python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT"
           python3 scripts/446u_apply_usb_console_handover.py --root "$ROOT" --check-only
-          # 446V: append to the verified 446U-v2 final tree (USB untouched).
           python3 -m py_compile scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py
           python3 scripts/446v_apply_hwc_read_trace.py --root "$ROOT"
           python3 scripts/446v_apply_hwc_read_trace.py --root "$ROOT" --check-only
@@ -305,14 +277,11 @@ jobs:
           python3 scripts/446w_apply_handoff_option_b.py --root "$ROOT" --check-only
           python3 scripts/446w_apply_ttygs3.py --root "$ROOT"
           python3 scripts/446w_apply_ttygs3.py --root "$ROOT" --check-only
-          # B v2 after original 446W option B injection.
           python3 -m py_compile scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py
           python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT"
           python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT" --check-only
           python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT"
           python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT" --check-only
-          # Phase446X: TG source copied ONLY from pinned commit, no firmware
-          # flashing permitted, kill switch a52.touch=0, Samsung sec helpers.
           python3 -m py_compile scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py
           python3 scripts/446x_apply_stm_touch.py \
             --tg "$PWD/workspace/touchgrass-a52xq" --root "$ROOT"
@@ -325,14 +294,11 @@ jobs:
             --disable TOUCHSCREEN_DUMP_MODE \
             --disable SEC_DEBUG_TSP_LOG \
             --disable TOUCHSCREEN_DUAL_FOLDABLE
-          # Extended kernel cmdline and boot header BOTH need ttyGS3, not ttyGS0.
           sed -i 's/console=ttyGS0,115200/console=ttyGS3,115200/g' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
           if grep -q '^CONFIG_CMDLINE=".*console=ttyGS0,115200' "$BUILD/.config"; then
             echo 'FAIL: stale ttyGS0 builtin console'; exit 1
           fi
-          # Full request property dump can exceed the old 512 KiB printk ring.
-          # Increase only the log ring, no DRM, display or PM behavior change.
           sed -i 's/^CONFIG_LOG_BUF_SHIFT=19$/CONFIG_LOG_BUF_SHIFT=21/' "$BUILD/.config"
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
@@ -373,20 +339,11 @@ jobs:
           python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT" --check-only
           python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT" --check-only
           python3 scripts/446x_apply_stm_touch.py --root "$ROOT" --check-only
-          # Phase305's historic --check-only requires its obsolete Phase13 solver
-          # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
-          # semantic markers below instead of running an incompatible phase gate.
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
-          # Generated runtime header is strictly derived from the validated
-          # source manifest. It is excluded from the source-tree fingerprint to
-          # avoid the self-referential hash circularity, not from the build.
           mkdir -p "$ROOT/include/generated"
-          # Exact Phase429 reconstructed source is a linked Git worktree:
-          # .git is a pointer FILE, not a directory. Resolve Git's real
-          # info/exclude location instead of attempting mkdir "$ROOT/.git".
           GIT_EXCLUDE="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path info/exclude)"
           test -n "$GIT_EXCLUDE"
           mkdir -p "$(dirname "$GIT_EXCLUDE")"
@@ -454,17 +411,14 @@ jobs:
             grep -Rns -E 'clk_sync_state|sync_state' "$ROOT/drivers/clk/qcom" | head -200 || true
           } | tee /tmp/p439-sync-state.txt
           test -s /tmp/p439-sync-state.txt
-
       - name: Incremental compile Phase446d GKI
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
-
           make -C "$ROOT" O="$BUILD" ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 -j"$(nproc)" Image
-
           IMAGE="$BUILD/arch/arm64/boot/Image"
           MAP="$BUILD/System.map"
           P445="$ROOT/drivers/a52_display/msm/a52_phase445.c"
@@ -543,39 +497,27 @@ jobs:
           python3 scripts/fence1f_reopen_p445_gate_at_cold_prepare.py --root "$ROOT" --check-only
           grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
           echo "CRASH1: raw FIFO F0 disabled; standard Samsung command remains enabled"
-
           python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
           python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
           python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
-
           grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
           grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
           grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
           grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
           grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
           grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
-          # Phase444's matched-moment names and TG console format are
-          # source-level contracts. In the GKI build some are compiled out or
-          # string-folded, so validate them in the generated source rather than
-          # requiring fragile literals to survive in Image.
           grep -Fq 'P445_GATE_DIAG' "$P445"
           grep -Fq 'R0_HOT_0_75US' "$P445"
           grep -Fq 'R1_HOT_0_75US' "$P445"
           grep -Fq 'R2_HOT_0_75US' "$P445"
           grep -Fq 'dropped_sections' "$P445"
-
-          # Require a GKI runtime summary string that is actually emitted by the
-          # compiled recorder, plus the durable binary section names below.
           grep -aFq 'R0_HOT_0_75US' "$IMAGE"
           grep -aFq 'R1_HOT_0_75US' "$IMAGE"
           grep -aFq 'R2_HOT_0_75US' "$IMAGE"
-
-          # Critical: no scheduled Phase440 F0 sender may survive in this Image.
           ! grep -aFq 'P440 EARLY start' "$IMAGE"
           ! grep -aFq 'P440 EARLY unlock_rc' "$IMAGE"
           ! grep -aFq 'P440 EARLY relock_rc' "$IMAGE"
-
           grep -Fq ' a52_p437_mark' "$MAP"
           grep -Fq ' a52_p439_allow_next' "$MAP"
           grep -Fq ' a52_p440_event' "$MAP"
@@ -591,23 +533,17 @@ jobs:
           grep -aFq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
           grep -aFq 'J_MISC_TRACE' "$IMAGE"
-          # The source markers are comments (not emitted in vmlinux).
-          # Audit actual runtime strings and the symbol of the linked PHY.
           grep -aFq 'msm-qusb-phy-v2' "$IMAGE"
           grep -aFq 'U1: forcing authenticated high-speed USB gadget' "$IMAGE"
           grep -aFq 'U1: selecting UTMI as PIPE on lagoon' "$IMAGE"
           grep -aFq 'U1: optional USB3 PHY absent' "$IMAGE"
           grep -Fq ' a52_u1_usb2_only' "$MAP" || true
           python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
-          # 446U replaces the abandoned U2 ACM-console handover. Check that
-          # the legacy broken U2 hook is absent AND the console-first path
-          # is present, with NO ttyGS1 console re-attachment.
           ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE"
           ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE"
           grep -aFq 'U446 UNBIND free_port before_close_wait' "$IMAGE"
           grep -aFq 'U446 HANDOVER_DISABLED' "$IMAGE"
           echo "P446U USB source/binary console-first audit PASS"
-
           ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
           ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
           grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
@@ -625,21 +561,18 @@ jobs:
           grep -Fq ' a52_p445_run_r2' "$MAP"
           ! grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
           ccache -s
-
       - name: Save Phase445 object cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: workspace/gki-phase199-out
           key: a52xq-phase441-vrr-state-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/441_apply_vrr_state_compat.py', 'scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
-
       - name: Save rolling clang ccache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
-
       - name: Package Phase446W-B/X retained splash, touchscreen built-in and RTC
         if: success()
         run: |
@@ -649,13 +582,11 @@ jobs:
           OUT="$PWD/f0bisect-gki-p6-out"
           SOURCE_BOOT="$PWD/phase429-gki-out/package/boot-phase429-apex-sf-focused-census-v1.img"
           FINAL="$OUT/package/boot-f0bisect-gki-p6-v1.img"
-
           rm -rf "$OUT"
           cp -a phase429-gki-out "$OUT"
           cp "$BUILD/arch/arm64/boot/Image" "$OUT/compile/Image"
           cp "$BUILD/System.map" "$OUT/compile/System.map"
           cp "$BUILD/.config" "$OUT/config/final.config"
-
           mkdir -p "$OUT/source" "$OUT/audit"
           cp "$ROOT/drivers/a52_secure/a52_ack_secure_flight_recorder.c" "$OUT/source/a52_ack_secure_flight_recorder.c"
           cp "$ROOT/drivers/a52_display/msm/a52_phase445.c" "$OUT/source/a52_phase445.c"
@@ -780,24 +711,16 @@ jobs:
              scripts/u2_apply_gki_usb_composite_handover.py \
              scripts/u2_ab_quiet_legacy_observers.py "$OUT/audit/"
           cp /tmp/p435-overlap.txt /tmp/p436-overlap.txt /tmp/p439-sync-state.txt /tmp/p441-vrr-audit.txt /tmp/u2-ab-quiet-report.json "$OUT/audit/" 2>/dev/null || true
-
           gzip -n -c "$BUILD/arch/arm64/boot/Image" > "$OUT/package/Image.gz"
-          # Phase446S already has U1 USB2-only DTB and both cmdline tokens.
-          # They must not be patched/appended a second time.
           python3 scripts/38_repack_a52_p1_boot.py \
             --source "$SOURCE_BOOT" --kernel "$OUT/package/Image.gz" \
             --output "$FINAL" --report "$OUT/package/phase446-repack-report.json"
-          # Versioned boot-header-v2 extra_cmdline flag. Only this token is
-          # appended; existing U1/QUSB2 DTB, ramdisk and the old tokens remain.
           python3 scripts/446_append_boot_cmdline.py \
             --source "$FINAL" --output "$FINAL.usb" \
             --append "a52.usb_handover=1" \
             --report "$OUT/package/phase446u-usb-cmdline-report.json"
           mv "$FINAL.usb" "$FINAL"
           grep -aFq 'a52.usb_handover=1' "$FINAL"
-          # Actual Samsung boot header has console=null. It MUST remain unchanged.
-          # Kernel CONFIG_CMDLINE_EXTEND supplies console=ttyGS3,115200.
-          # Verifier audits config, preserves console=null and never rewrites it.
           python3 scripts/446w_retarget_boot_console.py \
             --source "$FINAL" --output "$FINAL.tty3" \
             --kernel-config "$BUILD/.config" \
@@ -821,7 +744,6 @@ jobs:
             --append "a52.446w_tty=3" \
             --report "$OUT/package/phase446w-port3.json"
           mv "$FINAL.port" "$FINAL"
-          # Header console=null is intentional; ttyGS3 comes from built-in config.
           grep -aFq 'console=null' "$FINAL"
           grep -Fq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
@@ -835,8 +757,6 @@ jobs:
           mv "$FINAL.touch" "$FINAL"
           grep -aFq 'a52.touch=1' "$FINAL"
           grep -aFq 'a52.446w_tty=3' "$FINAL"
-          # The A52 R02 touchscreen is an applied DT overlay, not an
-          # un-applied DTS source. Check packed boot DTB after ALL changes.
           python3 scripts/446x_check_final_touch_dtb.py \
             --boot "$FINAL" \
             --report "$OUT/package/phase446x-final-touch-dtb.json"
@@ -863,17 +783,13 @@ jobs:
           test "$(grep -Ec '^(CONFIG_PSTORE_CONSOLE|CONFIG_PSTORE_RAM)=y$' "$BUILD/.config")" -eq 2
           grep -Fq 'A52_PHASE446R_COMMIT_GEM_LIFETIME_V1' "$ROOT/drivers/a52_display/msm/msm_atomic.c"
           grep -Fq 'A52_PHASE446R_COMMIT_GEM_LIFETIME_V1' "$ROOT/drivers/a52_display/msm/msm_gem.c"
-          # Early serial console is ttyGS3; ttyGS0 reserved for Android.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
-
-          # Phase446i changes one variable only: skip the TE GPIO IRQ registration.
           test "$(stat -c '%s' "$FINAL")" -eq 100663296
           grep -Fq 'a52.cb2_reuse=1' "$OUT/package/phase446-cb2-cmdline-report.json"
           cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
           chmod +x "$OUT/package/446d_collect_boot_identity.sh"
           sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
-
           cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
           Phase446W: a52.446w_cold=1 by default, no SDE continuous
           splash ownership, reserved framebuffer never freed early; normal
@@ -925,18 +841,15 @@ jobs:
           and legacy P430/P431/P385 diagnostic sampling threads where present.
           Audit report: audit/u2-ab-quiet-report.json.
           This is not an exhaustive audit of every historical observer; no hardware proof.
-
           With a52.usb_handover=1 Android ConfigFS should take the UDC after ttyGS0 quiesces.
           With a52.usb_handover=0 PuTTY COM3 stays and ADB is unavailable.
           Keep the known-good Phase446T image for hardware rollback.
-
           Phase446i GKI matched passive F0 environment twin
           ==================================================
           Established:
             - Phase446g/h TE IRQ skip keeps the inherited splash streaming until Android handoff.
             - F0 still enters DSI BUSY, lanes remain LP-11, DMA_DONE never asserts.
             - R1 controller reset and R2 ctrl/PHY/PLL rebuild already failed.
-
           Phase446i adds observation only:
             - I_SW_ENTRY: cached DSI controller states and requested byte/pixel/byte_intf/esc rates.
             - I_RAW_PRE / I_RAW_POST: full 0x88e7000..0x88e70ff refgen dump,
@@ -945,20 +858,16 @@ jobs:
             - I_BUS_PRE / I_BUS_POST: full Kona DSI debug selector table.
             - hot-path capture uses MMIO only: no clk API, regulator API, allocation, printk,
               runtime-PM, reset, force-clock, or recovery write.
-
           Refgen source audit:
             - GKI port is Kona-only: qcom,refgen-kona-regulator + refgen_kona_ops.
             - generic +0x08/+0x14 BIAS_EN/BG_CTRL path is absent.
             - therefore the earlier generic-ops corruption theory is source-ruled-out.
-
           GKI retains the proven TE IRQ skip solely so F0 is tested on a live display link.
           Compare I_* sections directly against the Phase446i TouchGrass twin.
           EOF
-
           (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | \
             xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
           sha256sum "$FINAL"
-          # Actual post-repack boot DTB, config/map, and full patched tree.
           INPUTS="$PWD/phase446s-final-inputs"
           python3 scripts/446s_publish_final_inputs.py \
             --root "$ROOT" --build "$BUILD" --boot "$FINAL" \
@@ -973,7 +882,6 @@ jobs:
             echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
             echo 'Any unavailable separate DTBO is explicitly documented.'
           } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1038,7 +946,6 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-
       - name: Upload Phase446i GKI
         if: success()
         uses: actions/upload-artifact@v4
@@ -1048,7 +955,6 @@ jobs:
           if-no-files-found: error
           compression-level: 1
           retention-days: 30
-
       - name: Upload Phase446S final build inputs
         if: success()
         uses: actions/upload-artifact@v4
@@ -1058,7 +964,6 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
-
       - name: Upload Phase446i GKI boot image
         if: success()
         uses: actions/upload-artifact@v4
@@ -1070,4 +975,3 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
-

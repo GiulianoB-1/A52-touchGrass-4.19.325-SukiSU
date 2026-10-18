@@ -89,6 +89,32 @@ def main():
     right=d.index(mark_end,left)
     dispatch.write_text(d[:left]+d[right:])
 
+    # New BakaSU has an optional zygote_next SuSFS 1.5.x helper. P170
+    # runs the manual + core-only SuSFS 1.4.2 combination, so this helper
+    # is neither supported nor needed. Keep the real manual setuid hooks
+    # and all normal root/zygote handling intact.
+    setuid=ksu/"kernel/hook/setuid_hook.c"
+    z=setuid.read_text()
+    z_begin="#ifdef CONFIG_KSU_SUSFS\nextern struct work_struct susfs_extra_works;\n"
+    z_end="#endif\n\nint ksu_handle_setuid(uid_t new_uid, uid_t old_uid)"
+    assert z.count(z_begin)==1 and z.count(z_end)==1, "BakaSU zygote_next helper shape changed"
+    first=z.index(z_begin)
+    last=z.index(z_end,first)
+    z=z[:first]+z[last+len("#endif\n\n"):]
+    z_call=("#ifdef CONFIG_KSU_SUSFS\n"
+            "    // Only susfs will process zygote_next\n"
+            "    // We don't care it in Tracepoint / Manual hook\n\n"
+            "    if (is_zygote_next(current_cred())) {\n"
+            "        handle_zygote_next_setresuid(new_uid);\n"
+            "    }\n"
+            "#endif\n")
+    assert z.count(z_call)==1, "BakaSU optional zygote_next invocation changed"
+    z=z.replace(z_call,"",1)
+    setuid.write_text(z)
+    assert "handle_zygote_next_setresuid" not in z
+    assert "int ksu_handle_setuid(uid_t new_uid, uid_t old_uid)" in z
+    assert "ksu_handle_umount(old_uid, new_uid);" in z
+
     run(sys.executable,"-c",compat,root,ksu)
     all_api = "\n".join(p.read_text(errors="replace") for p in (ksu/"kernel").rglob("*.c"))
     assert "susfs_is_current_proc_umounted" not in all_api, "modern SuSFS runtime caller survived"

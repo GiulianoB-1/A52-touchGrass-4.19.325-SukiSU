@@ -29,7 +29,7 @@ def check(root):
         raise RuntimeError("P446Z KSU upstream setup symlink missing")
     for rel,words in ((MAKE,("obj-$(CONFIG_KSU) += kernelsu/",TAG)),
                       (KCFG,('source "drivers/kernelsu/Kconfig"',TAG)),
-                      (INIT,("P446Z KSU version=%s hooks=tracepoint rc=0","P446Z KSU version=%s hooks=tracepoint rc=-12"))):
+                      (INIT,("P446Z KSU version=%s hooks=tracepoint rc=0","P446Z KSU version=%s hooks=tracepoint rc=%d"))):
         data=(root/rel).read_text()
         for w in words:
             if w not in data:raise RuntimeError(f"P446Z KSU missing {w} in {rel}")
@@ -71,7 +71,7 @@ def main():
             raise RuntimeError("P446Z pinned KSU init error branch changed")
         init=init.replace(anchor,
           '    ksu_cred = prepare_creds();\n    if (!ksu_cred) {\n'
-          '        pr_err("P446Z KSU version=%s hooks=tracepoint rc=-12 prepare_creds\\n", KSU_VERSION_FULL);\n'
+          '        pr_err("P446Z KSU version=%s hooks=tracepoint rc=%d prepare_creds\\n", KSU_VERSION_FULL, -ENOSYS);\n'
           '        pr_err("prepare cred failed!\\n");\n        return -ENOSYS;\n    }',1)
         anchor2='    return 0;\n}\n\nvoid __exit kernelsu_exit(void)'
         if init.count(anchor2)!=1:raise RuntimeError("P446Z KSU init success anchor changed")

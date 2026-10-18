@@ -31,10 +31,19 @@ python3 scripts/446aa_trace_touch_drm.py --root "$ROOT" --check-only
 python3 -m py_compile scripts/446ab_probe_fifo_and_property_epochs.py
 python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT"
 python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT" --check-only
+python3 -m py_compile scripts/446ac_stage_gpi.py scripts/446ac_gsi_i2c.py scripts/446ac_hwc_ring.py
+python3 scripts/446ac_stage_gpi.py --root "$ROOT"
+python3 scripts/446ac_stage_gpi.py --root "$ROOT" --check-only
+python3 scripts/446ac_gsi_i2c.py --root "$ROOT"
+python3 scripts/446ac_gsi_i2c.py --root "$ROOT" --check-only
+python3 scripts/446ac_hwc_ring.py --root "$ROOT"
+python3 scripts/446ac_hwc_ring.py --root "$ROOT" --check-only
+"$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
 bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
 python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+grep -Fxq CONFIG_QCOM_GPI_DMA=y "$BUILD/.config"
 grep -Fxq CONFIG_KSU=y "$BUILD/.config"
 grep -Fxq CONFIG_KSU_TRACEPOINT_HOOK=y "$BUILD/.config"
 grep -Fxq CONFIG_I2C_QCOM_GENI=y "$BUILD/.config"
@@ -50,6 +59,7 @@ test -s "$BUILD/security/selinux/flask.h"
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
      -j"$(nproc)" \
+     drivers/dma/qcom/gpi.o \
      drivers/i2c/busses/i2c-qcom-geni.o \
      drivers/gpu/drm/drm_atomic_uapi.o \
      drivers/gpu/drm/drm_mode_object.o \
@@ -60,4 +70,4 @@ test -s "$BUILD/drivers/kernelsu/built-in.a"
 llvm-ar t "$BUILD/drivers/kernelsu/built-in.a" | grep -Fq 'core/init.o'
 llvm-ar t "$BUILD/drivers/kernelsu/built-in.a" | grep -Fq 'hook/arm64/syscall_hook.o'
 echo 'P446Z PREFLIGHT KSU_ARCHIVE PASS: built-in.a contains core/init.o and ARM64 tracepoint hook'
-echo 'P446Z PREFLIGHT PASS: SE8 I2C bus vote, STM fail-fast, KSU built-in object all compiled'
+echo 'P446AC PREFLIGHT PASS: pinned GPI driver + SE8 GSI + HWC ring + STM + KSU objects compiled'

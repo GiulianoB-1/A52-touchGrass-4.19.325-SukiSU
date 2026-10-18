@@ -6,7 +6,7 @@ reserved continuous splash buffer: bootloader may still be scanning it when
 this code runs. The memory remains reserved for the entire boot (safe leak).
 Rollback: a52.446w_cold=0 on the boot image cmdline.
 
-Switch B: a52.446w_handoff=1 (default for 446W-B), guarded full modeset in first
+Switch B: a52.446w_handoff=0 (Phase446AB diagnostic default), guarded full modeset in first
 HWC atomic with splash kept. Intended to exercise EXISTING TG safe cleanup
 paths, not blind mutation of panel, crtc, or encoder flags.
 """
@@ -26,7 +26,7 @@ def patch_kms(s):
     anchor="static bool g_cont_splash = true;"
     code=r'''/* A52_PHASE446W_SPLASH_SELECT_V1 */
 static bool a52w_cold;
-static bool a52w_handoff = true;
+static bool a52w_handoff = false;
 static int __init a52w_cold_arg(char *s)
 {
 	if (!s) return -EINVAL;
@@ -92,11 +92,11 @@ def check(root):
     s=(root/P).read_text()
     if "P446W_FULL_POST_NORMAL_ON" not in (root/SS).read_text():
         raise RuntimeError("446W post-cycle complete snapshot missing")
-    for a in ("static bool a52w_cold;","static bool a52w_handoff = true;",TAG,'early_param("a52.446w_cold"','early_param("a52.446w_handoff"',
+    for a in ("static bool a52w_cold;","static bool a52w_handoff = false;",TAG,'early_param("a52.446w_cold"','early_param("a52.446w_handoff"',
               "P446W SPLASH COLD_SELECTED=1","sde_kms->splash_data.num_splash_regions",
               "a52w_handoff_selected"):
         if a not in s:raise RuntimeError("446W missing "+a)
-    print("P446W-B SPLASH CHECK PASS: default splash adoption/rail votes, handoff B enabled, reserved mem kept")
+    print("P446W-B SPLASH CHECK PASS: default splash adoption/rail votes, handoff B disabled, reserved mem kept")
 def main():
     p=argparse.ArgumentParser();p.add_argument("--root",type=Path,required=True)
     p.add_argument("--check-only",action="store_true");args=p.parse_args()

@@ -297,8 +297,8 @@ jobs:
           # Clang -Werror=misleading-indentation rejects that generated C.
           # Apply only this precisely checked generator correction before
           # materializing the source, then pin its corrected SHA-256.
-          old=b'    if (!gi2c->se.wrapper)\\n        return -EPROBE_DEFER;'
-          new=b'    if (!gi2c->se.wrapper) {\\n        return -EPROBE_DEFER;\\n    }'
+          old=b'    if (!gi2c->se.wrapper)\n        return -EPROBE_DEFER;'
+          new=b'    if (!gi2c->se.wrapper) {\n        return -EPROBE_DEFER;\n    }'
           assert raw.count(old)==1, 'P446Y GENI wrapper guard anchor drift'
           raw=raw.replace(old,new,1)
           assert hashlib.sha256(raw).hexdigest()=='d9b95c7f7ee9ccc14e590d82a5d6b91f737c504babc63132d0488fc0447016b7'

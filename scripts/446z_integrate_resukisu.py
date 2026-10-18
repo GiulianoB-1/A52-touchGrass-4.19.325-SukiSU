@@ -14,8 +14,9 @@ import argparse
 import subprocess
 
 TAG="A52_PHASE446Z_RESUKISU_BUILTIN_TRACEPOINT_V1"
-PIN="239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb"
-RELEASE_TAG="v4.2.0-rc3"
+PIN="b2c595ddfa64b685e5a144ad37b7c95f912fb92a"
+DRIVER=35233
+KSU_LOG=f"P446AC KSU version=%s driver=%u commit={PIN} hooks=tracepoint rc="
 MAKE=Path("drivers/Makefile")
 KCFG=Path("drivers/Kconfig")
 INIT=Path("KernelSU/kernel/core/init.c")
@@ -25,14 +26,14 @@ def check(root):
         raise RuntimeError("P446Z KSU refuses symlink at source root")
     got=subprocess.check_output(["git","-C",str(root/"KernelSU"),"rev-parse","HEAD"],text=True).strip()
     if got!=PIN:raise RuntimeError(f"P446Z KSU upstream SHA drift: {got}")
-    tag_sha=subprocess.check_output(["git","-C",str(root/"KernelSU"),"rev-parse","refs/tags/"+RELEASE_TAG+"^{commit}"],text=True).strip()
-    if tag_sha!=PIN:raise RuntimeError("P446AB KSU tag ref differs from pinned SHA")
+    revision_count=int(subprocess.check_output(["git","-C",str(root/"KernelSU"),"rev-list","--count","HEAD"],text=True).strip())
+    if 30000+revision_count+700!=DRIVER:raise RuntimeError(f"P446AC KSU wrong driver version: {30000+revision_count+700} expected {DRIVER}")
     symlink=root/"drivers/kernelsu"
     if not symlink.is_symlink() or symlink.readlink().as_posix()!="../KernelSU/kernel":
         raise RuntimeError("P446Z KSU upstream setup symlink missing")
     for rel,words in ((MAKE,("obj-$(CONFIG_KSU) += kernelsu/",TAG)),
                       (KCFG,('source "drivers/kernelsu/Kconfig"',TAG)),
-                      (INIT,("P446Z KSU version=%s tag=v4.2.0-rc3 hooks=tracepoint rc=0","P446Z KSU version=%s tag=v4.2.0-rc3 hooks=tracepoint rc=%d"))):
+                      (INIT,(KSU_LOG+"0 builtin=1",KSU_LOG+"%d prepare_creds"))):
         data=(root/rel).read_text()
         for w in words:
             if w not in data:raise RuntimeError(f"P446Z KSU missing {w} in {rel}")
@@ -44,7 +45,7 @@ def check(root):
                           "ksu_handle_stat(", "ksu_handle_sys_read("):
             if forbidden in t:
                 raise RuntimeError(f"P446Z KSU manual-hook collision in {rel}: {forbidden}")
-    print("P446Z KSU AUDIT PASS: pinned BakaSU upstream, builtin tracepoint hooks, no legacy VFS hooks, setup.sh-equivalent tree wiring")
+    print(f"P446AC KSU AUDIT PASS: pinned commit={PIN} driver={DRIVER} builtin=1 tracepoint hooks, no legacy VFS hooks")
 
 def main():
     a=argparse.ArgumentParser()
@@ -74,12 +75,12 @@ def main():
             raise RuntimeError("P446Z pinned KSU init error branch changed")
         init=init.replace(anchor,
           '    ksu_cred = prepare_creds();\n    if (!ksu_cred) {\n'
-          '        pr_err("P446Z KSU version=%s tag=v4.2.0-rc3 hooks=tracepoint rc=%d prepare_creds\\n", KSU_VERSION_FULL, -ENOSYS);\n'
+          '        pr_err("P446AC KSU version=%s driver=%u commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a hooks=tracepoint rc=%d prepare_creds\\n", KSU_VERSION_FULL, KSU_VERSION, -ENOSYS);\n'
           '        pr_err("prepare cred failed!\\n");\n        return -ENOSYS;\n    }',1)
         anchor2='    return 0;\n}\n\nvoid __exit kernelsu_exit(void)'
         if init.count(anchor2)!=1:raise RuntimeError("P446Z KSU init success anchor changed")
         init=init.replace(anchor2,
-          '    pr_info("P446Z KSU version=%s tag=v4.2.0-rc3 hooks=tracepoint rc=0 builtin=1\\n", KSU_VERSION_FULL);\n'
+          '    pr_info("P446AC KSU version=%s driver=%u commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a hooks=tracepoint rc=0 builtin=1\\n", KSU_VERSION_FULL, KSU_VERSION);\n'
           '    return 0;\n}\n\nvoid __exit kernelsu_exit(void)',1)
         (root/INIT).write_text(init)
         (root/MAKE).write_text(mk.rstrip()+f"\n\n# {TAG}\nobj-$(CONFIG_KSU) += kernelsu/\n")

@@ -40,5 +40,6 @@ make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      drivers/i2c/busses/i2c-qcom-geni.o \
      drivers/input/touchscreen/stm/fts5cu56a/fts_ts.o \
      drivers/soc/qcom/qcom-geni-se.o \
-     drivers/kernelsu/kernelsu.o
+     drivers/kernelsu/
+test -s "$BUILD/drivers/kernelsu/kernelsu.o"
 echo 'P446Z PREFLIGHT PASS: SE8 I2C bus vote, STM fail-fast, KSU built-in object all compiled'

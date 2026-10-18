@@ -182,7 +182,7 @@ static int a52ac_gsi_xfer(struct geni_i2c_dev *gi2c,
 		}
 		ret=dma_submit_error(dmaengine_submit(td));
 		if (ret)goto cleanup;
-		dev_info(dev,"P446AC GSI XFER_START msg=%d/%d addr=%#x dir=%c len=%u segs=%d\n",
+		dev_info_ratelimited(dev,"P446AC GSI XFER_START msg=%d/%d addr=%#x dir=%c len=%u segs=%d\n",
 			i+1,num,msg->addr,rdmsg?'R':'W',msg->len,n);
 		dma_async_issue_pending(gi2c->a52ac_tx);
 		timeout=wait_for_completion_timeout(&gi2c->done,msecs_to_jiffies(1100));
@@ -196,7 +196,7 @@ cleanup:
 		dma_unmap_single(mapdev,phys,msg->len,
 			rdmsg ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 		i2c_put_dma_safe_msg_buf(buf,msg,!ret);
-		dev_info(dev,"P446AC GSI XFER_DONE msg=%d/%d rc=%d\n",i+1,num,ret);
+		dev_info_ratelimited(dev,"P446AC GSI XFER_DONE msg=%d/%d rc=%d\n",i+1,num,ret);
 		if (ret)break;
 	}
 	return ret;

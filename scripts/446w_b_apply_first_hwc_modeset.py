@@ -128,20 +128,18 @@ static int a52w_try_handoff_modeset(struct drm_atomic_state *state)
 '''
     s=s[:start]+helper+s[end:]
     s='#include <linux/a52_ack_secure_flight_recorder.h>\n#include <linux/a52_446v_display_trace.h>\n#include <linux/a52_446w_handoff_b.h>\n'+s
-    old='''	struct msm_drm_private *priv;
-
-	priv = dev->dev_private;
-	a52w_try_handoff_modeset(state);
-	if (priv && priv->kms'''
-    new='''	struct msm_drm_private *priv;
-	int a52w_rc;
-
-	a52w_rc=a52w_try_handoff_modeset(state);
-	if (a52w_rc)
-		return a52w_rc;
-	priv = dev->dev_private;
-	if (priv && priv->kms'''
-    return one(s,old,new,"msm_atomic_check propagate acquire errno")
+    # Pinned 446T already instruments this function with trace_id, trace,
+    # and rc declarations, plus a52_ackfr_record statements before priv.
+    # Change only the original 446W helper call inside msm_atomic_check,
+    # keeping C89 declarations BEFORE those existing trace statements.
+    at=s.index("int msm_atomic_check(struct drm_device *dev,")
+    en=s.index("\\n}",at)+2
+    sub=s[at:en]
+    sub=one(sub,"\\tint rc;","\\tint rc;\\n\\tint a52w_rc;","C89 declaration after rc")
+    sub=one(sub,"\\ta52w_try_handoff_modeset(state);",
+      "\\ta52w_rc=a52w_try_handoff_modeset(state);\\n\\tif (a52w_rc)\\n\\t\\treturn a52w_rc;",
+      "replace original option-B helper invocation")
+    return s[:at]+sub+s[en:]
 
 def patch_atomic(s):
     if TAG in s:return s

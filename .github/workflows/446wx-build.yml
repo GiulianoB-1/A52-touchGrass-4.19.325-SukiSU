@@ -1,5 +1,5 @@
-name: Phase446Y serialized handoff + SE8 GENI
-run-name: Phase446Y blocking HWC handoff + single-SE8 GENI touch
+name: Phase446Z SE8 core-voted touch and built-in root
+run-name: Phase446Z QUPv3_1 RPMh bus vote + fast STM probe
 on:
   push:
     branches:
@@ -32,7 +32,7 @@ concurrency:
 jobs:
   gki:
     if: true
-    name: Build Phase446Y serialized HWC STM touch via GENI
+    name: Build Phase446Z QUP core-voted GENI STM touch
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     env:
@@ -311,6 +311,9 @@ jobs:
           python3 scripts/446y_fix_geni_clock_unwind.py --root "$ROOT"
           python3 scripts/446y_fix_geni_clock_unwind.py --root "$ROOT" --check-only
           python3 scripts/446y_apply_handoff_i2c.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/446z_apply_qup_core_touch.py
+          python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT"
+          python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" \
             --enable INPUT_TOUCHSCREEN \
             --enable TOUCHSCREEN_STM_FTS5CU56A \
@@ -369,6 +372,7 @@ jobs:
           python3 scripts/446x_apply_stm_touch.py --root "$ROOT" --check-only
           python3 scripts/446y_apply_handoff_i2c.py --root "$ROOT" --check-only
           python3 scripts/446y_fix_geni_clock_unwind.py --root "$ROOT" --check-only
+          python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
@@ -656,7 +660,7 @@ jobs:
           cp scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py "$OUT/source/"
           cp scripts/446w_apply_splash_select.py scripts/446w_apply_handoff_option_b.py scripts/446w_apply_ttygs3.py scripts/446w_retarget_boot_console.py "$OUT/source/"
           cp scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py "$OUT/source/"
-          cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py scripts/446y_apply_handoff_i2c.py scripts/446y_apply_handoff_i2c.py.z64 scripts/446y_fix_geni_clock_unwind.py "$OUT/source/" 
+          cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py scripts/446y_apply_handoff_i2c.py scripts/446y_apply_handoff_i2c.py.z64 scripts/446y_fix_geni_clock_unwind.py scripts/446z_apply_qup_core_touch.py "$OUT/source/" 
           mkdir -p "$OUT/source/touchscreen_fts5cu56a" "$OUT/source/sec_input"
           cp "$ROOT/drivers/input/touchscreen/stm/fts5cu56a/"{fts_ts.c,fts_fwu.c,fts_sec.c,fts_ts.h,Kconfig,Makefile} "$OUT/source/touchscreen_fts5cu56a/"
           cp "$ROOT/drivers/input/common/"{sec_cmd.c,sec_tclm_v2.c,sec_secure_touch.c} "$OUT/source/sec_input/"

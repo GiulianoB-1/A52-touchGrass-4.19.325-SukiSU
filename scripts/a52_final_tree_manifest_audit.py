@@ -150,9 +150,9 @@ EXPECT={
      ("A52_PHASE446V_PMK8350_RTC_V1",'"qcom,pmk8350-rtc"',
       "0x6140","0x6240","P446V RTC PROBE","P446V RTC REGISTER")),
 
- "P446W-B default retains splash and panel votes":("drivers/a52_display/msm/sde/sde_kms.c",
+ "P446AB default retains splash votes, Plan B handoff OFF":("drivers/a52_display/msm/sde/sde_kms.c",
      ("A52_PHASE446W_SPLASH_SELECT_V1","static bool a52w_cold;",
-      "static bool a52w_handoff = true;","P446W SPLASH COLD_SELECTED=0",
+      "static bool a52w_handoff = false;","P446W SPLASH COLD_SELECTED=0",
       "a52w_handoff_selected","early_param(\"a52.446w_cold\"")),
  "P446W-B actual first-frame HWC modeset":("drivers/a52_display/msm/msm_drv.c",
      ("A52_PHASE446W_HANDOFF_B_ACTUAL_FRAME_V2","P446W HANDOFF begin",

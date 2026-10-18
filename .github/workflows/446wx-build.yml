@@ -282,7 +282,7 @@ jobs:
           python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT" --check-only
           python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT"
           python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT" --check-only
-          python3 -m py_compile scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py
+          python3 -m py_compile scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py
           python3 scripts/446x_apply_stm_touch.py \
             --tg "$PWD/workspace/touchgrass-a52xq" --root "$ROOT"
           python3 scripts/446x_apply_stm_touch.py --root "$ROOT" --check-only
@@ -624,7 +624,7 @@ jobs:
           cp scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py "$OUT/source/"
           cp scripts/446w_apply_splash_select.py scripts/446w_apply_handoff_option_b.py scripts/446w_apply_ttygs3.py scripts/446w_retarget_boot_console.py "$OUT/source/"
           cp scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py "$OUT/source/"
-          cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py "$OUT/source/" 
+          cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py "$OUT/source/" 
           mkdir -p "$OUT/source/touchscreen_fts5cu56a" "$OUT/source/sec_input"
           cp "$ROOT/drivers/input/touchscreen/stm/fts5cu56a/"{fts_ts.c,fts_fwu.c,fts_sec.c,fts_ts.h,Kconfig,Makefile} "$OUT/source/touchscreen_fts5cu56a/"
           cp "$ROOT/drivers/input/common/"{sec_cmd.c,sec_tclm_v2.c,sec_secure_touch.c} "$OUT/source/sec_input/"
@@ -756,6 +756,12 @@ jobs:
             --report "$OUT/package/phase446x-touch-enabled.json"
           mv "$FINAL.touch" "$FINAL"
           grep -aFq 'a52.touch=1' "$FINAL"
+          # Published 446T FDT does NOT contain TG's R02 touchscreen and
+          # qupv3_se8_i2c is disabled; apply the exact R02 target here.
+          python3 scripts/446x_apply_touch_boot_dtb.py \
+            --boot "$FINAL" --output "$FINAL.touchdtb" \
+            --report "$OUT/package/phase446x-touch-dtb-patch.json"
+          mv "$FINAL.touchdtb" "$FINAL"
           grep -aFq 'a52.446w_tty=3' "$FINAL"
           python3 scripts/446x_check_final_touch_dtb.py \
             --boot "$FINAL" \
@@ -767,8 +773,10 @@ jobs:
           parse=runpy.run_path('scripts/38_repack_a52_p1_boot.py')['parse_boot']
           previous=parse(Path(sys.argv[1]).read_bytes())
           rebuilt=parse(Path(sys.argv[2]).read_bytes())
-          for key in ('dtb','ramdisk','recovery_dtbo'):
+          for key in ('ramdisk','recovery_dtbo'):
               assert rebuilt[key]==previous[key], 'Phase446T boot must preserve '+key
+          assert rebuilt['dtb']!=previous['dtb'], 'Phase446X STM overlay must change DTB'
+          assert b'stm,fts_touch' in rebuilt['dtb'], 'Phase446X must pack touch into FINAL DTB'
           raw=Path(sys.argv[2]).read_bytes()
           assert b'a52.cb2_reuse=1' in raw and b'no_console_suspend' in raw
           target=Path(sys.argv[3])

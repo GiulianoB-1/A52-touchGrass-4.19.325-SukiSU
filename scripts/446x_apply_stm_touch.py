@@ -159,6 +159,42 @@ static atomic_t a52x_touch_events=ATOMIC_INIT(0);
 					atomic_read(&a52x_touch_events),TouchID,
 					info->finger[TouchID].x,info->finger[TouchID].y);
 ''',"first 5 touches")
+    # 5.10 input_mt_init_slots returns int: MUST propagate failures before
+    # registration. At both call sites, probe has allocated input devices and
+    # initialized wakelock; err_register_input is the correct unwind.
+    s=one(s,
+        "static void fts_set_input_prop(struct fts_ts_info *info, struct input_dev *dev, u8 propbit)\n{",
+        "static int fts_set_input_prop(struct fts_ts_info *info, struct input_dev *dev, u8 propbit)\n{\n\tint rc;",
+        "change input props to checked int")
+    s=one(s,
+        '''if (propbit == INPUT_PROP_POINTER)
+		input_mt_init_slots(dev, FINGER_MAX, INPUT_MT_POINTER);
+	else
+		input_mt_init_slots(dev, FINGER_MAX, INPUT_MT_DIRECT);
+
+	input_set_drvdata(dev, info);''',
+        r'''if (propbit == INPUT_PROP_POINTER)
+		rc=input_mt_init_slots(dev,FINGER_MAX,INPUT_MT_POINTER);
+	else
+		rc=input_mt_init_slots(dev,FINGER_MAX,INPUT_MT_DIRECT);
+	if (rc) {
+		pr_err("P446X TOUCH input_mt_init_slots FAILED rc=%d name=%s\n",
+		       rc,dev->name?dev->name:"(unnamed)");
+		return rc;
+	}
+	input_set_drvdata(dev, info);
+	return 0;''',
+        "return mt slot init")
+    s=one(s,
+        'fts_set_input_prop(info, info->input_dev_pad, INPUT_PROP_POINTER);',
+        '''retval=fts_set_input_prop(info,info->input_dev_pad,INPUT_PROP_POINTER);
+		if (retval)goto err_register_input;''',
+        "pad init rc")
+    s=one(s,
+        'fts_set_input_prop(info, info->input_dev, INPUT_PROP_DIRECT);',
+        '''retval=fts_set_input_prop(info,info->input_dev,INPUT_PROP_DIRECT);
+	if (retval)goto err_register_input;''',
+        "touch init rc")
     # Diagnostic and defer-safe regulator handling. TG original silently
     # returns success when a supplier is missing; don't continue with ERR_PTR.
     for rail in ("dvdd","avdd"):
@@ -236,7 +272,8 @@ def linkage(root):
 def check(root):
     c={DST+"/fts_ts.c":(TAG,'early_param("a52.touch"',"P446X TOUCH EVENT",
             "P446X TOUCH I2C_ID","P446X TOUCH INPUT","P446X TOUCH REGULATOR_ENABLE",
-            "struct proc_ops","ktime_get_real_ts64","wakeup_source_register"),
+            "struct proc_ops","ktime_get_real_ts64","wakeup_source_register",
+            "P446X TOUCH input_mt_init_slots FAILED"),
        DST+"/fts_fwu.c":(TAG,"FW_WRITE_BLOCKED","P446X TOUCH FW_VERSIONS"),
        DST+"/fts_ts.h":("struct wakeup_source *wakelock;",),
        COMMON+"/sec_cmd.c":("sec_cmd_init(",),

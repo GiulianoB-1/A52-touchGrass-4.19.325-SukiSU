@@ -157,8 +157,8 @@ def drm(s):
     s=once(s,"/* A52_PHASE446AA_SE8_DRM_REQUEST_TRACE_V1; first 192 ioctls, no state modification */",
            DRM_HELPERS+"\n/* A52_PHASE446AA_SE8_DRM_REQUEST_TRACE_V1; first 192 ioctls, no state modification */",
            "shared DRM epoch helpers")
-    s=once(s,"\t\t\ta52aa_seq=atomic_inc_return(&a52aa_req_no);",
-           "\t\t\ta52aa_seq=atomic_inc_return(&a52aa_req_no);\n"
+    s=once(s,"\t\ta52aa_seq=atomic_inc_return(&a52aa_req_no);",
+           "\t\ta52aa_seq=atomic_inc_return(&a52aa_req_no);\n"
            "\t\t\ta52ab_count_hwc_ioctl(arg);",
            "count atomic ioctl once not on retry")
     s=once(s,"\tif (!drm_property_change_valid_get(prop, prop_value, &ref))",

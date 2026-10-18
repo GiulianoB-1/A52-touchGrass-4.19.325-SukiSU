@@ -18,6 +18,36 @@ GSI=r'''
  * Generate TG-compatible CONFIG0/GO/DATA TREs through its GPI DMAengine.
  * Keep the stock ACK FIFO path untouched for all other engines.
  */
+/* TG 4.19 GSI mode: ACK 5.10 GENI_SE_DMA is NOT equivalent.
+ * Enable external GPI event routing instead of local SE completion IRQs.
+ * Ref: TG GSI mode implementation at drivers/platform/msm/qcom-geni-se.c.
+ */
+static void a52ac_select_gsi_mode(struct geni_i2c_dev *gi2c)
+{
+	void __iomem *base=gi2c->se.base;
+	u32 m_irq=readl_relaxed(base+SE_GENI_M_IRQ_EN);
+	u32 s_irq=readl_relaxed(base+SE_GENI_S_IRQ_EN);
+	u32 dma=readl_relaxed(base+SE_GENI_DMA_MODE_EN);
+	u32 gsi=readl_relaxed(base+0xe18); /* SE_GSI_EVENT_EN */
+	/* Local GENI IRQs must not compete with the GPI event ring. */
+	writel_relaxed(0,base+0xe1c); /* SE_IRQ_EN */
+	m_irq &= ~(M_CMD_DONE_EN|M_TX_FIFO_WATERMARK_EN|
+		   M_RX_FIFO_WATERMARK_EN|M_RX_FIFO_LAST_EN);
+	s_irq &= ~S_CMD_DONE_EN;
+	writel_relaxed(s_irq,base+SE_GENI_S_IRQ_EN);
+	writel_relaxed(m_irq,base+SE_GENI_M_IRQ_EN);
+	writel_relaxed(0xffffffff,base+SE_GENI_M_IRQ_CLEAR);
+	writel_relaxed(0xffffffff,base+SE_GENI_S_IRQ_CLEAR);
+	writel_relaxed(0xffffffff,base+SE_DMA_TX_IRQ_CLR);
+	writel_relaxed(0xffffffff,base+SE_DMA_RX_IRQ_CLR);
+	writel_relaxed(dma|GENI_DMA_MODE_EN,base+SE_GENI_DMA_MODE_EN);
+	writel_relaxed(gsi|0xf,base+0xe18); /* RX/TX/M/S GSI events */
+	dev_info_once(gi2c->se.dev,
+		"P446AC GSI_MODE irq_global=0 events=%#x dma_en=%#x fifo_disable=%#x\n",
+		readl_relaxed(base+0xe18),readl_relaxed(base+SE_GENI_DMA_MODE_EN),
+		readl_relaxed(base+0x64));
+}
+
 static void a52ac_gsi_event(struct dma_chan *ch,
 			   const struct msm_gpi_cb *cb, void *arg)
 {
@@ -116,6 +146,7 @@ static int a52ac_gsi_xfer(struct geni_i2c_dev *gi2c,
 	ret=a52ac_gsi_channels(gi2c);
 	if (ret)
 		return ret;
+	a52ac_select_gsi_mode(gi2c);
 	for (i=0;i<num;i++) {
 		struct i2c_msg *msg=&msgs[i];
 		struct msm_gpi_tre cfg={},go={},data={};

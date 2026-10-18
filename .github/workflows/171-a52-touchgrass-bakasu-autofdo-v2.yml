@@ -1218,6 +1218,7 @@ jobs:
           echo "p159_build_cache_key=$KEY" | tee artifacts/p159-build-cache-key.txt
 
       - name: Restore P159 built outputs
+        if: ${{ false }} # P171 must re-create KernelSU + fs/susfs.c; compiled-only cache omits them
         id: p159_built_cache
         uses: actions/cache/restore@v4
         with:
@@ -1285,7 +1286,7 @@ jobs:
           echo "P159 final build outputs restored from cache"
 
       - name: Save P159 built outputs
-        if: steps.p159_built_cache.outputs.cache-hit != 'true'
+        if: ${{ false }} # Do not store incomplete source closure as a reusable P171 cache
         uses: actions/cache/save@v4
         with:
           path: |

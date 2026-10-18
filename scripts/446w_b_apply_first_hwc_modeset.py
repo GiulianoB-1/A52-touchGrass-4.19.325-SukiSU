@@ -144,7 +144,7 @@ static int a52w_try_handoff_modeset(struct drm_atomic_state *state)
 
 def patch_atomic(s):
     if TAG in s:return s
-    s='#include <linux/a52_446w_handoff_b.h>\n#include <linux/a52_446v_display_trace.h>\n'+s
+    s='/* '+TAG+' */\n#include <linux/a52_446w_handoff_b.h>\n#include <linux/a52_446v_display_trace.h>\n'+s
     begin=s.index("static void complete_commit(struct msm_commit *c)")
     end=s.index("\n}",begin)+2
     sub=s[begin:end]

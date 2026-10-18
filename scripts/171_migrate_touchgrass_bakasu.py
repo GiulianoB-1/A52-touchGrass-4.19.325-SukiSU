@@ -77,19 +77,21 @@ def main():
     end="\nMANUALSUSFSCOMPATPY\n\"\"\""
     assert compat_py.count(begin)==1 and compat_py.count(end)==1
     compat=compat_py.split(begin,1)[1].split(end,1)[0]
-    run(sys.executable,"-c",compat,root,ksu)
-
-    # BakaSU's new manager mark code may query newer SuSFS task state even
-    # in the old core-only mode. The manual hook path doesn't need this.
+    # BakaSU's manage-mark query has a SuSFS 1.5.x state accessor absent
+    # from P170's core-only 1.4.2. Drop only that optional query path.
+    # Our manual hooks have no task mark to expose; preserve default = 0.
     dispatch=ksu/"kernel/supercall/dispatch.c"
-    edit_once(dispatch,
-        "#elif defined(CONFIG_KSU_SUSFS)\n        if (susfs_is_current_proc_umounted()) {",
-        "#elif defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n        if (susfs_is_current_proc_umounted()) {",
-        "manager mark manual-hook branch")
-    # The inaccessible SuSFS 1.5.x branch can remain in #if 0 at compile
-    # time, but use a strict reference count to detect unwanted new callers.
+    d=dispatch.read_text()
+    mark_start="#elif defined(CONFIG_KSU_SUSFS)\n        if (susfs_is_current_proc_umounted()) {"
+    mark_end="#else\n        cmd.result = 0;\n#endif"
+    assert d.count(mark_start)==1, "manage-mark SUSFS anchor changed"
+    left=d.index(mark_start)
+    right=d.index(mark_end,left)
+    dispatch.write_text(d[:left]+d[right:])
+
+    run(sys.executable,"-c",compat,root,ksu)
     all_api = "\n".join(p.read_text(errors="replace") for p in (ksu/"kernel").rglob("*.c"))
-    assert all_api.count("susfs_is_current_proc_umounted")==1, "unexpected modern SUSFS runtime caller"
+    assert "susfs_is_current_proc_umounted" not in all_api, "modern SuSFS runtime caller survived"
 
     # Preserve P170 root/mount safety: do not let manager turn kernel
     # module-unmount back on. Allowlist default is independently disabled.

@@ -166,8 +166,8 @@ python3 scripts/446_append_boot_cmdline.py \
 mv "$FINAL.cold" "$FINAL"
 python3 scripts/446_append_boot_cmdline.py \
   --source "$FINAL" --output "$FINAL.boff" \
-  --append "a52.446w_handoff=1" \
-  --report "$OUT/package/phase446w-handoff-on.json"
+  --append "a52.446w_handoff=0" \
+  --report "$OUT/package/phase446w-handoff-off.json"
 mv "$FINAL.boff" "$FINAL"
 python3 scripts/446_append_boot_cmdline.py \
   --source "$FINAL" --output "$FINAL.port" \
@@ -179,7 +179,7 @@ grep -Fq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
 grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
 grep -aFq 'console=ttyGS3,115200' "$BUILD/arch/arm64/boot/Image"
 grep -aFq 'a52.446w_cold=0' "$FINAL"
-grep -aFq 'a52.446w_handoff=1' "$FINAL"
+grep -aFq 'a52.446w_handoff=0' "$FINAL"
 python3 scripts/446_append_boot_cmdline.py \
   --source "$FINAL" --output "$FINAL.touch" \
   --append "a52.touch=1" \
@@ -229,12 +229,10 @@ cp scripts/446d_collect_boot_identity.sh "$OUT/package/"
 chmod +x "$OUT/package/446d_collect_boot_identity.sh"
 sha256sum "$FINAL" > "$OUT/package/EXPECTED-BOOT-SHA256.txt"
 cat > "$OUT/PHASE446D-NOTES.txt" <<'EOF'
-Phase446W: a52.446w_cold=1 by default, no SDE continuous
-splash ownership, reserved framebuffer never freed early; normal
-first DRM modeset cold-inits DSI (potential short black screen).
-Experimental B a52.446w_cold=0 a52.446w_handoff=1 is
-disabled for this A/B test; when enabled it requests a guarded
-first-HWC full modeset to execute existing TG DSI/SDE cleanup.
+Phase446AB: a52.446w_cold=0 and a52.446w_handoff=0 by default.
+Splash rails/votes remain adopted, but forced first-HWC Plan B modeset is
+OFF for this baseline diagnostic. a52.446w_handoff=1 remains available
+as a controlled boot-time alternative via cmdline.
 Early legacy USB serial on ttyGS3, U446 checks only line3;
 ttyGS0 remains for Samsung smdexe/DUN. U446 decisions printk.
 P446V PMK8350 RTC support is MUST-KEEP.

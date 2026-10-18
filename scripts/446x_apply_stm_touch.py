@@ -248,6 +248,46 @@ def header(s):
     s=one(s,'struct wake_lock wakelock;','struct wakeup_source *wakelock;',"header wakelock pointer")
     return s
 
+def logging_compat(root):
+    """TG sec_input logging macros aren't present in A12 5.10 headers.
+
+    Add no-op-free printk equivalents, scoped only to the copied STM+Samsung
+    helpers. Generic DRM/GPU/mainline input log formatting is unchanged.
+    """
+    compat=root/INPUT/"a52_touch_compat.h"
+    compat.write_text(r'''/* Phase446X TG sec_input logging compatibility (5.10). */
+#ifndef _A52_TOUCH_COMPAT_H
+#define _A52_TOUCH_COMPAT_H
+#include <linux/device.h>
+#include <linux/printk.h>
+#ifndef SECLOG
+#define SECLOG "[sec_input]"
+#endif
+#ifndef input_info
+#define input_info(mode, dev, fmt, ...) dev_info((dev), fmt, ##__VA_ARGS__)
+#endif
+#ifndef input_err
+#define input_err(mode, dev, fmt, ...) dev_err((dev), fmt, ##__VA_ARGS__)
+#endif
+#ifndef input_dbg
+#define input_dbg(mode, dev, fmt, ...) dev_dbg((dev), fmt, ##__VA_ARGS__)
+#endif
+#ifndef input_raw_info
+#define input_raw_info(mode, dev, fmt, ...) dev_info((dev), fmt, ##__VA_ARGS__)
+#endif
+#ifndef input_log_fix
+#define input_log_fix() do { } while (0)
+#endif
+#endif
+''')
+    # The Samsung factory processor uses SECLOG too. Header only affects TG
+    # copied sources, never globals like include/linux/input.h.
+    for p in (DST+"/fts_ts.c",DST+"/fts_fwu.c",
+              COMMON+"/sec_cmd.c",COMMON+"/sec_tclm_v2.c",
+              COMMON+"/sec_secure_touch.c"):
+        f=root/p
+        f.write_text('#include <linux/input/a52_touch_compat.h>\n'+f.read_text())
+
 def linkage(root):
     paths=[
       ("drivers/input/Makefile",
@@ -288,6 +328,8 @@ def check(root):
         s=(root/p).read_text()
         for term in terms:
             if term not in s:raise RuntimeError("P446X missing "+term+" in "+p)
+    if "input_info" not in (root/INPUT/"a52_touch_compat.h").read_text():
+        raise RuntimeError("P446X missing TG input logging adapters")
     mk=(root/DST/"Makefile").read_text()
     if "fts_sec.o" in mk or "fts_sec.c" not in (root/DST/"fts_ts.c").read_text():
         raise RuntimeError("fts_sec.c MUST be included only, not a separate object")
@@ -313,6 +355,7 @@ def main():
             dest.write_bytes(src.read_bytes())
         for p,fn in ((DST+"/fts_ts.c",ts),(DST+"/fts_fwu.c",fwu),(DST+"/fts_ts.h",header)):
             f=a.root/p;f.write_text(fn(f.read_text()))
+        logging_compat(a.root)
         linkage(a.root)
     check(a.root)
 if __name__=="__main__":main()

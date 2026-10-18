@@ -29,3 +29,4 @@ jobs:
         run: |
           set -Eeuo pipefail
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= -color .github/workflows/446s-suspend-power-flicker.yml
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= -color .github/workflows/446wx-build.yml

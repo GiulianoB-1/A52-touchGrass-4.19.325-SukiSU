@@ -28,6 +28,12 @@ static inline void *ipc_log_context_create(int pages,const char *name,int flags)
 static inline void ipc_log_string(void *ctx,const char *fmt,...) { }
 #endif
 """
+def adapt_gpi_510(src):
+    # 5.10 renamed devm_ioremap_nocache; devm_ioremap preserves TG's
+    # NULL-on-failure behavior. Exact upstream source kept for audit.
+    old=b"devm_ioremap_nocache("
+    if src.count(old)!=1:raise RuntimeError("P446AC GPI mapping anchor drift")
+    return src.replace(old,b"devm_ioremap(",1)
 def blob(s):
     return hashlib.sha1(b"blob "+str(len(s)).encode()+b"\0"+s).hexdigest()
 def one(s,a,b,label):
@@ -36,7 +42,13 @@ def one(s,a,b,label):
 def check(root):
     for name,sha in SOURCES.items():
         f=root/name
-        if not f.is_file() or blob(f.read_bytes())!=sha:
+        if name.endswith("/gpi.c"):
+            upstream=f.with_name("gpi.tg-original.c")
+            if not upstream.is_file() or blob(upstream.read_bytes())!=sha:
+                raise RuntimeError("P446AC original TG gpi.c blob drift")
+            if not f.is_file() or f.read_bytes()!=adapt_gpi_510(upstream.read_bytes()):
+                raise RuntimeError("P446AC GPI 5.10 MMIO API port drift")
+        elif not f.is_file() or blob(f.read_bytes())!=sha:
             raise RuntimeError("P446AC GPI pinned blob missing or changed: "+name)
     if (root/"include/linux/ipc_logging.h").read_text()!=IPC_SHIM:
         raise RuntimeError("P446AC IPC-only compatibility shim missing/drifted")
@@ -80,6 +92,9 @@ config QCOM_GPI_DMA
 """
         for f,b in staged:
             f.parent.mkdir(parents=True,exist_ok=True)
+            if f.name=="gpi.c":
+                f.with_name("gpi.tg-original.c").write_bytes(b)
+                b=adapt_gpi_510(b)
             f.write_bytes(b)
         shim=root/"include/linux/ipc_logging.h"
         if shim.exists():raise RuntimeError("P446AC refuses to overwrite existing IPC implementation")

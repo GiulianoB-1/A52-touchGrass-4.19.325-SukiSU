@@ -52,6 +52,8 @@ def function_body(s,signature,newbody):
 
 def fwu(s):
     if TAG in s:return s
+    # Only the forbidden SPU update path references Samsung's spu-verify.h.
+    s=one(s,"#include <linux/spu-verify.h>","", "unused SPU header")
     # Strip *all* ways a factory/ROM request could program controller flash.
     # Keep fts_fw_wait_for_event/echo_event and calibration helpers.
     blocked=[

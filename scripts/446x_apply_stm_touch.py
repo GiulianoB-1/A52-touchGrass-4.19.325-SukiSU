@@ -82,6 +82,11 @@ def fwu(s):
 
 def ts(s):
     if TAG in s:return s
+    # TG's oscillator-trim "recovery" sends flash-save commands 0xA4 05 04
+    # outside fts_fwu.c. It is an IC NVM writer; refuse it on GKI as well.
+    s=function_body(s,"int fts_osc_trim_recovery(struct fts_ts_info *info)",
+        r'''	pr_warn_ratelimited("P446X TOUCH OSC_FLASH_RECOVERY_BLOCKED firmware/NVM writes forbidden\n");
+	return -EPERM;''')
     s=s.replace('#include <linux/wakelock.h>','#include <linux/pm_wakeup.h>')
     s='#include <linux/atomic.h>\n#include <linux/ktime.h>\n#include <linux/sched.h>\n'+s
     s=one(s,"wake_lock_timeout(&info->wakelock, msecs_to_jiffies(500));",
@@ -273,7 +278,8 @@ def check(root):
     c={DST+"/fts_ts.c":(TAG,'early_param("a52.touch"',"P446X TOUCH EVENT",
             "P446X TOUCH I2C_ID","P446X TOUCH INPUT","P446X TOUCH REGULATOR_ENABLE",
             "struct proc_ops","ktime_get_real_ts64","wakeup_source_register",
-            "P446X TOUCH input_mt_init_slots FAILED"),
+            "P446X TOUCH input_mt_init_slots FAILED",
+            "P446X TOUCH OSC_FLASH_RECOVERY_BLOCKED"),
        DST+"/fts_fwu.c":(TAG,"FW_WRITE_BLOCKED","P446X TOUCH FW_VERSIONS"),
        DST+"/fts_ts.h":("struct wakeup_source *wakelock;",),
        COMMON+"/sec_cmd.c":("sec_cmd_init(",),

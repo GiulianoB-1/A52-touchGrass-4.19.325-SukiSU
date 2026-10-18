@@ -1,0 +1,27 @@
+name: 446X workflow syntax gate
+on:
+  push:
+    branches:
+      - agent/a52-phase446w-handoff-b-default-v1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate target workflow YAML and source scripts
+        run: |
+          set -Eeuo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+          p=Path(".github/workflows/446s-suspend-power-flicker.yml")
+          doc=yaml.safe_load(p.read_text())
+          assert "jobs" in doc and "gki" in doc["jobs"]
+          print("446X YAML syntax PASS and gki job found")
+          PY
+          python3 -m py_compile scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py
+          echo "446X Python scripts syntax PASS"

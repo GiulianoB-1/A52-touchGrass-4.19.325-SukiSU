@@ -1,5 +1,5 @@
-name: Phase446W - cold splash A/B + ttyGS3 console handover + RTC
-run-name: Phase446W cold-init A/B + ttyGS3 for Android adb (keep 446V RTC)
+name: Phase446W-B - first-HWC splash handoff + ttyGS3 + PMK8350 RTC
+run-name: Phase446W-B adopted splash + force HWC modeset + DSI trace + RTC
 # Phase446i keeps the proven GKI TE-IRQ skip and Phase446i lifecycle markers.
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
@@ -30,7 +30,7 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 
 concurrency:
-  group: a52-phase446w-${{ github.ref }}
+  group: a52-phase446w-b-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -302,6 +302,12 @@ jobs:
           python3 scripts/446w_apply_handoff_option_b.py --root "$ROOT" --check-only
           python3 scripts/446w_apply_ttygs3.py --root "$ROOT"
           python3 scripts/446w_apply_ttygs3.py --root "$ROOT" --check-only
+          # B v2 after original 446W option B injection.
+          python3 -m py_compile scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py
+          python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT"
+          python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT" --check-only
+          python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT"
+          python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT" --check-only
           # Extended kernel cmdline and boot header BOTH need ttyGS3, not ttyGS0.
           sed -i 's/console=ttyGS0,115200/console=ttyGS3,115200/g' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
@@ -318,7 +324,7 @@ jobs:
           grep -Fxq CONFIG_RTC_HCTOSYS=y "$BUILD/.config"
           grep -Fxq 'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
-          echo 'P446W default cold=1, opt-in handoff=0, ttyGS3 gate and PMK8350 RTC PASS'
+          echo 'P446W-B default cold=0 handoff=1, ttyGS3 and PMK8350 RTC PASS'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -344,6 +350,8 @@ jobs:
           python3 scripts/446w_apply_splash_select.py --root "$ROOT" --check-only
           python3 scripts/446w_apply_handoff_option_b.py --root "$ROOT" --check-only
           python3 scripts/446w_apply_ttygs3.py --root "$ROOT" --check-only
+          python3 scripts/446w_b_apply_first_hwc_modeset.py --root "$ROOT" --check-only
+          python3 scripts/446w_b_apply_dsi_path_trace.py --root "$ROOT" --check-only
           # Phase305's historic --check-only requires its obsolete Phase13 solver
           # stub. Phase423 legitimately replaced that stub; audit FINAL 305+423
           # semantic markers below instead of running an incompatible phase gate.
@@ -377,7 +385,7 @@ jobs:
           printf '#define A52_446S_FINGERPRINT "%s"\n' "$FP" > "$ROOT/include/generated/a52_446s_manifest.h"
           printf 'P446S MANIFEST PASS %s\n' "$FP"
           echo "Source fingerprint: $FP" >> "$GITHUB_STEP_SUMMARY"
-      - name: Compile Phase446W cold splash, USB ttyGS3 and RTC objects first (fail-fast)
+      - name: Compile Phase446W-B HWC modeset, DSI path and retained USB/RTC (fail-fast)
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
@@ -404,7 +412,7 @@ jobs:
             drivers/usb/gadget/function/u_serial.o \
             drivers/usb/gadget/legacy/serial.o \
             drivers/usb/gadget/configfs.o
-          echo 'P446W changed splash, USB port3, DRM and RTC object compilation PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo 'P446W-B HWC modeset, DSI tracing and retained USB/RTC compilation PASS' >> "$GITHUB_STEP_SUMMARY"
       - name: Audit display clock sync_state contracts
         run: |
           set -Eeuo pipefail
@@ -473,7 +481,16 @@ jobs:
           grep -aFq 'P446V RTC PROBE' "$IMAGE"
           grep -aFq 'P446V RTC REGISTER' "$IMAGE"
           grep -aFq 'P446W SPLASH COLD_SELECTED=1' "$IMAGE"
-          grep -aFq 'P446W HANDOFF_OPTION_B request full modeset' "$IMAGE"
+          grep -aFq 'P446W HANDOFF begin' "$IMAGE"
+          grep -aFq 'P446W HANDOFF end' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=disable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=enable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_prepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_enable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_disable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_unprepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF panel ON_CMDS' "$IMAGE"
+          grep -aFq 'P446W_HANDOFF_POST_COMPLETE' "$IMAGE"
           grep -aFq 'P446W FULL_POST_NORMAL_ON' "$IMAGE"
           grep -aFq 'P446W USB early legacy g_serial allocated ttyGS3' "$IMAGE"
           grep -aFq 'P446W U446 COORDINATOR DONE' "$IMAGE"
@@ -592,7 +609,7 @@ jobs:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
 
-      - name: Package Phase446W cold splash and ttyGS3 retaining PMK8350 RTC
+      - name: Package Phase446W-B retained-splash boot with forced HWC modeset and RTC
         if: success()
         run: |
           set -Eeuo pipefail
@@ -644,6 +661,7 @@ jobs:
           cp scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py scripts/446u_apply_usb_console_handover.py scripts/446u_toggle_usb_handover.py "$OUT/source/"
           cp scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py "$OUT/source/"
           cp scripts/446w_apply_splash_select.py scripts/446w_apply_handoff_option_b.py scripts/446w_apply_ttygs3.py scripts/446w_retarget_boot_console.py "$OUT/source/"
+          cp scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py "$OUT/source/"
           for f in drivers/gpu/drm/drm_mode_object.c drivers/gpu/drm/drm_property.c drivers/gpu/drm/drm_connector.c drivers/gpu/drm/drm_crtc.c drivers/gpu/drm/drm_encoder.c drivers/rtc/rtc-pm8xxx.c drivers/a52_display/msm/sde/sde_encoder.c; do
             cp "$ROOT/$f" "$OUT/source/$(basename "$f")"
           done
@@ -754,13 +772,13 @@ jobs:
           grep -Fq '"image_all_bytes_unchanged": true' "$OUT/package/phase446w-console-retarget.json"
           python3 scripts/446_append_boot_cmdline.py \
             --source "$FINAL" --output "$FINAL.cold" \
-            --append "a52.446w_cold=1" \
-            --report "$OUT/package/phase446w-cold-on.json"
+            --append "a52.446w_cold=0" \
+            --report "$OUT/package/phase446w-cold-off.json"
           mv "$FINAL.cold" "$FINAL"
           python3 scripts/446_append_boot_cmdline.py \
             --source "$FINAL" --output "$FINAL.boff" \
-            --append "a52.446w_handoff=0" \
-            --report "$OUT/package/phase446w-handoff-off.json"
+            --append "a52.446w_handoff=1" \
+            --report "$OUT/package/phase446w-handoff-on.json"
           mv "$FINAL.boff" "$FINAL"
           python3 scripts/446_append_boot_cmdline.py \
             --source "$FINAL" --output "$FINAL.port" \
@@ -772,8 +790,8 @@ jobs:
           grep -Fq 'CONFIG_CMDLINE_EXTEND=y' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
           grep -aFq 'console=ttyGS3,115200' "$BUILD/arch/arm64/boot/Image"
-          grep -aFq 'a52.446w_cold=1' "$FINAL"
-          grep -aFq 'a52.446w_handoff=0' "$FINAL"
+          grep -aFq 'a52.446w_cold=0' "$FINAL"
+          grep -aFq 'a52.446w_handoff=1' "$FINAL"
           grep -aFq 'a52.446w_tty=3' "$FINAL"
           cp scripts/446u_toggle_usb_handover.py "$OUT/package/"
           python3 - "$SOURCE_BOOT" "$FINAL" "$OUT/package" <<'PY'
@@ -904,7 +922,7 @@ jobs:
           test -s "$INPUTS/boot-final.dts"
           {
             echo '### Phase446S final build inputs'
-            echo 'Artifact: A52XQ-PHASE446W-FINAL-INPUTS-${{ github.run_number }}'
+            echo 'Artifact: A52XQ-PHASE446WB-FINAL-INPUTS-${{ github.run_number }}'
             echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
             echo 'Any unavailable separate DTBO is explicitly documented.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -913,7 +931,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446W-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446WB-GKI-FAIL-DIAG-${{ github.run_number }}
           path: |
             scripts/446m_apply_gdsc_irq_ab.py
             scripts/446n_apply_dsi_irq_rearm.py
@@ -978,7 +996,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446W-GKI-${{ github.run_number }}
+          name: A52XQ-PHASE446WB-GKI-${{ github.run_number }}
           path: f0bisect-gki-p6-out/
           if-no-files-found: error
           compression-level: 1
@@ -988,7 +1006,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446W-FINAL-INPUTS-${{ github.run_number }}
+          name: A52XQ-PHASE446WB-FINAL-INPUTS-${{ github.run_number }}
           path: phase446s-final-inputs/
           if-no-files-found: error
           compression-level: 0
@@ -998,7 +1016,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446W-GKI-${{ github.run_number }}-BOOT
+          name: A52XQ-PHASE446WB-GKI-${{ github.run_number }}-BOOT
           path: |
             f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
             f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json

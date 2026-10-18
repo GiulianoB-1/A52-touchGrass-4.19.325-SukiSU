@@ -116,6 +116,31 @@ def main():
     assert "ksu_handle_umount(old_uid, new_uid);" in z
 
     run(sys.executable,"-c",compat,root,ksu)
+
+    # BakaSU b2c595dd has a deliberate unconditional $(error) in its
+    # tools/susfs_compat.mk. P170's ReSukiSU adaptation inserted the include
+    # into manual-hook Kbuild; it is invalid for this pinned BakaSU version.
+    # On our hybrid config the SuSFS *feature sub-options* are all disabled;
+    # legacy 1.4.2 core is supplied by the TG tree and manually adapted above.
+    # Do not change upstream's error guard or affect BakaSU's standalone
+    # SuSFS inline-hook branch. Remove only the injected manual-hook include.
+    kbuild = ksu/"kernel/Kbuild"
+    ktext = kbuild.read_text()
+    include_block = (
+        "  ifdef CONFIG_KSU_SUSFS\n"
+        "    include $(KSU_SRC)/tools/susfs_compat.mk\n"
+        "  endif\n"
+    )
+    assert ktext.count(include_block)==1, "P171 unexpected manual-hook SuSFS include placement"
+    assert ktext.count("else ifdef CONFIG_KSU_MANUAL_HOOK")==1
+    assert "include $(KSU_SRC)/tools/manual_hook_check.mk" in ktext
+    assert "else ifdef CONFIG_KSU_SUSFS" in ktext
+    kbuild.write_text(ktext.replace(include_block, "", 1))
+    assert "using Manual Hook" in kbuild.read_text()
+    assert kbuild.read_text().count("include $(KSU_SRC)/tools/susfs_compat.mk")==1, (
+        "upstream SuSFS-inline branch must stay intact"
+    )
+
     all_api = "\n".join(p.read_text(errors="replace") for p in (ksu/"kernel").rglob("*.c"))
     assert "susfs_is_current_proc_umounted" not in all_api, "modern SuSFS runtime caller survived"
 

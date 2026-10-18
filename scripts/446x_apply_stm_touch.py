@@ -70,13 +70,17 @@ def fwu(s):
     # Android 16 vendor ROM may not carry the original A52 firmware.bin.
     # Missing file is NOT a reason to refuse the already-running IC: do not
     # try to flash, log that bin version is unavailable and keep probing.
-    s=one(s,'''				fw_path);
+    pr_start=s.index("int fts_fw_update_on_probe(struct fts_ts_info *info)")
+    pr_end=s.index("EXPORT_SYMBOL(fts_fw_update_on_probe);",pr_start)
+    probe=s[pr_start:pr_end]
+    probe=one(probe,'''				fw_path);
 		goto done;''',
         r'''				fw_path);
 		pr_warn("P446X TOUCH BIN_MISSING name=%s ic_version=%04x: read-only bringup continues\n",
 			fw_path,info->fw_version_of_ic);
 		retval=FTS_NOT_ERROR;
 		goto done;''',"firmware image unavailable read-only fallback")
+    s=s[:pr_start]+probe+s[pr_end:]
     needle="retval = fts_fw_updater(info, fw_data);"
     s=one(s,needle,r'''pr_info("P446X TOUCH FW_VERSIONS ic=%04x bin=%04x ic_main=%04x bin_main=%04x fw_write=BLOCKED\n",
 		info->fw_version_of_ic,info->fw_version_of_bin,

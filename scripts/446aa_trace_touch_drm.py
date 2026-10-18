@@ -37,10 +37,9 @@ def patch_i2c(s):
     s=replace_one(s,anchor,
          '\tif (gi2c->se.a52_legacy_ahb && !atomic_read(&gi2c->a52y_first_xfer))\n'
          '\t\tdev_info(gi2c->se.dev,\n'
-         '\t\t\t"P446AA SE8 BEFORE se_clk_hz=%lu se_enabled=%d mclk_cfg=%#x clk_ro=%#x clk_sel=%#x output=%#x irq_en=%#x ios=%#x\\n",\n'
+         '\t\t\t"P446AA SE8 BEFORE se_clk_hz=%lu mclk_cfg=%#x clk_ro=%#x clk_sel=%#x output=%#x irq_en=%#x ios=%#x\\n",\n'
          '\t\t\tclk_get_rate(gi2c->se.clk),\n'
-         '\t\t\t__clk_is_enabled(gi2c->se.clk),\n'
-         '\t\t\treadl_relaxed(gi2c->se.base+0x48),\n'
+                  '\t\t\treadl_relaxed(gi2c->se.base+0x48),\n'
          '\t\t\treadl_relaxed(gi2c->se.base+0x60),\n'
          '\t\t\treadl_relaxed(gi2c->se.base+0x7c),\n'
          '\t\t\treadl_relaxed(gi2c->se.base+0x24),\n'

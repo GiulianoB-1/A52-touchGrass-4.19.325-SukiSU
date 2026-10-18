@@ -25,6 +25,9 @@ test -f "$ROOT/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c"
 python3 -m py_compile scripts/446z_apply_qup_core_touch.py scripts/446z_integrate_resukisu.py
 python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT"
 python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT" --check-only
+python3 -m py_compile scripts/446aa_trace_touch_drm.py
+python3 scripts/446aa_trace_touch_drm.py --root "$ROOT"
+python3 scripts/446aa_trace_touch_drm.py --root "$ROOT" --check-only
 bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
 python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \
@@ -45,6 +48,7 @@ make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
      -j"$(nproc)" \
      drivers/i2c/busses/i2c-qcom-geni.o \
+     drivers/gpu/drm/drm_atomic_uapi.o \
      drivers/input/touchscreen/stm/fts5cu56a/fts_ts.o \
      drivers/soc/qcom/qcom-geni-se.o \
      drivers/kernelsu/

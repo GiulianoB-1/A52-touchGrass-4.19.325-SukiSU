@@ -67,6 +67,17 @@ def fwu(s):
         # Kernel-load helper signature can wrap onto second line.
         s=function_body(s,sig,'''	pr_warn_ratelimited("P446X TOUCH FW_WRITE_BLOCKED function=%s (no IC flash writes on GKI)\\n",__func__);
 	return -EPERM;''')
+    # The -Werror GKI build diagnoses now-inert static firmware helpers as
+    # unused; explicitly annotate only these hard-blocked functions. Never
+    # resurrect their bodies or turn on firmware programming.
+    for signature in (
+        "static int FTS_Check_Erase_Done(",
+        "static int fts_fw_burn(",
+        "static const int fts_fw_updater(",
+        "static int fts_load_fw_from_kernel(",
+        "static int fts_load_fw_from_ums("):
+        new=signature.replace("static ", "static __maybe_unused ", 1)
+        s=one(s,signature,new,"mark disabled flash helper unused")
     # Preserve the full TG parser for firmware header and IC-vs-bin version
     # reading, but make UPDATE->BURN unreachable (no auto flash or calibration).
     # Android 16 vendor ROM may not carry the original A52 firmware.bin.

@@ -14,6 +14,20 @@ SOURCES={
  "drivers/dma/qcom/msm_gpi_mmio.h":"74a390b21dab05df5a8da7ef2a9b650139479c03",
  "include/linux/msm_gpi.h":"11f9cf7bd2a20770d032847511744609dafbcc12",
 }
+# TG GPI uses downstream IPC log strings solely for debug telemetry.
+# ACK 5.10 has no ipc_logging.h. Keep the exact pinned GPI driver byte-for-byte
+# and provide a no-op log transport; ordinary dev_err/pr_err remain functional.
+IPC_SHIM = """/* A52_PHASE446AC_GPI_IPC_SHIM_V1 - logging only, not GPI transport */
+#ifndef _LINUX_IPC_LOGGING_H
+#define _LINUX_IPC_LOGGING_H
+#include <linux/types.h>
+static inline void *ipc_log_context_create(int pages,const char *name,int flags)
+{
+    return NULL;
+}
+static inline void ipc_log_string(void *ctx,const char *fmt,...) { }
+#endif
+"""
 def blob(s):
     return hashlib.sha1(b"blob "+str(len(s)).encode()+b"\0"+s).hexdigest()
 def one(s,a,b,label):
@@ -24,6 +38,8 @@ def check(root):
         f=root/name
         if not f.is_file() or blob(f.read_bytes())!=sha:
             raise RuntimeError("P446AC GPI pinned blob missing or changed: "+name)
+    if (root/"include/linux/ipc_logging.h").read_text()!=IPC_SHIM:
+        raise RuntimeError("P446AC IPC-only compatibility shim missing/drifted")
     mk=(root/"drivers/dma/qcom/Makefile").read_text()
     cfg=(root/"drivers/dma/qcom/Kconfig").read_text()
     if TAG not in mk or "obj-$(CONFIG_QCOM_GPI_DMA) += gpi.o" not in mk:
@@ -65,6 +81,9 @@ config QCOM_GPI_DMA
         for f,b in staged:
             f.parent.mkdir(parents=True,exist_ok=True)
             f.write_bytes(b)
+        shim=root/"include/linux/ipc_logging.h"
+        if shim.exists():raise RuntimeError("P446AC refuses to overwrite existing IPC implementation")
+        shim.write_text(IPC_SHIM)
         mk.write_text(m);cfg.write_text(c)
     check(root)
 if __name__=="__main__":main()

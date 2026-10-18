@@ -141,6 +141,69 @@ def main():
         "upstream SuSFS-inline branch must stay intact"
     )
 
+    # Port the three actual SuSFS process-state helpers used by BakaSU's
+    # sucompat.h: per-task/thread flag 34. This follows the implementation
+    # in the Linux 4.14+ SuSFS patch; never replace the hooks with no-ops.
+    # ARM64 TG4.19 thread_info.flags is unsigned long (64 bits).
+    import re
+    ti = root / "arch/arm64/include/asm/thread_info.h"
+    ti_text = ti.read_text()
+    if not re.search(r"struct thread_info\\s*\\{\\s*unsigned long\\s+flags\\s*;", ti_text):
+        raise RuntimeError("P171 ARM64 thread_info.flags layout unexpected")
+    candidates = list((root / "arch/arm64/include").rglob("*.h"))
+    candidates += list((root / "include/linux").rglob("*.h"))
+    candidates += list((ksu / "kernel").rglob("*.h"))
+    occupied = []
+    for item in candidates:
+        body = item.read_text(errors="replace")
+        if re.search(r"^\\s*#\\s*define\\s+TIF_[A-Za-z0-9_]+\\s+34(?:\\s|$)", body, re.M):
+            occupied.append(str(item))
+    if occupied:
+        raise RuntimeError("P171 ARM64 TIF bit34 collision: " + ", ".join(occupied))
+    susfs_header = root / "include/linux/susfs.h"
+    header = susfs_header.read_text()
+    if "TIF_PROC_NO_SU" in header:
+        raise RuntimeError("P171 pinned SuSFS header already has no_su state")
+    include_anchor = "#include <linux/types.h>\\n"
+    assert header.count(include_anchor) == 1, "P171 pinned SuSFS include anchor mismatch"
+    header = header.replace(include_anchor, include_anchor + "#include <linux/thread_info.h>\\n", 1)
+    code = """
+/* P171: real SuSFS per-thread no-su state for BakaSU manual hooks.
+ * Bit 34 is used by upstream's 4.14+ SuSFS implementation and is
+ * separately collision-checked against this exact TG4.19 source.
+ * It is inherited through task cloning and dies with the task.
+ */
+#define TIF_PROC_NO_SU 34
+
+static inline bool susfs_is_current_proc_no_su(void)
+{
+    return !!test_thread_flag(TIF_PROC_NO_SU);
+}
+
+static inline void susfs_set_current_proc_no_su(void)
+{
+    set_thread_flag(TIF_PROC_NO_SU);
+}
+
+static inline void susfs_clear_current_proc_no_su(void)
+{
+    clear_thread_flag(TIF_PROC_NO_SU);
+}
+"""
+    guard = "#define KSU_SUSFS_H\\n"
+    assert header.count(guard) == 1, "P171 pinned SuSFS header guard mismatch"
+    header = header.replace(guard, guard + code + "\\n", 1)
+    susfs_header.write_text(header)
+    for fn in ("susfs_is_current_proc_no_su", "susfs_set_current_proc_no_su",
+               "susfs_clear_current_proc_no_su"):
+        assert "static inline " in header and fn+"(void)" in header, fn
+    # Check the actual expected BakaSU mapping uses these helper names, rather
+    # than relying on a lucky link or silently rewriting privilege semantics.
+    sucompat_header = (ksu / "kernel/feature/sucompat.h").read_text()
+    for fn in ("susfs_is_current_proc_no_su", "susfs_set_current_proc_no_su",
+               "susfs_clear_current_proc_no_su"):
+        assert fn in sucompat_header, "P171 expected BakaSU no-su macro missing: "+fn
+
     all_api = "\n".join(p.read_text(errors="replace") for p in (ksu/"kernel").rglob("*.c"))
     assert "susfs_is_current_proc_umounted" not in all_api, "modern SuSFS runtime caller survived"
 

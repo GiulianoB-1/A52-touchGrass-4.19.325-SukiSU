@@ -52,6 +52,8 @@ cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts
 mkdir -p "$OUT/source/touchscreen_fts5cu56a" "$OUT/source/sec_input"
 cp "$ROOT/drivers/input/touchscreen/stm/fts5cu56a/"{fts_ts.c,fts_fwu.c,fts_sec.c,fts_ts.h,Kconfig,Makefile} "$OUT/source/touchscreen_fts5cu56a/"
 git -C "$ROOT/KernelSU" rev-parse HEAD > "$OUT/source/446z-resukisu-commit.txt"
+printf "%s\n" "35233" > "$OUT/source/446ac-resukisu-driver.txt"
+printf "%s\n" "BakaSU b2c595ddfa64b685e5a144ad37b7c95f912fb92a builtin tracepoint" > "$OUT/source/446ac-resukisu-pin.txt"
 cp "$ROOT/KernelSU/kernel/core/init.c" "$OUT/source/446z-resukisu-init.c"
 cp "$ROOT/drivers/i2c/busses/i2c-qcom-geni.c" "$OUT/source/446z-i2c-qcom-geni.c"
 cp "$ROOT/drivers/gpu/drm/drm_atomic_uapi.c" "$OUT/source/446aa-drm-atomic-uapi.c"

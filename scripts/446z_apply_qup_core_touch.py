@@ -305,8 +305,11 @@ def check(root):
     t=(root/STM).read_text()
     for word in (TAG,"PROBE_PREFER_ASYNCHRONOUS","P446Z TOUCH INIT_ABORT",
                  "P446Z TOUCH FIRST_I2C_TIMEOUT","dvdd_held","avdd_held",
-                 "P446X TOUCH FW_WRITE_BLOCKED"):
+):
         if word not in t:raise RuntimeError("P446Z missing STM "+word)
+    fwu=(root/"drivers/input/touchscreen/stm/fts5cu56a/fts_fwu.c").read_text()
+    if "FW_WRITE_BLOCKED" not in fwu or "A52_PHASE446X_STM_FTS_READ_ONLY_V1" not in fwu:
+        raise RuntimeError("P446Z missing mandatory firmware-write safeguards in fts_fwu.c")
     print("P446Z contract PASS: wrapper DT pairs -> nonzero core/memory vote before SE8, resume/suspend vote, IRQ/pinctrl witnesses, async STM first timeout, owned regulator refs; firmware still read-only")
 
 def main():

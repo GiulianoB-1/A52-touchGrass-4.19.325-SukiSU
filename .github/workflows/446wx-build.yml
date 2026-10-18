@@ -37,10 +37,7 @@ jobs:
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [qcom]
+    # P446Z: one qcom build; no matrix expansion at job-graph creation.
     steps:
       - uses: actions/checkout@v4
       - name: Validate Phase441 payload

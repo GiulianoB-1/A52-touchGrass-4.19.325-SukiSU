@@ -48,7 +48,7 @@ cp scripts/446u_apply_atomic_request_trace.py scripts/446u_expand_p445_store.py 
 cp scripts/446v_apply_hwc_read_trace.py scripts/446v_apply_state_diff.py scripts/446v_apply_pmk8350_rtc.py "$OUT/source/"
 cp scripts/446w_apply_splash_select.py scripts/446w_apply_handoff_option_b.py scripts/446w_apply_ttygs3.py scripts/446w_retarget_boot_console.py "$OUT/source/"
 cp scripts/446w_b_apply_first_hwc_modeset.py scripts/446w_b_apply_dsi_path_trace.py "$OUT/source/"
-cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py scripts/446y_apply_handoff_i2c.py scripts/446y_apply_handoff_i2c.py.z64 scripts/446y_fix_geni_clock_unwind.py scripts/446z_apply_qup_core_touch.py scripts/446aa_trace_touch_drm.py scripts/446ab_probe_fifo_and_property_epochs.py scripts/446z_integrate_resukisu.py scripts/446z_setup_resukisu.sh "$OUT/source/" 
+cp scripts/446x_apply_stm_touch.py scripts/446x_check_final_touch_dtb.py scripts/446x_apply_touch_boot_dtb.py scripts/446y_apply_handoff_i2c.py scripts/446y_apply_handoff_i2c.py.z64 scripts/446y_fix_geni_clock_unwind.py scripts/446z_apply_qup_core_touch.py scripts/446aa_trace_touch_drm.py scripts/446ab_probe_fifo_and_property_epochs.py scripts/446ac_stage_gpi.py scripts/446ac_gsi_i2c.py scripts/446ac_hwc_ring.py scripts/446z_integrate_resukisu.py scripts/446z_setup_resukisu.sh "$OUT/source/" 
 mkdir -p "$OUT/source/touchscreen_fts5cu56a" "$OUT/source/sec_input"
 cp "$ROOT/drivers/input/touchscreen/stm/fts5cu56a/"{fts_ts.c,fts_fwu.c,fts_sec.c,fts_ts.h,Kconfig,Makefile} "$OUT/source/touchscreen_fts5cu56a/"
 git -C "$ROOT/KernelSU" rev-parse HEAD > "$OUT/source/446z-resukisu-commit.txt"
@@ -58,6 +58,13 @@ cp "$ROOT/KernelSU/kernel/core/init.c" "$OUT/source/446z-resukisu-init.c"
 cp "$ROOT/drivers/i2c/busses/i2c-qcom-geni.c" "$OUT/source/446z-i2c-qcom-geni.c"
 cp "$ROOT/drivers/gpu/drm/drm_atomic_uapi.c" "$OUT/source/446aa-drm-atomic-uapi.c"
 cp "$ROOT/drivers/gpu/drm/drm_mode_object.c" "$OUT/source/446ab-drm-mode-object.c"
+cp "$ROOT/drivers/dma/qcom/gpi.c" "$OUT/source/446ac-tg-gpi.c"
+cp "$ROOT/drivers/dma/qcom/msm_gpi_mmio.h" "$OUT/source/446ac-msm_gpi_mmio.h"
+cp "$ROOT/include/linux/msm_gpi.h" "$OUT/source/446ac-msm_gpi.h"
+cp "$ROOT/drivers/gpu/drm/drm_atomic_uapi.c" "$OUT/source/446ac-hwc-ring.c"
+python3 scripts/446ac_stage_gpi.py --root "$ROOT" --check-only
+python3 scripts/446ac_gsi_i2c.py --root "$ROOT" --check-only
+python3 scripts/446ac_hwc_ring.py --root "$ROOT" --check-only
 cp "$ROOT/drivers/soc/qcom/qcom-geni-se.c" "$OUT/source/446z-qcom-geni-se.c"
 
 cp "$ROOT/drivers/input/common/"{sec_cmd.c,sec_tclm_v2.c,sec_secure_touch.c} "$OUT/source/sec_input/"

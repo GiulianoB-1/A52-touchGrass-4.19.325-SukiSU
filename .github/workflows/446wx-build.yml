@@ -405,6 +405,16 @@ jobs:
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
+          # Phase446Z: building the built-in BakaSU directory directly is
+          # earlier than the Image target's init/ and SELinux prerequisites.
+          # Kbuild must generate these real headers before compiling KSU.
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 init/version.o security/selinux/
+          test -s "$BUILD/include/generated/compile.h"
+          test -s "$BUILD/security/selinux/flask.h"
+          test -s "$BUILD/security/selinux/av_permissions.h"
+          echo 'P446Z KSU PREREQS PASS: compile.h + SELinux generated headers'
           make -C "$ROOT" O="$BUILD" ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 -j"$(nproc)" \

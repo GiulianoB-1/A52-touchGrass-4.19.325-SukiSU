@@ -315,7 +315,7 @@ test -s "$INPUTS/boot-final.dtb"
 test -s "$INPUTS/boot-final.dts"
 {
   echo '### Phase446S final build inputs'
-  echo 'Artifact: A52XQ-PHASE446WX-FINAL-INPUTS-$GITHUB_RUN_NUMBER'
+  echo "Artifact: A52XQ-PHASE446WX-FINAL-INPUTS-$GITHUB_RUN_NUMBER"
   echo 'Files: final.config, System.map, modules.builtin/order (if built), boot-final.dtb and decompiled DTS, available DTBO/DTS, final-patched-gki-source.tar.zst and hash manifest.'
   echo 'Any unavailable separate DTBO is explicitly documented.'
 } >> "$GITHUB_STEP_SUMMARY"

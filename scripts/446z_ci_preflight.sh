@@ -38,7 +38,7 @@ grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$BUILD/.config"
 # Generate the two real prerequisites explicitly instead of faking headers.
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
-     init/version.o security/selinux/flask.h
+     init/version.o security/selinux/
 test -s "$BUILD/include/generated/compile.h"
 test -s "$BUILD/security/selinux/flask.h"
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \

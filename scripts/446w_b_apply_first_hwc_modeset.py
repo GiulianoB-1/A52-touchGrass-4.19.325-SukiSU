@@ -175,10 +175,12 @@ def patch_atomic(s):
     for needle,label in [("drm_atomic_helper_commit_modeset_disables(dev, state);","disable"),
                          ("msm_atomic_helper_commit_modeset_enables(dev, state);","enable"),
                          ("kms->funcs->complete_commit(kms, state);","sde_complete")]:
-        sub=one(sub,needle,
-             f'if (a52w_handoff_selected() && !a52w_handoff_done())\\n\\t\\tpr_info("P446W HANDOFF phase={label}-enter\\\\n");\\n\\t'+needle+
-             f'\\n\\tif (a52w_handoff_selected() && !a52w_handoff_done())\\n\\t\\tpr_info("P446W HANDOFF phase={label}-exit\\\\n");',
-             "commit phase "+label)
+        replacement=f'''if (a52w_handoff_selected() && !a52w_handoff_done())
+		pr_info("P446W HANDOFF phase={label}-enter\\n");
+	{needle}
+	if (a52w_handoff_selected() && !a52w_handoff_done())
+		pr_info("P446W HANDOFF phase={label}-exit\\n");'''
+        sub=one(sub,needle,replacement,"commit phase "+label)
     s=s[:sub_start]+sub+s[sub_end:]
     # Tag the unused generic atomic commit tail for completeness.
     return s

@@ -171,7 +171,7 @@ def patch_atomic(s):
     sub_start=s.index("static void complete_commit(struct msm_commit *c)")
     sub_end=s.index("\n}",sub_start)+2
     sub=s[sub_start:sub_end]
-    for needle,label in [("drm_atomic_helper_commit_modeset_disables(dev, state);","disable"),
+    for needle,label in [("msm_atomic_helper_commit_modeset_disables(dev, state);","disable"),
                          ("msm_atomic_helper_commit_modeset_enables(dev, state);","enable"),
                          ("kms->funcs->complete_commit(kms, state);","sde_complete")]:
         replacement=f'''if (a52w_handoff_selected() && !a52w_handoff_done())

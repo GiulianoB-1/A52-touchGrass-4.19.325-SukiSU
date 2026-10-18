@@ -76,6 +76,17 @@ static void a52w_try_handoff_modeset(struct drm_atomic_state *state)
     return s[:fnstart]+part+s[fnend:]
 def check(root):
     s=(root/P).read_text()
+    # 446W-B actual-frame v2 replaces the entire option-B v1 helper.
+    # Both share this compatibility check in mandatory strict audit.
+    if "A52_PHASE446W_HANDOFF_B_ACTUAL_FRAME_V2" in s:
+        for x in ("P446W HANDOFF begin","P446W HANDOFF end",
+                  "drm_atomic_get_crtc_state",
+                  "drm_atomic_get_connector_state",
+                  "a52w_rc=a52w_try_handoff_modeset(state)"):
+            if x not in s:
+                raise RuntimeError("446W-B v2 handoff missing "+x)
+        print("P446W handoff B CHECK PASS: v2 real-HWC atomically acquired states")
+        return
     for x in [TAG,"a52w_try_handoff_modeset(state);",
               "P446W HANDOFF_OPTION_B request full modeset",
               "co->crtc==crtc"]:

@@ -30,7 +30,12 @@ def run(*args):
 def get(dtb,path,name):
     return run("fdtget","-t","x",str(dtb),path,name)
 def put(dtb,path,name,*vals,kind="x"):
-    run("fdtput","-t",kind,str(dtb),path,name,*map(str,vals))
+    # With fdtput -t x, bare digits are interpreted as HEX, not decimal.
+    # Formatting integer cells explicitly as 0x... prevents 0x49 turning
+    # into 0x73 and 400000 Hz silently becoming 0x400000 Hz.
+    values=[hex(v) if kind=="x" and isinstance(v,int) else str(v)
+            for v in vals]
+    run("fdtput","-t",kind,str(dtb),path,name,*values)
 def empty(dtb,path,name):
     run("fdtput",str(dtb),path,name)
 def new_node(dtb,path):

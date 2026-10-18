@@ -132,12 +132,11 @@ def ts(s):
     s=one(s,'struct timeval current_time;','struct timespec64 current_time;',"timespec")
     s=one(s,'do_gettimeofday(&current_time);','ktime_get_real_ts64(&current_time);',"ktime")
     s=one(s,'-sys_tz.tz_minuteswest * 60','0',"UTC")
+    # C89: preserve all original probe locals immediately after "{";
+    # emit probe-enter diagnostics at the first real statement instead.
     s=one(s,'static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)\n{',
-        '''static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
-{
-	pr_info("P446X TOUCH probe-enter bus=%d addr=%#x irq=%d pid=%d comm=%s\\n",
-		client->adapter?i2c_adapter_id(client->adapter):-1,
-		client->addr,client->irq,task_pid_nr(current),current->comm);''',"probe enter")
+        'static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)\n{',
+        "verify two-arg probe signature")
     s=one(s,'\tinfo->probe_done = true;',
         '''	pr_info("P446X TOUCH INPUT name=%s irq=%d i2c_errors=%d fw_ic=%04x fw_bin=%04x\\n",
 		info->input_dev->name,info->irq,atomic_read(&a52x_i2c_errors),
@@ -250,8 +249,16 @@ static atomic_t a52x_touch_events=ATOMIC_INIT(0);
     s=s[:probe_start]+probe+s[probe_end:]
     # Early return avoids NULL deref if probe fails prior to allocating info.
     s=one(s,'\tinput_info(true, &client->dev, "%s: FTS Driver [70%s]\\n", __func__,',
-        '''	pr_info("P446X TOUCH I2C_ID addr=%#x expected=0x49 irq=%d\\n",client->addr,client->irq);
+        '''	pr_info("P446X TOUCH probe-enter bus=%d addr=%#x irq=%d pid=%d comm=%s\\n",
+		client->adapter?i2c_adapter_id(client->adapter):-1,
+		client->addr,client->irq,task_pid_nr(current),current->comm);
+	pr_info("P446X TOUCH I2C_ID addr=%#x expected=0x49 irq=%d\\n",client->addr,client->irq);
 	input_info(true, &client->dev, "%s: FTS Driver [70%s]\\n", __func__,''',"I2C identifier")
+    # Samsung-only input_dev.disabled was removed in 5.10. Use the
+    # portable open count for the ESD recovery "not opened" branch.
+    s=one(s,"if (info->input_dev_touch->disabled) {",
+          "if (!READ_ONCE(info->input_dev_touch->users)) {",
+          "5.10 input_dev lacks disabled field")
     # Kconfig gated driver registration before touching I2C device.
     s=one(s,'static int __init fts_driver_init(void)\n{',
         '''static bool a52x_touch_enabled=true;

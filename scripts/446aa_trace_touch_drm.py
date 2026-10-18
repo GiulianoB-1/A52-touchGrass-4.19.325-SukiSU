@@ -76,19 +76,26 @@ def patch_drm(s):
        "\t}\n"
        "\tcopied_objs = 0;",
        "ioctl count")
-    anchor="ret = drm_atomic_set_property(state, file_priv, obj,"
-    if s.count(anchor)!=1:
-        raise RuntimeError("P446AA expected one drm_atomic_set_property call")
-    # Event is printed before drm_atomic_set_property mutates state.
-    s=s.replace(anchor,
-        "if (a52aa_seq && a52aa_seq<=192 &&\n"
-        "\t\t\t    obj->type==DRM_MODE_OBJECT_PLANE &&\n"
-        "\t\t\t    (!strcmp(prop->name,\"FB_ID\") ||\n"
-        "\t\t\t     !strcmp(prop->name,\"CRTC_ID\")))\n"
-        "\t\t\t\tpr_info(\"P446AA DRM_INPUT seq=%u plane=%u prop=%s val=%llu\\n\",\n"
-        "\t\t\t\t\ta52aa_seq,obj->id,prop->name,\n"
-        "\t\t\t\t\t(unsigned long long)prop_value);\n"
-        "\t\t"+anchor,1)
+    # ACK 5.10 layouts legitimately split this call across two lines.
+    # Preserve the original call verbatim and log immediately before it.
+    import re
+    pat=r'(?m)^(?P<indent>[ \t]*)ret\s*=\s*drm_atomic_set_property\s*\(\s*state\s*,\s*file_priv\s*,\s*obj\s*,'
+    matches=list(re.finditer(pat,s))
+    if len(matches)!=1:
+        raise RuntimeError("P446AA expected exactly one DRM property set, found "+str(len(matches)))
+    hit=matches[0]
+    i=hit.start()
+    indent=hit.group("indent")
+    trace=(
+        indent+"if (a52aa_seq && a52aa_seq<=192 &&\n"
+        +indent+"\tobj->type==DRM_MODE_OBJECT_PLANE &&\n"
+        +indent+"\t(!strcmp(prop->name,\"FB_ID\") ||\n"
+        +indent+"\t !strcmp(prop->name,\"CRTC_ID\")))\n"
+        +indent+"\tpr_info(\"P446AA DRM_INPUT seq=%u plane=%u prop=%s val=%llu\\n\",\n"
+        +indent+"\t\ta52aa_seq,obj->id,prop->name,\n"
+        +indent+"\t\t(unsigned long long)prop_value);\n"
+    )
+    s=s[:i]+trace+s[i:]
     # Headers included directly here because this remains a removable debug patch.
     a="/* "+TAG+"; first 192 ioctls, no state modification */"
     s=replace_one(s,a,

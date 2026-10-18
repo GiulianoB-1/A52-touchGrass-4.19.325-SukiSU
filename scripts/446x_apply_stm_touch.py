@@ -292,6 +292,23 @@ def logging_compat(root):
     Add no-op-free printk equivalents, scoped only to the copied STM+Samsung
     helpers. Generic DRM/GPU/mainline input log formatting is unchanged.
     """
+    # The TG header declares this symbol unconditionally, but TG builds
+    # its implementation only with CONFIG_SEC_DEBUG_TSP_LOG=y. The A52
+    # read-only port deliberately disables that full Samsung logging stack.
+    # Mirror the other disabled SEC_TSP_LOG entrypoints: preserve the call
+    # for future logger ports while eliminating the dangling linker symbol.
+    sponge_header = root/INPUT/"sec_tsp_log.h"
+    sponge_source = sponge_header.read_text()
+    sponge_source = one(sponge_source, "extern void sec_tsp_sponge_log(char *buf);",
+        """#ifdef CONFIG_SEC_DEBUG_TSP_LOG
+extern void sec_tsp_sponge_log(char *buf);
+#else
+static inline void sec_tsp_sponge_log(char *buf)
+{
+    (void)buf;
+}
+#endif""", "disabled Samsung sponge logger")
+    sponge_header.write_text(sponge_source)
     compat=root/INPUT/"a52_touch_compat.h"
     compat.write_text(r'''/* Phase446X TG sec_input logging compatibility (5.10). */
 #ifndef _A52_TOUCH_COMPAT_H
@@ -407,6 +424,12 @@ def check(root):
             if term not in s:raise RuntimeError("P446X missing "+term+" in "+p)
     if "input_info" not in (root/INPUT/"a52_touch_compat.h").read_text():
         raise RuntimeError("P446X missing TG input logging adapters")
+    sponge = (root/INPUT/"sec_tsp_log.h").read_text()
+    for marker in ("#ifdef CONFIG_SEC_DEBUG_TSP_LOG\\nextern void sec_tsp_sponge_log",
+                   "static inline void sec_tsp_sponge_log(char *buf)",
+                   "(void)buf;"):
+        if marker.replace("\\n", "\n") not in sponge:
+            raise RuntimeError("P446X missing disabled sponge logger fallback: " + marker)
     mk=(root/DST/"Makefile").read_text()
     if "fts_sec.o" in mk or "fts_sec.c" not in (root/DST/"fts_ts.c").read_text():
         raise RuntimeError("fts_sec.c MUST be included only, not a separate object")

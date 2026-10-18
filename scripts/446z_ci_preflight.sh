@@ -34,6 +34,13 @@ grep -Fxq CONFIG_KSU_TRACEPOINT_HOOK=y "$BUILD/.config"
 grep -Fxq CONFIG_I2C_QCOM_GENI=y "$BUILD/.config"
 grep -Fxq CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y "$BUILD/.config"
 grep -Fxq '# CONFIG_KSU_SUSFS is not set' "$BUILD/.config"
+# Object-only Kbuild does not visit init/ or SELinux, unlike full Image.
+# Generate the two real prerequisites explicitly instead of faking headers.
+make -C "$ROOT" O="$BUILD" ARCH=arm64 \
+     CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+     init/version.o security/selinux/flask.h
+test -s "$BUILD/include/generated/compile.h"
+test -s "$BUILD/security/selinux/flask.h"
 make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
      -j"$(nproc)" \

@@ -1,5 +1,5 @@
-name: Phase446Z SE8 core-voted touch and built-in root
-run-name: Phase446Z QUPv3_1 RPMh bus vote + fast STM probe
+name: Phase446AB FIFO/GSI diagnostic and HWC property epochs
+run-name: Phase446AB SE8 FIFO/GSI and composer first20/post-cycle
 on:
   push:
     branches:
@@ -314,6 +314,9 @@ jobs:
           python3 -m py_compile scripts/446aa_trace_touch_drm.py
           python3 scripts/446aa_trace_touch_drm.py --root "$ROOT"
           python3 scripts/446aa_trace_touch_drm.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/446ab_probe_fifo_and_property_epochs.py
+          python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT"
+          python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT" --check-only
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
             --enable INPUT_TOUCHSCREEN \
@@ -379,6 +382,7 @@ jobs:
           python3 scripts/446y_fix_geni_clock_unwind.py --root "$ROOT" --check-only
           python3 scripts/446z_apply_qup_core_touch.py --root "$ROOT" --check-only
           python3 scripts/446aa_trace_touch_drm.py --root "$ROOT" --check-only
+          python3 scripts/446ab_probe_fifo_and_property_epochs.py --root "$ROOT" --check-only
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -484,6 +488,10 @@ jobs:
           grep -aFq "P446Z I2C BUS_VOTE" "$IMAGE"
           grep -aFq "P446AA SE8 BEFORE" "$IMAGE"
           grep -aFq "P446AA DRM_INPUT" "$IMAGE"
+          grep -aFq "P446AB SE8_CAP" "$IMAGE"
+          grep -aFq "P446AB PROP_GET" "$IMAGE"
+          grep -aFq "P446AB PROP_SET" "$IMAGE"
+          grep -aFq "P446Z KSU version=" "$IMAGE"
           grep -aFq "P446Z TOUCH INIT_ABORT" "$IMAGE"
           grep -aFq 'P446S MEMLAT skip_monitor' "$IMAGE"
           grep -aFq 'P446S FRAME seq=' "$IMAGE"

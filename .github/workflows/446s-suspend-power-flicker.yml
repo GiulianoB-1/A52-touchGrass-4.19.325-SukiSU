@@ -4,6 +4,9 @@ run-name: Phase446W-B/X first HWC modeset + STM5CU56A touch built-in/no-flash + 
 # It adds matched Phase444 sections for raw refgen/DISPCC/MDP and full Kona DSI debug-bus PRE/POST.
 
 on:
+  push:
+    branches:
+      - agent/a52-phase446w-handoff-b-default-v1
   pull_request:
     branches:
       - agent/a52-phase446t-gpu-smmu-lifetime-v1

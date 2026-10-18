@@ -211,12 +211,16 @@ static atomic_t a52x_touch_events=ATOMIC_INIT(0);
 		goto out;
 	}}'''
         s=one(s,key,replace,"regulator "+rail)
-    s=one(s,'if (info->board->power)\n\t\tinfo->board->power(info, true);',
+    probe_start=s.index("static int fts_probe(struct i2c_client *client,")
+    probe_end=s.index("\nstatic int fts_remove(struct i2c_client *client)",probe_start)
+    probe=s[probe_start:probe_end]
+    probe=one(probe,'if (info->board->power)\n\t\tinfo->board->power(info, true);',
         '''if (info->board->power) {
 		retval=info->board->power(info,true);
 		pr_info("P446X TOUCH REGULATOR_ENABLE avdd/dvdd rc=%d\\n",retval);
 		if (retval) goto err_input_allocate_device;
 	}''',"probe enable defer")
+    s=s[:probe_start]+probe+s[probe_end:]
     # Early return avoids NULL deref if probe fails prior to allocating info.
     s=one(s,'\tinput_info(true, &client->dev, "%s: FTS Driver [70%s]\\n", __func__,',
         '''	pr_info("P446X TOUCH I2C_ID addr=%#x expected=0x49 irq=%d\\n",client->addr,client->irq);

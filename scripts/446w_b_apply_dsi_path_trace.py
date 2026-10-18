@@ -24,7 +24,7 @@ def trace_func(s,signature,kind):
 			(unsigned long long)ktime_get_boottime_ns());
 '''
     frag=frag[:check]+entry+frag[check:]
-    last=frag.rfind("\treturn rc;")
+    last=max(frag.rfind("\treturn rc;"),frag.rfind("\treturn 0;"))
     if last<0:raise RuntimeError("446W-B DSI no rc return in "+kind)
     ext=f'''if (a52w_handoff_selected())
 		pr_info("P446W HANDOFF DSI {kind} exit rc=%d ts=%llu\\n",
@@ -57,7 +57,7 @@ def patch_panel(s):
 #endif
 			);
 '''+anchor,"panel on commands start")
-    anchor='''	else
+    anchor='''	else if (!a52_p445_samsung_blocked())
 		panel->panel_initialized = true;'''
     frag=one(frag,anchor,anchor+r'''
 	if (a52w_handoff_selected())

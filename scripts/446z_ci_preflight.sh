@@ -48,5 +48,8 @@ make -C "$ROOT" O="$BUILD" ARCH=arm64 \
      drivers/input/touchscreen/stm/fts5cu56a/fts_ts.o \
      drivers/soc/qcom/qcom-geni-se.o \
      drivers/kernelsu/
-test -s "$BUILD/drivers/kernelsu/kernelsu.o"
+test -s "$BUILD/drivers/kernelsu/built-in.a"
+llvm-ar t "$BUILD/drivers/kernelsu/built-in.a" | grep -Fq 'core/init.o'
+llvm-ar t "$BUILD/drivers/kernelsu/built-in.a" | grep -Fq 'hook/arm64/syscall_hook.o'
+echo 'P446Z PREFLIGHT KSU_ARCHIVE PASS: built-in.a contains core/init.o and ARM64 tracepoint hook'
 echo 'P446Z PREFLIGHT PASS: SE8 I2C bus vote, STM fail-fast, KSU built-in object all compiled'

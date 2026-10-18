@@ -298,6 +298,28 @@ def logging_compat(root):
 #ifndef input_log_fix
 #define input_log_fix() do { } while (0)
 #endif
+/* TG 4.19 Samsung input-event-codes values absent from A12 GKI UAPI. */
+#ifndef KEY_SIDE_GESTURE
+#define KEY_SIDE_GESTURE 0x1c6
+#endif
+#ifndef KEY_BLACK_UI_GESTURE
+#define KEY_BLACK_UI_GESTURE 0x1c7
+#endif
+#ifndef KEY_SIDE_GESTURE_RIGHT
+#define KEY_SIDE_GESTURE_RIGHT 0x1ca
+#endif
+#ifndef KEY_SIDE_GESTURE_LEFT
+#define KEY_SIDE_GESTURE_LEFT 0x1cb
+#endif
+#ifndef KEY_INT_CANCEL
+#define KEY_INT_CANCEL 0x2be
+#endif
+#ifndef ABS_MT_CUSTOM
+#define ABS_MT_CUSTOM 0x3e
+#endif
+#ifndef ABS_MT_CUSTOM2
+#define ABS_MT_CUSTOM2 0x3f
+#endif
 #endif
 ''')
     # The Samsung factory processor uses SECLOG too. Header only affects TG

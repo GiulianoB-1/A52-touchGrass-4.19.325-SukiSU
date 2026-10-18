@@ -1931,8 +1931,10 @@ jobs:
           from pathlib import Path
           p=Path('scripts/.package-p152.sh')
           s=p.read_text()
-          original='grep -Fxq "$RESUKISU_VERSION_FULL" "$WORK_DIR/Image.strings" \\\n  || fail "Kernel Image does not contain the pinned ReSukiSU version"'
-          updated='grep -Fq "@BakaSU" "$WORK_DIR/Image.strings" \\\n  || fail "Kernel Image does not contain compiled pinned BakaSU identity"'
+          original = ('grep -Fxq "$RESUKISU_VERSION_FULL" "$WORK_DIR/Image.strings" ' + chr(92) + chr(10)
+                      + '  || fail "Kernel Image does not contain the pinned ReSukiSU version"')
+          updated = ('grep -Fq "@BakaSU" "$WORK_DIR/Image.strings" ' + chr(92) + chr(10)
+                     + '  || fail "Kernel Image does not contain compiled pinned BakaSU identity"')
           if s.count(original) != 1:
               raise SystemExit('P171 package script ReSukiSU check changed')
           s=s.replace(original,updated,1)

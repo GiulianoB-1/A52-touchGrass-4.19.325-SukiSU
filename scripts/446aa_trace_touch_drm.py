@@ -47,7 +47,7 @@ def patch_i2c(s):
          '\t\t\treadl_relaxed(gi2c->se.base+0x614),\n'
          '\t\t\treadl_relaxed(gi2c->se.base+SE_GENI_IOS));\n'
          +anchor,"first command clock state")
-    return s
+    return "/* "+TAG+" */\n"+s
 
 def patch_drm(s):
     if TAG in s:

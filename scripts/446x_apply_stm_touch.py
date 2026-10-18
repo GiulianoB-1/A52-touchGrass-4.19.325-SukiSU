@@ -227,17 +227,17 @@ static atomic_t a52x_touch_events=ATOMIC_INIT(0);
         '''retval=fts_set_input_prop(info,info->input_dev,INPUT_PROP_DIRECT);
 	if (retval)goto err_register_input;''',
         "touch init rc")
-    # Diagnostic and defer-safe regulator handling. TG original silently
-    # returns success when a supplier is missing; don't continue with ERR_PTR.
+    # Preserve the *entire* original if-body and matching closing brace.
+    # Earlier patch inserted an extra } after replacing only the if header,
+    # causing C parser errors and dropping boot_on use. Never repeat that.
     for rail in ("dvdd","avdd"):
         key=f'if (IS_ERR_OR_NULL(info->regulator_{rail})) {{'
-        replace=f'''if (IS_ERR(info->regulator_{rail})) {{
-		retval=PTR_ERR(info->regulator_{rail});
+        repl=f'''if (IS_ERR_OR_NULL(info->regulator_{rail})) {{
+		retval=IS_ERR(info->regulator_{rail}) ?
+			PTR_ERR(info->regulator_{rail}) : -ENODEV;
 		info->regulator_{rail}=NULL;
-		pr_info("P446X TOUCH REGULATOR_GET {rail} rc=%d\\n",retval);
-		goto out;
-	}}'''
-        s=one(s,key,replace,"regulator "+rail)
+		pr_info("P446X TOUCH REGULATOR_GET {rail} rc=%d\\n",retval);'''
+        s=one(s,key,repl,"regulator "+rail)
     probe_start=s.index("static int fts_probe(struct i2c_client *client,")
     probe_end=s.index("\nstatic int fts_remove(struct i2c_client *client)",probe_start)
     probe=s[probe_start:probe_end]
@@ -324,6 +324,23 @@ def logging_compat(root):
 #endif
 #ifndef KEY_INT_CANCEL
 #define KEY_INT_CANCEL 0x2be
+#endif
+/* A52 factory sysfs feature enumeration: four independent bits.
+ * Source TG fts_sec.c declares the flags by capability field, but the
+ * Samsung common feature defines are absent in A12 GKI.
+ * Do not mutate underlying board capability booleans.
+ */
+#ifndef INPUT_FEATURE_ENABLE_SETTINGS_AOT
+#define INPUT_FEATURE_ENABLE_SETTINGS_AOT BIT(0)
+#endif
+#ifndef INPUT_FEATURE_ENABLE_SYNC_RR120
+#define INPUT_FEATURE_ENABLE_SYNC_RR120 BIT(1)
+#endif
+#ifndef INPUT_FEATURE_SUPPORT_OPEN_SHORT_TEST
+#define INPUT_FEATURE_SUPPORT_OPEN_SHORT_TEST BIT(2)
+#endif
+#ifndef INPUT_FEATURE_SUPPORT_MIS_CALIBRATION_TEST
+#define INPUT_FEATURE_SUPPORT_MIS_CALIBRATION_TEST BIT(3)
 #endif
 #ifndef ABS_MT_CUSTOM
 #define ABS_MT_CUSTOM 0x3e

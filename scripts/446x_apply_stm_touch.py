@@ -16,7 +16,7 @@ COMMON="drivers/input/common"
 INPUT="include/linux/input"
 REQUIRED=[f"{TG}/{p}" for p in ("fts_ts.c","fts_fwu.c","fts_sec.c","fts_ts.h","Kconfig","Makefile")]
 REQUIRED += [f"{COMMON}/{p}" for p in ("sec_cmd.c","sec_tclm_v2.c","sec_secure_touch.c","Kconfig","Makefile")]
-REQUIRED += [f"{INPUT}/{p}" for p in ("sec_cmd.h","sec_tclm_v2.h","sec_secure_touch.h")]
+REQUIRED += [f"{INPUT}/{p}" for p in ("sec_cmd.h","sec_tclm_v2.h","sec_secure_touch.h","sec_tsp_log.h")]
 
 def one(s,a,z,why):
     n=s.count(a)
@@ -109,6 +109,9 @@ def ts(s):
     s=one(s,'\tinfo->probe_done = true;',
         '''	pr_info("P446X TOUCH INPUT name=%s irq=%d i2c_errors=%d fw_ic=%04x fw_bin=%04x\\n",
 		info->input_dev->name,info->irq,atomic_read(&a52x_i2c_errors),
+		info->fw_version_of_ic,info->fw_version_of_bin);
+	pr_info("P446X TOUCH probe-rc=0 i2c=0x49 irq=%d input=%s fw_ic=%04x fw_bin=%04x\\n",
+		info->irq,info->input_dev->name,
 		info->fw_version_of_ic,info->fw_version_of_bin);
 	info->probe_done = true;''',"registered input witness")
     s=one(s,'\tinput_err(true, &client->dev, "%s: failed(%d)\\n", __func__, retval);',
@@ -211,7 +214,9 @@ def linkage(root):
       ("drivers/input/touchscreen/Makefile",
        'obj-$(CONFIG_TOUCHSCREEN_STM_FTS5CU56A) += stm/fts5cu56a/'),
       ("drivers/input/touchscreen/Kconfig",
-       'source "drivers/input/touchscreen/stm/fts5cu56a/Kconfig"')]
+       'source "drivers/input/touchscreen/stm/fts5cu56a/Kconfig"'),
+      ("drivers/input/Kconfig",
+       'source "drivers/input/common/Kconfig"')]
     for p,add in paths:
         f=root/p;s=f.read_text()
         if add not in s:f.write_text(s.rstrip()+"\n"+add+"\n")
@@ -224,7 +229,8 @@ def linkage(root):
     (root/TG/"Makefile").write_text("obj-$(CONFIG_TOUCHSCREEN_STM_FTS5CU56A) += fts_ts.o fts_fwu.o\n")
     k=root/TG/"Kconfig";s=k.read_text()
     s=s.replace('tristate "STMicroelectronics','bool "STMicroelectronics')
-    if "depends on I2C" not in s:s=s.replace('config TOUCHSCREEN_STM_FTS5CU56A', 'config TOUCHSCREEN_STM_FTS5CU56A')
+    if "depends on I2C" not in s:
+        raise RuntimeError("TG FTS Kconfig missing required I2C dependency")
     k.write_text(s)
 
 def check(root):

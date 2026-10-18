@@ -292,8 +292,18 @@ jobs:
           raw=zlib.decompress(base64.b64decode(
               Path('scripts/446y_apply_handoff_i2c.py.z64').read_text().strip(),validate=True))
           assert hashlib.sha256(raw).hexdigest()=='0cd9a1eea938e8f3aa74e48d9b11b89cdfacfce3defb476e069d292774beb81d'
+          # The legacy GENI wrapper guard in the pinned generator had a
+          # two-line unbraced if followed by a tab-indented resource lookup.
+          # Clang -Werror=misleading-indentation rejects that generated C.
+          # Apply only this precisely checked generator correction before
+          # materializing the source, then pin its corrected SHA-256.
+          old=b'    if (!gi2c->se.wrapper)\\n        return -EPROBE_DEFER;'
+          new=b'    if (!gi2c->se.wrapper) {\\n        return -EPROBE_DEFER;\\n    }'
+          assert raw.count(old)==1, 'P446Y GENI wrapper guard anchor drift'
+          raw=raw.replace(old,new,1)
+          assert hashlib.sha256(raw).hexdigest()=='d9b95c7f7ee9ccc14e590d82a5d6b91f737c504babc63132d0488fc0447016b7'
           Path('scripts/446y_apply_handoff_i2c.py').write_bytes(raw)
-          print('P446Y PATCH PAYLOAD SHA-256 VERIFIED')
+          print('P446Y PATCH PAYLOAD SHA-256 VERIFIED; GENI wrapper guard braced, Clang -Wmisleading-indentation avoided')
           PY
           python3 -m py_compile scripts/446y_apply_handoff_i2c.py
           python3 scripts/446y_apply_handoff_i2c.py --root "$ROOT"

@@ -499,8 +499,34 @@ jobs:
             git -C "$TOOLCHAIN_REPO" remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
             git -C "$TOOLCHAIN_REPO" sparse-checkout init --cone
             git -C "$TOOLCHAIN_REPO" sparse-checkout set "$AOSP_CLANG_REVISION"
-            git -C "$TOOLCHAIN_REPO" -c protocol.version=2 fetch --depth=1 --filter=blob:none origin "$AOSP_CLANG_COMMIT"
-            git -C "$TOOLCHAIN_REPO" checkout --quiet --detach FETCH_HEAD
+            # AOSP's Gitiles promisor can return intermittent HTTP 502 on
+            # large blob batches during sparse checkout. Retry both phases;
+            # never change the pinned commit or silently use another compiler.
+            fetched=0
+            for attempt in 1 2 3 4; do
+              if git -C "$TOOLCHAIN_REPO" -c protocol.version=2 fetch --depth=1 --filter=blob:none origin "$AOSP_CLANG_COMMIT"; then
+                fetched=1
+                break
+              fi
+              echo "::warning::AOSP Clang fetch failed (attempt $attempt/4)"
+              if [ "$attempt" -lt 4 ]; then sleep $((attempt * 15)); fi
+            done
+            test "$fetched" -eq 1
+
+            checked_out=0
+            for attempt in 1 2 3 4; do
+              if git -C "$TOOLCHAIN_REPO" checkout --force --quiet --detach "$AOSP_CLANG_COMMIT" &&
+                 [ -x "$NEW_CLANG" ] &&
+                 [ -x "$TOOLCHAIN_REPO/$AOSP_CLANG_REVISION/bin/ld.lld" ] &&
+                 [ -x "$TOOLCHAIN_REPO/$AOSP_CLANG_REVISION/bin/llvm-ar" ] &&
+                 [ -x "$TOOLCHAIN_REPO/$AOSP_CLANG_REVISION/bin/llvm-nm" ]; then
+                checked_out=1
+                break
+              fi
+              echo "::warning::AOSP Clang sparse checkout incomplete (attempt $attempt/4)"
+              if [ "$attempt" -lt 4 ]; then sleep $((attempt * 15)); fi
+            done
+            test "$checked_out" -eq 1
           fi
           test -x "$NEW_CLANG"
           test "$(git -C "$TOOLCHAIN_REPO" rev-parse HEAD)" = "$AOSP_CLANG_COMMIT"

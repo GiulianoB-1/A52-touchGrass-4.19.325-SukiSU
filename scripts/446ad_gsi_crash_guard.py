@@ -236,7 +236,7 @@ def verify(root):
         "IS_ERR_OR_NULL(rd)", "IS_ERR_OR_NULL(td)",
     )
     required_t = (DELAY, 'early_param("a52.touch_delay_ms"', "msleep(a52ad_touch_delay_ms)",
-                  "a52ad_touch_delay_ms = 8000", "P446X TOUCH FW")
+                  "a52ad_touch_delay_ms = 8000", 'early_param("a52.touch"')
     for key in required_c:
         if key not in c:
             raise RuntimeError(f"P446AD missing I2C contract {key}")

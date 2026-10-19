@@ -11,7 +11,7 @@ PC="$3"
   echo "P446AF DECODE invalid func+offset: $PC"; exit 2;
 }
 echo "P446AF DECODE source=$(basename "$VMLINUX") PC=$PC"
-if ! readelf -SW "$VMLINUX" | grep -Fq '.debug_info'; then
+if ! readelf -SW "$VMLINUX" | grep -F '.debug_info' >/dev/null; then
   echo "P446AF DECODE WARNING: no DWARF debug_info in vmlinux; source lines unavailable."
 fi
 tmp="$(mktemp)"

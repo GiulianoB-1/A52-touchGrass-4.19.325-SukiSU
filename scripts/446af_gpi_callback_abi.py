@@ -93,9 +93,9 @@ def patch(s):
         "\t\t\tif (IS_ERR_OR_NULL(rd) || !virt_addr_valid(rd)) {",
         "validate and log prepared RX descriptor")
     s=once(s,
-        "\t\t\tdev_err(dev, \"P446AD GSI RX descriptor invalid rc=%d\\n\", ret);",
-        "\t\t\tdev_err(dev, \"P446AD GSI RX descriptor invalid rc=%d\\n\", ret);\n"
-        "\t\t\tdev_err(dev, \"P446AF GSI BADPTR field=rx_desc val=%px\\n\",rd);",
+        "\t\t\t\tdev_err(dev, \"P446AD GSI RX descriptor invalid rc=%d\\n\", ret);",
+        "\t\t\t\tdev_err(dev, \"P446AD GSI RX descriptor invalid rc=%d\\n\", ret);\n"
+        "\t\t\t\tdev_err(dev, \"P446AF GSI BADPTR field=rx_desc val=%px\\n\",rd);",
         "log invalid rx descriptor")
     s=once(s,
         "\t\t\trd->callback_param=gi2c;",

@@ -32,6 +32,12 @@ For each adapter: record exact vendor branch/SHA, file path and dependency ABI, 
 
 Prefer CodeLinaro `clo/la/platform/vendor/opensource/audio-kernel` with a **pinned compatible 5.10 branch/revision**, above upstream ADSP + GLINK/APR/GPR. Port the Q6 AFE/ASM/ADM/APM stack, Bolero/WSA/WCD codecs and Samsung amp path with A52 clock, SoundWire, audio DSP, regulator and DT dependencies. Do not duplicate upstream RPMsg, remoteproc or GLINK drivers. Wave 4 must be independently disableable when ADSP/firmware fails.
 
+## Later waves using the same layering
+
+**Wave 5 — SSC/sensors:** keep upstream ADSP PAS + GLINK/QMI core in Layer 1; adapt Qualcomm 5.10 SSC/sensor transport and any downstream `/dev` interfaces in Layer 2; verify the Samsung Android sensor HAL/SSC names and SELinux nodes against actual logcat. ET7xx fingerprint and NFC/eSE have distinct SPI/I2C hardware ports: audit GSI-only SEs and wrapper SID DMA first. Each adapter retains its own default-off driver gate. Do not infer that a userspace sensor device is provided by ADSP merely because remoteproc reports running.
+
+**Wave 6 — Wi-Fi/BT:** Layer 1 contains MSS/SMEM/GLINK plus verified PCIe/UART hardware and regulator/clock/reset suppliers. Prefer a **revision-pinned Qualcomm msm-5.10** CNSS2/ICNSS + QCA WLAN host driver and BT transport for the userspace-facing Layer 2, rather than a TG 4.19 bulk copy. Verify actual vendor `cnss-daemon`, netlink, `wlan0`, HCI, firmware filenames, `/sys` contracts and security labels. No WLAN firmware/NV calibration writes. Gate Wi-Fi and BT independently, and do not attempt to enable Wi-Fi before its required MSS dependency is verified. Later audio layer does not substitute for network/sensor adapters.
+
 ## Read-only vendor userspace contract
 
 `merge/userspace-nodes.csv` is a **hypothesis-to-verification** map, not a list of observed opened paths. The collector captures actual `logcat -b all`, dmesg/AVC/open errors and boot-time node listings. Run `scripts/447b_vendor_node_audit.py --input <capture-dir> --map merge/userspace-nodes.csv --out <report-dir>` to produce observed path→owner-layer evidence. Every path HAL/init actually attempts to open must become a row and be mapped to Layer 1, 2, 3, or to a documented **unmapped blocker**. If no attempted-open log exists, note `NOT_OBSERVED` instead of claiming coverage.

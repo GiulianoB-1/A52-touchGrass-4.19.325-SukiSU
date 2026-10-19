@@ -342,6 +342,9 @@ jobs:
           python3 -m py_compile scripts/446af_gpi_callback_abi.py
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT"
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/447b_restore_446ag_touch.py
+          python3 scripts/447b_restore_446ag_touch.py --root "$ROOT"
+          python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           # Phase447: gates for future ports only. No existing W0/W1 driver changed.
           python3 -m py_compile scripts/447_stage_control.py scripts/447_manifest_audit.py
           python3 scripts/447_stage_control.py --root "$ROOT"
@@ -426,6 +429,7 @@ jobs:
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
           python3 scripts/447_stage_control.py --root "$ROOT" --check-only
+          python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
           python3 -m py_compile scripts/447_discover_sources.py
           python3 scripts/447_discover_sources.py --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -544,6 +548,9 @@ jobs:
           grep -aFq "P446AB PROP_SET" "$IMAGE"
           grep -aFq "P446AC GSI_ONLY" "$IMAGE"
           grep -aFq "P447 GATES initialized wave=" "$IMAGE"
+          grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
+          grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
+          grep -aFq "P447B GSI SUMMARY" "$IMAGE"
           grep -aFq "P446AF GSI RX_SUBMIT" "$IMAGE"
           grep -aFq "P446AF GSI BADPTR" "$IMAGE"
           grep -aFq "P446AC HWC_RING READY" "$IMAGE"
@@ -715,9 +722,16 @@ jobs:
         with:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
-      - name: Package Phase446W-B/X retained splash, touchscreen built-in and RTC
+      - name: Package Phase447B A/B/C boots from one kernel
         if: success()
-        run: bash scripts/446z_package_preserved.sh
+        run: |
+          set -Eeuo pipefail
+          bash scripts/446z_package_preserved.sh
+          python3 -m py_compile scripts/447b_generate_variants.py
+          python3 scripts/447b_generate_variants.py \
+            --source f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img \
+            --out phase447b-variants
+          cat phase447b-variants/READ-BEFORE-FLASH.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -743,6 +757,8 @@ jobs:
             scripts/446ae_dma_wrapper_guard.py
             scripts/446af_gpi_callback_abi.py
             scripts/446af_decode_oops.sh
+            scripts/447b_restore_446ag_touch.py
+            scripts/447b_generate_variants.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h
@@ -791,6 +807,39 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
+      - name: Upload P447B variant A wave2 battery (EXPERIMENTAL)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-447B-A-W2-BATTERY-EXPERIMENTAL-${{ github.run_number }}
+          path: |
+            phase447b-variants/A-wave2-battery-only.boot.img
+            phase447b-variants/variants.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload P447B variant B wave3 DSP no MSS (EXPERIMENTAL)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-447B-B-W3-DSP-NO-MSS-EXPERIMENTAL-${{ github.run_number }}
+          path: |
+            phase447b-variants/B-wave3-dsp-no-mss.boot.img
+            phase447b-variants/variants.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload P447B variant C wave3 modem IPA (EXPERIMENTAL)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-447B-C-W3-MSS-IPA-EXPERIMENTAL-${{ github.run_number }}
+          path: |
+            phase447b-variants/C-wave3-modem-ipa.boot.img
+            phase447b-variants/variants.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+          if-no-files-found: error
+          compression-level: 0
       - name: Upload Phase447 manifest and compatibility review
         if: always()
         uses: actions/upload-artifact@v4

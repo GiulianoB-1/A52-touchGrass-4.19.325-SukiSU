@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 
 I2C=Path("drivers/i2c/busses/i2c-qcom-geni.c")
+TOUCH=Path("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c")
 TAG="A52_PHASE446AF_GPI_CALLBACK_ABI_FIX_V1"
 
 def once(s,a,b,name):
@@ -163,8 +164,44 @@ def patch(s):
         "capture TX cookie")
     return s
 
+def patch_touch(s):
+    if "A52_PHASE446AF_TOUCH_PROBE_FAILFAST_V1" in s:
+        return s
+    if "A52_PHASE446AD_TOUCH_PROBE_DELAY_V1" not in s:
+        raise RuntimeError("P446AF touch fail-fast needs 446AD touch delay")
+    start=s.index("int fts_read_reg(")
+    end=s.index("#ifdef FTS_SUPPORT_SPONGELIB",start)
+    frag=s[start:end]
+    frag=once(frag,
+        "\tint retry = FTS_TS_I2C_RETRY_CNT;",
+        "\t/* A52_PHASE446AF_TOUCH_PROBE_FAILFAST_V1 */\n"
+        "\tint retry = info->probe_done ? FTS_TS_I2C_RETRY_CNT : 1;",
+        "single attempt for probe-only reads")
+    s=s[:start]+frag+s[end:]
+    s=once(s,
+        "\trc = fts_read_reg(info, &regAdd[0], 1, (u8 *)data, FTS_EVENT_SIZE);\n"
+        "\tif (rc == -ENOTCONN) {\n"
+        "\t\treturn rc;\n"
+        "\t}",
+        "\trc = fts_read_reg(info, &regAdd[0], 1, (u8 *)data, FTS_EVENT_SIZE);\n"
+        "\tif (rc < 0) {\n"
+        "\t\tinput_err(true, &info->client->dev,\n"
+        '\t\t\t"P446AF TOUCH INIT_ABORT first_read rc=%d\\n", rc);\n'
+        "\t\treturn rc;\n"
+        "\t}",
+        "abort STM init on first I2C read failure")
+    return s
+
+
 def check(root):
     s=(root/I2C).read_text()
+    t=(root/TOUCH).read_text()
+    for key in ("A52_PHASE446AF_TOUCH_PROBE_FAILFAST_V1",
+                "int retry = info->probe_done ? FTS_TS_I2C_RETRY_CNT : 1;",
+                "P446AF TOUCH INIT_ABORT first_read rc=%d",
+                "A52_PHASE446AD_TOUCH_PROBE_DELAY_V1"):
+        if key not in t:
+            raise RuntimeError("P446AF touch fail-fast missing "+key)
     required=(TAG,"a52af_tx_cb.userdata=gi2c",
         "a52af_rx_cb.userdata=gi2c",
         "rd->callback_param=&gi2c->a52af_rx_cb",
@@ -188,7 +225,12 @@ def main():
     ap.add_argument("--check-only",action="store_true")
     args=ap.parse_args()
     p=args.root/I2C
-    if not args.check_only:p.write_text(patch(p.read_text()))
+    if not args.check_only:
+        touch_path=args.root/TOUCH
+        pending=[(p,patch(p.read_text())),
+                 (touch_path,patch_touch(touch_path.read_text()))]
+        for file,new_content in pending:
+            file.write_text(new_content)
     check(args.root)
 
 if __name__=="__main__":main()

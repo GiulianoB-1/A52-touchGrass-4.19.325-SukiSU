@@ -217,10 +217,16 @@ def apply_i2c(s):
 def apply_touch(s):
     if DELAY in s:
         return s
+    # Declare the parameter before fts_probe, where the delay is consumed.
+    # Register the early_param handler near fts_driver_init as before.
+    s = once(s,
+        'static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)\n{',
+        'static unsigned int a52ad_touch_delay_ms = 8000;\n\n'
+        'static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)\n{',
+        "probe-visible delay declaration")
     s = once(s,
         'early_param("a52.touch",a52x_touch_param);',
         '''/* A52_PHASE446AD_TOUCH_PROBE_DELAY_V1: diagnostic only, no firmware writes. */
-static unsigned int a52ad_touch_delay_ms = 8000;
 static int __init a52ad_touch_delay_param(char *value)
 {
 	unsigned int ms;
@@ -261,6 +267,12 @@ def verify(root):
     for key in required_t:
         if key not in t:
             raise RuntimeError(f"P446AD missing touch contract {key}")
+    declaration = "static unsigned int a52ad_touch_delay_ms = 8000;"
+    signature = "static int fts_probe(struct i2c_client *client,"
+    if t.count(declaration) != 1 or t.index(declaration) >= t.index(signature):
+        raise RuntimeError("P446AD: delay declaration missing or below fts_probe")
+    if t.count('early_param("a52.touch_delay_ms"') != 1:
+        raise RuntimeError("P446AD: delay early_param is missing or duplicated")
     if c.count("devm_add_action_or_reset(dev, a52ac_gsi_release, gi2c)") != 1:
         raise RuntimeError("P446AD channel cleanup ownership mismatch")
     if c.count("ret = a52ac_gsi_channels(gi2c);") != 1:

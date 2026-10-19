@@ -46,7 +46,16 @@ def adapt_gpi_510(src):
     # NULL-on-failure behavior. Exact upstream source kept for audit.
     old=b"devm_ioremap_nocache("
     if src.count(old)!=1:raise RuntimeError("P446AC GPI mapping anchor drift")
-    return src.replace(old,b"devm_ioremap(",1)
+    adapted=src.replace(old,b"devm_ioremap(",1)
+    # 446AD: log provider registration, not event-ring readiness.
+    # The latter becomes true only after both SE8 channels are configured.
+    anchor=b"\tgpi_setup_debug(gpi_dev);\n"
+    if adapted.count(anchor)!=1:
+        raise RuntimeError("P446AD GPI probe audit anchor drift")
+    adapted=adapted.replace(anchor,
+        b'\tdev_info(gpi_dev->dev, "P446AD GPI probe rc=0 gpii=%u ev_ring=awaiting_channel_config\\n",\n'
+        b'\t\tgpi_dev->max_gpii);\n'+anchor,1)
+    return adapted
 def blob(s):
     return hashlib.sha1(b"blob "+str(len(s)).encode()+b"\0"+s).hexdigest()
 def one(s,a,b,label):

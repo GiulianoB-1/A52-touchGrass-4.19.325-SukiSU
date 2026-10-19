@@ -195,6 +195,11 @@ EXPECT={
  "P446X wakeup-source header":("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.h",
      ("struct wakeup_source *wakelock;",)),
 
+ "P447 new-driver gates":("drivers/a52_447/a52_447_gates.c",
+     ("A52_PHASE447_GATES_V1","P447 GATES initialized wave=",
+      'early_param("a52.wave"', "a52_447_probe_allowed")),
+ "P447 gate API":("include/linux/a52_phase447.h",
+     ("A52_PHASE447_GATES_V1","A52_447_COUNT")),
 }
 FILES_EXTRA=[
  "drivers/a52_secure/Makefile",

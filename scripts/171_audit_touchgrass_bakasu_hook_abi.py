@@ -53,7 +53,7 @@ def verify(src):
                         f"{f}: wrong struct-filename guard for {func}")
             else:
                 start=txt.index(guard+"int ksu_handle_faccessat")
-                stop=txt.index("#else\\nint ksu_handle_faccessat",start)
+                stop=txt.index("#else\nint ksu_handle_faccessat",start)
                 require(legacy in txt[start:stop],
                         f"{f}: grouped stat prototype not under the manual/SUSFS guard")
             require(txt.count(manual)==1,

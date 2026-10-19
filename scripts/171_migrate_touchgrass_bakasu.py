@@ -226,17 +226,17 @@ static inline void susfs_clear_current_proc_no_su(void)
         # prototypes under a single #ifdef preceding faccessat.
         funcs = ("faccessat", "stat") if src == cfile else ("faccessat",)
         for func in funcs:
-            old = ("#ifdef CONFIG_KSU_SUSFS\\n"
+            old = ("#ifdef CONFIG_KSU_SUSFS\n"
                    "int ksu_handle_"+func+"(int *dfd, struct filename **filename,")
-            new = ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+            new = ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n"
                    "int ksu_handle_"+func+"(int *dfd, struct filename **filename,")
             if body.count(old)!=1:
                 raise RuntimeError("P171 non-GKI hook ABI guard changed: "+str(src)+" "+func)
             body=body.replace(old,new,1)
         if src == hfile:
-            start = body.index("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+            start = body.index("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n"
                                "int ksu_handle_faccessat(")
-            stop = body.index("#else\\nint ksu_handle_faccessat(",start)
+            stop = body.index("#else\nint ksu_handle_faccessat(",start)
             assert ("int ksu_handle_stat(int *dfd, struct filename **filename,") in body[start:stop], (
                 "P171 grouped stat prototype moved outside guarded branch")
         src.write_text(body)
@@ -244,7 +244,7 @@ static inline void susfs_clear_current_proc_no_su(void)
             assert ("int ksu_handle_"+func+"(int *dfd, const char __user **filename_user,") in body, (
                 "P171 missing user-pointer manual handler: "+func)
     for func in ("faccessat","stat"):
-        assert ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+        assert ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n"
                 "int ksu_handle_"+func) in cfile.read_text()
     print("P171 faccessat/stat manual-hook ABI overrides incompatible SUSFS structs: PASS")
 

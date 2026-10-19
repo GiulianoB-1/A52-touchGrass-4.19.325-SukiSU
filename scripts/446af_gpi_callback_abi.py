@@ -68,6 +68,8 @@ def patch(s):
     if TAG in s: return s
     if "A52_PHASE446AE_GSI_WRAPPER_DMA_V1" not in s:
         raise RuntimeError("P446AF requires complete 446AE mapped GSI transport")
+    # Keep the page-address validity guards independent of transitive headers.
+    s="#include <linux/mm.h>\n"+s
     s=once(s,
         "\tbool a52ad_gsi_ready;",
         "\tbool a52ad_gsi_ready;\n"

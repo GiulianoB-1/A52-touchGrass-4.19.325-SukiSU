@@ -28,6 +28,19 @@ static inline void *ipc_log_context_create(int pages,const char *name,int flags)
 static inline void ipc_log_string(void *ctx,const char *fmt,...) { }
 #endif
 """
+# The follow-on P446AD patch completes the no-op IPC compatibility API.
+# Accept only the exact original shim or this exact append-only extension.
+# All TG GPI source blobs retain their independent pinned SHA checks.
+IPC_SHIM_DESTROY = """/* A52_PHASE446AD_IPC_LOG_CONTEXT_DESTROY_COMPAT_V1: no allocation in the IPC logging stub. */
+static inline void ipc_log_context_destroy(void *context)
+{
+    (void)context;
+}
+
+"""
+IPC_SHIM_WITH_DESTROY = IPC_SHIM.replace(
+    "#endif\n", IPC_SHIM_DESTROY + "#endif\n"
+)
 def adapt_gpi_510(src):
     # 5.10 renamed devm_ioremap_nocache; devm_ioremap preserves TG's
     # NULL-on-failure behavior. Exact upstream source kept for audit.
@@ -50,8 +63,11 @@ def check(root):
                 raise RuntimeError("P446AC GPI 5.10 MMIO API port drift")
         elif not f.is_file() or blob(f.read_bytes())!=sha:
             raise RuntimeError("P446AC GPI pinned blob missing or changed: "+name)
-    if (root/"include/linux/ipc_logging.h").read_text()!=IPC_SHIM:
+    ipc_text=(root/"include/linux/ipc_logging.h").read_text()
+    if ipc_text not in (IPC_SHIM, IPC_SHIM_WITH_DESTROY):
         raise RuntimeError("P446AC IPC-only compatibility shim missing/drifted")
+    if ipc_text == IPC_SHIM_WITH_DESTROY:
+        print("P446AC IPC shim PASS: exact 446AD destroy() extension verified")
     mk=(root/"drivers/dma/qcom/Makefile").read_text()
     cfg=(root/"drivers/dma/qcom/Kconfig").read_text()
     if TAG not in mk or "obj-$(CONFIG_QCOM_GPI_DMA) += gpi.o" not in mk:

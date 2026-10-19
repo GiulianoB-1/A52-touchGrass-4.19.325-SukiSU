@@ -46,13 +46,22 @@ def touch(s):
     return s
 def gsi(s):
     if TAG in s:return s
+    s=once(s,"static void a52ac_gsi_tx_cb(void *arg)",
+        "static atomic_t a52ag_xfer_count=ATOMIC_INIT(0);\n"
+        "static void a52ac_gsi_tx_cb(void *arg)",
+        "global GSI log counter")
+    for label in ("TX","RX"):
+        s=once(s,
+            '\tdev_info_ratelimited(gi2c->se.dev,\n\t\t"P446AF GSI '+label+'_CB',
+            '\tif (atomic_read(&a52ag_xfer_count)<=20)\n'
+            '\t\tdev_info_ratelimited(gi2c->se.dev,\n\t\t"P446AF GSI '+label+'_CB',
+            "guard GSI "+label+" completion log")
     start=s.index("static int a52ac_gsi_xfer(")
     end=s.index("static int geni_i2c_xfer(",start)
     frag=s[start:end]
     frag=once(frag,
         "\tint i,ret=0;",
         """	int i,ret=0;
-	static atomic_t a52ag_xfer_count=ATOMIC_INIT(0);
 	static unsigned long a52ag_last_summary;
 	bool a52ag_verbose=(atomic_inc_return(&a52ag_xfer_count)<=20);
 """.rstrip(),
@@ -79,7 +88,8 @@ def check(root):
         if marker not in t:raise RuntimeError("P447B touch missing "+marker)
     if "\trc = fts_fw_update_on_probe(info);" in t:
         raise RuntimeError("P447B legacy STM firmware request still invoked")
-    for marker in ("first20_only=1","P447B GSI SUMMARY","a52ag_verbose"):
+    for marker in ("first20_only=1","P447B GSI SUMMARY","a52ag_verbose",
+                   "if (atomic_read(&a52ag_xfer_count)<=20)"):
         if marker not in i:raise RuntimeError("P447B GSI missing "+marker)
     print("P447B TOUCH AG PASS: no firmware request, default delay=0, guarded IRQ depth, first20+5s summary")
 def main():

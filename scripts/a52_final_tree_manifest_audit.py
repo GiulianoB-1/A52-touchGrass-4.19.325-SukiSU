@@ -195,7 +195,12 @@ EXPECT={
  "P446X wakeup-source header":("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.h",
      ("struct wakeup_source *wakelock;",)),
 
- "P447 new-driver gates":("drivers/a52_447/a52_447_gates.c",
+ "P447B AG touch safe probe":("drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c",
+     ("A52_PHASE447B_TOUCH_AG_V1","a52ad_touch_delay_ms = 0;",
+      "P447B TOUCH FW_REQUEST_SKIPPED","P447B TOUCH IRQ_DEPTH_SKIP")),
+ "P447B bounded GSI diagnostics":("drivers/i2c/busses/i2c-qcom-geni.c",
+     ("P447B GSI SUMMARY","first20_only=1","a52ag_verbose")),
+  "P447 new-driver gates":("drivers/a52_447/a52_447_gates.c",
      ("A52_PHASE447_GATES_V1","P447 GATES initialized wave=",
       'early_param("a52.wave"', "a52_447_probe_allowed")),
  "P447 gate API":("include/linux/a52_phase447.h",

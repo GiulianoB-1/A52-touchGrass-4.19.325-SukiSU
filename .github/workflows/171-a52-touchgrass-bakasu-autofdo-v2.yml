@@ -32,7 +32,7 @@ env:
 
 jobs:
   build:
-    name: Build P171 TG4.19 BakaSU pinned b2c595dd with P170 AutoFDO v2
+    name: Build P171 TG4.19 BakaSU v4.2.0-rc3 (35171) manual ABI checked
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -1323,12 +1323,24 @@ jobs:
           python3 /tmp/171_fix_ramoops_reserved_alias.py "$KERNEL" \
             | tee artifacts/p171-bakasu-rmem-alias.txt
           git -C "$KERNEL" diff --check
-          test "$(git -C "$KERNEL/KernelSU" rev-parse HEAD)" = "b2c595ddfa64b685e5a144ad37b7c95f912fb92a"
+          test "$(git -C "$KERNEL/KernelSU" rev-parse HEAD)" = "239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb"
+          test "$(git -C "$KERNEL/KernelSU" describe --tags --exact-match)" = "v4.2.0-rc3"
+          # Mandatory TG4.19 manual-hook ABI audit: the 2026-10-19 panic
+          # was a raw userspace filename misread as struct filename** in
+          # ksu_handle_faccessat(). Validate both faccessat and stat, plus
+          # the other kernel hook callsites BEFORE producing a new Image.
+          python3 -m py_compile scripts/171_audit_touchgrass_bakasu_hook_abi.py
+          python3 scripts/171_audit_touchgrass_bakasu_hook_abi.py "$KERNEL" \
+            | tee artifacts/p171-bakasu-hook-abi-audit.txt
           source scripts/common.sh
           echo 'P171: rebuilding full 4.19.206 kernel with pinned BakaSU + Clang22 AutoFDO v2'
           build_kernel touchgrass-4.19.206-resukisu-v4.1.0-susfs-v1.4.2-manual-core \
             2>&1 | tee artifacts/p171-bakasu-rebuild.log
           test -s "$IMAGE"
+          grep -Fq 'BakaSU version code: 35171' artifacts/p171-bakasu-rebuild.log \
+            || { echo 'P171 ERROR: wrong BakaSU driver version, expected 35171'; exit 1; }
+          grep -Fq 'v4.2.0-rc3' artifacts/p171-bakasu-rebuild.log \
+            || { echo 'P171 ERROR: missing 4.2.0-rc3 tag'; exit 1; }
           grep -Fxq CONFIG_KSU=y "$KERNEL_DIR/out/.config"
           grep -Fxq CONFIG_KSU_MANUAL_HOOK=y "$KERNEL_DIR/out/.config"
           grep -Fxq CONFIG_KSU_SUSFS=y "$KERNEL_DIR/out/.config"
@@ -1340,7 +1352,7 @@ jobs:
             || { echo 'P171 ERROR: exact ramoops reserved-memory fix absent in Image'; exit 1; }
           ! strings "$IMAGE" | grep -Fq '2206a7dd@ReSukiSU'
           sha256sum "$IMAGE" "$KERNEL_DIR/out/vmlinux" | tee artifacts/p171-bakasu-image-sha256.txt
-          printf 'bakasu_commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a\nprofile_sha256=%s\n' \
+          printf 'bakasu_commit=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb\nprofile_sha256=%s\n' \
             "${A52_AUTOFDO_PROFILE_SHA}" | tee artifacts/p171-bakasu-provenance.txt
           echo 'P171 TouchGrass BakaSU compile and root config audit PASS'
 
@@ -1952,10 +1964,10 @@ jobs:
           if s.count(original) != 1:
               raise SystemExit('P171 package script ReSukiSU check changed')
           s=s.replace(original,updated,1)
-          s=s.replace('resukisu=$RESUKISU_VERSION_FULL','bakasu=b2c595ddfa64b685e5a144ad37b7c95f912fb92a')
-          s=s.replace('resukisu_commit=$RESUKISU_COMMIT','bakasu_commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a')
-          s=s.replace('ReSukiSU: $RESUKISU_VERSION_FULL','BakaSU: b2c595ddfa64b685e5a144ad37b7c95f912fb92a')
-          s=s.replace('ReSukiSU commit: $RESUKISU_COMMIT','BakaSU commit: b2c595ddfa64b685e5a144ad37b7c95f912fb92a')
+          s=s.replace('resukisu=$RESUKISU_VERSION_FULL','bakasu=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb')
+          s=s.replace('resukisu_commit=$RESUKISU_COMMIT','bakasu_commit=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb')
+          s=s.replace('ReSukiSU: $RESUKISU_VERSION_FULL','BakaSU: 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb')
+          s=s.replace('ReSukiSU commit: $RESUKISU_COMMIT','BakaSU commit: 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb')
           p.write_text(s)
           PY
           sed -i 's/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + ReSukiSU v4.1.0/kernel.string=touchGrass A52xq Linux $TARGET_VERSION + BakaSU b2c595dd + Clang22 ThinLTO AutoFDO v2/' scripts/.package-p152.sh
@@ -1997,7 +2009,7 @@ jobs:
           test "$image_sha" = "$zip_image_sha" || { echo "P171 package/kernel Image mismatch"; exit 1; }
           strings "$KERNEL/out/arch/arm64/boot/Image" | grep -Fq '@BakaSU'
           {
-            echo "bakasu_commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a"
+            echo "bakasu_commit=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb"
             echo "autofdo_profile_sha256=$A52_AUTOFDO_PROFILE_SHA"
             echo "image_sha256=$image_sha"
             echo "vmlinux_sha256=$(sha256sum "$KERNEL/out/vmlinux" | awk '{print $1}')"

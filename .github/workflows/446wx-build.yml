@@ -330,6 +330,9 @@ jobs:
           python3 -m py_compile scripts/446ad_gsi_crash_guard.py
           python3 scripts/446ad_gsi_crash_guard.py --root "$ROOT"
           python3 scripts/446ad_gsi_crash_guard.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/446ae_dma_wrapper_guard.py
+          python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT"
+          python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
@@ -403,6 +406,7 @@ jobs:
           python3 scripts/446ac_hwc_ring.py --root "$ROOT" --check-only
           python3 scripts/446ad_fix_ipc_logging_compat.py --root "$ROOT" --check-only
           python3 scripts/446ad_gsi_crash_guard.py --root "$ROOT" --check-only
+          python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -693,6 +697,7 @@ jobs:
             scripts/446s_apply_kgsl_smmu_runtime_pm.py
             scripts/446ad_fix_ipc_logging_compat.py
             scripts/446ad_gsi_crash_guard.py
+            scripts/446ae_dma_wrapper_guard.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h

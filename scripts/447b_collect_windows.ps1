@@ -37,7 +37,22 @@ for d in /sys/class/remoteproc/remoteproc*; do echo ===$d===; cat $d/name $d/sta
 Save-ADB "remoteproc-60s" $remote
 Save-ADB "qrtr-60s" "if command -v qrtr-lookup >/dev/null 2>&1; then qrtr-lookup; else echo qrtr-lookup_missing; fi; cat /proc/net/qrtr 2>/dev/null || true"
 Save-ADB "vendor-dev-nodes" "ls -l /dev/subsys* /dev/glink* /dev/smd* /dev/diag /dev/at_mdm* /dev/qrtr* /dev/rmnet* 2>&1"
+# Static rc references are not evidence of successful open(); parsed as init references.
+Save-ADB "vendor-init-dev-references" 'for d in /vendor/etc/init /odm/etc/init /system/etc/init; do if test -d "$d"; then grep -rn "/dev/" "$d" 2>/dev/null | head -n 400; fi; done'
+Save-ADB "vendor-hal-open-errors" 'logcat -d -b all -t 5000 2>&1 | grep -iE "avc: denied|open(at)?\(|cannot open|failed to open|no such file|/dev/" | tail -n 1200'
+
 Save-ADB "net-devices" "ip link show"
 Save-ADB "dmesg" "dmesg 2>&1 | tail -n 1800"
 Save-ADB "logcat" "logcat -d -b all -t 2500 2>&1"
 Write-Host ("P447B capture saved to " + $out + ". No firmware/NV commands used.")
+
+# Optional offline /dev owner analysis; never needs root or changes the phone.
+$py=Get-Command python -ErrorAction SilentlyContinue
+$map=Join-Path (Get-Location) "merge/userspace-nodes.csv"
+$audit=Join-Path (Get-Location) "scripts/447b_vendor_node_audit.py"
+if ($py -and (Test-Path $map) -and (Test-Path $audit)) {
+  & python $audit --input $out --map $map --out (Join-Path $out "devnode-audit")
+  if ($LASTEXITCODE -ne 0) { Write-Warning "P447B node-audit failed. Logs retained for inspection." }
+} else {
+  Write-Host "P447B: run python scripts/447b_vendor_node_audit.py --input <capture-dir> --map merge/userspace-nodes.csv --out <output-dir> when Python is available"
+}

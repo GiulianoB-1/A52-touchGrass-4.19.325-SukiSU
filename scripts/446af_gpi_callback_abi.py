@@ -107,8 +107,8 @@ def patch(s):
         "\t\t\ttd->callback_param=&gi2c->a52af_tx_cb;",
         "fix corrupting TX callback parameter")
     s=once(s,
-        "\t\t\tif (IS_ERR_OR_NULL(td)) {",
-        "\t\t\tif (IS_ERR_OR_NULL(td) || !virt_addr_valid(td)) {",
+        "\t\tif (IS_ERR_OR_NULL(td)) {",
+        "\t\tif (IS_ERR_OR_NULL(td) || !virt_addr_valid(td)) {",
         "validate TX descriptor")
     s=once(s,
         "\t\t\tdev_err(dev, \"P446AD GSI TX descriptor invalid rc=%d\\n\", ret);",
@@ -122,14 +122,14 @@ def patch(s):
 			     !virt_addr_valid(gi2c->a52ac_tx) ||
 			     IS_ERR_OR_NULL(gi2c->a52ac_rx) ||
 			     !virt_addr_valid(gi2c->a52ac_rx))) {
-			dev_err(dev, "P446AF GSI BADPTR field=channel tx=%px rx=%px\n",
+			dev_err(dev, "P446AF GSI BADPTR field=channel tx=%px rx=%px\\n",
 				gi2c->a52ac_tx, gi2c->a52ac_rx);
 			ret=-EIO;
 			break;
 		}
 		if (unlikely(gi2c->a52ac_tx->device != gi2c->a52ae_tx_ops ||
 			     gi2c->a52ac_rx->device != gi2c->a52ae_rx_ops)) {
-			dev_err(dev, "P446AF GSI BADPTR field=chan.device tx=%px rx=%px\n",
+			dev_err(dev, "P446AF GSI BADPTR field=chan.device tx=%px rx=%px\\n",
 				gi2c->a52ac_tx->device,gi2c->a52ac_rx->device);
 			ret=-EIO;
 			break;
@@ -144,7 +144,7 @@ def patch(s):
 				dma_cookie_t cookie=dmaengine_submit(rd);
 				ret=dma_submit_error(cookie);
 				dev_info(dev,
-					"P446AF GSI RX_SUBMIT desc=%px cookie=%d rc=%d\n",
+					"P446AF GSI RX_SUBMIT desc=%px cookie=%d rc=%d\\n",
 					rd,cookie,ret);
 				if (ret) goto cleanup;
 			}
@@ -157,7 +157,7 @@ def patch(s):
 			dma_cookie_t cookie=dmaengine_submit(td);
 			ret=dma_submit_error(cookie);
 			dev_info_ratelimited(dev,
-				"P446AF GSI TX_SUBMIT desc=%px cookie=%d rc=%d\n",
+				"P446AF GSI TX_SUBMIT desc=%px cookie=%d rc=%d\\n",
 				td,cookie,ret);
 			if (ret)goto cleanup;
 		}""",

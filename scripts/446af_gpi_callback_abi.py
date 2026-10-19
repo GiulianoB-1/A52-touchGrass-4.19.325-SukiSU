@@ -180,18 +180,20 @@ def patch_touch(s):
         "\tint retry = info->probe_done ? FTS_TS_I2C_RETRY_CNT : 1;",
         "single attempt for probe-only reads")
     s=s[:start]+frag+s[end:]
-    s=once(s,
-        "\trc = fts_read_reg(info, &regAdd[0], 1, (u8 *)data, FTS_EVENT_SIZE);\n"
-        "\tif (rc == -ENOTCONN) {\n"
-        "\t\treturn rc;\n"
-        "\t}",
-        "\trc = fts_read_reg(info, &regAdd[0], 1, (u8 *)data, FTS_EVENT_SIZE);\n"
+    init_start=s.index("static int fts_init(struct fts_ts_info *info)")
+    init_end=s.index("\nstatic ", init_start+1)
+    init=s[init_start:init_end]
+    # P446Z already checks -ETIMEDOUT before the legacy -ENOTCONN test.
+    # Change only that legacy condition, keeping P446Z's earlier timeout guard.
+    init=once(init,
+        "\tif (rc == -ENOTCONN) {\n\t\treturn rc;\n\t}",
         "\tif (rc < 0) {\n"
         "\t\tinput_err(true, &info->client->dev,\n"
         '\t\t\t"P446AF TOUCH INIT_ABORT first_read rc=%d\\n", rc);\n'
         "\t\treturn rc;\n"
         "\t}",
         "abort STM init on first I2C read failure")
+    s=s[:init_start]+init+s[init_end:]
     return s
 
 

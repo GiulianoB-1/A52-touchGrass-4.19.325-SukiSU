@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/171-a52-touchgrass-bakasu-autofdo-v2.yml
       - scripts/171_migrate_touchgrass_bakasu.py
+      - scripts/171_fix_ramoops_reserved_alias.py
       - profiles/**
   workflow_dispatch:
 
@@ -1312,6 +1313,12 @@ jobs:
           python3 -m py_compile /tmp/171_migrate_touchgrass_bakasu.py
           python3 /tmp/171_migrate_touchgrass_bakasu.py --kernel "$KERNEL" --repo "$PWD" \
             | tee artifacts/p171-bakasu-migration.txt
+          # P171 raw crash log: duplicate reservation-only GKI-78 DTB node
+          # overlaps native ramoops at 0xB1B00000, causing a late panic.
+          # Patch only that pair in the TG4.19 reserved-memory registration.
+          python3 scripts/171_fix_ramoops_reserved_alias.py "$KERNEL" \
+            | tee artifacts/p171-bakasu-rmem-alias.txt
+          git -C "$KERNEL" diff --check
           test "$(git -C "$KERNEL/KernelSU" rev-parse HEAD)" = "b2c595ddfa64b685e5a144ad37b7c95f912fb92a"
           source scripts/common.sh
           echo 'P171: rebuilding full 4.19.206 kernel with pinned BakaSU + Clang22 AutoFDO v2'
@@ -1325,6 +1332,8 @@ jobs:
           grep -Fxq CONFIG_THINLTO=y "$KERNEL_DIR/out/.config"
           strings "$IMAGE" | grep -F '@BakaSU' \
             || { echo 'P171 ERROR: image does not contain BakaSU kernel version'; exit 1; }
+          strings "$IMAGE" | grep -Fq 'A52_P171_RMEM_ALIAS' \
+            || { echo 'P171 ERROR: exact ramoops reserved-memory fix absent in Image'; exit 1; }
           ! strings "$IMAGE" | grep -Fq '2206a7dd@ReSukiSU'
           sha256sum "$IMAGE" "$KERNEL_DIR/out/vmlinux" | tee artifacts/p171-bakasu-image-sha256.txt
           printf 'bakasu_commit=b2c595ddfa64b685e5a144ad37b7c95f912fb92a\nprofile_sha256=%s\n' \

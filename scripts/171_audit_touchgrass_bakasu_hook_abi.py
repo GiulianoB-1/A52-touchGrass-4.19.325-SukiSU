@@ -46,12 +46,20 @@ def verify(src):
         manual=f"int ksu_handle_{func}(int *dfd, const char __user **filename_user,"
         for f in (cc,hh):
             txt=f.read_text()
-            require(txt.count(guard+legacy)==1,
-                    f"{f}: wrong struct-filename guard for {func}")
+            # The .c file guards both definitions independently, while the
+            # .h file shares one guard across two grouped prototypes.
+            if f==cc or func=="faccessat":
+                require(txt.count(guard+legacy)==1,
+                        f"{f}: wrong struct-filename guard for {func}")
+            else:
+                start=txt.index(guard+"int ksu_handle_faccessat")
+                stop=txt.index("#else\\nint ksu_handle_faccessat",start)
+                require(legacy in txt[start:stop],
+                        f"{f}: grouped stat prototype not under the manual/SUSFS guard")
             require(txt.count(manual)==1,
                     f"{f}: manual user-pointer declaration missing for {func}")
-            require(txt.index(guard+legacy)<txt.index(manual),
-                    f"{f}: manual prototype not in other conditional branch")
+            require(txt.index(legacy)<txt.index(manual),
+                    f"{f}: manual prototype not in later conditional branch")
             line(f,manual)
 
     for rel,decl,call in [

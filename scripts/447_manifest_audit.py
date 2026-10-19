@@ -11,7 +11,8 @@ COLS=("wave","subsystem","function","TG path","Kconfig","DT compatible(s)",
       "ACK has same compatible? (conflict)","strategy",
       "suppliers (regulator/clock/icc/pinctrl/IRQ/mbox/iommu/reserved-mem)",
       "firmware files + path","userspace paths (/sys,/dev)","switch name","status")
-STRATEGY={"ACK-as-is","vendor copy from TG (unique name)","mainline backport"}
+STRATEGY={"ACK-as-is","vendor copy from TG (unique name)","mainline backport",
+          "Qualcomm msm-5.10 compatibility backport","Qualcomm audio-kernel 5.10 backport"}
 TRAPS={
  "19 GSI-only":r"GENI_IF_FIFO_DISABLE_RO|fifo_disable_ro",
  "20 map-device SID":r"dma_map_single\(|dma_map_sg\(|dma_alloc_coherent\(",

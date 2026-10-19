@@ -1316,7 +1316,11 @@ jobs:
           # P171 raw crash log: duplicate reservation-only GKI-78 DTB node
           # overlaps native ramoops at 0xB1B00000, causing a late panic.
           # Patch only that pair in the TG4.19 reserved-memory registration.
-          python3 scripts/171_fix_ramoops_reserved_alias.py "$KERNEL" \
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/171_fix_ramoops_reserved_alias.py" \
+            -o /tmp/171_fix_ramoops_reserved_alias.py
+          python3 -m py_compile /tmp/171_fix_ramoops_reserved_alias.py
+          python3 /tmp/171_fix_ramoops_reserved_alias.py "$KERNEL" \
             | tee artifacts/p171-bakasu-rmem-alias.txt
           git -C "$KERNEL" diff --check
           test "$(git -C "$KERNEL/KernelSU" rev-parse HEAD)" = "b2c595ddfa64b685e5a144ad37b7c95f912fb92a"

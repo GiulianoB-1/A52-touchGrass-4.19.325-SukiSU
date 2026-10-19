@@ -12,8 +12,8 @@ import argparse
 TAG="A52_PHASE447_GATES_V1"
 GATES=[
  (2,"sm5714"),(2,"directcharger"),(2,"battery"),(2,"charger"),(2,"fuelgauge"),(2,"muic"),(2,"pdic"),
- (2,"adc"),(3,"aoss"),(3,"glink"),(3,"adsp"),(3,"cdsp"),(3,"mss"),
- (3,"ipa"),(4,"audio"),(4,"codec"),(5,"sensors"),(5,"fingerprint"),
+ (2,"adc"),(3,"aoss"),(3,"glink"),(3,"glinkpkt"),(3,"ssrcompat"),(3,"rmtfscompat"),(3,"adsp"),(3,"cdsp"),(3,"mss"),
+ (3,"ipa"),(4,"audio"),(4,"audioapr"),(4,"codec"),(5,"sensors"),(5,"fingerprint"),
  (5,"nfc"),(5,"vibrator"),(6,"wifi"),(6,"bt"),(7,"vidc"),
  (7,"camera"),(8,"devbw"),(8,"suspend"),(8,"thermal"),(8,"misc"),
 ]

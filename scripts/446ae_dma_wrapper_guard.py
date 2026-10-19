@@ -186,11 +186,11 @@ def patch(s):
 		dma_unmap_single(mapdev,phys,msg->len,""",
         "single-channel synchronous GPII group reset and cleanup")
     s = once(s,
-        '\t\tret=a52ac_gsi_channels(gi2c);\n'
+        '\t\tret = a52ac_gsi_channels(gi2c);\n'
         '\t\tif (ret)\n'
         '\t\t\treturn dev_err_probe(dev, ret,\n'
         '\t\t\t\t\t     "P446AD GSI provider not ready\\n");',
-        '\t\tret=a52ac_gsi_channels(gi2c);\n'
+        '\t\tret = a52ac_gsi_channels(gi2c);\n'
         '\t\tif (ret)\n'
         '\t\t\treturn dev_err_probe(dev, ret,\n'
         '\t\t\t\t\t     "P446AD GSI provider not ready\\n");\n'

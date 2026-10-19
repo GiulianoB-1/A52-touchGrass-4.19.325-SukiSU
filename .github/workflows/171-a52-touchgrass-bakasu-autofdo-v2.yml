@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/171-a52-touchgrass-bakasu-autofdo-v2.yml
       - scripts/171_migrate_touchgrass_bakasu.py
+      - scripts/171_audit_touchgrass_bakasu_hook_abi.py
       - scripts/171_fix_ramoops_reserved_alias.py
       - profiles/**
   workflow_dispatch:

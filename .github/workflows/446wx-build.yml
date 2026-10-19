@@ -429,6 +429,7 @@ jobs:
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
           python3 -m py_compile scripts/447_discover_sources.py
           python3 scripts/447_discover_sources.py --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
+          python3 scripts/447_config_diff.py --tg "$PWD/workspace/touchgrass-a52xq/arch/arm64/configs/a52xq_defconfig" --ack "$BUILD/.config" --manifest merge/manifest.csv --out phase447-inventory
           cat phase447-inventory/phase447-summary.md >> "$GITHUB_STEP_SUMMARY"
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -801,6 +802,7 @@ jobs:
             scripts/447_stage_control.py
             scripts/447_manifest_audit.py
             scripts/447_discover_sources.py
+            scripts/447_config_diff.py
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols

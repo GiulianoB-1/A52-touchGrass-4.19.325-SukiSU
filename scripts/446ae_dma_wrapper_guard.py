@@ -217,8 +217,23 @@ def check(root):
         raise RuntimeError("P446AE wrapper must be acquired once at probe")
     if c.count("dmaengine_terminate_sync(gi2c->a52ac_tx)") != 1:
         raise RuntimeError("P446AE unexpected GPII reset count")
-    if "dmaengine_terminate_all(gi2c->a52ac_rx)" in c:
-        raise RuntimeError("P446AE never reset TX and RX separately")
+    # Inspect only the active GSI transfer, not the existing device-release
+    # callback.  a52ac_gsi_release() must still terminate both channels on
+    # driver teardown, whereas the GSI transfer error path resets one GPII.
+    start = c.index("static int a52ac_gsi_xfer(")
+    end = c.index("static int geni_i2c_xfer(", start)
+    xfer = c[start:end]
+    if xfer.count("dmaengine_terminate_sync(gi2c->a52ac_tx)") != 1:
+        raise RuntimeError("P446AE must reset one GPII on transfer failure")
+    if ("dmaengine_terminate_all(gi2c->a52ac_tx)" in xfer or
+        "dmaengine_terminate_all(gi2c->a52ac_rx)" in xfer or
+        "dmaengine_terminate_sync(gi2c->a52ac_rx)" in xfer):
+        raise RuntimeError("P446AE transfer must not reset GPII twice")
+    release = c[c.index("static void a52ac_gsi_release("):
+                c.index("static int a52ac_gsi_channels(")]
+    if ("dmaengine_terminate_all(gi2c->a52ac_tx)" not in release or
+        "dmaengine_terminate_all(gi2c->a52ac_rx)" not in release):
+        raise RuntimeError("P446AE must preserve both teardown channels")
     print("P446AE DMA_OWNER PASS: QUPv3_1 IOMMU device, pool/swiotlb guard, synchronous single GPII reset")
 
 

@@ -260,17 +260,36 @@ def verify(root):
         "IS_ERR_OR_NULL(rd)", "IS_ERR_OR_NULL(td)",
     )
     required_t = (DELAY, 'early_param("a52.touch_delay_ms"', "msleep(a52ad_touch_delay_ms)",
-                  "a52ad_touch_delay_ms = 8000", 'early_param("a52.touch"')
+                  'early_param("a52.touch"')
     for key in required_c:
         if key not in c:
             raise RuntimeError(f"P446AD missing I2C contract {key}")
     for key in required_t:
         if key not in t:
             raise RuntimeError(f"P446AD missing touch contract {key}")
-    declaration = "static unsigned int a52ad_touch_delay_ms = 8000;"
+    # P447B/446AG deliberately removes the 8-second default. Do not weaken
+    # the original P446AD verification unless the full 447B safeguards exist.
+    ag_tag = "A52_PHASE447B_TOUCH_AG_V1"
+    if ag_tag in t:
+        declaration = "static unsigned int a52ad_touch_delay_ms = 0;"
+        for marker in ("P447B TOUCH FW_REQUEST_SKIPPED",
+                       "P447B TOUCH IRQ_DEPTH_SKIP",
+                       "if (!READ_ONCE(info->irq_enabled))",
+                       "pr_info_once",
+                       "A52_PHASE446AF_TOUCH_PROBE_FAILFAST_V1"):
+            if marker not in t:
+                raise RuntimeError("P446AD: P447B zero-delay override missing "+marker)
+        if "\trc = fts_fw_update_on_probe(info);" in t:
+            raise RuntimeError("P446AD: P447B must not invoke firmware update during probe")
+        if "a52ad_touch_delay_ms = 8000;" in t:
+            raise RuntimeError("P446AD: conflicting delayed/undelayed probe defaults")
+        touch_mode = "P447B/446AG zero-ms default with firmware request skipped and IRQ guarded"
+    else:
+        declaration = "static unsigned int a52ad_touch_delay_ms = 8000;"
+        touch_mode = "legacy 8000-ms default"
     signature = "static int fts_probe(struct i2c_client *client,"
     if t.count(declaration) != 1 or t.index(declaration) >= t.index(signature):
-        raise RuntimeError("P446AD: delay declaration missing or below fts_probe")
+        raise RuntimeError("P446AD: delay declaration missing, duplicated or below fts_probe")
     if t.count('early_param("a52.touch_delay_ms"') != 1:
         raise RuntimeError("P446AD: delay early_param is missing or duplicated")
     if c.count("devm_add_action_or_reset(dev, a52ac_gsi_release, gi2c)") != 1:
@@ -278,7 +297,7 @@ def verify(root):
     if c.count("ret = a52ac_gsi_channels(gi2c);") != 1:
         raise RuntimeError("P446AD channel acquisition must occur once at probe")
     print("P446AD GSI GUARD PASS: probe-ordered 5-cell DMA, error-checked RX/TX and first xfer")
-    print("P446AD TOUCH DELAY PASS: early parameter default 8000ms, async probe and kill switch kept")
+    print("P446AD TOUCH DELAY PASS: "+touch_mode+"; early parameter and kill switch retained")
 
 
 def main():

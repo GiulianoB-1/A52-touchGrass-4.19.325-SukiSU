@@ -222,7 +222,10 @@ static inline void susfs_clear_current_proc_no_su(void)
     hfile = ksu/"kernel/feature/sucompat.h"
     for src in (cfile, hfile):
         body=src.read_text()
-        for func in ("faccessat", "stat"):
+        # .c implements two separately guarded functions; .h groups both
+        # prototypes under a single #ifdef preceding faccessat.
+        funcs = ("faccessat", "stat") if src == cfile else ("faccessat",)
+        for func in funcs:
             old = ("#ifdef CONFIG_KSU_SUSFS\\n"
                    "int ksu_handle_"+func+"(int *dfd, struct filename **filename,")
             new = ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
@@ -230,6 +233,12 @@ static inline void susfs_clear_current_proc_no_su(void)
             if body.count(old)!=1:
                 raise RuntimeError("P171 non-GKI hook ABI guard changed: "+str(src)+" "+func)
             body=body.replace(old,new,1)
+        if src == hfile:
+            start = body.index("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+                               "int ksu_handle_faccessat(")
+            stop = body.index("#else\\nint ksu_handle_faccessat(",start)
+            assert ("int ksu_handle_stat(int *dfd, struct filename **filename,") in body[start:stop], (
+                "P171 grouped stat prototype moved outside guarded branch")
         src.write_text(body)
         for func in ("faccessat","stat"):
             assert ("int ksu_handle_"+func+"(int *dfd, const char __user **filename_user,") in body, (

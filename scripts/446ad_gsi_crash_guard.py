@@ -111,6 +111,7 @@ static int a52ac_gsi_channels(struct geni_i2c_dev *gi2c)
 			dma_chan_name(tx), dma_chan_name(rx), ret);
 		goto error;
 	}
+	gi2c->a52ad_gsi_ready = true;
 	dev_info(dev, "P446AD GPI READY tx=%s rx=%s ev_ring=initialized rc=0\n",
 		 dma_chan_name(tx), dma_chan_name(rx));
 	return 0;
@@ -131,6 +132,22 @@ def apply_i2c(s):
     if s[start:end].count("static int a52ac_gsi_channels(") != 1:
         raise RuntimeError("P446AD GSI channel block changed")
     s = s[:start] + CHANNELS + s[end:]
+    s = once(s,
+        "\tstruct dma_chan *a52ac_tx, *a52ac_rx;",
+        "\tstruct dma_chan *a52ac_tx, *a52ac_rx;\n\tbool a52ad_gsi_ready;",
+        "GSI readiness field")
+    s = once(s,
+        "\tif (gi2c->a52ac_tx) {\n\t\tdmaengine_terminate_all(gi2c->a52ac_tx);",
+        "\tif (!IS_ERR_OR_NULL(gi2c->a52ac_tx)) {\n\t\tif (gi2c->a52ad_gsi_ready)\n\t\t\tdmaengine_terminate_all(gi2c->a52ac_tx);",
+        "guard partially configured TX teardown")
+    s = once(s,
+        "\tif (gi2c->a52ac_rx) {\n\t\tdmaengine_terminate_all(gi2c->a52ac_rx);",
+        "\tif (!IS_ERR_OR_NULL(gi2c->a52ac_rx)) {\n\t\tif (gi2c->a52ad_gsi_ready)\n\t\t\tdmaengine_terminate_all(gi2c->a52ac_rx);",
+        "guard partially configured RX teardown")
+    s = once(s,
+        "\t\tgi2c->a52ac_rx=NULL;\n\t}\n}",
+        "\t\tgi2c->a52ac_rx=NULL;\n\t}\n\tgi2c->a52ad_gsi_ready = false;\n}",
+        "clear channel readiness on release")
     s = once(s,
         "\tret=a52ac_gsi_channels(gi2c);\n\tif (ret)\n\t\treturn ret;\n\ta52ac_select_gsi_mode(gi2c);",
         """	if (IS_ERR_OR_NULL(gi2c->a52ac_tx) ||
@@ -232,7 +249,8 @@ def verify(root):
     required_c = (
         TAG, "dma_request_chan(dev, \"tx\")", "dma_request_chan(dev, \"rx\")",
         "P446AD GPI READY", "P446AD I2C GSI first_xfer",
-        "P446AD GSI provider not ready", "dma_mapping_error(mapdev,phys)",
+        "P446AD GSI provider not ready", "a52ad_gsi_ready",
+        "dma_mapping_error(mapdev,phys)",
         "IS_ERR_OR_NULL(rd)", "IS_ERR_OR_NULL(td)",
     )
     required_t = (DELAY, 'early_param("a52.touch_delay_ms"', "msleep(a52ad_touch_delay_ms)",

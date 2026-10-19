@@ -11,7 +11,8 @@ import subprocess
 import shutil
 import sys
 
-PIN = "b2c595ddfa64b685e5a144ad37b7c95f912fb92a"
+PIN = "239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb"
+TAG = "v4.2.0-rc3"
 UPSTREAM = "https://github.com/Baka-SU/BakaSU.git"
 SUSFS_API = "1.4.2"
 
@@ -58,11 +59,17 @@ def main():
     shutil.rmtree(ksu)
     run("git","init","-q",ksu)
     run("git","-C",ksu,"remote","add","origin",UPSTREAM)
-    run("git","-C",ksu,"fetch","--quiet","--depth=1","--filter=blob:none","origin",PIN)
-    run("git","-C",ksu,"checkout","--quiet","--detach","FETCH_HEAD")
+    run("git","-C",ksu,"fetch","--quiet","--depth=1","origin",
+        "refs/tags/"+TAG+":refs/tags/"+TAG)
+    run("git","-C",ksu,"checkout","--quiet","--detach","refs/tags/"+TAG)
+    assert subprocess.check_output(["git","-C",str(ksu),"describe","--exact-match","--tags"],text=True).strip()==TAG
     actual=subprocess.check_output(["git","-C",str(ksu),"rev-parse","HEAD"],text=True).strip()
     assert actual==PIN, "BakaSU identity mismatch"
     assert (ksu/"kernel/Kbuild").is_file(), "Pinned BakaSU Kbuild missing"
+    # This BakaSU repository release predates its branding switch. Retain
+    # the original code/version count but label this deliberate kernel fork.
+    edit_once(ksu/"kernel/Kbuild", "REPO_NAME := ReSukiSU",
+              "REPO_NAME := BakaSU", "BakaSU source branding at pinned tag")
 
     # Reuse the exact core-only Linux 4.19 / SuSFS 1.4.2 adaptation already
     # proven on P170. This code verifies exact upstream anchor shapes, failing
@@ -205,6 +212,32 @@ static inline void susfs_clear_current_proc_no_su(void)
     for fn in ("susfs_is_current_proc_no_su", "susfs_set_current_proc_no_su",
                "susfs_clear_current_proc_no_su"):
         assert fn in sucompat_header, "P171 expected BakaSU no-su macro missing: "+fn
+
+    # CRASH FIX 2026-10-19: TG fs/open.c and fs/stat.c pass an
+    # (address-of) const char __user*; BakaSU's CONFIG_KSU_SUSFS branch
+    # instead treats it as struct filename** and dereferences userspace
+    # under PAN (ksu_handle_faccessat+0x60 at 1.431s). Manual hooks MUST
+    # take precedence over SUSFS in both definition and declaration.
+    cfile = ksu/"kernel/feature/sucompat.c"
+    hfile = ksu/"kernel/feature/sucompat.h"
+    for src in (cfile, hfile):
+        body=src.read_text()
+        for func in ("faccessat", "stat"):
+            old = ("#ifdef CONFIG_KSU_SUSFS\\n"
+                   "int ksu_handle_"+func+"(int *dfd, struct filename **filename,")
+            new = ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+                   "int ksu_handle_"+func+"(int *dfd, struct filename **filename,")
+            if body.count(old)!=1:
+                raise RuntimeError("P171 non-GKI hook ABI guard changed: "+str(src)+" "+func)
+            body=body.replace(old,new,1)
+        src.write_text(body)
+        for func in ("faccessat","stat"):
+            assert ("int ksu_handle_"+func+"(int *dfd, const char __user **filename_user,") in body, (
+                "P171 missing user-pointer manual handler: "+func)
+    for func in ("faccessat","stat"):
+        assert ("#if defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+                "int ksu_handle_"+func) in cfile.read_text()
+    print("P171 faccessat/stat manual-hook ABI overrides incompatible SUSFS structs: PASS")
 
     all_api = "\n".join(p.read_text(errors="replace") for p in (ksu/"kernel").rglob("*.c"))
     assert "susfs_is_current_proc_umounted" not in all_api, "modern SuSFS runtime caller survived"

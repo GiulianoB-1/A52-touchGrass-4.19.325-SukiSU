@@ -1330,8 +1330,15 @@ jobs:
           # was a raw userspace filename misread as struct filename** in
           # ksu_handle_faccessat(). Validate both faccessat and stat, plus
           # the other kernel hook callsites BEFORE producing a new Image.
-          python3 -m py_compile scripts/171_audit_touchgrass_bakasu_hook_abi.py
-          python3 scripts/171_audit_touchgrass_bakasu_hook_abi.py "$KERNEL" \
+          # The workflow checks out the old P150 baseline, which does not contain
+          # P171 audit helpers. Load this mandatory guard from the running SHA,
+          # just like the P171 migration and ramoops repair scripts above.
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/171_audit_touchgrass_bakasu_hook_abi.py" \
+            -o /tmp/171_audit_touchgrass_bakasu_hook_abi.py
+          test -s /tmp/171_audit_touchgrass_bakasu_hook_abi.py
+          python3 -m py_compile /tmp/171_audit_touchgrass_bakasu_hook_abi.py
+          python3 /tmp/171_audit_touchgrass_bakasu_hook_abi.py "$KERNEL" \
             | tee artifacts/p171-bakasu-hook-abi-audit.txt
           source scripts/common.sh
           echo 'P171: rebuilding full 4.19.206 kernel with pinned BakaSU + Clang22 AutoFDO v2'

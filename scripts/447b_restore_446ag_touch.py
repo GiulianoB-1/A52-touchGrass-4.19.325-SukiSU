@@ -30,7 +30,7 @@ def touch(s):
     frag=s[start:end]
     frag=once(frag,
         "\tstruct irq_desc *desc = irq_to_desc(info->irq);",
-        """	struct irq_desc *desc;
+        r"""	struct irq_desc *desc;
 	/* Avoid enable_irq/disable_irq before request_threaded_irq succeeds. */
 	if (!READ_ONCE(info->irq_enabled)) {
 		pr_info_once("P447B TOUCH IRQ_DEPTH_SKIP before request_irq\n");
@@ -40,7 +40,7 @@ def touch(s):
 	if (unlikely(!desc)) {
 		pr_err("P447B TOUCH IRQ_DESC_NULL irq=%d\n",info->irq);
 		return;
-	}""".replace('request_irq\\n','request_irq\\\\n').replace('irq=%d\\n','irq=%d\\\\n'),
+	}""",
         "IRQ registration precedes IRQ depth operations")
     s=s[:start]+frag+s[end:]
     return s
@@ -62,13 +62,13 @@ def gsi(s):
     if n<3:raise RuntimeError("P447B expected >=3 informational GSI lines, found "+str(n))
     frag=once(frag,
         "\treturn ret;\n}",
-        """	if (time_after(jiffies,READ_ONCE(a52ag_last_summary)+5*HZ)) {
+        r"""	if (time_after(jiffies,READ_ONCE(a52ag_last_summary)+5*HZ)) {
 		WRITE_ONCE(a52ag_last_summary,jiffies);
 		dev_info(dev,"P447B GSI SUMMARY xfers=%d rc=%d first20_only=1\n",
 			atomic_read(&a52ag_xfer_count),ret);
 	}
 	return ret;
-}""".replace('first20_only=1\\n','first20_only=1\\\\n'),
+}""",
         "five-second GSI summary")
     return s[:start]+frag+s[end:]
 def check(root):

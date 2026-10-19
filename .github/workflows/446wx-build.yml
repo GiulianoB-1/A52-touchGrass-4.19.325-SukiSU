@@ -10,6 +10,12 @@ on:
     paths-ignore:
       - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
+    inputs:
+      decode_pc:
+        description: 'Kernel symbol+offset[/size] (exact vmlinux required)'
+        type: string
+        required: false
+        default: 'geni_i2c_xfer+0x408/0xe1c'
 permissions:
   contents: read
   actions: read
@@ -333,6 +339,9 @@ jobs:
           python3 -m py_compile scripts/446ae_dma_wrapper_guard.py
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT"
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/446af_gpi_callback_abi.py
+          python3 scripts/446af_gpi_callback_abi.py --root "$ROOT"
+          python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
@@ -349,10 +358,14 @@ jobs:
           if grep -q '^CONFIG_CMDLINE=".*console=ttyGS0,115200' "$BUILD/.config"; then
             echo 'FAIL: stale ttyGS0 builtin console'; exit 1
           fi
+          # P446AF: retain DWARF in vmlinux for source-line oops decoding.
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable DEBUG_KERNEL --enable DEBUG_INFO --enable DEBUG_INFO_DWARF4 --enable DEBUG_INFO_REDUCED
           sed -i 's/^CONFIG_LOG_BUF_SHIFT=19$/CONFIG_LOG_BUF_SHIFT=21/' "$BUILD/.config"
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
+          grep -Fxq CONFIG_DEBUG_INFO=y "$BUILD/.config"
+          grep -Fxq CONFIG_DEBUG_INFO_DWARF4=y "$BUILD/.config"
           grep -Fxq CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y "$BUILD/.config"
           grep -Fxq CONFIG_I2C_QCOM_GENI=y "$BUILD/.config"
           grep -Fxq CONFIG_QCOM_GPI_DMA=y "$BUILD/.config"
@@ -407,6 +420,7 @@ jobs:
           python3 scripts/446ad_fix_ipc_logging_compat.py --root "$ROOT" --check-only
           python3 scripts/446ad_gsi_crash_guard.py --root "$ROOT" --check-only
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
+          python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -519,6 +533,8 @@ jobs:
           grep -aFq "P446AB PROP_GET" "$IMAGE"
           grep -aFq "P446AB PROP_SET" "$IMAGE"
           grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P446AF GSI RX_SUBMIT" "$IMAGE"
+          grep -aFq "P446AF GSI BADPTR" "$IMAGE"
           grep -aFq "P446AC HWC_RING READY" "$IMAGE"
           grep -aFq "a52_446ac_hwc_requests" "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"
@@ -660,6 +676,22 @@ jobs:
           grep -Fq ' a52_p445_run_r2' "$MAP"
           ! grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
           ccache -s
+      - name: Preserve Phase446AF vmlinux for crash decoding
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          test -s "$BUILD/vmlinux"
+          test -s "$BUILD/System.map"
+          test -s "$ROOT/scripts/faddr2line"
+          mkdir -p phase446af-debug
+          cp "$BUILD/vmlinux" phase446af-debug/vmlinux
+          cp "$BUILD/System.map" phase446af-debug/System.map
+          cp "$ROOT/scripts/faddr2line" phase446af-debug/faddr2line
+          cp "$BUILD/.config" phase446af-debug/final.config
+          readelf -SW phase446af-debug/vmlinux | grep -F '.debug_info'
+          printf '%s\n' "P446AF DWARF vmlinux retained for exact offset decoding" >> "$GITHUB_STEP_SUMMARY"
       - name: Save Phase445 object cache
         if: always()
         uses: actions/cache/save@v4
@@ -698,6 +730,8 @@ jobs:
             scripts/446ad_fix_ipc_logging_compat.py
             scripts/446ad_gsi_crash_guard.py
             scripts/446ae_dma_wrapper_guard.py
+            scripts/446af_gpi_callback_abi.py
+            scripts/446af_decode_oops.sh
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h
@@ -746,6 +780,15 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
+      - name: Upload Phase446AF DWARF crash-decode symbols
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 30
       - name: Upload Phase446i GKI
         if: success()
         uses: actions/upload-artifact@v4
@@ -774,4 +817,46 @@ jobs:
             f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json
           if-no-files-found: error
           compression-level: 0
+          retention-days: 30
+
+  decode_pc:
+    name: Decode PC (faddr2line)
+    needs: gki
+    if: needs.gki.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug
+      - name: Decode GSI oops function and source line
+        env:
+          PC_INPUT: ${{ inputs.decode_pc }}
+        run: |
+          set -Eeuo pipefail
+          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
+          test -s phase446af-debug/vmlinux
+          bash -n scripts/446af_decode_oops.sh
+          {
+            echo "## P446AF decoded kernel PC"
+            echo "Requested: $PC"
+            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
+          } | tee phase446af-debug/decode.txt
+          {
+            echo '### Phase446AF faddr2line'
+            echo '~~~text'
+            cat phase446af-debug/decode.txt
+            echo '~~~'
+            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload decoded kernel PC
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
+          path: phase446af-debug/decode.txt
+          if-no-files-found: error
           retention-days: 30

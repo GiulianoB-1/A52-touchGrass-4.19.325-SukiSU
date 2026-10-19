@@ -72,12 +72,6 @@ def verify(src):
         ("fs/exec.c",
          "extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,",
          "ksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);"),
-        ("fs/read_write.c",
-         "extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,",
-         "ksu_handle_sys_read(fd, &buf, &count);"),
-        ("drivers/input/input.c",
-         "extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);",
-         "ksu_handle_input_handle_event(&type, &code, &value);"),
     ]:
         p=src/rel
         s=p.read_text()
@@ -85,6 +79,24 @@ def verify(src):
         require(call in s, f"{rel}: expected original TG hook call changed")
         line(p,decl)
         line(p,call)
+
+    # Manual + SuSFS-core-only keeps the automatic input hook and omits
+    # legacy inline read/input calls. These are intentionally removed by
+    # scripts/56_patch_resukisu_susfs_manual_core.py, so requiring their
+    # original TG declarations would reject the known-good manual baseline.
+    # Match the production build's negative hook contract instead.
+    for rel, forbidden in (
+        ("fs/read_write.c",
+         ("ksu_vfs_read_hook", "ksu_handle_sys_read(fd, &buf, &count);")),
+        ("drivers/input/input.c",
+         ("ksu_handle_input_handle_event(&type, &code, &value);",)),
+    ):
+        p=src/rel
+        source=p.read_text()
+        for symbol in forbidden:
+            require(symbol not in source,
+                    f"{rel}: obsolete inline hook unexpectedly present: {symbol}")
+        print(f"{rel}: manual + SuSFS-core-only inline-hook absence PASS")
 
     actual_exec=ksu/"kernel/feature/sucompat.c"
     require("int ksu_handle_execveat(int *fd, struct filename **filename_ptr," in actual_exec.read_text(),

@@ -1,0 +1,43 @@
+# Phase447B read-only Windows/PowerShell bring-up collector.
+# powershell -ExecutionPolicy Bypass -File scripts/447b_collect_windows.ps1 -Variant B
+param([ValidateSet("A","B","C")][string]$Variant = "A")
+$ErrorActionPreference="Stop"
+$stamp=Get-Date -Format "yyyyMMdd_HHmmss"
+$out=Join-Path (Get-Location) ("P447B_" + $Variant + "_" + $stamp)
+New-Item -ItemType Directory -Path $out -Force | Out-Null
+function Save-ADB([string]$name,[string]$cmd){
+  $target=Join-Path $out ($name + ".txt")
+  ("Command: adb shell " + $cmd) | Out-File -FilePath $target -Encoding utf8
+  try {
+    & adb shell $cmd 2>&1 | Out-File -FilePath $target -Append -Encoding utf8
+  } catch {
+    ("ERROR " + $_.Exception.Message) | Out-File -FilePath $target -Append
+  }
+}
+if (-not (Get-Command adb -ErrorAction SilentlyContinue)){
+  throw "adb not found in PATH. Install Android platform-tools."
+}
+Write-Host "P447B: read-only ADB capture. No device writes are issued."
+& adb wait-for-device
+Save-ADB "identity" "uname -a; cat /proc/cmdline"
+Save-ADB "touch" "getevent -lp 2>/dev/null | grep -i -C3 touch"
+Write-Host "Sampling power supplies ~30 seconds after ADB became available"
+Start-Sleep -Seconds 30
+$power=@'
+for d in battery usb ac otg; do echo ===$d===; for f in capacity status health present voltage_now current_now temp online type usb_type; do cat /sys/class/power_supply/$d/$f 2>/dev/null || true; done; done
+'@
+Save-ADB "battery-30s" $power
+Save-ADB "dumpsys-battery" "dumpsys battery"
+Save-ADB "thermal" 'ls /sys/class/thermal/thermal_zone*/{type,temp} 2>&1'
+Write-Host "Sampling modem and DSP ~60 seconds after ADB became available"
+Start-Sleep -Seconds 30
+$remote=@'
+for d in /sys/class/remoteproc/remoteproc*; do echo ===$d===; cat $d/name $d/state $d/firmware 2>/dev/null; done
+'@
+Save-ADB "remoteproc-60s" $remote
+Save-ADB "qrtr-60s" "if command -v qrtr-lookup >/dev/null 2>&1; then qrtr-lookup; else echo qrtr-lookup_missing; fi; cat /proc/net/qrtr 2>/dev/null || true"
+Save-ADB "vendor-dev-nodes" "ls -l /dev/subsys* /dev/glink* /dev/smd* /dev/diag /dev/at_mdm* /dev/qrtr* /dev/rmnet* 2>&1"
+Save-ADB "net-devices" "ip link show"
+Save-ADB "dmesg" "dmesg 2>&1 | tail -n 1800"
+Save-ADB "logcat" "logcat -d -b all -t 2500 2>&1"
+Write-Host ("P447B capture saved to " + $out + ". No firmware/NV commands used.")

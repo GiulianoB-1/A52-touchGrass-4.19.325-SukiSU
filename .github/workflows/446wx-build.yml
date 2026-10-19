@@ -1,12 +1,12 @@
-name: Phase446AC GPI/GSI touchscreen and HWC onset request ring
-run-name: Phase446AC pinned TG GPI/GSI port and HWC request ring
+name: Phase447 guarded Big Merge (baseline 446AF)
+run-name: Phase447 staged drivers inventory and default-off wave guards
 on:
   push:
     branches:
-      - agent/a52-phase446w-handoff-b-default-v1
+      - agent/a52-phase447-big-merge-off-v1
   pull_request:
     branches:
-      - agent/a52-phase446t-gpu-smmu-lifetime-v1
+      - agent/a52-phase446w-handoff-b-default-v1
     paths-ignore:
       - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
@@ -33,7 +33,7 @@ env:
   CCACHE_NOHASHDIR: 'true'
   CCACHE_PATH: /usr/bin:/usr/local/bin
 concurrency:
-  group: a52-phase446w-x-${{ github.ref }}
+  group: a52-phase447-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   gki:
@@ -342,6 +342,10 @@ jobs:
           python3 -m py_compile scripts/446af_gpi_callback_abi.py
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT"
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
+          # Phase447: gates for future ports only. No existing W0/W1 driver changed.
+          python3 -m py_compile scripts/447_stage_control.py scripts/447_manifest_audit.py
+          python3 scripts/447_stage_control.py --root "$ROOT"
+          python3 scripts/447_stage_control.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
@@ -421,6 +425,9 @@ jobs:
           python3 scripts/446ad_gsi_crash_guard.py --root "$ROOT" --check-only
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
+          python3 scripts/447_stage_control.py --root "$ROOT" --check-only
+          python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
+          cat phase447-inventory/phase447-summary.md >> "$GITHUB_STEP_SUMMARY"
           python3 scripts/446z_integrate_resukisu.py --root "$ROOT" --check-only
           grep -Fq 'A52_PHASE305_DISPLAY_RPMH_FLUSH_COMPAT_V1' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
@@ -533,6 +540,7 @@ jobs:
           grep -aFq "P446AB PROP_GET" "$IMAGE"
           grep -aFq "P446AB PROP_SET" "$IMAGE"
           grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P447 GATES initialized wave=" "$IMAGE"
           grep -aFq "P446AF GSI RX_SUBMIT" "$IMAGE"
           grep -aFq "P446AF GSI BADPTR" "$IMAGE"
           grep -aFq "P446AC HWC_RING READY" "$IMAGE"
@@ -780,6 +788,18 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
+      - name: Upload Phase447 manifest and compatibility review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P447-INVENTORY-${{ github.run_number }}
+          path: |
+            merge/manifest.csv
+            phase447-inventory/
+            scripts/447_stage_control.py
+            scripts/447_manifest_audit.py
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
         if: always()
         uses: actions/upload-artifact@v4

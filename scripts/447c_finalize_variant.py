@@ -82,8 +82,13 @@ def main():
         if len((" ".join(first+[word])).encode("ascii"))<=480:
             first.append(word)
         else:spilled.append(word)
-    p1=" ".join(first)
+    # Android boot v2 tools concatenate cmdline + extra_cmdline literally.
+    # Preserve an explicit separator so the last primary token and first
+    # extra token cannot merge when the primary field is no longer full.
     xtra=" ".join(spilled)
+    p1=" ".join(first)+(" " if xtra else "")
+    if (p1+xtra).split()!=first+spilled:
+        raise RuntimeError("P447C boot v2 cmdline boundary token lost")
     if len(p1)>=CMD_LEN or len(xtra)>=EXTRA_LEN:
         raise RuntimeError("P447C cmdline overflow")
     if len(p1)>480:

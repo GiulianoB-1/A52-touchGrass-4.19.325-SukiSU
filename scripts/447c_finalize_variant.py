@@ -101,7 +101,7 @@ def main():
     primary_args=p1.split()
     if not all(k in primary_args for k in critical):
         raise RuntimeError("P447C primary args lost")
-    if "initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
+    if b"initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
         raise RuntimeError("P447C still has initcall_debug")
     x.out.mkdir(parents=True,exist_ok=True)
     target=x.out/(label+".boot.img")

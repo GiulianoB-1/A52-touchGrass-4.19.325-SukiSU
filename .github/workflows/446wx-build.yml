@@ -1,5 +1,5 @@
-name: Phase447 guarded Big Merge (baseline 446AF)
-run-name: Phase447 staged drivers inventory and default-off wave guards
+name: Phase447C independently compiled W2/W3 boot variants and compact primary cmdline
+run-name: Phase447C 3 independent kernel Images A/B/C and ABL cmdline repair
 on:
   push:
     branches:
@@ -38,12 +38,19 @@ concurrency:
 jobs:
   gki:
     if: true
-    name: Build Phase446Z QUP core-voted GENI STM touch
+    name: Build 447C ${{ matrix.variant.id }} (compiled wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - { id: A, wave: 2, mss: 0, ipa: 0 }
+          - { id: B, wave: 3, mss: 0, ipa: 0 }
+          - { id: C, wave: 3, mss: 1, ipa: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
-    # P446Z: one qcom build; no matrix expansion at job-graph creation.
+    # P447C: independent .config builds in parallel in the SAME workflow run.
     steps:
       - uses: actions/checkout@v4
       - name: Validate Phase441 payload
@@ -367,10 +374,25 @@ jobs:
           fi
           # P446AF: retain DWARF in vmlinux for source-line oops decoding.
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable DEBUG_KERNEL --enable DEBUG_INFO --enable DEBUG_INFO_DWARF4 --enable DEBUG_INFO_REDUCED
-          sed -i 's/^CONFIG_LOG_BUF_SHIFT=19$/CONFIG_LOG_BUF_SHIFT=21/' "$BUILD/.config"
-          grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
+          # P447C: compiled fallback per variant; extra_cmdline is truncated by ABL.
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-val A52_WAVE_DEFAULT "${{ matrix.variant.wave }}"
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 23
+          if [ "${{ matrix.variant.mss }}" = 1 ]; then
+            "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_MSS_DEFAULT
+          else
+            "$ROOT/scripts/config" --file "$BUILD/.config" --disable A52_MSS_DEFAULT
+          fi
+          if [ "${{ matrix.variant.ipa }}" = 1 ]; then
+            "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_IPA_DEFAULT
+          else
+            "$ROOT/scripts/config" --file "$BUILD/.config" --disable A52_IPA_DEFAULT
+          fi
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
-          grep -Fxq CONFIG_LOG_BUF_SHIFT=21 "$BUILD/.config"
+          grep -Fxq "CONFIG_A52_WAVE_DEFAULT=${{ matrix.variant.wave }}" "$BUILD/.config"
+          grep -Fxq CONFIG_LOG_BUF_SHIFT=23 "$BUILD/.config"
+          if [ "${{ matrix.variant.mss }}" = 1 ]; then grep -Fxq CONFIG_A52_MSS_DEFAULT=y "$BUILD/.config"; else grep -Fxq "# CONFIG_A52_MSS_DEFAULT is not set" "$BUILD/.config"; fi
+          if [ "${{ matrix.variant.ipa }}" = 1 ]; then grep -Fxq CONFIG_A52_IPA_DEFAULT=y "$BUILD/.config"; else grep -Fxq "# CONFIG_A52_IPA_DEFAULT is not set" "$BUILD/.config"; fi
+          echo "P447C COMPILED_CONFIG wave=${{ matrix.variant.wave }} mss=${{ matrix.variant.mss }} ipa=${{ matrix.variant.ipa }} logbuf=8MiB" >> "$GITHUB_STEP_SUMMARY"
           grep -Fxq CONFIG_DEBUG_INFO=y "$BUILD/.config"
           grep -Fxq CONFIG_DEBUG_INFO_DWARF4=y "$BUILD/.config"
           grep -Fxq CONFIG_TOUCHSCREEN_STM_FTS5CU56A=y "$BUILD/.config"
@@ -725,21 +747,34 @@ jobs:
         with:
           path: .ccache
           key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
-      - name: Package Phase447B A/B/C boots from one kernel
+      - name: Package and audit Phase447C independently compiled ${{ matrix.variant.id }} boot
         if: success()
         run: |
           set -Eeuo pipefail
           bash scripts/446z_package_preserved.sh
-          python3 -m py_compile scripts/447b_generate_variants.py
-          python3 scripts/447b_generate_variants.py \
+          python3 -m py_compile scripts/447c_finalize_variant.py
+          python3 scripts/447c_finalize_variant.py \
             --source f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img \
-            --out phase447b-variants
+            --config workspace/gki-phase199-out/.config \
+            --variant "${{ matrix.variant.id }}" --out phase447b-variants
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          x=json.loads(Path("phase447b-variants/compiled-variant.json").read_text())
+          assert x["primary_cmdline_length"] <= 480
+          assert x["compiled_config"]["CONFIG_LOG_BUF_SHIFT"] == 23
+          print("P447C PRIMARY ARGS:",x["primary_cmdline"])
+          print("P447C BOOT HEADER version=",x["boot_header_version"],"cmdline_length=",x["primary_cmdline_length"])
+          PY
+          if command -v unpack_bootimg >/dev/null 2>&1; then
+            unpack_bootimg --boot_img "$(find phase447b-variants -name '*.boot.img' -type f -print -quit)" --out /tmp/p447c-unpack | head -n 45
+          fi
           cat phase447b-variants/READ-BEFORE-FLASH.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446WX-GKI-FAIL-DIAG-${{ github.run_number }}
+          name: A52XQ-PHASE446WX-GKI-FAIL-DIAG-${{ github.run_number }}-${{ matrix.variant.id }}
           path: |
             scripts/446m_apply_gdsc_irq_ab.py
             scripts/446n_apply_dsi_irq_rearm.py
@@ -762,6 +797,7 @@ jobs:
             scripts/446af_decode_oops.sh
             scripts/447b_restore_446ag_touch.py
             scripts/447b_generate_variants.py
+            scripts/447c_finalize_variant.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h
@@ -810,41 +846,41 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-      - name: Upload P447B variant A wave2 battery (EXPERIMENTAL)
-        if: success()
+      - name: Upload P447C independently compiled variant A (EXPERIMENTAL)
+        if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447B-A-W2-BATTERY-EXPERIMENTAL-${{ github.run_number }}
+          name: A52XQ-447C-A-W2-COMPILED-EXPERIMENTAL-${{ github.run_number }}
           path: |
             phase447b-variants/A-wave2-battery-only.boot.img
-            phase447b-variants/variants.json
+            phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload P447B variant B wave3 DSP no MSS (EXPERIMENTAL)
-        if: success()
+      - name: Upload P447C independently compiled variant B (EXPERIMENTAL)
+        if: success() && matrix.variant.id == 'B'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447B-B-W3-DSP-NO-MSS-EXPERIMENTAL-${{ github.run_number }}
+          name: A52XQ-447C-B-W3-NO-MSS-COMPILED-EXPERIMENTAL-${{ github.run_number }}
           path: |
             phase447b-variants/B-wave3-dsp-no-mss.boot.img
-            phase447b-variants/variants.json
+            phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload P447B variant C wave3 modem IPA (EXPERIMENTAL)
-        if: success()
+      - name: Upload P447C independently compiled variant C (EXPERIMENTAL)
+        if: success() && matrix.variant.id == 'C'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447B-C-W3-MSS-IPA-EXPERIMENTAL-${{ github.run_number }}
+          name: A52XQ-447C-C-W3-MSS-IPA-COMPILED-EXPERIMENTAL-${{ github.run_number }}
           path: |
             phase447b-variants/C-wave3-modem-ipa.boot.img
-            phase447b-variants/variants.json
+            phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review
-        if: always()
+        if: always() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P447-INVENTORY-${{ github.run_number }}
@@ -862,7 +898,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
-        if: always()
+        if: always() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
@@ -871,7 +907,7 @@ jobs:
           compression-level: 6
           retention-days: 30
       - name: Upload Phase446i GKI
-        if: success()
+        if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}
@@ -880,7 +916,7 @@ jobs:
           compression-level: 1
           retention-days: 30
       - name: Upload Phase446S final build inputs
-        if: success()
+        if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-FINAL-INPUTS-${{ github.run_number }}
@@ -889,7 +925,7 @@ jobs:
           compression-level: 0
           retention-days: 30
       - name: Upload Phase446i GKI boot image
-        if: success()
+        if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}-BOOT

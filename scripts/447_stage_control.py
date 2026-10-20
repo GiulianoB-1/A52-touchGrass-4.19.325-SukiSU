@@ -31,6 +31,7 @@ def header():
     lines+=["\tA52_447_"+n.upper()+"," for _,n in GATES]
     lines+=["\tA52_447_COUNT","};",
             "bool a52_447_enabled(enum a52_447_subsys id);",
+            "bool a52_447c_trace_verbose(void);",
             "int a52_447_probe_allowed(struct device *dev, enum a52_447_subsys id);",
             "#endif"]
     return "\n".join(lines)+"\n"
@@ -63,6 +64,20 @@ def source():
 "#endif",
 "static unsigned int a52_447_wave=CONFIG_A52_WAVE_DEFAULT;",
 "static bool a52_447_source_cmdline;",
+"static bool a52_447c_verbose;",
+"bool a52_447c_trace_verbose(void)",
+"{",
+"\treturn READ_ONCE(a52_447c_verbose);",
+"}",
+"EXPORT_SYMBOL_GPL(a52_447c_trace_verbose);",
+"static int __init a52_447c_parse_trace(char *v)",
+"{",
+"\tunsigned int n;",
+"\tif (!v || kstrtouint(v,0,&n) || n>1) return -EINVAL;",
+"\ta52_447c_verbose=n!=0;",
+"\treturn 0;",
+"}",
+'early_param("a52.trace_verbose",a52_447c_parse_trace);',
 "static int __init a52_447_parse_wave(char *v)",
 "{","\tunsigned int n;",
 "\tif (!v || kstrtouint(v,0,&n) || n<1 || n>8) return -EINVAL;",
@@ -154,6 +169,8 @@ def check(root):
     assert 'source "drivers/a52_447/Kconfig"' in (root/"drivers/Kconfig").read_text()
     assert "config A52_WAVE_DEFAULT" in (p/"Kconfig").read_text()
     assert "CONFIG_A52_WAVE_DEFAULT" in c
+    assert "a52_447c_trace_verbose(void)" in c
+    assert "a52_447c_trace_verbose(void)" in h
     assert "P447 GATES source=%s wave=%u mss=%d ipa=%d" in c
     assert c.count('early_param("a52.wave"')==1
     assert c.count("GATE(")==len(GATES)-2+1

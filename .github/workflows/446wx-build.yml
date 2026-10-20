@@ -356,6 +356,9 @@ jobs:
           python3 -m py_compile scripts/447_stage_control.py scripts/447_manifest_audit.py
           python3 scripts/447_stage_control.py --root "$ROOT"
           python3 scripts/447_stage_control.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/447c_quiet_frame_trace.py
+          python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
+          python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
@@ -451,6 +454,7 @@ jobs:
           python3 scripts/446ae_dma_wrapper_guard.py --root "$ROOT" --check-only
           python3 scripts/446af_gpi_callback_abi.py --root "$ROOT" --check-only
           python3 scripts/447_stage_control.py --root "$ROOT" --check-only
+          python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
           python3 -m py_compile scripts/447_discover_sources.py
@@ -572,6 +576,7 @@ jobs:
           grep -aFq "P446AB PROP_GET" "$IMAGE"
           grep -aFq "P446AB PROP_SET" "$IMAGE"
           grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P447 GATES source=%s wave=%u mss=%d ipa=%d" "$IMAGE"
           grep -aFq "P447 GATES initialized wave=" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
           grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
@@ -798,6 +803,7 @@ jobs:
             scripts/447b_restore_446ag_touch.py
             scripts/447b_generate_variants.py
             scripts/447c_finalize_variant.py
+            scripts/447c_quiet_frame_trace.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h

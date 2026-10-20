@@ -265,7 +265,7 @@ def audit(root,build,out,strict,image):
             missing.append({"contract":"P446W no stale CONFIG_CMDLINE ttyGS0"})
         # P447C increases printk from 2 MiB to 8 MiB; do not reject a
         # stronger setting just because the legacy contract checked "=21".
-        logbuf = re.search(r"(?m)^CONFIG_LOG_BUF_SHIFT=(\\d+)$", c)
+        logbuf = re.search(r"(?m)^CONFIG_LOG_BUF_SHIFT=(\d+)$", c)
         if not logbuf or int(logbuf.group(1)) < 21:
             missing.append({"contract":"P446U >=2MiB printk ring for unsampled prop capture"})
         if logbuf and int(logbuf.group(1)) > 27:

@@ -83,10 +83,13 @@ static int a52d_mv(struct a52d_fg *fg)
 static int a52d_temp(struct a52d_fg *fg)
 {
 	int v=a52d_sram_read(fg,A52D_FG_TEMP),t;
-	if (v<0) return v;
+	/* Valid negative Celsius readings exist. Use an out-of-range error
+	 * sentinel so probe never mistakes -EIO for -5 deci-Celsius.
+	 */
+	if (v<0) return -10000;
 	t=((v&0x7fff)*10*2989)>>19;
 	if (v&0x8000)t=-t;
-	if (t < -400 || t>1100)return -ERANGE;
+	if (t < -400 || t>1100)return -10000;
 	return t;
 }
 
@@ -120,7 +123,7 @@ static int a52d_get_property(struct power_supply *psy,
 		v->intval=rc*1000;return 0;
 	case POWER_SUPPLY_PROP_TEMP:
 		rc=a52d_temp(fg);
-		if (rc<0)return rc;
+		if (rc<-400)return -EIO;
 		v->intval=rc;return 0;
 	case POWER_SUPPLY_PROP_STATUS:
 		/* No charger/MUIC port: do not guess CHARGING or DISCHARGING. */

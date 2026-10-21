@@ -145,7 +145,7 @@ def check(root):
                   "P447B GSI SUMMARY"):
         if token not in c:raise RuntimeError("P447D I2C missing "+token)
     if "SE8_ONLY=1" in c:raise RuntimeError("P447D stale SE8_ONLY restriction")
-    assert "CONFIG_A52_I2C_SE_ALLOW_DEFAULT" in (root/KCONFIG).read_text()
+    assert "config A52_I2C_SE_ALLOW_DEFAULT" in (root/KCONFIG).read_text()
     print("P447D I2C PASS: SE7/8/10 exact allowlist, wave2-gated, dynamic GSI/FIFO, first transfer and DMA-owner witnesses; no TZ/ADSP probes")
 
 def main():

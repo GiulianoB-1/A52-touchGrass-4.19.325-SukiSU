@@ -201,7 +201,7 @@ def patch(s):
 	ret=devm_add_action_or_reset(&pdev->dev,a52e_put_fg,bat->fg);''',
            "TG learned max init")
     s=one(s,"path=kobject_get_path(&psy->dev.kobj,GFP_KERNEL);",
-          '''ret=a52h_attrs_add(pdev,psy);
+          r'''ret=a52h_attrs_add(pdev,psy);
 	if (ret)
 		return dev_err_probe(&pdev->dev,ret,
 			"P447H SOC sysfs attrs registration failed\n");

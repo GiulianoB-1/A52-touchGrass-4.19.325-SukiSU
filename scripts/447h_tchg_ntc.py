@@ -113,9 +113,9 @@ def patch(s):
           "\tif (READ_ONCE(fg->a52g_ntc))return 0;\n"
           "\tpoints=of_property_count_u32_elems",
           "previous primary channel already acquired")
-    s=one(s,"static void a52h_ntc_retry_work(struct work_struct *work)",
-          HELPER+"\nstatic void a52h_ntc_retry_work(struct work_struct *work)",
-          "helper and Tchg data table")
+    s=one(s,"static int a52g_sample(struct a52d_fg *fg, bool first)",
+          HELPER+"\nstatic int a52g_sample(struct a52d_fg *fg, bool first)",
+          "charger thermistor helpers must be declared before guard sampling")
     s=one(s,"int rc=a52g_ntc_attach(bat->a52h_pdev,power_supply_get_drvdata(bat->fg));",
           "struct a52d_fg *fg=power_supply_get_drvdata(bat->fg);\n"
           "\tint rc=a52g_ntc_attach(bat->a52h_pdev,fg);\n"

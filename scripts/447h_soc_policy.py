@@ -52,6 +52,7 @@ static ssize_t batt_capacity_max_store(struct device *dev,
 	bat->a52h_cap_max=value;
 	bat->a52h_written=true;
 	mutex_unlock(&bat->a52h_cap_lock);
+	power_supply_changed(psy); /* notify Android after learned-capacity restore */
 	dev_info(dev,
 		 "P447H SOC writer=sysfs pid=%d comm=%s cap_old=%d cap_new=%d range=%d..%d no_NV_write=1\n",
 		 task_pid_nr(current),current->comm,old,value,lower,
@@ -119,6 +120,16 @@ GET=r'''static int a52e_battery_get_property(struct power_supply *psy,
 				    union power_supply_propval *val)
 {
 	struct a52e_battery *bat=power_supply_get_drvdata(psy);
+	if (psp==POWER_SUPPLY_PROP_TEMP) {
+		struct a52d_fg *fg=power_supply_get_drvdata(bat->fg);
+		int ntc=a52g_ntc_temp(fg);
+		if (ntc>=-200 && ntc<=900) {
+			val->intval=ntc;
+			return 0;
+		}
+		/* FG die remains labeled fallback, not claimed cell temperature. */
+		return power_supply_get_property(bat->fg,psp,val);
+	}
 	if (psp==POWER_SUPPLY_PROP_CAPACITY) {
 		struct a52d_fg *fg=power_supply_get_drvdata(bat->fg);
 		int raw=a52f_soc_deci(fg);
@@ -216,6 +227,7 @@ def check(root):
     for marker in (TAG,"P447H SOC raw=%d","P447H SOC writer=sysfs",
                    "batt_capacity_max,0660","batt_read_raw_soc,0444",
                    "batt_full_capacity,0444","a52h_attrs_add(pdev,psy)",
+                   "power_supply_changed(psy)","if (psp==POWER_SUPPLY_PROP_TEMP)",
                    "capacity_max_margin","writer=default","writer=%s",
                    "no_NV_write=1"):
         if marker not in t:raise RuntimeError("P447H SOC missing "+marker)

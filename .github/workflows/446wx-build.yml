@@ -1,5 +1,5 @@
 name: Phase447F Samsung TG I2C numbering + FG child path + SOC parity
-run-name: Phase447F A/B/C TG-numbered I2C, SM5714 child, SOC read-only scaling
+run-name: Phase447F corrected A/B/C TG I2C + FG child + SOC read-only comparison
 on:
   push:
     branches:
@@ -383,7 +383,7 @@ jobs:
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable QCOM_GPI_DMA --enable DMA_ENGINE
           "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_447D_SM5714_RO --enable QCOM_SPMI_ADC5
-          "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_447F_TG_I2C_NR --set-val A52_447F_CAPACITY_MAX_DECI 920
+          "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_447F_TG_I2C_NR
           # No charger or PDIC write-capable driver is allowed in 447D stage 1.
           bash scripts/446z_setup_resukisu.sh "$ROOT" "$BUILD"
           "$ROOT/scripts/config" --file "$BUILD/.config" \
@@ -422,7 +422,6 @@ jobs:
           grep -Fxq CONFIG_QCOM_SPMI_ADC5=y "$BUILD/.config"
           grep -Fxq CONFIG_A52_I2C_SE_ALLOW_DEFAULT=0x580 "$BUILD/.config"
           grep -Fxq CONFIG_A52_447F_TG_I2C_NR=y "$BUILD/.config"
-          grep -Fxq CONFIG_A52_447F_CAPACITY_MAX_DECI=920 "$BUILD/.config"
           if [ "${{ matrix.variant.mss }}" = 1 ]; then grep -Fxq CONFIG_A52_MSS_DEFAULT=y "$BUILD/.config"; else grep -Fxq "# CONFIG_A52_MSS_DEFAULT is not set" "$BUILD/.config"; fi
           if [ "${{ matrix.variant.ipa }}" = 1 ]; then grep -Fxq CONFIG_A52_IPA_DEFAULT=y "$BUILD/.config"; else grep -Fxq "# CONFIG_A52_IPA_DEFAULT is not set" "$BUILD/.config"; fi
           echo "P447C COMPILED_CONFIG wave=${{ matrix.variant.wave }} mss=${{ matrix.variant.mss }} ipa=${{ matrix.variant.ipa }} logbuf=8MiB" >> "$GITHUB_STEP_SUMMARY"
@@ -622,6 +621,7 @@ jobs:
           grep -aFq "P447F I2C NR ctrl=%pa" "$IMAGE"
           grep -aFq "P447F SM5714 FG_CHILD" "$IMAGE"
           grep -aFq "P447F SOC raw_deci=%d" "$IMAGE"
+          grep -aFq "source=DT_no_charge_comparison_pending" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
           grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
           grep -aFq "P447B GSI SUMMARY" "$IMAGE"
@@ -907,7 +907,7 @@ jobs:
         if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447F-A-W2-TG-I2C-FG-SOC-EXPERIMENTAL-${{ github.run_number }}
+          name: A52XQ-447F-A-W2-TG-I2C-FG-SOC-COMPARE-ONLY-${{ github.run_number }}
           path: |
             phase447b-variants/A-wave2-battery-only.boot.img
             phase447b-variants/compiled-variant.json

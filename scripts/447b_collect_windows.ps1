@@ -27,6 +27,41 @@ $power=@'
 for d in battery usb ac otg; do echo ===$d===; for f in capacity status health present voltage_now current_now temp online type usb_type; do cat /sys/class/power_supply/$d/$f 2>/dev/null || true; done; done
 '@
 Save-ADB "battery-30s" $power
+# P447E: collect *effective* sysfs paths and current SELinux labels.
+# This is read-only and does not change SELinux enforcement or vendor files.
+$labels=@'
+for d in /sys/class/power_supply/*; do
+  [ -e "$d" ] || continue
+  echo "===== $d ====="
+  readlink -f "$d" 2>&1
+  ls -lZd "$d" "$(readlink -f "$d")" 2>&1
+  for f in type present capacity voltage_now temp status online; do
+    if [ -e "$d/$f" ]; then
+      echo "--- $d/$f"
+      readlink -f "$d/$f"
+      ls -lZ "$d/$f" 2>&1
+      cat "$d/$f" 2>&1
+    fi
+  done
+done
+'@
+Save-ADB "power_supply_labels" $labels
+$policy=@'
+echo "===== effective SELinux enforcement ====="
+getenforce 2>&1
+echo "===== vendor/odm genfs_contexts files (if mounted as text) ====="
+for f in /vendor/etc/selinux/genfs_contexts /odm/etc/selinux/genfs_contexts /system/etc/selinux/plat_genfs_contexts /system_ext/etc/selinux/genfs_contexts /product/etc/selinux/genfs_contexts; do
+  if [ -f "$f" ]; then
+    echo "### $f"
+    grep -iE "genfscon sysfs.*(power_supply|battery|i2c|thermal|samsung_mobile)" "$f" 2>&1 || true
+  fi
+done
+echo "===== visible policy candidates ====="
+find /vendor/etc/selinux /odm/etc/selinux /system/etc/selinux /system_ext/etc/selinux -maxdepth 3 -type f -name "*genfs*" -print 2>/dev/null
+'@
+Save-ADB "selinux_genfscon_expected" $policy
+Save-ADB "samsung_battery_platform" 'for d in /sys/bus/platform/devices/*battery* /sys/bus/platform/devices/samsung_mobile*; do [ -e "$d" ] && { echo "$d"; readlink -f "$d"; ls -Zd "$d"; }; done'
+Save-ADB "hal_health_thermal_denials" 'dmesg 2>&1 | grep -E "hal_health_default|hal_thermal_default|P447E battery|P447E I2C|P447 W2 battery" | tail -n 300'
 Save-ADB "dumpsys-battery" "dumpsys battery"
 Save-ADB "thermal" 'ls /sys/class/thermal/thermal_zone*/{type,temp} 2>&1'
 Write-Host "Sampling modem and DSP ~60 seconds after ADB became available"

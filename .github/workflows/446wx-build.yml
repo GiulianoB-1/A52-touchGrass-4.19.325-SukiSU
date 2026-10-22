@@ -1,5 +1,5 @@
-name: Phase447G emergency 45C charging inhibit and battery thermal diagnostics
-run-name: Phase447G charger safety guard A/B/C 45C fallback (no full charger controls)
+name: Phase447H ADC5/NTC retry and learned SM5714 SOC scaling (guard still only charger write)
+run-name: Phase447H A/B/C 0x55 IIO-NTC retry and TG scaled SOC; charger remains guard-only
 on:
   push:
     branches:
@@ -396,6 +396,13 @@ jobs:
           python3 -m py_compile scripts/447g_adc5_gpio2.py
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT"
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
+          # P447H: IIO deferral must RECOVER; capacity_max is learned via
+          # bounded Samsung-compatible battery sysfs, never set to 920.
+          python3 -m py_compile scripts/447h_ntc_retry.py scripts/447h_soc_policy.py
+          python3 scripts/447h_ntc_retry.py --root "$ROOT"
+          python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
+          python3 scripts/447h_soc_policy.py --root "$ROOT"
+          python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -513,6 +520,8 @@ jobs:
           python3 scripts/447g_chg_guard.py --root "$ROOT" --check-only
           python3 scripts/447g_ntc_iio.py --root "$ROOT" --check-only
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
+          python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
+          python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -650,6 +659,12 @@ jobs:
           grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
           grep -aFq "gpio2_pu2" "$IMAGE"
           grep -aFq "gpio3_pu2" "$IMAGE"
+          grep -aFq "gpio4_pu2" "$IMAGE"
+          grep -aFq "P447H NTC RETRY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=" "$IMAGE"
+          grep -aFq "P447H SOC raw=" "$IMAGE"
+          grep -aFq "P447H SOC writer=sysfs" "$IMAGE"
+          grep -aFq "batt_capacity_max" "$IMAGE"
           grep -aFq "source=DT_no_charge_comparison_pending" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
           grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
@@ -895,6 +910,8 @@ jobs:
             scripts/447g_chg_guard.py
             scripts/447g_ntc_iio.py
             scripts/447g_adc5_gpio2.py
+            scripts/447h_ntc_retry.py
+            scripts/447h_soc_policy.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h

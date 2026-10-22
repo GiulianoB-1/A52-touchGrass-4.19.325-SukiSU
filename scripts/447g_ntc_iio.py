@@ -114,7 +114,7 @@ static void a52g_ntc_attach(struct platform_device *pdev,struct a52d_fg *fg)
 		points,adc[0],adc[points-1]);
 }
 '''
-def one(s,a,b,descr):
+def once(s,a,b,descr):
     n=s.count(a)
     if n!=1:raise RuntimeError(f"P447G NTC {descr} anchor count={n}")
     return s.replace(a,b,1)

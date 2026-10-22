@@ -33,8 +33,17 @@ def check(root):
     for marker in (TAG,"i2c_add_adapter(&gi2c->adap)",
                    "P447E I2C SE%d DT_ALIAS=%d"):
         if marker not in s:raise RuntimeError("P447E alias audit missing "+marker)
+    # Phase447F has captured TG proof of exact A52 SE7/SE8/SE10 IDs.
+    # Only that fail-closed mapping is exempt from the 447E ban.
     if "i2c_add_numbered_adapter(&gi2c->adap)" in s:
-        raise RuntimeError("P447E forbids unverified forced adapter number")
+        required=("A52_PHASE447F_TG_I2C_NR_V1",
+                  "case 7: return 34", "case 8: return 35",
+                  "case 10:return 36",
+                  "gi2c->se.a52_legacy_ahb",
+                  "a52d_i2c_legacy_allowed")
+        if not all(x in s for x in required):
+            raise RuntimeError("P447E forbids unverified forced adapter number")
+        print("P447E/P447F I2C whitelist PASS: TG-proven SE7/SE8/SE10 only")
     print("P447E I2C ALIAS PASS: uses existing 5.10 of_alias_get_id auto-number and reports each resolved alias; touch untouched")
 def main():
     p=argparse.ArgumentParser()

@@ -129,6 +129,17 @@ static int a52d_soc(struct a52d_fg *fg)
 
 def check(root):
     c=(root/SRC).read_text()
+    # Phase447H supersedes 447F's comparison-only Android capacity value.
+    # Validate the actual learned-max successor while retaining raw FG math.
+    if "A52_PHASE447H_LEARNED_SOC_SYSFS_V1" in c:
+        for m in (TAG,"static int a52f_soc_deci",
+                  "P447H SOC raw=%d","writer=%s",
+                  "batt_capacity_max,0660"):
+            if m not in c:raise RuntimeError("P447F/447H SOC contract "+m)
+        if "CONFIG_A52_447F_CAPACITY_MAX_DECI" in c:
+            raise RuntimeError("P447F/447H guessed 920 prohibited")
+        print("P447F -> P447H SOC PASS: raw FG mathematics, bounded learned capacity ABI")
+        return
     for item in (TAG,"static int a52f_soc_deci",
                  "source=DT_no_charge_comparison_pending",
                  "ui_preserved=%d","fuelgauge,capacity_max",

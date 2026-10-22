@@ -388,6 +388,9 @@ jobs:
           python3 -m py_compile scripts/447g_chg_guard.py
           python3 scripts/447g_chg_guard.py --root "$ROOT"
           python3 scripts/447g_chg_guard.py --root "$ROOT" --check-only
+          python3 -m py_compile scripts/447g_ntc_iio.py
+          python3 scripts/447g_ntc_iio.py --root "$ROOT"
+          python3 scripts/447g_ntc_iio.py --root "$ROOT" --check-only
           # ADC5 read-only compatibility: 0x53 rfc_cam_therm was rejected.
           # No claim of battery NTC until DT-to-channel and temp table verify.
           python3 -m py_compile scripts/447g_adc5_gpio2.py
@@ -508,6 +511,7 @@ jobs:
           python3 scripts/447f_sm5714_fg_child.py --root "$ROOT" --check-only
           python3 scripts/447f_soc_scaling.py --root "$ROOT" --check-only
           python3 scripts/447g_chg_guard.py --root "$ROOT" --check-only
+          python3 scripts/447g_ntc_iio.py --root "$ROOT" --check-only
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
@@ -643,6 +647,7 @@ jobs:
           grep -aFq "P447G CHG_GUARD SAMPLE" "$IMAGE"
           grep -aFq "P447G CHG_GUARD INHIBIT_OK" "$IMAGE"
           grep -aFq "P447G CHG_GUARD INHIBIT_FAILED" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
           grep -aFq "gpio2_pu2" "$IMAGE"
           grep -aFq "source=DT_no_charge_comparison_pending" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
@@ -887,6 +892,7 @@ jobs:
             scripts/447f_sm5714_fg_child.py
             scripts/447f_soc_scaling.py
             scripts/447g_chg_guard.py
+            scripts/447g_ntc_iio.py
             scripts/447g_adc5_gpio2.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c

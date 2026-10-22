@@ -669,6 +669,7 @@ jobs:
           grep -aFq "gpio1_pu2" "$IMAGE"
           grep -aFq "P447H ADC5 GPIO" "$IMAGE"
           grep -aFq "P447H ADC5 PROVIDER DT_OK" "$IMAGE"
+          grep -aFq "P447H TEMP MISSING" "$IMAGE"
           grep -aFq "gpio2_pu2" "$IMAGE"
           grep -aFq "gpio3_pu2" "$IMAGE"
           grep -aFq "gpio4_pu2" "$IMAGE"

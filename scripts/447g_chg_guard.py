@@ -151,7 +151,7 @@ def patch(s):
 			soc,mv,temp,-EIO);
 		return -ENODEV;
 	}'''
-    b=a+'''
+    b='''
 	if (IS_ENABLED(CONFIG_A52_447G_CHG_GUARD)) {
 		if (!i2c_check_functionality(client->adapter,
 					I2C_FUNC_SMBUS_BYTE_DATA))
@@ -165,7 +165,7 @@ def patch(s):
 		if (rc<0)
 			return dev_err_probe(&client->dev,rc,
 				"P447G CHG_GUARD initial verification failed; no battery supplier registered\\n");
-	}'''
+	}''' + a
     s=once(s,a,b,"immediate pre-psy thermal inhibit")
     s=once(s,"schedule_delayed_work(&fg->snapshot,msecs_to_jiffies(30000));",
            "schedule_delayed_work(&fg->snapshot,msecs_to_jiffies(30000));\n"

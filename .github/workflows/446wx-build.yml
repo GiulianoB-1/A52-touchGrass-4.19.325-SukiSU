@@ -649,6 +649,7 @@ jobs:
           grep -aFq "P447G CHG_GUARD INHIBIT_FAILED" "$IMAGE"
           grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
           grep -aFq "gpio2_pu2" "$IMAGE"
+          grep -aFq "gpio3_pu2" "$IMAGE"
           grep -aFq "source=DT_no_charge_comparison_pending" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
           grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"

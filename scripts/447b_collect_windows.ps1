@@ -81,6 +81,10 @@ Save-ADB "dmesg" "dmesg 2>&1 | tail -n 1800"
 # P447: one-time 40-before/20-after HWC dump can occur before this
 # collector. Keep EVERY marker line; the regular dmesg file is truncated.
 Save-ADB "flicker-ring" 'dmesg 2>&1 | grep -F "P447 FLICKER_RING"'
+# One-shot and 30s-ratelimited 5.10 DRM vblank EINVAL provenance.
+# Keep every P447J line, independent of the normal dmesg tail.
+Save-ADB "vblank-447j" 'dmesg 2>&1 | grep -F "P447J VBLANK"'
+Save-ADB "sdm-vblank-userspace" 'logcat -b all -d -v threadtime 2>&1 | grep -E "drmWaitVBlank failed|RegisterVSync|SetVsyncEnabled|CommitLayerStack: Commit failed|BAD_DISPLAY" | tail -n 220'
 # Safety diagnostics retain all emergency inhibit lines, including early boot.
 Save-ADB "charger-guard" 'dmesg 2>&1 | grep -E "P447G CHG_GUARD|P447H (TEMP|NTC|SOC|TCHG|ADC5)|P447 W2 battery|qcom-spmi-adc5.*(invalid channel|probe)"'
 Save-ADB "battery-learned-soc" 'for f in batt_capacity_max batt_read_raw_soc batt_full_capacity capacity temp voltage_now; do p=/sys/class/power_supply/battery/$f; echo "==== $p ===="; ls -lZ "$p" 2>&1; cat "$p" 2>&1; done'

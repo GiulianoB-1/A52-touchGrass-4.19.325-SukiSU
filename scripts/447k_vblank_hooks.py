@@ -80,11 +80,17 @@ void a52k_msm_crtc_disable_vblank(struct drm_crtc *crtc)
                "void a52k_msm_crtc_disable_vblank(struct drm_crtc *crtc);\n"
                "struct msm_kms;\n", "header declarations")
     funcs = "static const struct drm_crtc_funcs sde_crtc_funcs = {\n"
-    crtc = once(crtc, funcs, 
-                "/* " + TAG + " */\n" + funcs +
-                "\t.enable_vblank = a52k_msm_crtc_enable_vblank,\n"
+    # The imported SDE build has a different header visibility chain from
+    # msm_drv.c. Put the declarations immediately before the CRTC function
+    # table in the *consumer* TU: Clang must see them before the designators.
+    crtc = once(crtc, funcs,
+                "/* " + TAG + " */\n" +
+                "extern int a52k_msm_crtc_enable_vblank(struct drm_crtc *crtc);\n" +
+                "extern void a52k_msm_crtc_disable_vblank(struct drm_crtc *crtc);\n" +
+                funcs +
+                "\t.enable_vblank = a52k_msm_crtc_enable_vblank,\n" +
                 "\t.disable_vblank = a52k_msm_crtc_disable_vblank,\n",
-                "install DRM 5.10 CRTC callbacks")
+                "install DRM 5.10 CRTC callbacks with visible prototypes")
     for p, data in zip(paths, (drv, hdr, crtc)):
         p.write_text(data)
     print("P447K APPLY: DRM 5.10 KMS CRTC hooks -> original TG vblank worker")
@@ -112,6 +118,11 @@ def check(root):
         if t not in hdr:
             raise RuntimeError("P447K declaration missing: " + t)
     start = crtc.index("static const struct drm_crtc_funcs sde_crtc_funcs = {")
+    # Fail CI *before* compilation if this exact TU cannot see both functions.
+    for prototype in ("extern int a52k_msm_crtc_enable_vblank(struct drm_crtc *crtc);",
+                      "extern void a52k_msm_crtc_disable_vblank(struct drm_crtc *crtc);"):
+        if crtc.count(prototype) != 1 or crtc.index(prototype) > start:
+            raise RuntimeError("P447K CRTC prototype absent before funcs: " + prototype)
     end = crtc.index("};", start)
     cb = crtc[start:end]
     for t in (".enable_vblank = a52k_msm_crtc_enable_vblank,",

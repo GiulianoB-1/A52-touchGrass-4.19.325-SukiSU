@@ -1,5 +1,5 @@
 name: Phase447H ADC5/NTC retry and learned SM5714 SOC scaling (guard still only charger write)
-run-name: Phase447H A/B/C 0x55 IIO-NTC retry and TG scaled SOC; charger remains guard-only
+run-name: Phase447H A/B/C TG bat_thm 0x53 + chg_thm 0x54 + quiet 0x55; guard-only charging
 on:
   push:
     branches:
@@ -404,9 +404,11 @@ jobs:
           python3 scripts/447h_adc5_tg_ntc.py --root "$ROOT" --check-only
           # P447H: IIO deferral must RECOVER; capacity_max is learned via
           # bounded Samsung-compatible battery sysfs, never set to 920.
-          python3 -m py_compile scripts/447h_ntc_retry.py scripts/447h_soc_policy.py
+          python3 -m py_compile scripts/447h_ntc_retry.py scripts/447h_tchg_ntc.py scripts/447h_soc_policy.py
           python3 scripts/447h_ntc_retry.py --root "$ROOT"
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
+          python3 scripts/447h_tchg_ntc.py --root "$ROOT"
+          python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT"
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
@@ -528,6 +530,7 @@ jobs:
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
           python3 scripts/447h_adc5_tg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
+          python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
@@ -671,6 +674,8 @@ jobs:
           grep -aFq "gpio4_pu2" "$IMAGE"
           grep -aFq "P447H NTC RETRY" "$IMAGE"
           grep -aFq "P447H TEMP therm=" "$IMAGE"
+          grep -aFq "P447H TCHG READY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=%d chg=%d fg=%d" "$IMAGE"
           grep -aFq "P447H SOC raw=" "$IMAGE"
           grep -aFq "P447H SOC writer=sysfs" "$IMAGE"
           grep -aFq "batt_capacity_max" "$IMAGE"
@@ -920,6 +925,7 @@ jobs:
             scripts/447g_adc5_gpio2.py
             scripts/447h_adc5_tg_ntc.py
             scripts/447h_ntc_retry.py
+            scripts/447h_tchg_ntc.py
             scripts/447h_soc_policy.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c

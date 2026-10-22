@@ -86,12 +86,12 @@ static int a52d_soc(struct a52d_fg *fg)
 	if (fg->a52f_capacity_max<=fg->a52f_capacity_min ||
 	    fg->a52f_capacity_max>1000) {
 		dev_err(&client->dev,
-			"P447F SOC invalid DT capacity_max=%u min=%u rc=%d\\\\n",
+			"P447F SOC invalid DT capacity_max=%u min=%u rc=%d\\n",
 			fg->a52f_capacity_max,fg->a52f_capacity_min,-EINVAL);
 		return -EINVAL;
 	}
 	dev_info(&client->dev,
-		"P447F SOC TG_DT max=%u min=%u type=%#x mode=compare_only (no inferred 920)\\\\n",
+		"P447F SOC TG_DT max=%u min=%u type=%#x mode=compare_only (no inferred 920)\\n",
 		fg->a52f_capacity_max,fg->a52f_capacity_min,
 		fg->a52f_calc_type);
 	fg->dev=&client->dev;'''
@@ -118,7 +118,7 @@ static int a52d_soc(struct a52d_fg *fg)
 			(int)(fg->a52f_capacity_max-fg->a52f_capacity_min),
 			0,1000);
 		pr_info_ratelimited(
-			"P447F SOC raw_deci=%d TG_max=%u TG_min=%u TG_type=%#x candidate_pct=%d ui_preserved=%d source=DT_no_charge_comparison_pending\\\\n",
+			"P447F SOC raw_deci=%d TG_max=%u TG_min=%u TG_type=%#x candidate_pct=%d ui_preserved=%d source=DT_no_charge_comparison_pending\\n",
 			deci,fg->a52f_capacity_max,fg->a52f_capacity_min,
 			fg->a52f_calc_type,scaled/10,val->intval);
 		return 0;

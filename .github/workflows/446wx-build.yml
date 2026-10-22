@@ -1,5 +1,5 @@
-name: Phase447H ADC5/NTC retry and learned SM5714 SOC scaling (guard still only charger write)
-run-name: Phase447J A/B/C passive vblank EINVAL diagnosis; 447H charger guard unchanged
+name: Phase447K CRTC vblank 5.10 compatibility fix (charger guard unchanged)
+run-name: Phase447K A/B/C KMS vblank CRTC hook fix; retain P447J diagnostic
 on:
   push:
     branches:
@@ -411,12 +411,15 @@ jobs:
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT"
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
-          # P447J diagnosis-only: drm_wait_vblank_ioctl, drm_vblank_get,
-          # 5.10 KMS CRTC callback vs TG legacy enable_vblank. Absolutely
-          # NO vblank/modeset/continuous-splash behavior change in this run.
+          # P447J passive vblank diagnostics retained unchanged.
           python3 -m py_compile scripts/447j_vblank_diag.py
           python3 scripts/447j_vblank_diag.py --root "$ROOT"
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
+          # P447K: connect 5.10 KMS CRTC hooks to the original TG
+          # vblank_ctrl_queue_work path. NO USB/charger/modeset changes.
+          python3 -m py_compile scripts/447k_vblank_hooks.py
+          python3 scripts/447k_vblank_hooks.py --root "$ROOT"
+          python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -539,6 +542,7 @@ jobs:
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
+          python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -929,6 +933,7 @@ jobs:
             scripts/447c_quiet_frame_trace.py
             scripts/447_flicker_ring.py
             scripts/447j_vblank_diag.py
+            scripts/447k_vblank_hooks.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
             scripts/447e_samsung_battery_platform.py

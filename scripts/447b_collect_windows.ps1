@@ -81,6 +81,9 @@ Save-ADB "dmesg" "dmesg 2>&1 | tail -n 1800"
 # P447: one-time 40-before/20-after HWC dump can occur before this
 # collector. Keep EVERY marker line; the regular dmesg file is truncated.
 Save-ADB "flicker-ring" 'dmesg 2>&1 | grep -F "P447 FLICKER_RING"'
+# Safety diagnostics retain all emergency inhibit lines, including early boot.
+Save-ADB "charger-guard" 'dmesg 2>&1 | grep -E "P447G CHG_GUARD|P447 W2 battery|qcom-spmi-adc5.*(invalid channel|probe)"'
+Save-ADB "charger-vbus-iio" 'for d in /sys/bus/iio/devices/iio:device*; do [ -d "$d" ] || continue; echo "===== $d ====="; cat "$d/name" 2>&1; ls "$d" | grep -E "(in_voltage|in_temp|name)" | head -n 70; done; echo "===== POWER_SUPPLY ====="; for d in /sys/class/power_supply/*; do [ -e "$d" ] || continue; echo "$d"; cat "$d/uevent" 2>&1; done'
 Save-ADB "logcat" "logcat -d -b all -t 2500 2>&1"
 Write-Host ("P447B capture saved to " + $out + ". No firmware/NV commands used.")
 

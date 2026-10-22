@@ -396,6 +396,12 @@ jobs:
           python3 -m py_compile scripts/447g_adc5_gpio2.py
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT"
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
+          # P447H addendum: ALL FOUR GPIO1..4 (0x52..0x55) must be
+          # available. Preserve TG's voltage/uV + Samsung NTC DT table
+          # rather than double-converting with ADC5_CHAN_TEMP.
+          python3 -m py_compile scripts/447h_adc5_tg_ntc.py
+          python3 scripts/447h_adc5_tg_ntc.py --root "$ROOT"
+          python3 scripts/447h_adc5_tg_ntc.py --root "$ROOT" --check-only
           # P447H: IIO deferral must RECOVER; capacity_max is learned via
           # bounded Samsung-compatible battery sysfs, never set to 920.
           python3 -m py_compile scripts/447h_ntc_retry.py scripts/447h_soc_policy.py
@@ -520,6 +526,7 @@ jobs:
           python3 scripts/447g_chg_guard.py --root "$ROOT" --check-only
           python3 scripts/447g_ntc_iio.py --root "$ROOT" --check-only
           python3 scripts/447g_adc5_gpio2.py --root "$ROOT" --check-only
+          python3 scripts/447h_adc5_tg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -656,6 +663,9 @@ jobs:
           grep -aFq "P447G CHG_GUARD INHIBIT_OK" "$IMAGE"
           grep -aFq "P447G CHG_GUARD INHIBIT_FAILED" "$IMAGE"
           grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
+          grep -aFq "gpio1_pu2" "$IMAGE"
+          grep -aFq "P447H ADC5 GPIO" "$IMAGE"
+          grep -aFq "P447H ADC5 PROVIDER DT_OK" "$IMAGE"
           grep -aFq "gpio2_pu2" "$IMAGE"
           grep -aFq "gpio3_pu2" "$IMAGE"
           grep -aFq "gpio4_pu2" "$IMAGE"
@@ -908,6 +918,7 @@ jobs:
             scripts/447g_chg_guard.py
             scripts/447g_ntc_iio.py
             scripts/447g_adc5_gpio2.py
+            scripts/447h_adc5_tg_ntc.py
             scripts/447h_ntc_retry.py
             scripts/447h_soc_policy.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c

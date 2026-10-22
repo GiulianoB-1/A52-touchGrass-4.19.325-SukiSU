@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
-"""447F read-only TG-style capacity scaling for Android-facing battery ONLY.
+"""447F corrected: replicate TG nominal SOC mathematics without inferred scale.
 
-TouchGrass: raw 52.8% -> 57.4%, implying effective runtime max ~920
-deci-percent; nominal DT capacity_max=1000, margin=300, type=0x1f.
-The effective maximum can be modified by Samsung policy/calibration;
-we do NOT pretend 920 is an always-correct factory value or write learned NV.
-Retain the "sm5714-fuelgauge" supply as raw real hardware percentage.
+2026-10-22 correction: GKI 51% vs TG 57% is explained by charging in
+recovery between captures. GKI's actual reading was CORRECT. Absolutely
+do not apply the inferred 920 effective max to the shipped UI.
+
+Port the read-only TG 0.1%-resolution SOC/scaling computation for
+diagnostic parity, with DT capacity_max/min and nominal 1000/0 fallback.
+Preserve the already-working GKI Android CAPACITY output unmodified until
+back-to-back, NO-CHARGING comparisons prove policy changes are needed.
+TG atomic/skip-abnormal/full calibration require charger state and are not
+enabled here; no gauge calibration/NV/OTP writes.
 """
 import argparse
 from pathlib import Path
-TAG="A52_PHASE447F_SOC_READONLY_SCALE_V1"
+TAG="A52_PHASE447F_SOC_PARITY_CORRECTED_V2"
 SRC=Path("drivers/a52_447/a52_sm5714_fg_ro.c")
 KCFG=Path("drivers/a52_447/Kconfig")
 def one(s,a,b,what):
     n=s.count(a)
-    if n!=1:raise RuntimeError(f"P447F scale {what} anchors={n}")
+    if n!=1:raise RuntimeError(f"P447F soc parity {what} anchors={n}")
     return s.replace(a,b,1)
+
 def patch(s):
     if TAG in s:return s
     if "A52_PHASE447F_SM5714_FG_CHILD_V1" not in s:
-        raise RuntimeError("P447F needs MFD-FG-child generated C")
-    before='''static int a52d_soc(struct a52d_fg *fg)
+        raise RuntimeError("P447F requires SM5714 FG child source")
+    raw='''static int a52d_soc(struct a52d_fg *fg)
 {
 	int v=a52d_sram_read(fg,A52D_FG_SOC);
 	int soc;
@@ -30,8 +36,9 @@ def patch(s):
 	if (soc<0 || soc>1100) return -ERANGE;
 	return clamp_val((soc+5)/10,0,100);
 }'''
-    after='''/* A52_PHASE447F_SOC_READONLY_SCALE_V1
- * TG sm5714_get_soc uses this exact deci-percent conversion.
+    replacement='''/* A52_PHASE447F_SOC_PARITY_CORRECTED_V2
+ * TG sm5714_get_soc(): 0.1% = (raw_sram_word * 10) >> 8.
+ * Preserve the GKI capacity rounding which was independently verified.
  */
 static int a52f_soc_deci(struct a52d_fg *fg)
 {
@@ -47,62 +54,101 @@ static int a52d_soc(struct a52d_fg *fg)
 	if (deci<0)return deci;
 	return clamp_val((deci+5)/10,0,100);
 }'''
-    s=one(s,before,after,"deci-percent source")
-    before='''	/* Preserve read failures; NEVER synthesize capacity, charger status,
+    s=one(s,raw,replacement,"TG raw 0.1 percent conversion")
+    # No synthetic 920! The running DT has nominal max=1000 and min=0.
+    s=one(s,"struct a52d_fg {\n",
+          "struct a52d_fg {\n\tu32 a52f_capacity_max;\n\tu32 a52f_capacity_min;\n\tu32 a52f_calc_type;\n",
+          "DT capacity configuration")
+    anchor='''	mutex_init(&fg->lock);
+	fg->dev=&client->dev;'''
+    dt='''	mutex_init(&fg->lock);
+	/* TG parse_dt() reads the sm5714-fuelgauge DT node. Missing
+	 * policy is NOT a reason to invent 920; use pinned A52 R02's
+	 * capacity_max=1000, min=0 only for read-only comparison.
+	 */
+	fg->a52f_capacity_max=1000;
+	fg->a52f_capacity_min=0;
+	fg->a52f_calc_type=0x1f;
+	{
+		struct device_node *np=of_find_node_by_name(NULL,
+							"sm5714-fuelgauge");
+		if (np) {
+			of_property_read_u32(np,"fuelgauge,capacity_max",
+					    &fg->a52f_capacity_max);
+			of_property_read_u32(np,"fuelgauge,capacity_min",
+					    &fg->a52f_capacity_min);
+			of_property_read_u32(np,
+				"fuelgauge,capacity_calculation_type",
+				&fg->a52f_calc_type);
+			of_node_put(np);
+		}
+	}
+	if (fg->a52f_capacity_max<=fg->a52f_capacity_min ||
+	    fg->a52f_capacity_max>1000) {
+		dev_err(&client->dev,
+			"P447F SOC invalid DT capacity_max=%u min=%u rc=%d\\\\n",
+			fg->a52f_capacity_max,fg->a52f_capacity_min,-EINVAL);
+		return -EINVAL;
+	}
+	dev_info(&client->dev,
+		"P447F SOC TG_DT max=%u min=%u type=%#x mode=compare_only (no inferred 920)\\\\n",
+		fg->a52f_capacity_max,fg->a52f_capacity_min,
+		fg->a52f_calc_type);
+	fg->dev=&client->dev;'''
+    s=one(s,anchor,dt,"probe DT capacity reading")
+    original='''	/* Preserve read failures; NEVER synthesize capacity, charger status,
 	 * USB/AC online state, or an unverified battery-present value.
 	 */
 	return power_supply_get_property(bat->fg,psp,val);'''
-    after='''	/* Preserve read failures; never synthesize charger state.
-	 * The FG supply remains RAW. Only Android's battery value is
-	 * scaled using a runtime-observed, compile-time auditable estimate
-	 * of TouchGrass capacity_max. No learned/NV writes.
+    new='''	/* Port the read-only TG scale calculation, but never ALTER Android
+	 * based on the now-disproven 51% vs 57% comparison. We lack the
+	 * production charging-state-dependent ATOMIC/SKIP_ABNORMAL logic.
+	 * Compare the candidate only until truly back-to-back same-SOC
+	 * boot captures establish a real discrepancy.
 	 */
 	if (psp==POWER_SUPPLY_PROP_CAPACITY) {
-		int deci=a52f_soc_deci(power_supply_get_drvdata(bat->fg));
-		int scaled;
+		struct a52d_fg *fg=power_supply_get_drvdata(bat->fg);
+		int deci=a52f_soc_deci(fg);
+		int ret,scaled;
 		if (deci<0)return deci;
-		/* TG: scaled_deci = (raw_deci - min) * 1000 /
-		 * (capacity_max - min), min=0. TG truncates to integer %.
-		 */
-		scaled=clamp_val(deci*1000 /
-				 CONFIG_A52_447F_CAPACITY_MAX_DECI,0,1000);
-		val->intval=scaled/10;
-		pr_info_ratelimited("P447F SOC raw_deci=%d max_deci=%d scaled_deci=%d ui=%d source=TG_20261022_estimate (not NV)\\n",
-			deci,CONFIG_A52_447F_CAPACITY_MAX_DECI,
-			scaled,val->intval);
+		ret=power_supply_get_property(bat->fg,psp,val);
+		if (ret)return ret;
+		scaled=clamp_val(
+			((deci-(int)fg->a52f_capacity_min)*1000) /
+			(int)(fg->a52f_capacity_max-fg->a52f_capacity_min),
+			0,1000);
+		pr_info_ratelimited(
+			"P447F SOC raw_deci=%d TG_max=%u TG_min=%u TG_type=%#x candidate_pct=%d ui_preserved=%d source=DT_no_charge_comparison_pending\\\\n",
+			deci,fg->a52f_capacity_max,fg->a52f_capacity_min,
+			fg->a52f_calc_type,scaled/10,val->intval);
 		return 0;
 	}
 	return power_supply_get_property(bat->fg,psp,val);'''
-    return one(s,before,after,"Android-facing battery scaling")
+    s=one(s,original,new,"Android CAPACITY passthrough + TG candidate audit")
+    return s
+
 def check(root):
     c=(root/SRC).read_text()
     for item in (TAG,"static int a52f_soc_deci",
-                 "P447F SOC raw_deci=%d","CONFIG_A52_447F_CAPACITY_MAX_DECI",
-                 "sm5714-fuelgauge", "P447F SM5714 FG_CHILD",
+                 "source=DT_no_charge_comparison_pending",
+                 "ui_preserved=%d","fuelgauge,capacity_max",
+                 "sm5714-fuelgauge","P447F SM5714 FG_CHILD",
                  "POWER_SUPPLY_STATUS_UNKNOWN"):
-        if item not in c:raise RuntimeError("P447F scale missing "+item)
-    k=(root/KCFG).read_text()
-    assert "config A52_447F_CAPACITY_MAX_DECI" in k
-    print("P447F SOC PASS: raw hardware supplier intact; Android battery scaled via compiled effective maximum, no NV writes")
+        if item not in c:raise RuntimeError("P447F corrected SOC audit missing "+item)
+    if "CONFIG_A52_447F_CAPACITY_MAX_DECI" in c:
+        raise RuntimeError("P447F inferred max used in compiled source")
+    if "default 920" in (root/KCFG).read_text():
+        raise RuntimeError("P447F inferred 920 still in Kconfig")
+    if "scaled/10,val->intval" not in c:
+        raise RuntimeError("P447F raw capacity passthrough not verified")
+    print("P447F SOC PASS: TG math diagnostics, DT max/min read-only; GKI 51% preserved; no guessed 920")
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--root",required=True,type=Path)
     p.add_argument("--check-only",action="store_true")
-    a=p.parse_args();k=a.root/KCFG;f=a.root/SRC
+    a=p.parse_args();f=a.root/SRC
     if not a.check_only:
-        s=k.read_text()
-        if "config A52_447F_CAPACITY_MAX_DECI" not in s:
-            s+="""
-config A52_447F_CAPACITY_MAX_DECI
-    int "A52 empirical TG effective FG capacity maximum (0.1%)"
-    range 700 1000
-    default 920
-    help
-      TG 2026-10-22: raw SOC 528 -> scaled 574 implies 920.
-      This is a read-only DISPLAY estimate, not production auto calibration.
-      Do not use it to program the gauge or control charger current.
-"""
-            k.write_text(s)
         f.write_text(patch(f.read_text()))
     check(a.root)
 if __name__=="__main__":main()

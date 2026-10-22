@@ -1,5 +1,5 @@
-name: Phase447K CRTC vblank 5.10 compatibility fix (charger guard unchanged)
-run-name: Phase447K A/B/C KMS vblank CRTC hook fix; retain P447J diagnostic
+name: Mangrove Kernel | Phase447K vblank fix (charger guard unchanged)
+run-name: Mangrove Kernel | Phase447K A/B/C, keep P447J diagnostic
 on:
   push:
     branches:
@@ -23,6 +23,8 @@ env:
   GKI_MANIFEST_BRANCH: common-android12-5.10-2026-04
   GKI_COMMON_TAG: android12-5.10-2026-04_r1
   GKI_COMMON_SHA: f960ed27302b1ff8e61e152fc202554d778deccd
+  # Defined-empty prevents Kbuild's dirty-tree '+' from changing uname -r.
+  LOCALVERSION: ''
   TOUCHGRASS_COMMIT: 6bf351bdf18bdb228db79e66f14a7a9c0178e5d7
   TOUCHGRASS_REPO: https://github.com/micr0softstore/samsung_android_kernel_a52xq.git
   CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -38,7 +40,7 @@ concurrency:
 jobs:
   gki:
     if: true
-    name: Build 447C ${{ matrix.variant.id }} (compiled wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }})
+    name: Mangrove Kernel ${{ matrix.variant.id }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     strategy:
@@ -447,6 +449,9 @@ jobs:
           # P447C: compiled fallback per variant; extra_cmdline is truncated by ABL.
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-val A52_WAVE_DEFAULT "${{ matrix.variant.wave }}"
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-val LOG_BUF_SHIFT 23
+          # Phase447M brand: uname -r -> 5.10.x-Mangrove. No Kconfig
+          # ABI, display, charger or touchscreen runtime behavior changed.
+          "$ROOT/scripts/config" --file "$BUILD/.config" --set-str LOCALVERSION "-Mangrove" --disable LOCALVERSION_AUTO
           if [ "${{ matrix.variant.mss }}" = 1 ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_MSS_DEFAULT
           else
@@ -458,6 +463,11 @@ jobs:
             "$ROOT/scripts/config" --file "$BUILD/.config" --disable A52_IPA_DEFAULT
           fi
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "$BUILD/.config"
+          KREL="$(make -s -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 kernelrelease)"
+          case "$KREL" in *-Mangrove) ;; *) echo "FAIL: Mangrove kernelrelease mismatch: $KREL"; exit 1;; esac
+          printf 'Mangrove Kernel release: %s\n' "$KREL" | tee -a "$GITHUB_STEP_SUMMARY"
           grep -Fxq "CONFIG_A52_WAVE_DEFAULT=${{ matrix.variant.wave }}" "$BUILD/.config"
           grep -Fxq CONFIG_LOG_BUF_SHIFT=23 "$BUILD/.config"
           grep -Fxq CONFIG_A52_447D_SM5714_RO=y "$BUILD/.config"
@@ -770,6 +780,8 @@ jobs:
           grep -aFq 'P446W USB early legacy g_serial allocated ttyGS3' "$IMAGE"
           grep -aFq 'P446W U446 COORDINATOR DONE' "$IMAGE"
           grep -aFq 'P446W U446 CONFIGFS defer' "$IMAGE"
+          test -s "$BUILD/include/generated/utsrelease.h"
+          grep -Fq -- '-Mangrove' "$BUILD/include/generated/utsrelease.h"
           python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
           echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
           test -s "$P445"
@@ -902,6 +914,17 @@ jobs:
             unpack_bootimg --boot_img "$(find phase447b-variants -name '*.boot.img' -type f -print -quit)" --out /tmp/p447c-unpack | head -n 45
           fi
           cat phase447b-variants/READ-BEFORE-FLASH.txt >> "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.variant.id }}" in
+            A) ORIGINAL_BOOT="phase447b-variants/A-wave2-battery-only.boot.img" ;;
+            B) ORIGINAL_BOOT="phase447b-variants/B-wave3-dsp-no-mss.boot.img" ;;
+            C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
+            *) echo "Invalid Mangrove variant"; exit 1 ;;
+          esac
+          MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
+          test -s "$ORIGINAL_BOOT"
+          cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1000,9 +1023,9 @@ jobs:
         if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447F-A-W2-TG-I2C-FG-SOC-COMPARE-ONLY-${{ github.run_number }}
+          name: Mangrove-Kernel-447M-A-W2-${{ github.run_number }}
           path: |
-            phase447b-variants/A-wave2-battery-only.boot.img
+            phase447b-variants/Mangrove-Kernel-447M-A.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
@@ -1011,9 +1034,9 @@ jobs:
         if: success() && matrix.variant.id == 'B'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447F-B-W3-NOMSS-TG-I2C-EXPERIMENTAL-${{ github.run_number }}
+          name: Mangrove-Kernel-447M-B-W3-NOMSS-${{ github.run_number }}
           path: |
-            phase447b-variants/B-wave3-dsp-no-mss.boot.img
+            phase447b-variants/Mangrove-Kernel-447M-B.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
@@ -1022,9 +1045,9 @@ jobs:
         if: success() && matrix.variant.id == 'C'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-447F-C-W3-MSS-IPA-TG-I2C-EXPERIMENTAL-${{ github.run_number }}
+          name: Mangrove-Kernel-447M-C-W3-MSS-IPA-${{ github.run_number }}
           path: |
-            phase447b-variants/C-wave3-modem-ipa.boot.img
+            phase447b-variants/Mangrove-Kernel-447M-C.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
           if-no-files-found: error
@@ -1080,7 +1103,7 @@ jobs:
         if: success() && matrix.variant.id == 'A'
         uses: actions/upload-artifact@v4
         with:
-          name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}-BOOT
+          name: Mangrove-Kernel-A52-447M-${{ github.run_number }}-BASE-BOOT
           path: |
             f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
             f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json

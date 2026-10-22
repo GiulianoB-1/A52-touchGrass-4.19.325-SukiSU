@@ -20,7 +20,7 @@ def patch(s):
     if beg<0 or end<0:
         raise RuntimeError("447G ADC5 table does not match ACK layout")
     table=s[beg:end]
-    if "[ADC5_GPIO2_100K_PU]" in table or "[ADC5_GPIO3_100K_PU]" in table:
+    if "[ADC5_GPIO2_100K_PU]" in table or "[ADC5_GPIO3_100K_PU]" in table or "[ADC5_GPIO4_100K_PU]" in table:
         raise RuntimeError("447G upstream GPIO2 channel already populated; inspect instead")
     marker='''	[ADC5_AMUX_THM2]	= ADC5_CHAN_TEMP("amux_thm2", 0,
 					SCALE_HW_CALIB_PM5_SMB_TEMP)'''
@@ -39,17 +39,21 @@ def patch(s):
 	 * channel 0x54. TG treats it as a raw VOLTAGE source as well.
 	 */
 	[ADC5_GPIO3_100K_PU] = ADC5_CHAN_VOLT("gpio3_pu2", 0,
+					SCALE_HW_CALIB_DEFAULT)
+	/* P447H: quiet_therm 0x55 from pinned TG: GPIO4 VOLTAGE. */
+	[ADC5_GPIO4_100K_PU] = ADC5_CHAN_VOLT("gpio4_pu2", 0,
 					SCALE_HW_CALIB_DEFAULT)'''
     return s[:beg]+table.replace(marker,marker+extra)+s[end:]
 def check(root):
     source=(root/FILE).read_text();head=(root/HEADER).read_text()
     for val in (TAG,'[ADC5_GPIO2_100K_PU] = ADC5_CHAN_VOLT("gpio2_pu2", 0',
                 '[ADC5_GPIO3_100K_PU] = ADC5_CHAN_VOLT("gpio3_pu2", 0',
+                '[ADC5_GPIO4_100K_PU] = ADC5_CHAN_VOLT("gpio4_pu2", 0',
                 "SCALE_HW_CALIB_DEFAULT"):
         if val not in source:raise RuntimeError("447G ADC5 source missing "+val)
-    if "#define ADC5_GPIO2_100K_PU" not in head or "#define ADC5_GPIO3_100K_PU" not in head:
+    if "#define ADC5_GPIO2_100K_PU" not in head or "#define ADC5_GPIO3_100K_PU" not in head or "#define ADC5_GPIO4_100K_PU" not in head:
         raise RuntimeError("447G ADC5 DT header missing GPIO2 channel")
-    print("P447G ADC5 PASS: channels 83 and 84 restored as TG voltage inputs; NOT misidentified as battery thermistor")
+    print("P447G ADC5 PASS: channels 83, 84 and 85 restored as TG voltage inputs; NOT misidentified as battery thermistor")
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--root",required=True,type=Path)

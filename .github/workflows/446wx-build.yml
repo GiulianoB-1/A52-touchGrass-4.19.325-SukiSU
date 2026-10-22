@@ -1,5 +1,5 @@
 name: Phase447H ADC5/NTC retry and learned SM5714 SOC scaling (guard still only charger write)
-run-name: Phase447H A/B/C TG bat_thm 0x53 + chg_thm 0x54 + quiet 0x55; guard-only charging
+run-name: Phase447J A/B/C passive vblank EINVAL diagnosis; 447H charger guard unchanged
 on:
   push:
     branches:
@@ -411,6 +411,12 @@ jobs:
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT"
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
+          # P447J diagnosis-only: drm_wait_vblank_ioctl, drm_vblank_get,
+          # 5.10 KMS CRTC callback vs TG legacy enable_vblank. Absolutely
+          # NO vblank/modeset/continuous-splash behavior change in this run.
+          python3 -m py_compile scripts/447j_vblank_diag.py
+          python3 scripts/447j_vblank_diag.py --root "$ROOT"
+          python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -532,6 +538,7 @@ jobs:
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
+          python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -693,6 +700,13 @@ jobs:
           grep -aFq "P447 FLICKER_RING DUMP_BEGIN" "$IMAGE"
           grep -aFq "P447 FLICKER_RING PROP" "$IMAGE"
           grep -aFq "P447 FLICKER_RING DUMP_END" "$IMAGE"
+          # 447J must actually survive compile into final Image, not only source.
+          grep -aFq "P447J VBLANK INIT" "$IMAGE"
+          grep -aFq "P447J VBLANK reason=" "$IMAGE"
+          grep -aFq "P447J VBLANK CRTC idx=" "$IMAGE"
+          grep -aFq "CRTC_HOOK_MISSING_KMS_LEGACY_ONLY" "$IMAGE"
+          grep -aFq "IOCTL_VBLANK_GET_FAILED" "$IMAGE"
+          grep -aFq "IOCTL_PIPE_OOB_OR_NO_LEASE" "$IMAGE"
           grep -aFq "a52_446ac_hwc_requests" "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"
           grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
@@ -914,6 +928,7 @@ jobs:
             scripts/447c_finalize_variant.py
             scripts/447c_quiet_frame_trace.py
             scripts/447_flicker_ring.py
+            scripts/447j_vblank_diag.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
             scripts/447e_samsung_battery_platform.py

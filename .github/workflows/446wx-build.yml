@@ -362,6 +362,13 @@ jobs:
           python3 scripts/447d_se7_se10_i2c.py --root "$ROOT" --check-only
           python3 scripts/447d_readonly_sm5714_fg.py --root "$ROOT"
           python3 scripts/447d_readonly_sm5714_fg.py --root "$ROOT" --check-only
+          # P447E: same SM5714 read-only source, Android-facing battery under
+          # the existing samsung_mobile_device:battery DT platform device.
+          python3 -m py_compile scripts/447e_samsung_battery_platform.py scripts/447e_alias_audit.py
+          python3 scripts/447e_samsung_battery_platform.py --root "$ROOT"
+          python3 scripts/447e_samsung_battery_platform.py --root "$ROOT" --check-only
+          python3 scripts/447e_alias_audit.py --root "$ROOT"
+          python3 scripts/447e_alias_audit.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -467,6 +474,8 @@ jobs:
           python3 scripts/447_stage_control.py --root "$ROOT" --check-only
           python3 scripts/447d_se7_se10_i2c.py --root "$ROOT" --check-only
           python3 scripts/447d_readonly_sm5714_fg.py --root "$ROOT" --check-only
+          python3 scripts/447e_samsung_battery_platform.py --root "$ROOT" --check-only
+          python3 scripts/447e_alias_audit.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -593,6 +602,8 @@ jobs:
           grep -aFq "P447 GATES initialized wave=" "$IMAGE"
           grep -aFq "P447D I2C SE%d PROBE" "$IMAGE"
           grep -aFq "P447 W2 battery FIRST" "$IMAGE"
+          grep -aFq "P447E battery PLATFORM_PROBE rc=0" "$IMAGE"
+          grep -aFq "P447E I2C SE%d DT_ALIAS=%d" "$IMAGE"
           grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
           grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
           grep -aFq "P447B GSI SUMMARY" "$IMAGE"
@@ -821,6 +832,8 @@ jobs:
             scripts/447c_quiet_frame_trace.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
+            scripts/447e_samsung_battery_platform.py
+            scripts/447e_alias_audit.py
             gki/common/drivers/i2c/busses/i2c-qcom-geni.c
             gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
             gki/common/include/linux/ipc_logging.h
@@ -911,6 +924,8 @@ jobs:
             merge/manifest.csv
             merge/userspace-nodes.csv
             merge/wave3-three-layer-contract.md
+            merge/wave2-447d-runtime-port-status.md
+            merge/wave2-447e-policy-acceptance.md
             phase447-inventory/
             scripts/447_stage_control.py
             scripts/447_manifest_audit.py

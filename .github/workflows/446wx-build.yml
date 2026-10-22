@@ -1,5 +1,5 @@
-name: Mangrove Kernel | Phase447K vblank fix (charger guard unchanged)
-run-name: Mangrove Kernel | Phase447K A/B/C, keep P447J diagnostic
+name: Mangrove Kernel | 447M vblank fix, USB/touch diagnostics
+run-name: Mangrove Kernel | 447M A/B/C USB+touch trace (charger unchanged)
 on:
   push:
     branches:
@@ -422,6 +422,15 @@ jobs:
           python3 -m py_compile scripts/447k_vblank_hooks.py
           python3 scripts/447k_vblank_hooks.py --root "$ROOT"
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
+          # P447I touch: first 48 parsed actions; no event-semantic change.
+          python3 -m py_compile scripts/447i_touch_lifecycle_trace.py
+          python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT"
+          python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT" --check-only
+          # P447L USB: composite bind/UDC start/connect and system PM stages.
+          # Read-only: no forced USB role, regulator change or wakelock.
+          python3 -m py_compile scripts/447l_usb_stage_diag.py
+          python3 scripts/447l_usb_stage_diag.py --root "$ROOT"
+          python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -465,6 +474,9 @@ jobs:
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "$BUILD/.config"
+          # Kernelrelease reads include/config/auto.conf. A restored build
+          # cache can leave it stale after olddefconfig updated .config.
+          make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 syncconfig
           KREL="$(make -s -C "$ROOT" O="$BUILD" ARCH=arm64 LLVM=1 LLVM_IAS=1 kernelrelease)"
           case "$KREL" in *-Mangrove) ;; *) echo "FAIL: Mangrove kernelrelease mismatch: $KREL"; exit 1;; esac
           printf 'Mangrove Kernel release: %s\n' "$KREL" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -553,6 +565,8 @@ jobs:
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
+          python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT" --check-only
+          python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -957,6 +971,8 @@ jobs:
             scripts/447_flicker_ring.py
             scripts/447j_vblank_diag.py
             scripts/447k_vblank_hooks.py
+            scripts/447i_touch_lifecycle_trace.py
+            scripts/447l_usb_stage_diag.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
             scripts/447e_samsung_battery_platform.py

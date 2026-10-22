@@ -100,14 +100,14 @@ def patch(src):
     # DRM modeset path deliberately retains exactly its existing behavior:
     # if CRTC hook is missing, it falls through to -EINVAL.
     src=one(src,
-            '''		if (crtc->funcs->enable_vblank)
+            r'''		if (crtc->funcs->enable_vblank)
 			return crtc->funcs->enable_vblank(crtc);
 	} else if (dev->driver->enable_vblank) {
 		return dev->driver->enable_vblank(dev, pipe);
 	}
 
 	return -EINVAL;''',
-            '''		if (crtc->funcs->enable_vblank) {
+            r'''		if (crtc->funcs->enable_vblank) {
 			int rc = crtc->funcs->enable_vblank(crtc);
 			if (rc)
 				a52j_vblank_trace(dev,"CRTC_ENABLE_HOOK_FAILED",
@@ -123,12 +123,12 @@ def patch(src):
 	return -EINVAL;''',
             "report missing KMS callback and hook failures")
     src=one(src,
-            '''	if (!drm_dev_has_vblank(dev))
+            r'''	if (!drm_dev_has_vblank(dev))
 		return -EINVAL;
 
 	if (drm_WARN_ON(dev, pipe >= dev->num_crtcs))
 		return -EINVAL;''',
-            '''	if (!drm_dev_has_vblank(dev)) {
+            r'''	if (!drm_dev_has_vblank(dev)) {
 		a52j_vblank_trace(dev,"GET_NOT_INITIALIZED",pipe,0,0,-EINVAL);
 		return -EINVAL;
 	}
@@ -139,7 +139,7 @@ def patch(src):
 	}''',
             "drm_vblank_get no-init and index checks")
     src=one(src,
-            '''		if (!vblank->enabled) {
+            r'''		if (!vblank->enabled) {
 			atomic_dec(&vblank->refcount);
 			ret = -EINVAL;
 		}
@@ -147,7 +147,7 @@ def patch(src):
 	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 
 	return ret;''',
-            '''		if (!vblank->enabled) {
+            r'''		if (!vblank->enabled) {
 			atomic_dec(&vblank->refcount);
 			ret = -EINVAL;
 			a52j_vblank_trace(dev,"GET_DISABLED_WITH_REFS",
@@ -160,10 +160,10 @@ def patch(src):
             "disabled with references branch")
     # Brief initialization status, exactly once per drm_vblank_init invocation.
     src=one(src,
-            '''	dev->num_crtcs = num_crtcs;
+            r'''	dev->num_crtcs = num_crtcs;
 
 	for (i = 0; i < num_crtcs; i++)''',
-            '''	dev->num_crtcs = num_crtcs;
+            r'''	dev->num_crtcs = num_crtcs;
 	pr_info("P447J VBLANK INIT num_crtcs=%u irq=%d has_vblank=%d drm_driver_legacy_hook=%d\n",
 		num_crtcs,dev->irq_enabled,drm_dev_has_vblank(dev),
 		!!(dev->driver && dev->driver->enable_vblank));
@@ -172,11 +172,11 @@ def patch(src):
             "init count and legacy hook")
     # The ioctl check reasons. Gate entry telemetry to tiny bounded sampling.
     src=one(src,
-            '''	unsigned int flags, pipe, high_pipe;
+            r'''	unsigned int flags, pipe, high_pipe;
 
 	if (!dev->irq_enabled)
 		return -EOPNOTSUPP;''',
-            '''	unsigned int flags, pipe, high_pipe;
+            r'''	unsigned int flags, pipe, high_pipe;
 	static atomic_t a52j_ioctl_enter = ATOMIC_INIT(0);
 
 	if (atomic_inc_return(&a52j_ioctl_enter) <= 3)
@@ -189,30 +189,30 @@ def patch(src):
 	}''',
             "ioctl entry and IRQ readiness")
     src=one(src,
-            '''	if (vblwait->request.type & _DRM_VBLANK_SIGNAL)
+            r'''	if (vblwait->request.type & _DRM_VBLANK_SIGNAL)
 		return -EINVAL;''',
-            '''	if (vblwait->request.type & _DRM_VBLANK_SIGNAL) {
+            r'''	if (vblwait->request.type & _DRM_VBLANK_SIGNAL) {
 		a52j_vblank_trace(dev,"IOCTL_SIGNAL_UNSUPPORTED",~0U,
 				 vblwait->request.type,vblwait->request.sequence,-EINVAL);
 		return -EINVAL;
 	}''',
             "signal flag reason")
     src=one(src,
-            '''			     (_DRM_VBLANK_TYPES_MASK | _DRM_VBLANK_FLAGS_MASK |
+            r'''			     (_DRM_VBLANK_TYPES_MASK | _DRM_VBLANK_FLAGS_MASK |
 			      _DRM_VBLANK_HIGH_CRTC_MASK));
 		return -EINVAL;''',
-            '''			     (_DRM_VBLANK_TYPES_MASK | _DRM_VBLANK_FLAGS_MASK |
+            r'''			     (_DRM_VBLANK_TYPES_MASK | _DRM_VBLANK_FLAGS_MASK |
 			      _DRM_VBLANK_HIGH_CRTC_MASK));
 		a52j_vblank_trace(dev,"IOCTL_INVALID_TYPE_FLAGS",~0U,
 				 vblwait->request.type,vblwait->request.sequence,-EINVAL);
 		return -EINVAL;''',
             "unsupported type bits")
     src=one(src,
-            '''	if (pipe >= dev->num_crtcs)
+            r'''	if (pipe >= dev->num_crtcs)
 		return -EINVAL;
 
 	vblank = &dev->vblank[pipe];''',
-            '''	if (pipe >= dev->num_crtcs) {
+            r'''	if (pipe >= dev->num_crtcs) {
 		a52j_vblank_trace(dev,"IOCTL_PIPE_OOB_OR_NO_LEASE",pipe,
 				 vblwait->request.type,vblwait->request.sequence,-EINVAL);
 		return -EINVAL;
@@ -221,20 +221,20 @@ def patch(src):
 	vblank = &dev->vblank[pipe];''',
             "client CRTC index mapping")
     src=one(src,
-            '''			     "crtc %d failed to acquire vblank counter, %d\n",
+            r'''			     "crtc %d failed to acquire vblank counter, %d\n",
 			     pipe, ret);
 		return ret;''',
-            '''			     "crtc %d failed to acquire vblank counter, %d\n",
+            r'''			     "crtc %d failed to acquire vblank counter, %d\n",
 			     pipe, ret);
 		a52j_vblank_trace(dev,"IOCTL_VBLANK_GET_FAILED",pipe,
 				 vblwait->request.type,vblwait->request.sequence,ret);
 		return ret;''',
             "get failure reason")
     src=one(src,
-            '''	default:
+            r'''	default:
 		ret = -EINVAL;
 		goto done;''',
-            '''	default:
+            r'''	default:
 		ret = -EINVAL;
 		a52j_vblank_trace(dev,"IOCTL_INVALID_REQUEST_MODE",pipe,
 				 vblwait->request.type,vblwait->request.sequence,ret);

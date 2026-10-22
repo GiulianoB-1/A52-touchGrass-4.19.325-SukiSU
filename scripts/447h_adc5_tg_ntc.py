@@ -36,7 +36,7 @@ def check(root):
         expected=f'[{name}] = ADC5_CHAN_VOLT("{label}", 0,'
         if expected not in src or f'#define {name}' not in hdr:
             raise RuntimeError(f"P447H ADC5 MISSING {num} {name}: cannot build unsafe missing NTC")
-    if TAG not in src or "P447H ADC5 GPIO" not in src or "P447H ADC5 PROVIDER" not in src:
+    if TAG not in src or "P447H ADC5 GPIO" not in src or "P447H ADC5 PROVIDER" not in src or "P447H TEMP MISSING" not in src:
         raise RuntimeError("P447H ADC5 probe diagnostics missing")
     # A generic TEMP-scaled channel would double-convert with Samsung DT table.
     for name,_,num in CHANNELS:
@@ -61,6 +61,23 @@ def patch(src):
 \t\t\t\t\tSCALE_HW_CALIB_DEFAULT)
 '''
     src=one(src,anchor,addition+anchor,"insert GPIO1")
+    # Do not silently skip the battery or charger thermometer: if the
+    # provider DT ever rejects them, log a distinctive fail-closed warning.
+    bad='''\tif (chan > ADC5_PARALLEL_ISENSE_VBAT_IDATA ||
+\t    !data->adc_chans[chan].datasheet_name) {
+\t\tdev_err(dev, "%s invalid channel number %d\\n", name, chan);
+\t\treturn -EINVAL;
+\t}'''
+    checked='''\tif (chan > ADC5_PARALLEL_ISENSE_VBAT_IDATA ||
+\t    !data->adc_chans[chan].datasheet_name) {
+\t\tif (chan==ADC5_GPIO2_100K_PU || chan==ADC5_GPIO3_100K_PU)
+\t\t\tdev_err(dev,
+\t\t\t\t"P447H TEMP MISSING ch=0x%x name=%s action=FAIL_CLOSED never_skip=1\\n",
+\t\t\t\tchan,name);
+\t\tdev_err(dev, "%s invalid channel number %d\\n", name, chan);
+\t\treturn -EINVAL;
+\t}'''
+    src=one(src,bad,checked,"mandatory NTC failure marker")
     marker='''\t\tprop.scale_fn_type =
 \t\t\tdata->adc_chans[prop.channel].scale_fn_type;'''
     rep='''\t\t/* TG A52 NTCs: mandatory, no silent skipped DT channel.

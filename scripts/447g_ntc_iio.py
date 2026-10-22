@@ -148,12 +148,13 @@ def patch(s):
            "int die,st,temp,fgtemp,ntc,ctrl,rc,readback,vbus;\n"
            "\tconst char *source;",
            "safety source")
-    s=once(s,"temp=a52d_temp(fg);",
+    s=once(s,"temp=a52d_temp(fg);\n\tst=i2c_smbus_read_byte_data",
            "fgtemp=a52d_temp(fg);\n"
            "\tntc=a52g_ntc_temp(fg);\n"
            "\tsource=(ntc>=-400 && ntc<=900)?\"BATT_THERM\":\"FG_FALLBACK\";\n"
-           "\ttemp=!strcmp(source,\"BATT_THERM\") ? ntc : fgtemp;",
-           "prefer battery NTC")
+           "\ttemp=!strcmp(source,\"BATT_THERM\") ? ntc : fgtemp;\n"
+           "\tst=i2c_smbus_read_byte_data",
+           "prefer battery NTC, only inside guard")
     s=once(s,'''			"P447G CHG_GUARD SAMPLE source=FG_FALLBACK batt_therm=UNAVAILABLE fg_temp_deciC=%d effective_deciC=%d threshold=%d VBUS=%d status1=%d latched=%d\\n",
 			temp,temp,A52G_GUARD_TEMP_DECI_C,vbus,st,
 			fg->a52g_inhibit_latched);''',

@@ -78,6 +78,9 @@ Save-ADB "vendor-hal-open-errors" 'logcat -d -b all -t 5000 2>&1 | grep -iE "avc
 
 Save-ADB "net-devices" "ip link show"
 Save-ADB "dmesg" "dmesg 2>&1 | tail -n 1800"
+# P447: one-time 40-before/20-after HWC dump can occur before this
+# collector. Keep EVERY marker line; the regular dmesg file is truncated.
+Save-ADB "flicker-ring" 'dmesg 2>&1 | grep -F "P447 FLICKER_RING"'
 Save-ADB "logcat" "logcat -d -b all -t 2500 2>&1"
 Write-Host ("P447B capture saved to " + $out + ". No firmware/NV commands used.")
 

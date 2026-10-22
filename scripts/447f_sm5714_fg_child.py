@@ -36,6 +36,12 @@ def patch(s):
               'power_supply_get_by_name("sm5714-fuelgauge")',
               "POWER_SUPPLY_STATUS_UNKNOWN"):
         if m not in s:raise RuntimeError("P447F FG requires "+m)
+    # TG production FG supply is UNKNOWN; 447D incorrectly inherited BATTERY.
+    # Keep only the Android-facing samsung,sec-battery proxy as BATTERY.
+    s=one(s,
+          'static const struct power_supply_desc a52e_fg_desc={\n\t.name="sm5714-fuelgauge",\n\t.type=POWER_SUPPLY_TYPE_BATTERY,',
+          'static const struct power_supply_desc a52e_fg_desc={\n\t.name="sm5714-fuelgauge",\n\t.type=POWER_SUPPLY_TYPE_UNKNOWN,',
+          "production TG FG TYPE_UNKNOWN")
     s=one(s,"struct a52d_fg {",
           "struct a52d_fg {\n\tstruct platform_device *a52f_fg_child;",
           "child field")
@@ -97,6 +103,8 @@ def check(root):
     if "devm_power_supply_register(&client->dev,&a52e_fg_desc" in c:
         raise RuntimeError("P447F FG supplier still under I2C root")
     assert '.name="battery"' in c and '.name="sm5714-fuelgauge"' in c
+    assert 'static const struct power_supply_desc a52e_fg_desc={\n\t.name="sm5714-fuelgauge",\n\t.type=POWER_SUPPLY_TYPE_UNKNOWN' in c
+    assert 'static const struct power_supply_desc a52e_battery_desc={\n\t.name="battery",\n\t.type=POWER_SUPPLY_TYPE_BATTERY' in c
     print("P447F SM5714 FG PATH PASS: child platform device, supply under child, ordered teardown; no charger/MUIC/flash")
 def main():
     p=argparse.ArgumentParser()

@@ -221,10 +221,10 @@ def patch(src):
 	vblank = &dev->vblank[pipe];''',
             "client CRTC index mapping")
     src=one(src,
-            '''		     "crtc %d failed to acquire vblank counter, %d\n",
+            '''			     "crtc %d failed to acquire vblank counter, %d\n",
 			     pipe, ret);
 		return ret;''',
-            '''		     "crtc %d failed to acquire vblank counter, %d\n",
+            '''			     "crtc %d failed to acquire vblank counter, %d\n",
 			     pipe, ret);
 		a52j_vblank_trace(dev,"IOCTL_VBLANK_GET_FAILED",pipe,
 				 vblwait->request.type,vblwait->request.sequence,ret);

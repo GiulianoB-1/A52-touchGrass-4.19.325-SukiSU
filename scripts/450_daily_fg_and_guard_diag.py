@@ -20,13 +20,14 @@ HELPERS=r'''
 #define A52P450_FG_CURR_AVG 0x09
 #define A52P450_CHG_STATUS2 0x0e
 #define A52P450_CHG_STATUS3 0x0f
-static int a52p450_current_ua(struct a52d_fg *fg, u8 addr)
+static int a52p450_read_current_ua(struct a52d_fg *fg, u8 addr, int *ua)
 {
     int word=a52d_sram_read(fg,addr);
     int ma;
     if (word<0) return word;
     ma=((word&0x7fff)*1000)/2044;
-    return ((word&0x8000) ? -ma : ma)*1000;
+    *ua=((word&0x8000) ? -ma : ma)*1000;
+    return 0;
 }
 static void a52p450_chg_state(struct a52d_fg *fg, const char *action)
 {
@@ -75,19 +76,15 @@ def patch(s):
               "static int a52g_sample(struct a52d_fg *fg, bool first)",
               "static enum power_supply_property a52d_props[]"):
         if a not in s:raise RuntimeError("P450 missing prerequisite "+a)
-    s=once(s,"static enum power_supply_property a52d_props[]",
-           HELPERS+"\nstatic enum power_supply_property a52d_props[]","current helpers")
+    s=once(s,"static int a52g_sample(struct a52d_fg *fg, bool first)",
+           HELPERS+"\nstatic int a52g_sample(struct a52d_fg *fg, bool first)","current/status helpers before guard")
     s=once(s,"POWER_SUPPLY_PROP_VOLTAGE_NOW,",
            "POWER_SUPPLY_PROP_VOLTAGE_NOW,\n    POWER_SUPPLY_PROP_CURRENT_NOW,\n    POWER_SUPPLY_PROP_CURRENT_AVG,","FG exposed property list")
     s=once(s,"case POWER_SUPPLY_PROP_VOLTAGE_NOW:",
            '''case POWER_SUPPLY_PROP_CURRENT_NOW:
-        rc=a52p450_current_ua(fg,A52P450_FG_CURR);
-        if (rc<0 && rc>-4096)return rc;
-        v->intval=rc;return 0;
+        return a52p450_read_current_ua(fg,A52P450_FG_CURR,&v->intval);
     case POWER_SUPPLY_PROP_CURRENT_AVG:
-        rc=a52p450_current_ua(fg,A52P450_FG_CURR_AVG);
-        if (rc<0 && rc>-4096)return rc;
-        v->intval=rc;return 0;
+        return a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&v->intval);
     case POWER_SUPPLY_PROP_VOLTAGE_NOW:''',"FG read properties")
     s=once(s,"u32 a52g_guard_cycle;","u32 a52g_guard_cycle;\n    unsigned long a52p450_started;","startup epoch")
     s=once(s,"fg->a52g_chg=client;",
@@ -107,11 +104,12 @@ def patch(s):
     part=once(part,anchor,'a52p450_chg_state(fg,"AFTER_INHIBIT");\n    '+anchor,"inhibit postread")
     anchor="if (first || fg->a52g_guard_cycle++ % 15 == 0)"
     part=once(part,anchor,'''if (first || fg->a52g_guard_cycle++ % 15 == 0) {
-        int now=a52p450_current_ua(fg,A52P450_FG_CURR);
-        int avg=a52p450_current_ua(fg,A52P450_FG_CURR_AVG);
+        int now=0,avg=0;
+        int now_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR,&now);
+        int avg_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&avg);
         dev_info(fg->dev,
-            "P450 FG current_ua=%d avg_ua=%d src=SRAM_RAW signed=1 charging_status=UNVERIFIED\n",
-            now,avg);
+            "P450 FG current_ua=%d avg_ua=%d rc_now=%d rc_avg=%d src=SRAM_RAW signed=1 charging_status=UNVERIFIED\n",
+            now,avg,now_rc,avg_rc);
     }''',"30-second FG current")
     s=s[:start]+part
     return s

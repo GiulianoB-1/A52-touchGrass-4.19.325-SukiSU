@@ -13,6 +13,7 @@ VARIANTS={
  "B":("B-wave3-dsp-no-mss",3,0,0),
  "C":("C-wave3-modem-ipa",3,1,1),
  "D":("D-wave2-ipc-only",2,0,0),
+ "E":("E-wave2-glink-qrtr-only",2,0,0),
 }
 def sha(x):return hashlib.sha256(x).hexdigest()
 def cs(b):return b.split(b"\0",1)[0].decode("ascii","strict")
@@ -125,7 +126,7 @@ def main():
     if b"initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
         raise RuntimeError("P447C still has initcall_debug")
     x.out.mkdir(parents=True,exist_ok=True)
-    if x.variant == "D":
+    if x.variant in ("D","E"):
         for key in ("QCOM_IPCC","QCOM_SMEM","QCOM_SMP2P","QCOM_AOSS_QMP"):
             if cfgval(cfg,key)!="y":
                 raise RuntimeError("P448 D missing IPC "+key)
@@ -133,6 +134,12 @@ def main():
                     "QCOM_Q6V5_WCSS","QCOM_WCNSS_PIL","QCOM_RMTFS_MEM"):
             if cfgval_optional_disabled(cfg,key)!="n":
                 raise RuntimeError("P448 D remoteproc or rmtfs active "+key)
+    if x.variant == "E":
+        for key in ("RPMSG","RPMSG_CHAR","RPMSG_QCOM_GLINK",
+                    "RPMSG_QCOM_GLINK_SMEM","QRTR","QRTR_SMD",
+                    "QCOM_SYSMON","QCOM_QMI_HELPERS"):
+            if cfgval(cfg,key)!="y":
+                raise RuntimeError("P448 E missing transport "+key)
     target=x.out/(label+".boot.img")
     target.write_bytes(built)
     report={

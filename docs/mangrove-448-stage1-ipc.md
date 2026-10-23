@@ -22,3 +22,19 @@ Acceptance for Stage 1: A52 boots, no unexpected panic, actual runtime probe mar
 - Stage 5 — MSS: back up modemst1, modemst2 and fsg on TG first. PAS id 4, modem firmware under /vendor/firmware-modem/image, memory 0x8b800000/0xf800000, UIO rmtfs region size 0x280000 client 1. No kernel NV/EFS/IMEI/RPMB writes.
 - Stage 6 — IPA/rmnet: only after stable MSS and validated downstream /dev/ipa, /dev/wwan_ioctl, rmnet_ctrl service ABI.
 - All later stages: no AP panic from SSR/PDR, no 60s firmware stalls, no guessed SMMU SID, no intentional subsystem crash. NPU optional. Use collector v1.14; record git SHA, CI run, artifact, .config and exact tested DTB. Charging remains on TG.
+
+## P448B next isolated build — Step 2 E
+
+E is a new Wave 2 (no generic Wave 3 enablement) GLINK-SMEM, RPMSG,
+QRTR-SMD, QCOM_SYSMON compilation and no-remoteproc boot-regression candidate,
+built separately from D. Its packaged boot DTB and compiled .config are audited
+before publishing. MPSS, ADSP, CDSP, IPA, and rmtfs remain OFF. NPU is deferred.
+
+**Not a claim of completed GLINK bring-up:** upstream 5.10 registers GLINK
+SMEM *via* remoteproc integration, rather than by binding the TouchGrass
+standalone qcom,glink node. Without a remoteproc, there is no GLINK edge
+probe, no QRTR IPCRTR endpoint, and no way to validate userspace pd-mapper or
+qrtr-ns against real DSP/modem peers. P448 GLINK REGISTER and P448 QRTR
+IPCRTR markers will appear only when future stages actually open links.
+AOSS qcom,qmp-mbox also remains unmatched and Step 1 is unaccepted
+pending a real driver/binding port and runtime probe evidence.

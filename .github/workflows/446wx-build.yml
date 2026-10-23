@@ -158,6 +158,15 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/a52-ccache-bin/clang" "$RUNNER_TEMP/a52-ccache-bin/clang++"
           echo "$RUNNER_TEMP/a52-ccache-bin" >> "$GITHUB_PATH"
+          # Hash compiler contents, not only its pathname: safe across updates.
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+      - name: Restore reusable clang ccache (variant-scoped)
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: mangrove-clang-ccache-v3-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mangrove-clang-ccache-v3-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-
       - name: Restore SHA-pinned Phase446S full source and boot
         run: |
           set -Eeuo pipefail
@@ -625,6 +634,30 @@ jobs:
           printf '#define A52_446S_FINGERPRINT "%s"\n' "$FP" > "$ROOT/include/generated/a52_446s_manifest.h"
           printf 'P446S MANIFEST PASS %s\n' "$FP"
           echo "Source fingerprint: $FP" >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute exact per-variant Kbuild cache identity
+        id: build_cache_key
+        run: |
+          set -Eeuo pipefail
+          BUILD="$PWD/workspace/gki-phase199-out"
+          FP="$(python3 -c 'import json;print(json.load(open("phase446r2-manifest/final-tree.json"))["source_fingerprint_sha256"])')"
+          CONFIG_SHA="$(sha256sum "$BUILD/.config" | cut -d' ' -f1)"
+          CLANG_SHA="$(/usr/bin/clang --version | head -n 1 | sha256sum | cut -d' ' -f1)"
+          printf 'fingerprint=%s\nconfig=%s\ntoolchain=%s\n' "$FP" "$CONFIG_SHA" "$CLANG_SHA" >> "$GITHUB_OUTPUT"
+          sha256sum "$BUILD/.config" > "$RUNNER_TEMP/mangrove-config-before-cache.sha256"
+      - name: Restore exact matching Kbuild objects (never cross-variant)
+        id: kbuild_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            workspace/gki-phase199-out
+            !workspace/gki-phase199-out/vmlinux
+            !workspace/gki-phase199-out/arch/arm64/boot/Image
+          key: mangrove-kbuild-v5-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ steps.build_cache_key.outputs.fingerprint }}-${{ steps.build_cache_key.outputs.config }}-${{ steps.build_cache_key.outputs.toolchain }}
+      - name: Verify restored build cache matches the final variant .config
+        run: |
+          set -Eeuo pipefail
+          sha256sum -c "$RUNNER_TEMP/mangrove-config-before-cache.sha256"
+          echo "P448 CACHE verified variant=${{ matrix.variant.id }} hit=${{ steps.kbuild_cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Compile Phase446W-B/X HWC+FTS touchscreen+sec_cmd+RTC (fail-fast)
         run: |
           set -Eeuo pipefail
@@ -916,18 +949,21 @@ jobs:
           cp "$BUILD/.config" phase446af-debug/final.config
           readelf -SW phase446af-debug/vmlinux | grep -F '.debug_info'
           printf '%s\n' "P446AF DWARF vmlinux retained for exact offset decoding" >> "$GITHUB_STEP_SUMMARY"
-      - name: Save Phase445 object cache
-        if: always()
+      - name: Save exact per-variant Kbuild objects
+        if: success() && steps.kbuild_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: workspace/gki-phase199-out
-          key: a52xq-phase441-vrr-state-objects-v1-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ hashFiles('scripts/441_apply_vrr_state_compat.py', 'scripts/440_apply_early_f0_cleanup_forensics.py', 'scripts/439_apply_dsi_autopsy.py', 'scripts/438_apply_devbw_semantic_parity.py') }}
-      - name: Save rolling clang ccache
+          path: |
+            workspace/gki-phase199-out
+            !workspace/gki-phase199-out/vmlinux
+            !workspace/gki-phase199-out/arch/arm64/boot/Image
+          key: mangrove-kbuild-v5-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ steps.build_cache_key.outputs.fingerprint }}-${{ steps.build_cache_key.outputs.config }}-${{ steps.build_cache_key.outputs.toolchain }}
+      - name: Save reusable clang ccache even if packaging fails
         if: always()
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: a52xq-clang-ccache-v2-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-phase440-${{ github.run_id }}
+          key: mangrove-clang-ccache-v3-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Package and audit Phase447C independently compiled ${{ matrix.variant.id }} boot
         if: success()
         run: |

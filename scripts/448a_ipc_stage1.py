@@ -106,10 +106,22 @@ def boot_check(boot,parser):
         match=re.search(re.escape(node)+r"\s*\{([\s\S]{0,2000}?)\n\s*\};",dts)
         if not match:raise RuntimeError("P448 packed DTB lacks "+node)
         blk=match.group(1)
-        if not re.search(r"qcom,smem\s*=\s*<\s*"+hex(ids[0])+r"\s+"+hex(ids[1])+r"\s*>",blk):
+        # dtc prints single-cell PID 1 as 0x01, not necessarily 0x1.
+        # Compare the actual parsed u32 cells rather than a literal hex format.
+        def cells(prop):
+            assignment=re.search(r"(?m)^\s*"+re.escape(prop)+r"\s*=\s*<([^>]*)>\s*;",blk)
+            if assignment is None:
+                raise RuntimeError("P448 compiled DTB property missing "+node+":"+prop)
+            try:
+                return tuple(int(value,0) for value in assignment.group(1).split())
+            except ValueError as exc:
+                raise RuntimeError("P448 invalid compiled DTB cells "+node+":"+prop) from exc
+        if cells("qcom,smem")!=ids:
             raise RuntimeError("P448 compiled DTB SMP2P IDs drift "+node)
-        if not re.search(r"qcom,remote-pid\s*=\s*<\s*"+hex(pid)+r"\s*>",blk):
-            raise RuntimeError("P448 compiled DTB PID drift "+node)
+        if cells("qcom,local-pid")!=(0,):
+            raise RuntimeError("P448 compiled DTB local PID drift "+node)
+        if cells("qcom,remote-pid")!=(pid,):
+            raise RuntimeError("P448 compiled DTB remote PID drift "+node)
     for tok in ("qcom,ipcc","qcom,smem","qcom,qmp-mbox","master-kernel","slave-kernel"):
         if tok not in dts:raise RuntimeError("P448 packed DTB missing "+tok)
     print("P448 IPC DTB PASS: correct TG IDs in packaged boot; AOSS ABI still unbound")

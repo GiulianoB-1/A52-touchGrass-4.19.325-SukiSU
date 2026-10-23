@@ -32,11 +32,11 @@ def patch(s):
        "SM6350 compatible")
     # Log after the onecell genpd is registered; no success marker on probe fail.
     s=once(s,
-       'platform_set_drvdata(pdev, qmp);\n\n\treturn 0;',
+       'platform_set_drvdata(pdev, qmp);',
        'platform_set_drvdata(pdev, qmp);\n'
        '    dev_info(&pdev->dev,\n'
        '        "P448 AOSS probe rc=0 pd_count=%u mbox=IPCC native_5_10=1\\n",\n'
-       '        qmp->pd_data.num_domains);\n\n\treturn 0;',
+       '        qmp->pd_data.num_domains);',
        "successful provider publication")
     # Preserve 5.10 AOSS load_state semantics instead of backporting 6.x ABI.
     s=once(s,

@@ -12,7 +12,8 @@ PARSER=runpy.run_path("scripts/38_repack_a52_p1_boot.py")
 parse=PARSER["parse_boot"]; boot_id=PARSER["calculate_boot_id"]; align=PARSER["align"]
 AOSS="/soc/qcom,qmp-aop@c300000"
 LPASS="/soc/qcom,lpass@3000000"
-TAG="P451_DSP_EXCLUSIVE_AOSS_ADSP_V1"
+TAG="P452_DSP_SCM_SM6350_SAFE_NODE_V1"
+SCM="/firmware/scm"
 def sha(x):return hashlib.sha256(x).hexdigest()
 def run(*args):
     x=subprocess.run([str(z) for z in args],capture_output=True,text=True)
@@ -82,6 +83,16 @@ def patch_fdt(raw):
     with tempfile.TemporaryDirectory() as d:
         file=Path(d)/"work.dtb";file.write_bytes(raw)
         meta=preflight(file)
+        # Native PAS probe gates on qcom_scm_is_available().
+        # TG's downstream SCM is not a platform device.
+        if optional("fdtget","-t","s",file,SCM,"compatible") is not None:
+            raise RuntimeError("P452 refusing duplicate /firmware/scm")
+        if optional("fdtget","-l",file,"/firmware") is None:
+            new(file,"/firmware")
+        new(file,SCM)
+        puts(file,SCM,"compatible","qcom,scm-sm6350","qcom,scm")
+        putx(file,SCM,"#reset-cells",1)
+        print("P452 SCM DTB STAGED compatible=qcom,scm-sm6350 reset-cells=1")
         # Upstream AOSS owns QMP; TG mailbox provider must not also bind.
         puts(file,AOSS,"compatible","qcom,sm6350-aoss-qmp")
         putx(file,AOSS,"#power-domain-cells",1)
@@ -142,6 +153,14 @@ def patch_fdt(raw):
                      "tg_original_lmx_phandle":hex(meta["mx"])})
         return newdtb,info
 def validate(file):
+    compat=run("fdtget","-t","s",file,SCM,"compatible").split()
+    if compat!=["qcom,scm-sm6350","qcom,scm"]:
+        raise RuntimeError("P452 SCM compatible mismatch "+repr(compat))
+    if cells(file,SCM,"#reset-cells")!=[1]:
+        raise RuntimeError("P452 SCM reset-cells mismatch")
+    for p in ("qcom,dload-mode","qcom,dload-mode-addr","download-mode"):
+        if optional("fdtget","-t","x",file,SCM,p) is not None:
+            raise RuntimeError("P452 unintended SCM download mode "+p)
     if run("fdtget","-t","s",file,AOSS,"compatible")!="qcom,sm6350-aoss-qmp":
         raise RuntimeError("P451 AOSS not exclusive native")
     if cells(file,AOSS,"#mbox-cells")!=[1]:
@@ -162,7 +181,9 @@ def validate(file):
         raise RuntimeError("P451 GLINK remote PID not 2")
     if cells(file,LPASS,"cx-supply")==cells(file,LPASS,"px-supply"):
         raise RuntimeError("P451 lcx/lmx references collided")
-    return {"status":"P451 DSP DTB PAS/AOSS/GLINK audited",
+    return {"status":"P452 DSP+SCM DTB PAS/AOSS/GLINK audited",
+            "scm":{"node":SCM,"compatible":["qcom,scm-sm6350","qcom,scm"],
+                   "reset_cells":1,"download_mode_default":"requires_config_n"},
             "aoss":"qcom,sm6350-aoss-qmp","adsp":"qcom,sm6350-adsp-pas",
             "load_state_name":"adsp","ssr_name":"lpass",
             "autoboot":"disabled by PAS descriptor",
@@ -220,5 +241,5 @@ def main():
                  "kernel_unchanged":True,"ramdisk_unchanged":True,
                  "original_boot_sha256":sha(original)})
     x.report.write_text(json.dumps(info,indent=2,sort_keys=True)+"\n")
-    print("P451 DSP BOOT PATCH PASS: native AOSS, manual SM6350 PAS, lcx/lmx 384, GLINK pid2, preserved kernel/ramdisk")
+    print("P452 DSP SCM BOOT PATCH PASS: native SCM, AOSS, manual SM6350 PAS, lcx/lmx 384, GLINK pid2, preserved kernel/ramdisk")
 if __name__=="__main__":main()

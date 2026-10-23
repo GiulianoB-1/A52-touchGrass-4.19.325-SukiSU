@@ -1,5 +1,5 @@
-name: Mangrove Kernel | 447M vblank fix, USB/touch diagnostics
-run-name: Mangrove Kernel | 447M A/B/C USB+touch trace (charger unchanged)
+name: Mangrove Kernel | 447N late touch window + USB function bind
+run-name: Mangrove Kernel | 447N A/B/C 60-140s touch + USB function (charger unchanged)
 on:
   push:
     branches:
@@ -431,6 +431,11 @@ jobs:
           python3 -m py_compile scripts/447l_usb_stage_diag.py
           python3 scripts/447l_usb_stage_diag.py --root "$ROOT"
           python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
+          # P447N: passively capture the Android-boot-only touch crash window,
+          # and name the ConfigFS function returning -ENODEV at composite bind.
+          python3 -m py_compile scripts/447n_late_touch_usb_function.py
+          python3 scripts/447n_late_touch_usb_function.py --root "$ROOT"
+          python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -567,6 +572,7 @@ jobs:
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
           python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT" --check-only
           python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
+          python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -973,6 +979,7 @@ jobs:
             scripts/447k_vblank_hooks.py
             scripts/447i_touch_lifecycle_trace.py
             scripts/447l_usb_stage_diag.py
+            scripts/447n_late_touch_usb_function.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
             scripts/447e_samsung_battery_platform.py

@@ -10,7 +10,7 @@ on:
         description: 'Kernel symbol+offset[/size] (exact vmlinux required)'
         type: string
         required: false
-        default: 'geni_i2c_xfer+0x408/0xe1c'
+        default: ''
 permissions:
   contents: read
   actions: read
@@ -1251,7 +1251,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
-        if: always() && matrix.variant.id == 'F'
+        if: always() && (matrix.variant.id == 'F' || (matrix.variant.id == 'G' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''))
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
@@ -1281,7 +1281,9 @@ jobs:
   decode_pc:
     name: Decode PC (faddr2line)
     needs: gki
-    if: needs.gki.result == 'success'
+    # PC decoding is an explicit opt-in tool, not a post-build requirement.
+    # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
+    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
     runs-on: ubuntu-22.04
     permissions:
       contents: read

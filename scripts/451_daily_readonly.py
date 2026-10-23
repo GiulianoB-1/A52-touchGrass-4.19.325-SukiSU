@@ -72,7 +72,7 @@ def patch(s):
     # Add battery-style diagnostic alongside current log without a false CHARGING status.
     s=once(s,'''now,avg,aux,stat,now_rc,avg_rc,aux<0?-1:!!(aux&0x400),aux<0?-1:!!(aux&0x8));
     }''',
-        '''now,avg,aux,stat,now_rc,avg_rc,aux<0?-1:!!(aux&0x400),aux<0?-1:!!(aux&0x8));
+        r'''now,avg,aux,stat,now_rc,avg_rc,aux<0?-1:!!(aux&0x400),aux<0?-1:!!(aux&0x8));
         dev_info(fg->dev,
             "P451 BATTERY current_mA=%d avg_mA=%d status=Unknown source=FG_NO_SEC_BATTERY\n",
             now/1000,avg/1000);

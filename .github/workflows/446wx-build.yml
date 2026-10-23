@@ -1,5 +1,5 @@
-name: Mangrove Kernel | P449 baseline and thermal guard
-run-name: P449 DAILY (E) + THERM-GUARD-TEST (F), Wave2 only
+name: Mangrove Kernel | Phase 450 DAILY diagnostic build
+run-name: P450 DAILY | FG current + charger status + safe startup race guard
 on:
   push:
     branches:
@@ -31,19 +31,18 @@ env:
   CCACHE_PATH: /usr/bin:/usr/local/bin
 concurrency:
   group: a52-phase447-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   gki:
     if: true
-    name: Mangrove ${{ matrix.variant.label }} [${{ matrix.variant.id }}] (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
+    name: Mangrove ${{ matrix.variant.label }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         variant:
-          - { id: E, label: DAILY-LAST-TESTED, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: F, label: THERM-GUARD-TEST, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: F, label: 450-DAILY-DIAGNOSTIC, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -420,6 +419,11 @@ jobs:
             python3 -m py_compile scripts/449f_chg_ntc_guard.py
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT"
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
+            # P450: no charger enable. Extend F with TG fuel-gauge current/status
+            # and a bounded startup IIO wait only when charger HW is confirmed OFF.
+            python3 -m py_compile scripts/450_daily_fg_and_guard_diag.py
+            python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT"
+            python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT" --check-only
           fi
           # P447J passive vblank diagnostics retained unchanged.
           python3 -m py_compile scripts/447j_vblank_diag.py
@@ -610,6 +614,7 @@ jobs:
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
           if [ "${{ matrix.variant.id }}" = F ]; then
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
+            python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT" --check-only
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
@@ -755,6 +760,12 @@ jobs:
           P445="$ROOT/drivers/a52_display/msm/a52_phase445.c"
           test -s "$IMAGE"
           test -s "$MAP"
+          if [ "${{ matrix.variant.id }}" = F ]; then
+            grep -aFq 'P450 FG current_ua=' "$IMAGE"
+            grep -aFq 'P450 CHG_STATE action=' "$IMAGE"
+            grep -aFq 'P450 CHG_GUARD sensor=NOT_READY' "$IMAGE"
+            echo 'P450 DAILY compiled FG current and CHG_STATE markers PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
           grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"
           grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
@@ -1023,7 +1034,7 @@ jobs:
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
           elif [ "${{ matrix.variant.id }}" = F ]; then
-            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-THERM-GUARD-TEST.boot.img
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-450-DAILY.boot.img
           fi
           printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
@@ -1136,26 +1147,13 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-      - name: Upload P449 last-tested E baseline (NOT charging-certified)
-        if: success() && matrix.variant.id == 'E'
-        uses: actions/upload-artifact@v4
-        with:
-          name: MANGROVE-449-DAILY-${{ github.run_number }}
-          path: |
-            phase447b-variants/MANGROVE-449-DAILY.boot.img
-            phase447b-variants/compiled-variant.json
-            phase447b-variants/READ-BEFORE-FLASH.txt
-            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
-            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
-          if-no-files-found: error
-          compression-level: 0
-      - name: Upload P449 F THERM-GUARD-TEST (NOT charger-certified)
+      - name: Upload MANGROVE-450-DAILY (diagnostics only; no charging support)
         if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-449-THERM-GUARD-TEST-${{ github.run_number }}
+          name: MANGROVE-450-DAILY-${{ github.run_number }}
           path: |
-            phase447b-variants/MANGROVE-449-THERM-GUARD-TEST.boot.img
+            phase447b-variants/MANGROVE-450-DAILY.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
@@ -1163,7 +1161,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review
-        if: always() && matrix.variant.id == 'E'
+        if: always() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P447-INVENTORY-${{ github.run_number }}
@@ -1183,7 +1181,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
-        if: always() && matrix.variant.id == 'E'
+        if: always() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
@@ -1192,7 +1190,7 @@ jobs:
           compression-level: 6
           retention-days: 30
       - name: Upload Phase446i GKI
-        if: success() && matrix.variant.id == 'E'
+        if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}
@@ -1201,7 +1199,7 @@ jobs:
           compression-level: 1
           retention-days: 30
       - name: Upload Phase446S final build inputs
-        if: success() && matrix.variant.id == 'E'
+        if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-FINAL-INPUTS-${{ github.run_number }}

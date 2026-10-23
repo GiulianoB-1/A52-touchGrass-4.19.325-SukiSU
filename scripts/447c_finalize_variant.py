@@ -21,6 +21,21 @@ def cfgval(cfg,name):
         if line.startswith("CONFIG_"+name+"="):return line.split("=",1)[1]
         if line=="# CONFIG_"+name+" is not set":return "n"
     raise RuntimeError("P447C missing config "+name)
+def cfgval_optional_disabled(cfg,name):
+    """Only P448 D: absent Kconfig symbol means not selectable, not enabled.
+
+    Keep cfgval() strict for mandatory compiled defaults and IPC providers.
+    """
+    wanted="CONFIG_"+name+"="
+    disabled="# CONFIG_"+name+" is not set"
+    matches=[line for line in cfg.splitlines()
+             if line.startswith(wanted) or line == disabled]
+    if len(matches)>1:
+        raise RuntimeError("P448 D duplicate Kconfig symbol "+name)
+    if not matches:
+        print("P448 D remoteproc symbol absent (not selectable):",name)
+        return "n"
+    return "n" if matches[0]==disabled else matches[0].split("=",1)[1]
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--source",required=True,type=Path)
@@ -116,7 +131,7 @@ def main():
                 raise RuntimeError("P448 D missing IPC "+key)
         for key in ("QCOM_Q6V5_PAS","QCOM_Q6V5_ADSP","QCOM_Q6V5_MSS",
                     "QCOM_Q6V5_WCSS","QCOM_WCNSS_PIL","QCOM_RMTFS_MEM"):
-            if cfgval(cfg,key)!="n":
+            if cfgval_optional_disabled(cfg,key)!="n":
                 raise RuntimeError("P448 D remoteproc or rmtfs active "+key)
     target=x.out/(label+".boot.img")
     target.write_bytes(built)

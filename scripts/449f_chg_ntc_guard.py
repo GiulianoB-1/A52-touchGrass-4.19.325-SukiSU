@@ -54,7 +54,7 @@ def patch(src):
     if src.count(DECL)!=1 or src.count(OLD)!=1:
         raise RuntimeError("P449 F guard structural anchor drift")
     src=src.replace(DECL,NEW_DECL,1)
-    src=src.replace(OLD,NEW,1)
+    src=src.replace(OLD,NEW.replace(chr(92)+"t",chr(9)),1)
     return src
 def check(root):
     s=(root/SRC).read_text()

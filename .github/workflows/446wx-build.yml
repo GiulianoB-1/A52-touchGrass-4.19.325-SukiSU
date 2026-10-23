@@ -1,5 +1,5 @@
-name: Mangrove Kernel | P448 Step1 IPC-only variant D + 447N A/B/C
-run-name: Mangrove Kernel | 448A1 IPC-only D, A/B/C retained; no remoteproc
+name: Mangrove Kernel | P449 baseline and thermal guard
+run-name: P449 DAILY (E) + THERM-GUARD-TEST (F), Wave2 only
 on:
   push:
     branches:
@@ -35,19 +35,15 @@ concurrency:
 jobs:
   gki:
     if: true
-    name: Mangrove Kernel ${{ matrix.variant.id }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
+    name: Mangrove ${{ matrix.variant.label }} [${{ matrix.variant.id }}] (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         variant:
-          - { id: A, wave: 2, mss: 0, ipa: 0, ipc: 0 }
-          - { id: B, wave: 3, mss: 0, ipa: 0, ipc: 0 }
-          - { id: C, wave: 3, mss: 1, ipa: 1, ipc: 0 }
-          - { id: D, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: E, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: F, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: E, label: DAILY-LAST-TESTED, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: F, label: THERM-GUARD-TEST, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -1024,6 +1020,11 @@ jobs:
           test -s "$ORIGINAL_BOOT"
           cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          if [ "${{ matrix.variant.id }}" = E ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
+          elif [ "${{ matrix.variant.id }}" = F ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-THERM-GUARD-TEST.boot.img
+          fi
           printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
             python3 scripts/448a_ipc_stage1.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
@@ -1135,71 +1136,26 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-      - name: Upload P447C independently compiled variant A (EXPERIMENTAL)
-        if: success() && matrix.variant.id == 'A'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mangrove-Kernel-447M-A-W2-${{ github.run_number }}
-          path: |
-            phase447b-variants/Mangrove-Kernel-447M-A.boot.img
-            phase447b-variants/compiled-variant.json
-            phase447b-variants/READ-BEFORE-FLASH.txt
-          if-no-files-found: error
-          compression-level: 0
-      - name: Upload P447C independently compiled variant B (EXPERIMENTAL)
-        if: success() && matrix.variant.id == 'B'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mangrove-Kernel-447M-B-W3-NOMSS-${{ github.run_number }}
-          path: |
-            phase447b-variants/Mangrove-Kernel-447M-B.boot.img
-            phase447b-variants/compiled-variant.json
-            phase447b-variants/READ-BEFORE-FLASH.txt
-          if-no-files-found: error
-          compression-level: 0
-      - name: Upload P447C independently compiled variant C (EXPERIMENTAL)
-        if: success() && matrix.variant.id == 'C'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mangrove-Kernel-447M-C-W3-MSS-IPA-${{ github.run_number }}
-          path: |
-            phase447b-variants/Mangrove-Kernel-447M-C.boot.img
-            phase447b-variants/compiled-variant.json
-            phase447b-variants/READ-BEFORE-FLASH.txt
-          if-no-files-found: error
-          compression-level: 0
-      - name: Upload Phase448 IPC-only variant D (EXPERIMENTAL)
-        if: success() && matrix.variant.id == 'D'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mangrove-Kernel-448-D-IPC-ONLY-${{ github.run_number }}
-          path: |
-            phase447b-variants/Mangrove-Kernel-447M-D.boot.img
-            phase447b-variants/compiled-variant.json
-            phase447b-variants/READ-BEFORE-FLASH.txt
-            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
-          if-no-files-found: error
-          compression-level: 0
-      - name: Upload Phase448 E GLINK+QRTR (no remoteproc)
+      - name: Upload P449 last-tested E baseline (NOT charging-certified)
         if: success() && matrix.variant.id == 'E'
         uses: actions/upload-artifact@v4
         with:
-          name: Mangrove-Kernel-448-E-GLINK-QRTR-NO-RPROC-${{ github.run_number }}
+          name: MANGROVE-449-DAILY-${{ github.run_number }}
           path: |
-            phase447b-variants/Mangrove-Kernel-447M-E.boot.img
+            phase447b-variants/MANGROVE-449-DAILY.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload Phase449 F guarded IPC+GLINK+QRTR (NO charger support)
+      - name: Upload P449 F THERM-GUARD-TEST (NOT charger-certified)
         if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-449F-BOOT-${{ github.run_number }}
+          name: MANGROVE-449-THERM-GUARD-TEST-${{ github.run_number }}
           path: |
-            phase447b-variants/Mangrove-Kernel-447M-F.boot.img
+            phase447b-variants/MANGROVE-449-THERM-GUARD-TEST.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
@@ -1207,7 +1163,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review
-        if: always() && matrix.variant.id == 'A'
+        if: always() && matrix.variant.id == 'E'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P447-INVENTORY-${{ github.run_number }}
@@ -1227,7 +1183,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
-        if: always() && matrix.variant.id == 'A'
+        if: always() && matrix.variant.id == 'E'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
@@ -1236,7 +1192,7 @@ jobs:
           compression-level: 6
           retention-days: 30
       - name: Upload Phase446i GKI
-        if: success() && matrix.variant.id == 'A'
+        if: success() && matrix.variant.id == 'E'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}
@@ -1245,22 +1201,11 @@ jobs:
           compression-level: 1
           retention-days: 30
       - name: Upload Phase446S final build inputs
-        if: success() && matrix.variant.id == 'A'
+        if: success() && matrix.variant.id == 'E'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-PHASE446WX-FINAL-INPUTS-${{ github.run_number }}
           path: phase446s-final-inputs/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-      - name: Upload Phase446i GKI boot image
-        if: success() && matrix.variant.id == 'A'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mangrove-Kernel-A52-447M-${{ github.run_number }}-BASE-BOOT
-          path: |
-            f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img
-            f0bisect-gki-p6-out/package/PHASE446S-MANIFEST.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

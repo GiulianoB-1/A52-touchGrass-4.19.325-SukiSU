@@ -52,3 +52,12 @@ Never assume an extra matrix job is free of CI time/resources.
 The single push workflow builds existing A/B/C/D/E and F only.
 No new remoteproc or charger enable bits. USB VBUS-at-boot fix
 remains a separately reviewed and staged task.
+
+## 449 failed-run recovery and simplified matrix
+Run 428 F compile failure: duplicate unsafe declaration + escaped C tab text.
+Fixed both on isolated staging branch, with precompile source validation.
+Only two compiled variants now: E=last-tested DAILY baseline, F=experimental
+THERM-GUARD-TEST. Neither is normal charging-certified. Retired A/B/C/D
+variants remain available in old Actions runs. No G/H/GH image is published
+without its validated driver integration. The unnamed raw base boot upload
+was removed to prevent accidental flash of an ambiguous file.

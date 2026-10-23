@@ -55,6 +55,13 @@ def patch(src):
         raise RuntimeError("P449 F guard structural anchor drift")
     src=src.replace(DECL,NEW_DECL,1)
     src=src.replace(OLD,NEW.replace(chr(92)+"t",chr(9)),1)
+    # Verify generated C has actual whitespace, not literal raw \t.
+    begin=src.index("/* "+TAG+":")
+    finish=src.index("if (first || fg->a52g_guard_cycle",begin)
+    if chr(92)+"t" in src[begin:finish]:
+        raise RuntimeError("P449 F literal backslash-t in generated C")
+    if src.count("bool unsafe;")!=1:
+        raise RuntimeError("P449 F duplicate unsafe declaration")
     return src
 def check(root):
     s=(root/SRC).read_text()
@@ -66,6 +73,12 @@ def check(root):
               "never_reenable=1",
               "fg->a52g_inhibit_latched=true;"):
         if x not in s:raise RuntimeError("P449 F contract missing "+x)
+    begin=s.index("/* "+TAG+":")
+    finish=s.index("if (first || fg->a52g_guard_cycle",begin)
+    if chr(92)+"t" in s[begin:finish]:
+        raise RuntimeError("P449 F invalid C whitespace")
+    if s.count("bool unsafe;")!=1:
+        raise RuntimeError("P449 F unsafe duplicate")
     if s.count("i2c_smbus_write_byte_data(")!=1:
         raise RuntimeError("P449 F must retain only the existing inhibit-only charger write")
     if "A52G_CHG_ENQ4FET" not in s or "ctrl & ~A52G_CHG_ENQ4FET" not in s:

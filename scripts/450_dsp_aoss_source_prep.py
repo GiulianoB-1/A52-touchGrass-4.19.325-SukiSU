@@ -25,10 +25,10 @@ def patch(s):
     if '"qcom,qmp-mbox"' in s:
         raise RuntimeError("P450 AOSS refuses downstream legacy mailbox binding")
     s=once(s,
-       '    { .compatible = "qcom,sm8250-aoss-qmp", },',
-       '    /* '+TAG+' */\n'
-       '    { .compatible = "qcom,sm6350-aoss-qmp", },\n'
-       '    { .compatible = "qcom,sm8250-aoss-qmp", },',
+       '\t{ .compatible = "qcom,sm8250-aoss-qmp", },',
+       '\t/* '+TAG+' */\n'
+       '\t{ .compatible = "qcom,sm6350-aoss-qmp", },\n'
+       '\t{ .compatible = "qcom,sm8250-aoss-qmp", },',
        "SM6350 compatible")
     # Log after the onecell genpd is registered; no success marker on probe fail.
     s=once(s,

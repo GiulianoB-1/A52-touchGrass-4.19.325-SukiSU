@@ -103,14 +103,15 @@ def patch(s):
     anchor="if (!fg->a52g_inhibit_latched || (ctrl & A52G_CHG_ENQ4FET))"
     part=once(part,anchor,'a52p450_chg_state(fg,"AFTER_INHIBIT");\n    '+anchor,"inhibit postread")
     anchor="if (first || fg->a52g_guard_cycle++ % 15 == 0)"
-    part=once(part,anchor,'''if (first || fg->a52g_guard_cycle++ % 15 == 0) {
+    part=once(part,anchor,r'''if (first || fg->a52g_guard_cycle % 15 == 0) {
         int now=0,avg=0;
         int now_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR,&now);
         int avg_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&avg);
         dev_info(fg->dev,
             "P450 FG current_ua=%d avg_ua=%d rc_now=%d rc_avg=%d src=SRAM_RAW signed=1 charging_status=UNVERIFIED\n",
             now,avg,now_rc,avg_rc);
-    }''',"30-second FG current")
+    }
+    '''+anchor,"30-second FG current")
     s=s[:start]+part
     return s
 def check(root):

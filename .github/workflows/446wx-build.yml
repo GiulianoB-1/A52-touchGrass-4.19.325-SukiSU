@@ -1,5 +1,5 @@
-name: Mangrove Kernel | Phase 450 DAILY diagnostic build
-run-name: P450 DAILY | FG current + charger status + safe startup race guard
+name: Mangrove Kernel | Phase 451 DAILY and manual-start DSP
+run-name: P451 DAILY + DSP (ADSP autoboot OFF; H1 unchanged)
 on:
   push:
     branches:
@@ -42,7 +42,8 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: F, label: 450-DAILY-DIAGNOSTIC, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: F, label: 451-DAILY-READONLY, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: 451-DSP-MANUAL-PAS, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -415,7 +416,7 @@ jobs:
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT"
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
-          if [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 -m py_compile scripts/449f_chg_ntc_guard.py
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT"
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
@@ -424,6 +425,9 @@ jobs:
             python3 -m py_compile scripts/450_daily_fg_and_guard_diag.py
             python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT"
             python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT" --check-only
+            python3 -m py_compile scripts/451_daily_readonly.py
+            python3 scripts/451_daily_readonly.py --root "$ROOT"
+            python3 scripts/451_daily_readonly.py --root "$ROOT" --check-only
           fi
           # P447J passive vblank diagnostics retained unchanged.
           python3 -m py_compile scripts/447j_vblank_diag.py
@@ -452,9 +456,16 @@ jobs:
             python3 -m py_compile scripts/448a_ipc_stage1.py
             python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"
           fi
-          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 -m py_compile scripts/448b_glink_qrtr_stage2.py
             python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"
+          fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            python3 -m py_compile scripts/450_dsp_aoss_source_prep.py scripts/451_dsp_pas_source.py scripts/451_dsp_boot_dtb.py
+            python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT"
+            python3 scripts/451_dsp_pas_source.py --root "$ROOT"
+            python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
+            python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
           fi
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
@@ -497,7 +508,7 @@ jobs:
               --disable QCOM_Q6V5_MSS --disable QCOM_Q6V5_WCSS \
               --disable QCOM_WCNSS_PIL --disable QCOM_RMTFS_MEM
           fi
-          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" \
               --enable RPMSG --enable RPMSG_CHAR \
               --enable RPMSG_QCOM_GLINK --enable RPMSG_QCOM_GLINK_SMEM \
@@ -520,7 +531,7 @@ jobs:
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
             python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only
           fi
-          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
           fi
           # Kernelrelease reads include/config/auto.conf. A restored build
@@ -612,7 +623,7 @@ jobs:
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
-          if [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
             python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT" --check-only
           fi
@@ -760,7 +771,7 @@ jobs:
           P445="$ROOT/drivers/a52_display/msm/a52_phase445.c"
           test -s "$IMAGE"
           test -s "$MAP"
-          if [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             grep -aFq 'P450 FG current_ua=' "$IMAGE"
             grep -aFq 'P450 CHG_STATE action=' "$IMAGE"
             grep -aFq 'P450 CHG_GUARD sensor=NOT_READY' "$IMAGE"
@@ -1043,7 +1054,7 @@ jobs:
               | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/448b_glink_qrtr_stage2.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
               --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" \
               | tee phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt

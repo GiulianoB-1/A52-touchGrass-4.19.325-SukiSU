@@ -12,6 +12,7 @@ VARIANTS={
  "A":("A-wave2-battery-only",2,0,0),
  "B":("B-wave3-dsp-no-mss",3,0,0),
  "C":("C-wave3-modem-ipa",3,1,1),
+ "D":("D-wave3-ipc-only",3,0,0),
 }
 def sha(x):return hashlib.sha256(x).hexdigest()
 def cs(b):return b.split(b"\0",1)[0].decode("ascii","strict")
@@ -109,6 +110,14 @@ def main():
     if b"initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
         raise RuntimeError("P447C still has initcall_debug")
     x.out.mkdir(parents=True,exist_ok=True)
+    if x.variant == "D":
+        for key in ("QCOM_IPCC","QCOM_SMEM","QCOM_SMP2P","QCOM_AOSS_QMP"):
+            if cfgval(cfg,key)!="y":
+                raise RuntimeError("P448 D missing IPC "+key)
+        for key in ("QCOM_Q6V5_PAS","QCOM_Q6V5_ADSP","QCOM_Q6V5_MSS",
+                    "QCOM_Q6V5_WCSS","QCOM_WCNSS_PIL","QCOM_RMTFS_MEM"):
+            if cfgval(cfg,key)!="n":
+                raise RuntimeError("P448 D remoteproc or rmtfs active "+key)
     target=x.out/(label+".boot.img")
     target.write_bytes(built)
     report={

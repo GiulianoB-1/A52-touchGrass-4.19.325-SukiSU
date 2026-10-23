@@ -1,5 +1,5 @@
-name: Mangrove Kernel | 447N late touch window + USB function bind
-run-name: Mangrove Kernel | 447N A/B/C 60-140s touch + USB function (charger unchanged)
+name: Mangrove Kernel | P448 Step1 IPC-only variant D + 447N A/B/C
+run-name: Mangrove Kernel | 448A1 IPC-only D, A/B/C retained; no remoteproc
 on:
   push:
     branches:
@@ -40,16 +40,17 @@ concurrency:
 jobs:
   gki:
     if: true
-    name: Mangrove Kernel ${{ matrix.variant.id }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }})
+    name: Mangrove Kernel ${{ matrix.variant.id }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         variant:
-          - { id: A, wave: 2, mss: 0, ipa: 0 }
-          - { id: B, wave: 3, mss: 0, ipa: 0 }
-          - { id: C, wave: 3, mss: 1, ipa: 1 }
+          - { id: A, wave: 2, mss: 0, ipa: 0, ipc: 0 }
+          - { id: B, wave: 3, mss: 0, ipa: 0, ipc: 0 }
+          - { id: C, wave: 3, mss: 1, ipa: 1, ipc: 0 }
+          - { id: D, wave: 3, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -436,6 +437,10 @@ jobs:
           python3 -m py_compile scripts/447n_late_touch_usb_function.py
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT"
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            python3 -m py_compile scripts/448a_ipc_stage1.py
+            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"
+          fi
           python3 -m py_compile scripts/447c_quiet_frame_trace.py
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT"
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
@@ -466,6 +471,16 @@ jobs:
           # Phase447M brand: uname -r -> 5.10.x-Mangrove. No Kconfig
           # ABI, display, charger or touchscreen runtime behavior changed.
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-str LOCALVERSION "-Mangrove" --disable LOCALVERSION_AUTO
+          # P448 D: no Q6/PAS, RMTFS or IPA. Other variants unchanged.
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            "$ROOT/scripts/config" --file "$BUILD/.config" \
+              --enable MAILBOX --enable HWSPINLOCK --enable HWSPINLOCK_QCOM \
+              --enable QCOM_IPCC --enable QCOM_SMEM --enable QCOM_SMP2P \
+              --enable QCOM_AOSS_QMP \
+              --disable QCOM_Q6V5_PAS --disable QCOM_Q6V5_ADSP \
+              --disable QCOM_Q6V5_MSS --disable QCOM_Q6V5_WCSS \
+              --disable QCOM_WCNSS_PIL --disable QCOM_RMTFS_MEM
+          fi
           if [ "${{ matrix.variant.mss }}" = 1 ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" --enable A52_MSS_DEFAULT
           else
@@ -479,6 +494,9 @@ jobs:
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "$BUILD/.config"
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only
+          fi
           # Kernelrelease reads include/config/auto.conf. A restored build
           # cache can leave it stale after olddefconfig updated .config.
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 syncconfig
@@ -573,6 +591,9 @@ jobs:
           python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT" --check-only
           python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq" --config "$BUILD/.config" --check-only
+          fi
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only
           python3 scripts/447_manifest_audit.py --manifest merge/manifest.csv --tg "$PWD/workspace/touchgrass-a52xq" --ack "$ROOT" --out phase447-inventory
@@ -938,6 +959,7 @@ jobs:
             A) ORIGINAL_BOOT="phase447b-variants/A-wave2-battery-only.boot.img" ;;
             B) ORIGINAL_BOOT="phase447b-variants/B-wave3-dsp-no-mss.boot.img" ;;
             C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
+            D) ORIGINAL_BOOT="phase447b-variants/D-wave3-ipc-only.boot.img" ;;
             *) echo "Invalid Mangrove variant"; exit 1 ;;
           esac
           MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
@@ -945,6 +967,12 @@ jobs:
           cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            python3 scripts/448a_ipc_stage1.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" \
+              | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload Phase446i GKI failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -980,6 +1008,7 @@ jobs:
             scripts/447i_touch_lifecycle_trace.py
             scripts/447l_usb_stage_diag.py
             scripts/447n_late_touch_usb_function.py
+            scripts/448a_ipc_stage1.py
             scripts/447d_se7_se10_i2c.py
             scripts/447d_readonly_sm5714_fg.py
             scripts/447e_samsung_battery_platform.py
@@ -1073,6 +1102,18 @@ jobs:
             phase447b-variants/Mangrove-Kernel-447M-C.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Phase448 IPC-only variant D (EXPERIMENTAL)
+        if: success() && matrix.variant.id == 'D'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mangrove-Kernel-448-D-IPC-ONLY-${{ github.run_number }}
+          path: |
+            phase447b-variants/Mangrove-Kernel-447M-D.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review

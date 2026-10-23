@@ -1063,27 +1063,42 @@ jobs:
             D) ORIGINAL_BOOT="phase447b-variants/D-wave2-ipc-only.boot.img" ;;
             E) ORIGINAL_BOOT="phase447b-variants/E-wave2-glink-qrtr-only.boot.img" ;;
             F) ORIGINAL_BOOT="phase447b-variants/F-wave2-therm-guard-glink-qrtr.boot.img" ;;
+            G) ORIGINAL_BOOT="phase447b-variants/G-wave2-manual-adsp-pas.boot.img" ;;
             *) echo "Invalid Mangrove variant"; exit 1 ;;
           esac
           MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
           test -s "$ORIGINAL_BOOT"
           cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-451-DSP.boot.img \
+              --report phase447b-variants/P451-DSP-DTB-MANIFEST.json \
+              --config workspace/gki-phase199-out/.config
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-451-DSP.boot.img"
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --config workspace/gki-phase199-out/.config --check-only \
+              | tee phase447b-variants/P451-DSP-BOOT-AUDIT.txt
+          fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
           elif [ "${{ matrix.variant.id }}" = F ]; then
-            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-450-DAILY.boot.img
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-451-DAILY.boot.img
           fi
           printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
             python3 scripts/448a_ipc_stage1.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
-              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
               | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
             python3 scripts/448b_glink_qrtr_stage2.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
-              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
               | tee phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
             cat phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
           fi

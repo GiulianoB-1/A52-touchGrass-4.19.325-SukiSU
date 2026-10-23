@@ -77,7 +77,9 @@ def check(root):
 
 def config_check(path):
     s=path.read_text()
-    if "CONFIG_A52_WAVE_DEFAULT=2\n" not in s:\n        raise RuntimeError("P448 D must remain wave=2: generic W3 gates OFF")\n    for name in ("MAILBOX","HWSPINLOCK","HWSPINLOCK_QCOM",
+    if "CONFIG_A52_WAVE_DEFAULT=2\n" not in s:
+        raise RuntimeError("P448 D must remain wave=2: generic W3 gates OFF")
+    for name in ("MAILBOX","HWSPINLOCK","HWSPINLOCK_QCOM",
                  "QCOM_IPCC","QCOM_SMEM","QCOM_SMP2P","QCOM_AOSS_QMP"):
         if "CONFIG_"+name+"=y\n" not in s:raise RuntimeError("P448 IPC disabled: "+name)
     for name in ("QCOM_Q6V5_PAS","QCOM_Q6V5_ADSP","QCOM_Q6V5_MSS",

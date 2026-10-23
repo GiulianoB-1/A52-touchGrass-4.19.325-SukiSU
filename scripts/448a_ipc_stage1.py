@@ -75,21 +75,24 @@ def check(root):
         raise RuntimeError("P448 unsafe AOSS compatible injected")
     print("P448 IPC SOURCE PASS: upstream core probe markers; no unverified AOSS alias")
 
-def config_check(path):
+def config_check(path,manual_pas=False):
     s=path.read_text()
     if "CONFIG_A52_WAVE_DEFAULT=2\n" not in s:
         raise RuntimeError("P448 D must remain wave=2: generic W3 gates OFF")
     for name in ("MAILBOX","HWSPINLOCK","HWSPINLOCK_QCOM",
                  "QCOM_IPCC","QCOM_SMEM","QCOM_SMP2P","QCOM_AOSS_QMP"):
         if "CONFIG_"+name+"=y\n" not in s:raise RuntimeError("P448 IPC disabled: "+name)
+    if manual_pas and "CONFIG_QCOM_Q6V5_PAS=y\n" not in s:
+        raise RuntimeError("P451 G PAS must be built-in")
     for name in ("QCOM_Q6V5_PAS","QCOM_Q6V5_ADSP","QCOM_Q6V5_MSS",
                  "QCOM_Q6V5_WCSS","QCOM_WCNSS_PIL","QCOM_RMTFS_MEM",
                  "A52_MSS_DEFAULT","A52_IPA_DEFAULT"):
+        if manual_pas and name=="QCOM_Q6V5_PAS":continue
         if "CONFIG_"+name+"=y\n" in s or "CONFIG_"+name+"=m\n" in s:
             raise RuntimeError("P448 D must not boot remoteproc/IPA/rmtfs: "+name)
     print("P448 IPC CONFIG PASS: only upstream IPC built in; PAS/MSS/IPA/rmtfs OFF")
 
-def boot_check(boot,parser):
+def boot_check(boot,parser,manual_pas=False):
     spec=importlib.util.spec_from_file_location("a52boot",parser)
     mod=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -122,9 +125,14 @@ def boot_check(boot,parser):
             raise RuntimeError("P448 compiled DTB local PID drift "+node)
         if cells("qcom,remote-pid")!=(pid,):
             raise RuntimeError("P448 compiled DTB remote PID drift "+node)
-    for tok in ("qcom,ipcc","qcom,smem","qcom,qmp-mbox","master-kernel","slave-kernel"):
+    expected=("qcom,ipcc","qcom,smem","master-kernel","slave-kernel")
+    if manual_pas:
+        expected+=("qcom,sm6350-aoss-qmp","qcom,sm6350-adsp-pas","glink-edge")
+    else:
+        expected+=("qcom,qmp-mbox",)
+    for tok in expected:
         if tok not in dts:raise RuntimeError("P448 packed DTB missing "+tok)
-    print("P448 IPC DTB PASS: correct TG IDs in packaged boot; AOSS ABI still unbound")
+    print("P448 IPC DTB PASS: TG IDs; native manual PAS="+str(manual_pas))
 
 def main():
     p=argparse.ArgumentParser()
@@ -134,16 +142,17 @@ def main():
     p.add_argument("--boot",type=Path)
     p.add_argument("--parser",type=Path,default=Path("scripts/38_repack_a52_p1_boot.py"))
     p.add_argument("--check-only",action="store_true")
+    p.add_argument("--manual-pas",action="store_true")
     x=p.parse_args()
     if x.tg:tg_check(x.tg)
     if x.boot:
-        boot_check(x.boot,x.parser)
-        if x.config:config_check(x.config)
+        boot_check(x.boot,x.parser,x.manual_pas)
+        if x.config:config_check(x.config,x.manual_pas)
         return
     if not x.check_only:
         updates={p:patch((x.root/p).read_text(),name) for name,p in PATHS.items()}
         for p,txt in updates.items():(x.root/p).write_text(txt)
     check(x.root)
-    if x.config:config_check(x.config)
+    if x.config:config_check(x.config,x.manual_pas)
 
 if __name__=="__main__":main()

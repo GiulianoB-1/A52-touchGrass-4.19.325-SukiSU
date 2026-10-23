@@ -45,12 +45,15 @@ def source(root,patch):
         if s.count(TAG)!=1 or s.count(marker)!=1:
             raise RuntimeError("P448B compiled source marker missing/duplicated")
     print("P448B SOURCE PASS: passive GLINK/QRTR success markers; no peer autostart")
-def config(f):
+def config(f,manual_pas=False):
     s=f.read_text().splitlines()
     for k in ENABLED:
         if "CONFIG_"+k+"=y" not in s:
             raise RuntimeError("P448B missing transport "+k)
+    if manual_pas and "CONFIG_QCOM_Q6V5_PAS=y" not in s:
+        raise RuntimeError("P451 G PAS not built")
     for k in FORBIDDEN:
+        if manual_pas and k=="QCOM_Q6V5_PAS":continue
         if "CONFIG_"+k+"=y" in s or "CONFIG_"+k+"=m" in s:
             raise RuntimeError("P448B unsafe remoteproc/IPA active "+k)
     if "CONFIG_A52_WAVE_DEFAULT=2" not in s:
@@ -74,9 +77,10 @@ def main():
     p.add_argument("--tg",type=Path);p.add_argument("--config",type=Path)
     p.add_argument("--boot",type=Path);p.add_argument("--check-only",action="store_true")
     p.add_argument("--parser",type=Path,default=Path("scripts/38_repack_a52_p1_boot.py"))
+    p.add_argument("--manual-pas",action="store_true")
     a=p.parse_args()
     if a.tg:check_tg(a.tg)
     if a.boot:boot(a.boot,a.parser)
     else:source(a.root,not a.check_only)
-    if a.config:config(a.config)
+    if a.config:config(a.config,a.manual_pas)
 if __name__=="__main__":main()

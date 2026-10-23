@@ -50,7 +50,7 @@ jobs:
           - { id: A, wave: 2, mss: 0, ipa: 0, ipc: 0 }
           - { id: B, wave: 3, mss: 0, ipa: 0, ipc: 0 }
           - { id: C, wave: 3, mss: 1, ipa: 1, ipc: 0 }
-          - { id: D, wave: 3, mss: 0, ipa: 0, ipc: 1 }
+          - { id: D, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -471,7 +471,8 @@ jobs:
           # Phase447M brand: uname -r -> 5.10.x-Mangrove. No Kconfig
           # ABI, display, charger or touchscreen runtime behavior changed.
           "$ROOT/scripts/config" --file "$BUILD/.config" --set-str LOCALVERSION "-Mangrove" --disable LOCALVERSION_AUTO
-          # P448 D: no Q6/PAS, RMTFS or IPA. Other variants unchanged.
+          # P448 D: wave=2 explicitly, add IPC drivers independently; no W3
+          # generic subsystem gates, no Q6/PAS, RMTFS or IPA. A/B/C unchanged.
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" \
               --enable MAILBOX --enable HWSPINLOCK --enable HWSPINLOCK_QCOM \
@@ -959,7 +960,7 @@ jobs:
             A) ORIGINAL_BOOT="phase447b-variants/A-wave2-battery-only.boot.img" ;;
             B) ORIGINAL_BOOT="phase447b-variants/B-wave3-dsp-no-mss.boot.img" ;;
             C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
-            D) ORIGINAL_BOOT="phase447b-variants/D-wave3-ipc-only.boot.img" ;;
+            D) ORIGINAL_BOOT="phase447b-variants/D-wave2-ipc-only.boot.img" ;;
             *) echo "Invalid Mangrove variant"; exit 1 ;;
           esac
           MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"

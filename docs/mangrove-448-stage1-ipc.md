@@ -2,7 +2,7 @@
 
 Based on work order 448 (23 Oct 2026), pinned TG 6bf351bd / Android common f960ed27.
 
-Only **D** is an IPC bring-up variant. A/B/C remain unchanged and are not evidence of modem support.
+Only **D** is an IPC bring-up variant. It compiles **A52_WAVE_DEFAULT=2** and opts into IPC drivers explicitly, preventing unrelated generic Wave 3 gates (ADSP/CDSP/GLINK/MSS) from arming. A/B/C remain unchanged and are not evidence of modem support.
 
 - Compiled-in upstream IPCC mailbox, Qualcomm SMEM (and its HWSPINLOCK), SMP2P and upstream AOSS QMP driver.
 - Forced downstream Q6/PAS/MSS/ADSP/WCSS/rmtfs components OFF for D. No IPA on this build.
@@ -13,3 +13,12 @@ Only **D** is an IPC bring-up variant. A/B/C remain unchanged and are not eviden
 - Before first MSS test, back up modemst1/2 and fsg from TG. Normal charging stays on TG until charger policy work 447I is complete.
 
 Acceptance for Stage 1: A52 boots, no unexpected panic, actual runtime probe markers for IPCC/SMEM/SMP2P, no defer storm, no new SELinux denials. AOSS requires separate validated work. This document does not claim that Stage1 is complete or that the modem functions.
+
+## Additional gates from the expanded work order (23 October)
+
+- Stage 2 — GLINK+QRTR: no remoteproc boot. Validate the four TG edges and channels and that qrtr-ns, pd-mapper and PDR tolerate missing peers.
+- Stage 3 — ADSP: mainline SM6350 PAS id 1, adsp firmware, TG memory 0x88d00000/0x2800000, crash SMEM 423, proxy/clock/smp2p/IRQs; no uncontrolled restart.
+- Stage 4 — CDSP/FastRPC: PAS 18 and correct DMA SMMU owner; downstream ABI /dev/adsprpc-smd for both ADSP and CDSP, not /dev/cdsprpc-smd.
+- Stage 5 — MSS: back up modemst1, modemst2 and fsg on TG first. PAS id 4, modem firmware under /vendor/firmware-modem/image, memory 0x8b800000/0xf800000, UIO rmtfs region size 0x280000 client 1. No kernel NV/EFS/IMEI/RPMB writes.
+- Stage 6 — IPA/rmnet: only after stable MSS and validated downstream /dev/ipa, /dev/wwan_ioctl, rmnet_ctrl service ABI.
+- All later stages: no AP panic from SSR/PDR, no 60s firmware stalls, no guessed SMMU SID, no intentional subsystem crash. NPU optional. Use collector v1.14; record git SHA, CI run, artifact, .config and exact tested DTB. Charging remains on TG.

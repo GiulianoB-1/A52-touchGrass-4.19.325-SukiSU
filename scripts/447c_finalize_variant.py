@@ -12,7 +12,7 @@ VARIANTS={
  "A":("A-wave2-battery-only",2,0,0),
  "B":("B-wave3-dsp-no-mss",3,0,0),
  "C":("C-wave3-modem-ipa",3,1,1),
- "D":("D-wave3-ipc-only",3,0,0),
+ "D":("D-wave2-ipc-only",2,0,0),
 }
 def sha(x):return hashlib.sha256(x).hexdigest()
 def cs(b):return b.split(b"\0",1)[0].decode("ascii","strict")

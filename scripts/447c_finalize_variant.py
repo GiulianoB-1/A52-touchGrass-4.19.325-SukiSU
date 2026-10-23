@@ -14,6 +14,7 @@ VARIANTS={
  "C":("C-wave3-modem-ipa",3,1,1),
  "D":("D-wave2-ipc-only",2,0,0),
  "E":("E-wave2-glink-qrtr-only",2,0,0),
+ "F":("F-wave2-therm-guard-glink-qrtr",2,0,0),
 }
 def sha(x):return hashlib.sha256(x).hexdigest()
 def cs(b):return b.split(b"\0",1)[0].decode("ascii","strict")
@@ -79,6 +80,10 @@ def main():
         "firmware_class.path=/vendor/firmware_mnt/image",
         "no_console_suspend","panic=0",
     ]
+    if x.variant=="F":
+        # P449: explicit run-time initcall evidence for the next IPC stage.
+        # ABL truncates extra cmdline; keep this in the PRIMARY field.
+        critical.append("initcall_debug")
     for item in critical[:6]:
         if item not in words:
             raise RuntimeError("P447C missing previously generated must-keep "+item)
@@ -123,10 +128,10 @@ def main():
     primary_args=p1.split()
     if not all(k in primary_args for k in critical):
         raise RuntimeError("P447C primary args lost")
-    if b"initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
+    if x.variant!="F" and b"initcall_debug" in built[CMD_OFF:CMD_OFF+CMD_LEN]:
         raise RuntimeError("P447C still has initcall_debug")
     x.out.mkdir(parents=True,exist_ok=True)
-    if x.variant in ("D","E"):
+    if x.variant in ("D","E","F"):
         for key in ("QCOM_IPCC","QCOM_SMEM","QCOM_SMP2P","QCOM_AOSS_QMP"):
             if cfgval(cfg,key)!="y":
                 raise RuntimeError("P448 D missing IPC "+key)
@@ -134,12 +139,14 @@ def main():
                     "QCOM_Q6V5_WCSS","QCOM_WCNSS_PIL","QCOM_RMTFS_MEM"):
             if cfgval_optional_disabled(cfg,key)!="n":
                 raise RuntimeError("P448 D remoteproc or rmtfs active "+key)
-    if x.variant == "E":
+    if x.variant in ("E","F"):
         for key in ("RPMSG","RPMSG_CHAR","RPMSG_QCOM_GLINK",
                     "RPMSG_QCOM_GLINK_SMEM","QRTR","QRTR_SMD",
                     "QCOM_SYSMON","QCOM_QMI_HELPERS"):
             if cfgval(cfg,key)!="y":
                 raise RuntimeError("P448 E missing transport "+key)
+    if x.variant=="F" and "initcall_debug" not in primary_args:
+        raise RuntimeError("P449 F initcall_debug missing from primary ABL cmdline")
     target=x.out/(label+".boot.img")
     target.write_bytes(built)
     report={
@@ -165,7 +172,8 @@ def main():
         "P447C "+label+": independently compiled wave "+str(wave)+", MSS="+str(mss)+", IPA="+str(ipa)+".\n"
         "ALL NEW PORTS STILL REQUIRE SOURCE/DT/ABI/NO-NV CERTIFICATION.\n"
         "Do not expect battery percentage or remoteproc states from gates alone.\n"
-        "Retain a known-good recovery boot image.\n")
+        "Retain a known-good recovery boot image.\n"
+        + ("P449F IS NOT A CHARGER PORT. NO NORMAL CHARGING; FG+NTC EMERGENCY INHIBIT ONLY.\n" if x.variant=="F" else ""))
     print("P447C BOOT PASS",x.variant,"wave",wave,"mss",mss,"ipa",ipa,
           "primary_length",len(p1),"extra_length",len(xtra),
           "SHA256",sha(built))

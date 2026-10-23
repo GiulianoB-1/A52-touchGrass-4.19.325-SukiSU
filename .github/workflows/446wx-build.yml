@@ -47,6 +47,7 @@ jobs:
           - { id: C, wave: 3, mss: 1, ipa: 1, ipc: 0 }
           - { id: D, wave: 2, mss: 0, ipa: 0, ipc: 1 }
           - { id: E, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: F, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -419,6 +420,11 @@ jobs:
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT"
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
+          if [ "${{ matrix.variant.id }}" = F ]; then
+            python3 -m py_compile scripts/449f_chg_ntc_guard.py
+            python3 scripts/449f_chg_ntc_guard.py --root "$ROOT"
+            python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
+          fi
           # P447J passive vblank diagnostics retained unchanged.
           python3 -m py_compile scripts/447j_vblank_diag.py
           python3 scripts/447j_vblank_diag.py --root "$ROOT"
@@ -446,7 +452,7 @@ jobs:
             python3 -m py_compile scripts/448a_ipc_stage1.py
             python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"
           fi
-          if [ "${{ matrix.variant.id }}" = E ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
             python3 -m py_compile scripts/448b_glink_qrtr_stage2.py
             python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"
           fi
@@ -491,7 +497,7 @@ jobs:
               --disable QCOM_Q6V5_MSS --disable QCOM_Q6V5_WCSS \
               --disable QCOM_WCNSS_PIL --disable QCOM_RMTFS_MEM
           fi
-          if [ "${{ matrix.variant.id }}" = E ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" \
               --enable RPMSG --enable RPMSG_CHAR \
               --enable RPMSG_QCOM_GLINK --enable RPMSG_QCOM_GLINK_SMEM \
@@ -514,7 +520,7 @@ jobs:
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
             python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only
           fi
-          if [ "${{ matrix.variant.id }}" = E ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
             python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
           fi
           # Kernelrelease reads include/config/auto.conf. A restored build
@@ -606,6 +612,9 @@ jobs:
           python3 scripts/447h_ntc_retry.py --root "$ROOT" --check-only
           python3 scripts/447h_tchg_ntc.py --root "$ROOT" --check-only
           python3 scripts/447h_soc_policy.py --root "$ROOT" --check-only
+          if [ "${{ matrix.variant.id }}" = F ]; then
+            python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
+          fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
           python3 scripts/447i_touch_lifecycle_trace.py --root "$ROOT" --check-only
@@ -1008,6 +1017,7 @@ jobs:
             C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
             D) ORIGINAL_BOOT="phase447b-variants/D-wave2-ipc-only.boot.img" ;;
             E) ORIGINAL_BOOT="phase447b-variants/E-wave2-glink-qrtr-only.boot.img" ;;
+            F) ORIGINAL_BOOT="phase447b-variants/F-wave2-therm-guard-glink-qrtr.boot.img" ;;
             *) echo "Invalid Mangrove variant"; exit 1 ;;
           esac
           MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
@@ -1021,7 +1031,7 @@ jobs:
               | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ "${{ matrix.variant.id }}" = E ]; then
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ]; then
             python3 scripts/448b_glink_qrtr_stage2.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
               --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" \
               | tee phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
@@ -1177,6 +1187,19 @@ jobs:
           name: Mangrove-Kernel-448-E-GLINK-QRTR-NO-RPROC-${{ github.run_number }}
           path: |
             phase447b-variants/Mangrove-Kernel-447M-E.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Phase449 F guarded IPC+GLINK+QRTR (NO charger support)
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-449F-BOOT-${{ github.run_number }}
+          path: |
+            phase447b-variants/Mangrove-Kernel-447M-F.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt

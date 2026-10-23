@@ -525,14 +525,29 @@ jobs:
           else
             "$ROOT/scripts/config" --file "$BUILD/.config" --disable A52_IPA_DEFAULT
           fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            "$ROOT/scripts/config" --file "$BUILD/.config" \
+              --enable REMOTEPROC --enable RPMSG_QCOM_SMD \
+              --enable QCOM_Q6V5_PAS --enable QCOM_SCM
+          fi
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "$BUILD/.config"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
-            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only
+            if [ "${{ matrix.variant.id }}" = G ]; then
+              python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only --manual-pas
+            else
+              python3 scripts/448a_ipc_stage1.py --root "$ROOT" --config "$BUILD/.config" --check-only
+            fi
           fi
           if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
-            python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
+            if [ "${{ matrix.variant.id }}" = G ]; then
+              python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only --manual-pas
+              python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
+              python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
+            else
+              python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
+            fi
           fi
           # Kernelrelease reads include/config/auto.conf. A restored build
           # cache can leave it stale after olddefconfig updated .config.
@@ -626,6 +641,11 @@ jobs:
           if [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/449f_chg_ntc_guard.py --root "$ROOT" --check-only
             python3 scripts/450_daily_fg_and_guard_diag.py --root "$ROOT" --check-only
+            python3 scripts/451_daily_readonly.py --root "$ROOT" --check-only
+          fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
+            python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
@@ -775,7 +795,14 @@ jobs:
             grep -aFq 'P450 FG current_ua=' "$IMAGE"
             grep -aFq 'P450 CHG_STATE action=' "$IMAGE"
             grep -aFq 'P450 CHG_GUARD sensor=NOT_READY' "$IMAGE"
-            echo 'P450 DAILY compiled FG current and CHG_STATE markers PASS' >> "$GITHUB_STEP_SUMMARY"
+            grep -aFq 'P451 CHG_REGS why=' "$IMAGE"
+            grep -aFq 'P451 BATTERY current_mA=' "$IMAGE"
+            echo 'P451 DAILY read-only logs compiled' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
+            grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
+            grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
           fi
           grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"

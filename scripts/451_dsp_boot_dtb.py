@@ -42,15 +42,20 @@ def walk(dtb,start="/",depth=0):
     for sub in children(dtb,start):
         yield from walk(dtb,(start.rstrip("/")+"/"+sub),depth+1)
 def glink_tg_adsp(dtb):
-    hits=[]
-    for node in walk(dtb,"/soc"):
-        if node==LPASS:continue
-        if node.rsplit("/",1)[-1] not in ("adsp","adsp@0"):continue
-        pid=optional("fdtget","-t","x",dtb,node,"qcom,remote-pid")
-        if pid and int(pid.split()[0],16)==2:
-            hits.append(node)
-    if len(hits)!=1:raise RuntimeError("P451 needs precisely one original TG ADSP GLINK edge, found "+repr(hits))
-    return hits[0]
+    # Final 451-DAILY-431 (artifact 12526483712) has this exact path:
+    # /soc/qcom,glink/adsp, qcom,remote-pid=2 and TG LPASS IPCC IRQ.
+    # Avoid a recursive fdtget listing that missed an existing node.
+    node="/soc/qcom,glink/adsp"
+    pid=cells(dtb,node,"qcom,remote-pid")
+    if pid!=[2]:
+        raise RuntimeError("P451 TG ADSP GLINK remote-pid mismatch "+repr(pid))
+    if run("fdtget","-t","s",dtb,"/soc/qcom,glink","compatible")!="qcom,glink":
+        raise RuntimeError("P451 TG GLINK parent compatible drift")
+    for prop in ("mboxes","interrupt-parent","interrupts"):
+        if not cells(dtb,node,prop):
+            raise RuntimeError("P451 TG ADSP GLINK missing "+prop)
+    print("P451 TG PACKED GLINK FOUND path="+node+" remote_pid=2")
+    return node
 def preflight(dtb):
     if run("fdtget","-t","s",dtb,AOSS,"compatible")!="qcom,qmp-mbox":
         raise RuntimeError("P451 refusing AOSS whose TG compatible already changed")
@@ -81,10 +86,14 @@ def patch_fdt(raw):
         puts(file,AOSS,"compatible","qcom,sm6350-aoss-qmp")
         putx(file,AOSS,"#power-domain-cells",1)
         putx(file,AOSS,"#clock-cells",0)
-        # Downstream #mbox-cells would announce a mailbox provider that
-        # native qcom_aoss DOES NOT implement. Remove the declaration.
-        if optional("fdtget","-t","x",file,AOSS,"#mbox-cells") is not None:
-            run("fdtput","-d",file,AOSS,"#mbox-cells")
+        # The native AOSS driver is the only QMP hardware owner.
+        # However, the final TG DTB has seven pre-existing mboxes clients
+        # pointing at this phandle, some potentially active for thermal/
+        # memory-offline support. Retain #mbox-cells as inert parser ABI;
+        # it does NOT create a mailbox provider in qcom_aoss.
+        # Native migration of those seven consumers remains separate work.
+        if cells(file,AOSS,"#mbox-cells")!=[1]:
+            raise RuntimeError("P451 missing legacy AOP consumer parser contract")
         # 5.10 Q6v5 PAS uses legacy cx/px regulator_get names. These aliases
         # point to the UNCHANGED TG lcx.lvl and lmx.lvl regulator phandles.
         puts(file,LPASS,"compatible","qcom,sm6350-adsp-pas")
@@ -127,8 +136,8 @@ def patch_fdt(raw):
 def validate(file):
     if run("fdtget","-t","s",file,AOSS,"compatible")!="qcom,sm6350-aoss-qmp":
         raise RuntimeError("P451 AOSS not exclusive native")
-    if optional("fdtget","-t","x",file,AOSS,"#mbox-cells") is not None:
-        raise RuntimeError("P451 native AOSS still exposes legacy mailbox provider")
+    if cells(file,AOSS,"#mbox-cells")!=[1]:
+        raise RuntimeError("P451 existing AOP mailbox client parser contract lost")
     if cells(file,AOSS,"#power-domain-cells")!=[1]:
         raise RuntimeError("P451 AOSS missing genpd single cell")
     if run("fdtget","-t","s",file,LPASS,"compatible")!="qcom,sm6350-adsp-pas":

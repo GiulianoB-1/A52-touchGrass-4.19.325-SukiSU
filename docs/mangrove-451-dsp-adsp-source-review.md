@@ -78,3 +78,38 @@ pre-inhibit register snapshot, throttle P450 AFTER_INHIBIT telemetry to
 30s, sample STATUS2 after settling and log AUX_STAT bit0x0008 suspect
 updates separately. Do not treat an unverified 0x0008 flag as proven
 invalidity. Preserve emergency inhibit until H1 verified.
+
+## 450 DAILY raw collector independently verified — 2026-10-23 21:25
+
+Two original archives `GKI_20261023_212530_boot_plus120s` and
+`GKI_20261023_212543_manual` were extracted and compared to the
+uploaded capture summary. Both retain the same boot timeline:
+
+- 2.102288s guard: VBUS=1, Tchg not yet initialized, inhibit required.
+- 2.103716s current +181000uA, AUX_STAT=0x8876.
+- 2.104847s charger EN=0 but STATUS2 bit3 still 1 (transient).
+- 2.104858s inhibit readback CNTL1 **0x6c to 0x64**, bit3 cleared.
+- 4.135932-4.137997s current -103000uA, STATUS2=0 charging=0.
+- Nine 30s current/TEMP samples; Tchg up to 44.5C, FG die up to
+  46.8C; actual battery thermistor about 34.6-34.9C.
+- 113/118 `P450 CHG_STATE action=AFTER_INHIBIT` duplicate logs;
+  throttle to 30s without losing on-change and initial records.
+- `aux_stat=0x885e` correlates with two -1000uA samples,
+  64.62 and 185.61 s; 0x0008 status meaning not yet verified.
+- Five P448 IPC probes PASS; AOSS/ADSP absent, as expected;
+  2 power supplies; USB connected at boot and configured high-speed.
+- `adsp.mdt` and segments found under mounted
+  `/vendor/firmware_mnt/image`. Native firmware-loader path still TBD.
+- `c300000.qcom,qmp-aop` listed as **unbound**. Confirm exclusive
+  ownership in *final* DTB before changing compatible/provider role.
+- Nonfatal WARNING traces still present: KGSL iommu
+  `System cache not enabled ... -19`, SMMU assignment `-22`;
+  manual bundle also includes `mm/pgsize_migration.c` warnings.
+  Do not misreport a boot without kernel panic as a warning-free boot.
+
+The emergency inhibit is **hardware validated**, including bootloader
+charge-on handoff. No H1 or PAS/ADSP functionality exists in this image.
+Prior mention that raw bundles were unavailable is obsolete after these
+uploads. Continue with Phase 451 AOSS/PAS work isolated from this
+charging-inhibit baseline. Neither USB-at-boot reconnect nor charging
+enable should be added opportunistically.

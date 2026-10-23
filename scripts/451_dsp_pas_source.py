@@ -60,7 +60,7 @@ static const struct adsp_data a52_sm6350_adsp_resource = {
     end=s.index("static void qcom_pas_handover(",start)
     part=s[start:end]
     part=once(part,'''ret = regulator_enable(adsp->cx_supply);''',
-        '''/* TG lcx.lvl/lmx.lvl level 0x180 (384), same downstream
+        r'''/* TG lcx.lvl/lmx.lvl level 0x180 (384), same downstream
      * regulator provider as display/GPU. Never add a competing rpmhpd.
      * Provider's maximum encoded performance level is 0xffff.
      */
@@ -81,7 +81,7 @@ static const struct adsp_data a52_sm6350_adsp_resource = {
     }
 \tclk_disable_unprepare(adsp->aggre2_clk);''',"error unvote")
     part=once(part,'''ret = qcom_q6v5_wait_for_start(&adsp->q6v5, msecs_to_jiffies(5000));''',
-        '''dev_info(adsp->dev,"P451 ADSP PAS_AUTH rc=0 pas_id=%d fw=%s\n",
+        r'''dev_info(adsp->dev,"P451 ADSP PAS_AUTH rc=0 pas_id=%d fw=%s\n",
              adsp->pas_id,rproc->firmware);
     ret = qcom_q6v5_wait_for_start(&adsp->q6v5, msecs_to_jiffies(5000));''',"PAS auth marker")
     s=s[:start]+part+s[end:]
@@ -89,7 +89,7 @@ static const struct adsp_data a52_sm6350_adsp_resource = {
     end=s.index("static int adsp_stop(",start)
     part=s[start:end]
     part=once(part,"regulator_disable(adsp->cx_supply);",
-        '''regulator_disable(adsp->cx_supply);
+        r'''regulator_disable(adsp->cx_supply);
     if (adsp->a52_level_rails) {
         regulator_set_voltage(adsp->px_supply,0,0xffff);
         regulator_set_voltage(adsp->cx_supply,0,0xffff);
@@ -100,7 +100,7 @@ static const struct adsp_data a52_sm6350_adsp_resource = {
     end=s.index("static int adsp_remove(",start)
     part=s[start:end]
     part=once(part,"rproc->auto_boot = desc->auto_boot;",
-        '''rproc->auto_boot = desc->auto_boot;
+        r'''rproc->auto_boot = desc->auto_boot;
     if (desc->a52_level_rails)
         dev_info(&pdev->dev,"P451 ADSP PROBE manual_start=1 auto_boot=0 PAS=1\n");''',"autoboot assertion log")
     s=s[:start]+part+s[end:]

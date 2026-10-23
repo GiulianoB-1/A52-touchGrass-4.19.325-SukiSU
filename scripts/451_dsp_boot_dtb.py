@@ -120,11 +120,19 @@ def patch_fdt(raw):
             if not channels:continue
             dst=edge+"/"+kid
             new(file,dst)
-            puts(file,dst,"qcom,glink-channels",*channels.split())
-            ints=optional("fdtget","-t","x",file,prev,"qcom,intents")
-            if ints:putx(file,dst,"qcom,intents",*[int(z,16) for z in ints.split()])
+            # Copy TG channel children EXACTLY (including fastrpc compatible,
+            # QRTR low-latency and SSR notify-edges), not only intents.
+            # fdtget/fdtput -t bx round-trips bytes, including boolean props.
+            for prop in run("fdtget","-p",file,prev).splitlines():
+                if prop in ("phandle","linux,phandle"):continue
+                original=run("fdtget","-t","bx",file,prev,prop)
+                run("fdtput","-t","bx",file,dst,prop,*original.split())
+                actual=run("fdtget","-t","bx",file,dst,prop)
+                if actual!=original:
+                    raise RuntimeError("P451 GLINK child byte mismatch "+prev+"/"+prop)
             copied+=1
-        if copied<2:raise RuntimeError("P451 no TG GLINK channels copied "+str(copied))
+        if copied!=4:
+            raise RuntimeError("P451 expected 4 TG ADSP channels, got "+str(copied))
         # One transport owner only, no phantom old platform transport.
         puts(file,meta["glink"],"status","disabled")
         newdtb=file.read_bytes()

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/mangrove-kernel-banner.webp" alt="Mangrove Kernel — 2D mangrove forest illustration" width="760">
+</p>
+
 # Mangrove Kernel
 
 **An Android 16 kernel bring-up project for the Samsung Galaxy A52 5G (SM-A526B / a52xq), based on GKI 5.10.**

@@ -4,11 +4,6 @@ on:
   push:
     branches:
       - agent/a52-phase447-big-merge-off-v1
-  pull_request:
-    branches:
-      - agent/a52-phase446w-handoff-b-default-v1
-    paths-ignore:
-      - '.github/workflows/446s-smmu-source-smoke.yml'
   workflow_dispatch:
     inputs:
       decode_pc:

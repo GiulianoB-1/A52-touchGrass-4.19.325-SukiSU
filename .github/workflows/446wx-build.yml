@@ -42,8 +42,8 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: F, label: 451-DAILY-READONLY, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: 451-DSP-MANUAL-PAS, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          # DAILY already passed in run 40008718794. DSP-only retry.
+          - { id: G, label: 451-DSP-MANUAL-PAS-RETRY, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -653,7 +653,9 @@ jobs:
           python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
-            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq" --config "$BUILD/.config" --check-only
+            IPC_ARGS=()
+            if [ "${{ matrix.variant.id }}" = G ]; then IPC_ARGS+=(--manual-pas); fi
+            python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq" --config "$BUILD/.config" --check-only "${IPC_ARGS[@]}"
           fi
           python3 scripts/447c_quiet_frame_trace.py --root "$ROOT" --check-only
           python3 scripts/447b_restore_446ag_touch.py --root "$ROOT" --check-only

@@ -12,21 +12,34 @@ TAG="A52_PHASE450_DAILY_GUARD_FG_DIAG_V1"
 
 HELPERS=r'''
 /* A52_PHASE450_DAILY_GUARD_FG_DIAG_V1
- * TG sm5714_fg_get_curr() reads SRAM 0x05/0x09; the signed value
- * below is a RAW current indication without TG charger-status gating.
+ * TG sm5714_fg_get_curr() reads SRAM 0x05/0x09; the signed value follows TG's 2.5x range and 0x8000 system-status
+ * rules. The downstream flag_chg_status policy is NOT yet available.
  * Report uA, not guaranteed net charge/discharge classification.
  */
 #define A52P450_FG_CURR 0x05
 #define A52P450_FG_CURR_AVG 0x09
+#define A52P450_FG_SYSTEM_STATUS 0x10
+#define A52P450_FG_AUX_STAT 0x22
 #define A52P450_CHG_STATUS2 0x0e
 #define A52P450_CHG_STATUS3 0x0f
-static int a52p450_read_current_ua(struct a52d_fg *fg, u8 addr, int *ua)
+static int a52p450_read_current_ua(struct a52d_fg *fg, u8 addr,
+                                   int *ua, int *aux_stat, int *sys_stat)
 {
     int word=a52d_sram_read(fg,addr);
-    int ma;
+    int stat,aux,ma;
     if (word<0) return word;
+    aux=i2c_smbus_read_word_data(fg->fg,A52P450_FG_AUX_STAT);
+    if (aux<0) return aux;
+    stat=i2c_smbus_read_word_data(fg->fg,A52P450_FG_SYSTEM_STATUS);
+    if (stat<0) return stat;
     ma=((word&0x7fff)*1000)/2044;
-    *ua=((word&0x8000) ? -ma : ma)*1000;
+    if (word&0x8000) ma=-ma;
+    /* TG sm5714_get_curr: widened range and factory/init current zero. */
+    if (aux&0x0400) ma=ma*25/10;
+    if (stat&0x8000) ma=0;
+    *ua=ma*1000;
+    if (aux_stat) *aux_stat=aux;
+    if (sys_stat) *sys_stat=stat;
     return 0;
 }
 static void a52p450_chg_state(struct a52d_fg *fg, const char *action)
@@ -82,9 +95,9 @@ def patch(s):
            "POWER_SUPPLY_PROP_VOLTAGE_NOW,\n    POWER_SUPPLY_PROP_CURRENT_NOW,\n    POWER_SUPPLY_PROP_CURRENT_AVG,","FG exposed property list")
     s=once(s,"case POWER_SUPPLY_PROP_VOLTAGE_NOW:",
            '''case POWER_SUPPLY_PROP_CURRENT_NOW:
-        return a52p450_read_current_ua(fg,A52P450_FG_CURR,&v->intval);
+        return a52p450_read_current_ua(fg,A52P450_FG_CURR,&v->intval,NULL,NULL);
     case POWER_SUPPLY_PROP_CURRENT_AVG:
-        return a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&v->intval);
+        return a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&v->intval,NULL,NULL);
     case POWER_SUPPLY_PROP_VOLTAGE_NOW:''',"FG read properties")
     s=once(s,"u32 a52g_guard_cycle;","u32 a52g_guard_cycle;\n    unsigned long a52p450_started;","startup epoch")
     s=once(s,"fg->a52g_chg=client;",
@@ -104,12 +117,14 @@ def patch(s):
     part=once(part,anchor,'a52p450_chg_state(fg,"AFTER_INHIBIT");\n    '+anchor,"inhibit postread")
     anchor="if (first || fg->a52g_guard_cycle++ % 15 == 0)"
     part=once(part,anchor,r'''if (first || fg->a52g_guard_cycle % 15 == 0) {
-        int now=0,avg=0;
-        int now_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR,&now);
-        int avg_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,&avg);
+        int now=0,avg=0,aux=-1,stat=-1;
+        int now_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR,
+                                             &now,&aux,&stat);
+        int avg_rc=a52p450_read_current_ua(fg,A52P450_FG_CURR_AVG,
+                                             &avg,NULL,NULL);
         dev_info(fg->dev,
-            "P450 FG current_ua=%d avg_ua=%d rc_now=%d rc_avg=%d src=SRAM_RAW signed=1 charging_status=UNVERIFIED\n",
-            now,avg,now_rc,avg_rc);
+            "P450 FG current_ua=%d avg_ua=%d aux_stat=%#x system_status=%#x rc_now=%d rc_avg=%d source=SM5714_RANGE_25_10 signed=1 status_flag=UNVERIFIED\n",
+            now,avg,aux,stat,now_rc,avg_rc);
     }
     '''+anchor,"30-second FG current")
     s=s[:start]+part
@@ -122,7 +137,11 @@ def check(root):
               "time_before(jiffies,fg->a52p450_started+10*HZ)",
               "POWER_SUPPLY_PROP_CURRENT_NOW",
               "POWER_SUPPLY_PROP_CURRENT_AVG",
-              "A52P450_FG_CURR 0x05","A52P450_FG_CURR_AVG 0x09"):
+              "A52P450_FG_CURR 0x05","A52P450_FG_CURR_AVG 0x09",
+              "A52P450_FG_SYSTEM_STATUS 0x10","A52P450_FG_AUX_STAT 0x22",
+              "if (aux&0x0400) ma=ma*25/10;",
+              "if (stat&0x8000) ma=0;",
+              "aux_stat=%#x system_status=%#x"):
         if a not in s:raise RuntimeError("P450 source missing "+a)
     if s.count("i2c_smbus_write_byte_data(")!=1:
         raise RuntimeError("P450 guard may not add charger register writes")

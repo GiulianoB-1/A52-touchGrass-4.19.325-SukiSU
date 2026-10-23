@@ -15,7 +15,7 @@ BASELINE_SHA256 = {
  "drivers/scsi/ufs/ufs-qcom-ice.c":"54f6ec3105812be5e9e954e9aaada4e3403f9d616f86f669f6e91bae74c6f167",
  "drivers/scsi/ufs/ufs-qcom.c":"2fa51b276b07bb8a9395bd6d85ccd07e07e5ae4b07b6a170c950ac9904978fcd",
  "drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c":"e671bac9aaac9e75ec8a4e0ddd0c7b858dd63e7bb6ecfb32ade4d6c51a9f5e24",
- "drivers/firmware/qcom_scm.c":"624b71d3e63c029b2c14d89d39053d18cc76517e8453c1a23f012b9f27c8df2f",
+ "drivers/firmware/qcom_scm.c":"ac216893ba4841a1745fdd92059baf1c33ab1dbe2b603575b76fb3d32e838fba",
 }
 # All qcom_scm_* caller source paths present in the P451 final source.
 # Even disabled paths are enumerated so an unexpected new caller is a blocker.
@@ -100,7 +100,8 @@ def audit(root, config, manual_pas, report):
         fail("SMMU downstream compatibility lost")
     fw=(root/"drivers/firmware/qcom_scm.c").read_text()
     if not all(x in fw for x in ("return !!__scm;",
-               'if (download_mode)', 'CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT')):
+               'if (download_mode)', 'CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT',
+               'P452 SCM PROBE rc=0 dload_default=%d')):
         fail("SCM availability/download-mode default code changed")
     callers={}
     for path,label in KNOWN_CALLERS.items():

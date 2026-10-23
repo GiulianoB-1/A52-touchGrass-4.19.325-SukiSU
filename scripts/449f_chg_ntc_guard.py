@@ -14,7 +14,7 @@ SRC=Path("drivers/a52_447/a52_sm5714_fg_ro.c")
 TAG="A52_PHASE449F_CHG_MIX_GUARD_V1"
 DECL="int die,st,temp,fgtemp,ntc,ctrl,rc,readback,vbus;"
 NEW_DECL="""int die,st,temp,fgtemp,ntc,chgtemp,ctrl,rc,readback,vbus;
-\tbool batt_trip,chg_trip,mix_trip,missing_chg,unsafe;
+\tbool batt_trip,chg_trip,mix_trip,missing_chg;
 \tconst char *rule;"""
 OLD="""unsafe=(temp>=A52G_GUARD_TEMP_DECI_C ||
 \t\ttemp< -400);"""

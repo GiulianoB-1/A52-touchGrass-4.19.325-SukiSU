@@ -1200,17 +1200,32 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-      - name: Upload MANGROVE-450-DAILY (diagnostics only; no charging support)
+      - name: Upload MANGROVE-451-DAILY (read-only charger diagnostics, no charging)
         if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-450-DAILY-${{ github.run_number }}
+          name: MANGROVE-451-DAILY-${{ github.run_number }}
           path: |
-            phase447b-variants/MANGROVE-450-DAILY.boot.img
+            phase447b-variants/MANGROVE-451-DAILY.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload MANGROVE-451-DSP (manual ADSP, autoboot disabled, no charger)
+        if: success() && matrix.variant.id == 'G'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-451-DSP-${{ github.run_number }}
+          path: |
+            phase447b-variants/MANGROVE-451-DSP.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            phase447b-variants/P451-DSP-BOOT-AUDIT.txt
+            phase447b-variants/P451-DSP-DTB-MANIFEST.json
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review

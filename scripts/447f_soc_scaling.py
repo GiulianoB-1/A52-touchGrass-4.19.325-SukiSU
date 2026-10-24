@@ -143,9 +143,13 @@ def check(root):
     for item in (TAG,"static int a52f_soc_deci",
                  "source=DT_no_charge_comparison_pending",
                  "ui_preserved=%d","fuelgauge,capacity_max",
-                 "sm5714-fuelgauge","P447F SM5714 FG_CHILD",
-                 "POWER_SUPPLY_STATUS_UNKNOWN"):
+                 "sm5714-fuelgauge","P447F SM5714 FG_CHILD"):
         if item not in c:raise RuntimeError("P447F corrected SOC audit missing "+item)
+    if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in c:
+        if "v->intval=a52h0_psy_status(fg,!!(st&BIT(0)))" not in c:
+            raise RuntimeError("P447F H0 status implementation missing")
+    elif "POWER_SUPPLY_STATUS_UNKNOWN" not in c:
+        raise RuntimeError("P447F read-only status UNKNOWN missing")
     if "CONFIG_A52_447F_CAPACITY_MAX_DECI" in c:
         raise RuntimeError("P447F inferred max used in compiled source")
     if "default 920" in (root/KCFG).read_text():

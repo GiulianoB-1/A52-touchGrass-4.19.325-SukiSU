@@ -110,7 +110,9 @@ def check(root):
               ".remove=a52h_battery_remove","cancel_delayed_work_sync(&bat->a52h_ntc_retry)",
               "static int a52g_ntc_attach(","ntc>=-200 && ntc<=900"):
         if m not in s:raise RuntimeError("P447H NTC audit "+m)
-    assert s.count("i2c_smbus_write_byte_data(")==1
+    expected_writes=2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1
+    if s.count("i2c_smbus_write_byte_data(")!=expected_writes:
+        raise RuntimeError("P447H NTC unexpected charger write callsites")
     print("P447H NTC PASS: real IIO ret/probe-defer retry, therm/FG side-by-side, no extra charger writes")
 if __name__=="__main__":
     p=argparse.ArgumentParser()

@@ -150,7 +150,11 @@ def check(root):
     assert s.count('.name="battery"')==1
     assert s.count('.name="sm5714-fuelgauge"')==1
     assert 'module_i2c_driver(a52d_fg_driver)' not in s
-    assert "POWER_SUPPLY_STATUS_UNKNOWN" in s
+    if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s:
+        assert "v->intval=a52h0_psy_status(fg,!!(st&BIT(0)))" in s
+        assert "POWER_SUPPLY_STATUS_UNKNOWN" not in s
+    else:
+        assert "POWER_SUPPLY_STATUS_UNKNOWN" in s
     assert "A52D_FG_RADDR 0x8c" in s
     print("P447E BRIDGE PASS: FG under SE7 as 'sm5714-fuelgauge'; 'battery' under Samsung DT platform parent; all gauge reads unchanged")
 def main():

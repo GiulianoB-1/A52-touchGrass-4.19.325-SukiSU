@@ -182,8 +182,9 @@ def check(root):
                  "a52g_ntc_attach(pdev,power_supply_get_drvdata(bat->fg))",
                  "devm_add_action_or_reset(&pdev->dev,a52g_ntc_cleanup"):
         if item not in c:raise RuntimeError("P447G NTC missing "+item)
-    if c.count("i2c_smbus_write_byte_data(")!=1:
-        raise RuntimeError("P447G NTC changed charger write count")
+    expected_writes=2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in c else 1
+    if c.count("i2c_smbus_write_byte_data(")!=expected_writes:
+        raise RuntimeError("P447G NTC unexpected charger write callsites")
     print("P447G THERM NTC PASS: Samsung adc-temp voltage+DT table when available, FG fallback otherwise, side-by-side logs, latch-only inhibitor")
 def main():
     p=argparse.ArgumentParser();p.add_argument("--root",required=True,type=Path)

@@ -155,8 +155,9 @@ def check(root):
               "if (!rc && !crc)",
               "a52h_chg_iio_cleanup"):
         if m not in s:raise RuntimeError(f"P447H TCHG audit {m}")
-    if s.count("i2c_smbus_write_byte_data(")!=1:
-        raise RuntimeError("P447H TCHG may not introduce charger writes")
+    expected_writes=2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1
+    if s.count("i2c_smbus_write_byte_data(")!=expected_writes:
+        raise RuntimeError("P447H TCHG unexpected charger write callsites")
     print("P447H TCHG PASS: independent charger NTC GPIO3/0x54 IIO uV -> Samsung DT deciC; retry and 30s Tbat/Tchg/FG logs")
 
 def main():

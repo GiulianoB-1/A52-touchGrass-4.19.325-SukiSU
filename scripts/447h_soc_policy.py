@@ -233,7 +233,9 @@ def check(root):
         if marker not in t:raise RuntimeError("P447H SOC missing "+marker)
     if "CONFIG_A52_447F_CAPACITY_MAX_DECI" in t:
         raise RuntimeError("P447H forbids guessed 920 Kconfig scale")
-    assert t.count("i2c_smbus_write_byte_data(")==1
+    expected_writes=2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in t else 1
+    if t.count("i2c_smbus_write_byte_data(")!=expected_writes:
+        raise RuntimeError("P447H SOC unexpected charger write callsites")
     print("P447H SOC PASS: TG dynamic-max RESTORE sysfs, nominal 1000 until writer, raw FG unaltered, bounded writer, no NV writes")
 def main():
     p=argparse.ArgumentParser();p.add_argument("--root",type=Path,required=True)

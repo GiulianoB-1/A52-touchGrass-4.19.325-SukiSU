@@ -54,6 +54,25 @@ static int a52h0_write_masked(struct a52d_fg *fg,u8 reg,u8 mask,u8 val)
     if((after&mask)!=(val&mask))return -EIO;
     return 0;
 }
+static const char *a52h0_state_str(int st)
+{
+    switch(st) {
+    case 0:return "OFF";
+    case 1:return "ARMED";
+    case 2:return "CHARGING";
+    case 3:return "FULL";
+    case 4:return "STOPPED";
+    case 5:return "FAULT_LATCHED";
+    default:return "UNKNOWN";
+    }
+}
+static void a52h0_set_state(struct a52d_fg *fg,int st,const char *why)
+{
+    if(fg->a52h0_state==st)return;
+    dev_warn(fg->dev,"P452 H0 STATE from=%s to=%s reason=%s\n",
+             a52h0_state_str(fg->a52h0_state),a52h0_state_str(st),why);
+    fg->a52h0_state=st;
+}
 static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
 {
     int ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
@@ -66,12 +85,26 @@ static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
             rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),0);
         else rc=-EIO;
     }
+    if(fg->a52h0_active)
+        fg->a52h0_elapsed+=jiffies-fg->a52h0_started;
     fg->a52h0_active=false;
     if(permanent || rc)fg->a52h0_killed=true;
+    a52h0_set_state(fg,fg->a52h0_killed?5:
+        !strcmp(why,"TOP_OFF")?3:
+        !strcmp(why,"MANUAL_DISARM") || !strcmp(why,"BOOT_PRE_ARM")?0:4,why);
     dev_warn(fg->dev,
-       "P452 H0 OFF reason=%s rc=%d permanent=%d killed=%d\n",
+       "P452 H0 STOP reason=%s rc=%d permanent=%d killed=%d\n",
        why,rc,permanent,fg->a52h0_killed);
     if(fg->psy)power_supply_changed(fg->psy);
+}
+static int a52h0_boot_inhibit(struct a52d_fg *fg)
+{
+    int id=a52h0_regread(fg,A52G_CHG_DEVICEID);
+    if(id<0 || id==0 || id==0xff)return -ENODEV;
+    fg->a52h0_deviceid=id;
+    fg->a52h0_handover=true;
+    a52h0_off(fg,"BOOT_PRE_ARM",false);
+    return fg->a52h0_killed?-EIO:0;
 }
 static bool a52h0_sensor_safe(struct a52d_fg *fg,int *b,int *c)
 {
@@ -82,7 +115,7 @@ static bool a52h0_sensor_safe(struct a52d_fg *fg,int *b,int *c)
 static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
                         int *vb,int *vcell,int *st2,int *ntc,int *chg_ntc)
 {
-    int st,fc,flt,ctrl,input;
+    int st,fc,flt,ctrl,input,id;
     *vcell=a52d_mv(fg);
     st=a52h0_regread(fg,A52G_CHG_STATUS1);
     *st2=a52h0_regread(fg,A52P450_CHG_STATUS2);
@@ -90,22 +123,23 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
     flt=a52h0_regread(fg,A52H0_BATREG);
     ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
     input=a52h0_regread(fg,A52H0_VBUSCNTL);
+    id=a52h0_regread(fg,A52G_CHG_DEVICEID);
     if(st<0 || *st2<0 || fc<0 || flt<0 || ctrl<0 || input<0 ||
-       *vcell<3000 || *vcell>4380)
+       id<0 || *vcell<3000 || *vcell>4380)
         return -EIO;
     *vb=!!(st&BIT(0));
     if(!a52h0_sensor_safe(fg,ntc,chg_ntc))
-        return -ERANGE;
-    if(!*vb || (fc&(BIT(0)|BIT(1))) ||
+        return -EAGAIN;
+    if(id!=fg->a52h0_deviceid || !*vb || (fc&(BIT(0)|BIT(1))) ||
        (flt&0x3f)!=A52H0_FLOAT_4380_CODE)
         return -EPERM;
     /* H0 prohibits VBUSCNTL writes. Refuse >500mA input rather than
      * pretending to run TG's ramp, which requires that register.
      */
-    if(100+(input&0x7f)*25>500)
+    if(input>0x10)
         return -ERANGE;
     if(*st2&BIT(7))
-        return -EIO; /* expired WDT must be cleared only while OFF */
+        return -ETIME; /* expired WDT must be cleared only while OFF */
     if(for_enable && (ctrl&A52G_CHG_ENQ4FET))
         return -EBUSY; /* guard owns bootloader charging handoff */
     return 0;
@@ -269,11 +303,15 @@ def patch(s):
            """struct delayed_work a52g_guard_work;
     struct mutex a52h0_lock;
     bool a52h0_armed, a52h0_active, a52h0_killed, a52h0_full;
-    unsigned long a52h0_started, a52h0_last_kick;""","fields")
+    bool a52h0_rearm, a52h0_handover, a52h0_guard_trip, a52h0_vbus_seen;
+    unsigned long a52h0_started, a52h0_last_kick;
+    unsigned long a52h0_ntc_valid_since, a52h0_elapsed;
+    int a52h0_deviceid, a52h0_state;""","fields")
     s=once(s,"static void a52g_poll(struct work_struct *work)",
            DECL+"\nstatic void a52g_poll(struct work_struct *work)","controller code")
     s=once(s,"(void)a52g_sample(fg,false);",
-           "(void)a52g_sample(fg,false);\n    a52h0_tick(fg);","poll after existing P449 guard")
+           "a52h0_tick(fg,a52g_sample(fg,false));",
+           "guard executes before H0, always")
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",
            "mutex_init(&fg->a52g_ntc_lock);\n    mutex_init(&fg->a52h0_lock);","mutex init")
     # Must be initialized before publishing /sys/... and before first
@@ -290,14 +328,20 @@ def patch(s):
     s=once(s,anchor,r'''    /* Bootloader may leave ENQ4FET ON. Force it OFF before
      * exposing h0_arm, even if both NTCs are already valid.
      */
-    a52h0_off(fg,"BOOT_PRE_ARM",false);
-    if (fg->a52h0_killed)
-        return dev_err_probe(fg->dev,-EIO,
-                 "P452 H0 startup inhibit unverified\n");
     rc=a52h0_attrs_create(fg);
     if (rc)return dev_err_probe(fg->dev,rc,
                         "P452 H0 sysfs arming controls unavailable\n");
 '''+anchor,"attrs after probe")
+    # P449 guard wins every cycle. H0's temperature inhibits are
+    # recoverable by hysteresis + user rearm, but F keeps P449's latch.
+    s=once(s,"fg->a52g_inhibit_latched=true;",
+           "fg->a52h0_guard_trip=true;","H0 guard condition")
+    s=once(s,"if (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\\n\\t\\treturn 0;",
+           "fg->a52h0_guard_trip=false;\\n\\tif (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\\n\\t\\treturn 0;",
+           "guard result reset")
+    s=once(s,"rc=a52g_sample(fg,true);",
+           "rc=a52h0_boot_inhibit(fg);\\n        if(rc<0)return dev_err_probe(fg->dev,rc,\\n            \"P452 H0 boot inhibit failed\\\\n\");\\n        rc=a52g_sample(fg,true);",
+           "H0 boot off before first P449 sample")
     # Old guard did one charger write. H0 adds exactly ONE audited generic
     # write site; no factory/input/float/FG NV register writes allowed.
     s=once(s,"static enum power_supply_property a52d_props[] = {",
@@ -330,7 +374,7 @@ static enum power_supply_property a52d_props[] = {""","forward functions for FG 
     return s
 def check(root):
     s=(root/SRC).read_text()
-    for key in (TAG,"P452 H0 OFF reason=","P452 H0 ON manual=1",
+    for key in (TAG,"P452 H0 STOP reason=","P452 H0 ON manual=1",
                 "P452 H0 KICK wdt=90s","dev_attr_h0_kill",
                 "POWER_SUPPLY_PROP_ONLINE",
                 "A52H0_MAX_TICKS (14400UL*HZ)",

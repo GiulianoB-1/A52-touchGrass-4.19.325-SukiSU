@@ -57,8 +57,11 @@ def inspect(f, patched=False):
         sizes={k:cells(f,node,k) for k in
                ("record-size","console-size","pmsg-size")}
         for prop,v in sizes.items():
-            if v!=[0x40000]:
-                raise RuntimeError("P453 "+prop+" !=256KiB: "+repr(v))
+            if (v is None or len(v)!=1 or v[0]<4096 or
+                v[0]>reg[-1] or (v[0] & (v[0]-1))):
+                raise RuntimeError("P453 invalid "+prop+" zone size "+repr(v))
+        if sum(v[0] for v in sizes.values())>reg[-1]:
+            raise RuntimeError("P453 existing zones exceed ramoops region")
     else:
         sizes=None
     ecc=cells(f,node,"ecc-size")

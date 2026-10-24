@@ -3,7 +3,7 @@ run-name: P452 DAILY fallback + DSP-CHG H0 (manual ADSP and manual charger opt-i
 on:
   push:
     branches:
-      - agent/a52-phase447-big-merge-off-v1
+      - agent/p452-scm-h1-staging
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -815,12 +815,14 @@ jobs:
             echo 'P451 DAILY read-only logs compiled' >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ matrix.variant.id }}" = G ]; then
+            grep -Fxq 'CONFIG_A52_447G_CHG_GUARD=y' "$BUILD/.config"
+            grep -aFq 'P452 H0 STATE from=' "$IMAGE"
             grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
             grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
             grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
-            grep -aFq 'P452 H0 ON manual=1' "$IMAGE"
-            grep -aFq 'P452 H0 KICK wdt=90s' "$IMAGE"
-            grep -aFq 'P452 H0 OFF reason=' "$IMAGE"
+            grep -aFq 'P452 H0 ENABLE cur=500' "$IMAGE"
+            grep -aFq 'P452 H0 WDT kick' "$IMAGE"
+            grep -aFq 'P452 H0 STOP reason=' "$IMAGE"
             grep -aFq 'P452 SCM PROBED native_5_10=1 dload_default=' "$IMAGE"
             if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
               grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"

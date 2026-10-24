@@ -2,7 +2,7 @@
 """P453 DAILY: surgical, audited pstore DTB repair in the final boot-v2 image.
 
 Convert reservation-only A52 DTBs into a single active ramoops consumer,
-install ecc-size=<16>, and preserve the 256KiB console/record/pmsg zones. This changes
+install ecc-size=<16>, and preserve actual vendor record/console/pmsg sizes. This changes
 only the embedded FDT and recalculated Android v2 boot id/DTB size.
 """
 import argparse, hashlib, json, runpy, struct, subprocess, tempfile
@@ -58,10 +58,17 @@ def inspect(f, patched=False):
                ("record-size","console-size","pmsg-size")}
         for prop,v in sizes.items():
             if (v is None or len(v)!=1 or v[0]<4096 or
-                v[0]>reg[-1] or (v[0] & (v[0]-1))):
+                v[0]>reg[-1] or v[0] % 4096 != 0):
                 raise RuntimeError("P453 invalid "+prop+" zone size "+repr(v))
-        if sum(v[0] for v in sizes.values())>reg[-1]:
-            raise RuntimeError("P453 existing zones exceed ramoops region")
+        # 5.10 fs/pstore/ram.c explicitly rounds non-power-of-two zone
+        # sizes DOWN. 192KiB vendor console becomes 128KiB effectively.
+        # Preserve the actual DT properties; do not rewrite the layout.
+        actual_total=sum(v[0] for v in sizes.values())
+        effective_total=sum(1 << (v[0].bit_length()-1) for v in sizes.values())
+        if actual_total>reg[-1]:
+            raise RuntimeError("P453 declared zones exceed ramoops region")
+        if effective_total>reg[-1]:
+            raise RuntimeError("P453 effective zones exceed ramoops region")
     else:
         sizes=None
     ecc=cells(f,node,"ecc-size")
@@ -74,6 +81,7 @@ def inspect(f, patched=False):
             "record_bytes":sizes["record-size"][0] if sizes else None,
             "console_bytes":sizes["console-size"][0] if sizes else None,
             "pmsg_bytes":sizes["pmsg-size"][0] if sizes else None,
+            "effective_console_bytes":(1 << (sizes["console-size"][0].bit_length()-1)) if sizes else None,
             "ecc_size":ecc}
 def fix(raw):
     with tempfile.TemporaryDirectory() as tmp:
@@ -98,6 +106,10 @@ def fix(raw):
             info["converted_inert_to_active"]=False
         run("fdtput","-t","x",f,n,"ecc-size","0x10")
         post=inspect(f,True)
+        if info["primary"] is not None:
+            for k in ("record_bytes","console_bytes","pmsg_bytes","reg"):
+                if post[k]!=info[k]:
+                    raise RuntimeError("P453 vendor ramoops property changed: "+k)
         out=f.read_bytes()
         if out==raw:raise RuntimeError("P453 DTB patch had no effect")
         post["converted_inert_to_active"]=info["converted_inert_to_active"]

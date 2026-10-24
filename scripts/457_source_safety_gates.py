@@ -32,7 +32,67 @@ def check_smmu(base, current):
         raise RuntimeError("P457 fatal SMMU forced-defer marker detected")
     print("P457 SMMU STRICT PASS: same probe as 451; only SCM=false-on-Lagoon")
 
+def reject_broken_c_string_literals(source):
+    """Reject literal newlines inside C strings BEFORE wasting a kernel build.
+
+    Parse comments and char literals so logging text in comments and
+    character escapes cannot trigger false positives. Backslash-escaped
+    characters, including legal source-line splices, are skipped.
+    """
+    state = "code"
+    line = 1
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        following = source[i+1] if i+1 < len(source) else ""
+        if state == "code":
+            if ch == "/" and following == "/":
+                state = "line_comment"
+                i += 2
+                continue
+            if ch == "/" and following == "*":
+                state = "block_comment"
+                i += 2
+                continue
+            if ch == '"':
+                state = "string"
+                first_line = line
+            elif ch == "'":
+                state = "char"
+        elif state == "line_comment":
+            if ch == "\n":
+                state = "code"
+        elif state == "block_comment":
+            if ch == "*" and following == "/":
+                state = "code"
+                i += 2
+                continue
+        elif state in ("string", "char"):
+            if ch == "\\":
+                if following == "\n":
+                    line += 1
+                i += 2
+                continue
+            if (state == "string" and ch == '"') or (state == "char" and ch == "'"):
+                state = "code"
+            elif ch == "\n":
+                raise RuntimeError(
+                    "P457 invalid C %s literal beginning at source line %d: raw newline"
+                    % (state, first_line if state == "string" else line)
+                )
+        if ch == "\n":
+            line += 1
+        i += 1
+    if state in ("string", "char", "block_comment"):
+        raise RuntimeError("P457 unterminated C lexical unit: " + state)
+
 def check_h0(s):
+    # Compile failure in #507: a Python triple-quoted generator literal
+    # converted the backslash-n in dev_err() into a physical C newline.
+    # This gate MUST inspect the fully GENERATED C, not only the .py file.
+    reject_broken_c_string_literals(s)
+    if 'dev_err(fg->dev,"P452 H0 REMOVE inhibit FAILED rc=%d\n",rc);' not in s:
+        raise RuntimeError("P457 H0 teardown diagnostic must contain escaped C newline")
     required = [
         "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1",
         "if(a52g_sample(fg,false)<0)",

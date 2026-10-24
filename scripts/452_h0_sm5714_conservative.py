@@ -448,7 +448,7 @@ def patch(s):
     # No devm wakeup action: a52d_fg_unregister cancels the guard
     # worker first, then unregisters the wakeup source. Prevent UAF.
     s=once(s,"cancel_delayed_work_sync(&fg->a52g_guard_work);",
-           """cancel_delayed_work_sync(&fg->a52g_guard_work);
+           r"""cancel_delayed_work_sync(&fg->a52g_guard_work);
     /* The psy devres may already be gone here: do NOT call
      * a52h0_off() because it notifies fg->psy. Disable directly.
      */

@@ -20,7 +20,8 @@ PIL_CANDIDATES=(
 )
 LOCAL=Path("patches/p458/a52_dsp_scm_runtime.c")
 
-PIL_BEGIN="\n\td = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);" // first statement after declarations
+# Place each early-defer guard after all locals, before allocation.
+PIL_BEGIN="\n\td = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);"
 PIL_HOLD=r'''
     /* A52_P458_LEGACY_VENUS_NPU_PROBE_FREEZE_V1
      * SCM binding retries every deferred probe. Do NOT allow legacy
@@ -37,7 +38,7 @@ PIL_HOLD=r'''
         return -EPROBE_DEFER;
     }
 '''
-SMP_BEGIN="\n\tsmp2p = devm_kzalloc(&pdev->dev, sizeof(*smp2p), GFP_KERNEL);" // first statement after declarations
+SMP_BEGIN="\n\tsmp2p = devm_kzalloc(&pdev->dev, sizeof(*smp2p), GFP_KERNEL);"
 SMP_HOLD=r'''
     /* A52_P458_SMP2P_NPU_DEFER_FROZEN_V1: no NPU edge activation
      * on SCM bind; keep unrelated modem/ADSP SMP2P untouched.

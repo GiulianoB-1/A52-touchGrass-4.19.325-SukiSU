@@ -109,8 +109,15 @@ def check_h0(s):
         raise RuntimeError("P457 H0 stay_awake must precede charge enable")
     cleanup=s[s.index("static void a52d_fg_unregister("):s.index("static int a52d_fg_probe(")]
     if not (cleanup.index("cancel_delayed_work_sync(&fg->a52g_guard_work);") <
+            cleanup.index("if(fg->a52h0_active)") <
+            cleanup.index("a52h0_write_masked(fg,A52G_CHG_CNTL1,") <
+            cleanup.index("__pm_relax(fg->a52h0_ws)") <
             cleanup.index("wakeup_source_unregister(fg->a52h0_ws);")):
-        raise RuntimeError("P457 H0 wakeup teardown must follow stopped guard worker")
+        raise RuntimeError("P457 H0 teardown must inhibit charging before wake release and after worker cancellation")
+    if 'a52h0_off(fg,"REMOVE"' in cleanup or "power_supply_changed" in cleanup:
+        raise RuntimeError("P457 H0 teardown must not notify possibly-freed power supplies")
+    if 'a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),0)' not in cleanup:
+        raise RuntimeError("P457 H0 unbind must stop WDT after ENQ4FET disable")
 
     # One watchdog kick on every active tick. The same guard worker is
     # rescheduled every 10 seconds while H0 is active; it still checks

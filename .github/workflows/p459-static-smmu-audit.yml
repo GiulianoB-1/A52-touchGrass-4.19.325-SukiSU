@@ -1,0 +1,43 @@
+name: P459 apps-SMMU suspend source audit (no firmware)
+on:
+  push:
+    branches:
+      - agent/p459-apps-smmu-suspend-investigation
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static_smmu:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode P446T SMMU patch and enumerate busy suspend sites
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,zlib,re,hashlib
+          f=Path('scripts/446t_apply_smmu_hold_no_nested.py.z64')
+          s=zlib.decompress(base64.b64decode(f.read_text().strip())).decode()
+          print('P459 DECODE: P446T source bytes=',len(s))
+          lines=s.splitlines()
+          terms=[r'EBUSY',r'arm_smmu_pm_suspend',r'arm_smmu_runtime_suspend',
+                 r'unmanaged_tbus',r'pm_runtime_force_suspend',
+                 r'system suspend',r'pm_runtime_suspended',r'QSMMUv500']
+          for term in terms:
+              matches=[i for i,l in enumerate(lines) if re.search(term,l,re.I)]
+              print('\nP459 TERM',term,'matches',len(matches))
+              for i in matches[:15]:
+                  lo,hi=max(0,i-8),min(len(lines),i+12)
+                  print('\n'.join(f'{j+1}: {lines[j]}' for j in range(lo,hi)))
+          out=Path('p459-static-audit')
+          out.mkdir(exist_ok=True)
+          (out/'446t_decompressed.py').write_text(s)
+          print('P459 SHA256',hashlib.sha256(s.encode()).hexdigest())
+          PY
+      - name: Upload audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: P459-DECODED-SMMU-SOURCE
+          path: p459-static-audit/
+          retention-days: 14

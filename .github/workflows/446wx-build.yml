@@ -515,7 +515,1097 @@ jobs:
             grep -E '^CONFIG_SCSI_UFS_(QCOM|CRYPTO)=' "$BUILD/.config" || true
             if grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$BUILD/.config" &&
                grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
-              verify_g_marker 'P452 SCM UFS_ICE_FROZEN off baseline_451=1'
+              ICE_MARKER='P452 SCM UFS_ICE_FROZEN off baseline_451=1'
+              test -s "$BUILD/drivers/scsi/ufs/ufs-qcom-ice.o" || {
+                echo "::error title=P452 ICE::UFS ICE enabled but compiled object is missing"
+                exit 1
+              }
+              if LC_ALL=C grep -aFq "$ICE_MARKER" "$IMAGE"; then
+                echo "P452 LINK MARKER PASS: $ICE_MARKER"
+              else
+                echo "P452 ICE linked-image marker absent; checking actual linked symbols"
+                grep -E '[[:space:]]ufs_qcom_ice_(init|enable|program_key|resume)
+            if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
+              verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'
+            else
+              echo 'P452 ARM_SMMU not built-in; no qcom arm-SMMU code activated' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
+          grep -aFq "P446Z KSU version=" "$IMAGE"
+          grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
+          grep -aFq "P446Z I2C BUS_VOTE" "$IMAGE"
+          grep -aFq "P446AA SE8 BEFORE" "$IMAGE"
+          grep -aFq "P446AA DRM_INPUT" "$IMAGE"
+          grep -aFq "P446AB SE8_CAP" "$IMAGE"
+          grep -aFq "P446AB PROP_GET" "$IMAGE"
+          grep -aFq "P446AB PROP_SET" "$IMAGE"
+          grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P447 GATES source=%s wave=%u mss=%d ipa=%d" "$IMAGE"
+          grep -aFq "P447 GATES initialized wave=" "$IMAGE"
+          grep -aFq "P447D I2C SE%d PROBE" "$IMAGE"
+          grep -aFq "P447 W2 battery FIRST" "$IMAGE"
+          grep -aFq "P447E battery PLATFORM_PROBE rc=0" "$IMAGE"
+          grep -aFq "P447E I2C SE%d DT_ALIAS=%d" "$IMAGE"
+          grep -aFq "P447F I2C NR ctrl=%pa" "$IMAGE"
+          grep -aFq "P447F SM5714 FG_CHILD" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD SAMPLE" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD INHIBIT_OK" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD INHIBIT_FAILED" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
+          grep -aFq "gpio1_pu2" "$IMAGE"
+          grep -aFq "P447H ADC5 GPIO" "$IMAGE"
+          grep -aFq "P447H ADC5 PROVIDER DT_OK" "$IMAGE"
+          grep -aFq "P447H TEMP MISSING" "$IMAGE"
+          grep -aFq "gpio2_pu2" "$IMAGE"
+          grep -aFq "gpio3_pu2" "$IMAGE"
+          grep -aFq "gpio4_pu2" "$IMAGE"
+          grep -aFq "P447H NTC RETRY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=" "$IMAGE"
+          grep -aFq "P447H TCHG READY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=%d chg=%d fg=%d" "$IMAGE"
+          grep -aFq "P447H SOC raw=" "$IMAGE"
+          grep -aFq "P447H SOC writer=sysfs" "$IMAGE"
+          grep -aFq "batt_capacity_max" "$IMAGE"
+          grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
+          grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
+          grep -aFq "P447B GSI SUMMARY" "$IMAGE"
+          grep -aFq "P446AF GSI RX_SUBMIT" "$IMAGE"
+          grep -aFq "P446AF GSI BADPTR" "$IMAGE"
+          grep -aFq "P446AC HWC_RING READY" "$IMAGE"
+          # 447 mandatory: marker must be compiled into the actual Image,
+          # not merely mentioned by a source-patch script or stale cache.
+          grep -aFq "P447 FLICKER_RING ARMED" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING TRIGGER" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING DUMP_BEGIN" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING PROP" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING DUMP_END" "$IMAGE"
+          # 447J must actually survive compile into final Image, not only source.
+          grep -aFq "P447J VBLANK INIT" "$IMAGE"
+          grep -aFq "P447J VBLANK reason=" "$IMAGE"
+          grep -aFq "P447J VBLANK CRTC idx=" "$IMAGE"
+          grep -aFq "CRTC_HOOK_MISSING_KMS_LEGACY_ONLY" "$IMAGE"
+          grep -aFq "IOCTL_VBLANK_GET_FAILED" "$IMAGE"
+          grep -aFq "IOCTL_PIPE_OOB_OR_NO_LEASE" "$IMAGE"
+          grep -aFq "a52_446ac_hwc_requests" "$IMAGE"
+          grep -aFq "P446Z KSU version=" "$IMAGE"
+          grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
+          grep -aFq "P446Z TOUCH INIT_ABORT" "$IMAGE"
+          grep -aFq 'P446S MEMLAT skip_monitor' "$IMAGE"
+          grep -aFq 'P446S FRAME seq=' "$IMAGE"
+          grep -aFq 'P446S GPU_CX_CONSUMER' "$IMAGE"
+          grep -aFq 'P446S KGSL_MUTEX held_ms=' "$IMAGE"
+          grep -aFq 'P446S GMU_CX POLL' "$IMAGE"
+          grep -aFq 'P446S KGSL_SMMU_RPM' "$IMAGE"
+          grep -aFq 'P446U PROP seq=' "$IMAGE"
+          grep -aFq 'P446U FRAME_JOIN seq=' "$IMAGE"
+          grep -aFq 'P446U PLANE91 seq=' "$IMAGE"
+          grep -aFq 'P446U MSM_CHECK seq=' "$IMAGE"
+          grep -aFq 'P446U BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'P446U SAMSUNG_BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'U446 CONSOLE worker-stop-ack' "$IMAGE"
+          grep -aFq 'U446 UNBIND gs_unbind enter' "$IMAGE"
+          grep -aFq 'U446 UDC configfs probe-exit' "$IMAGE"
+          grep -aFq 'U446 holder pid=' "$IMAGE"
+          grep -aFq 'U446 CONSOLE request-dequeue-enter' "$IMAGE"
+          grep -aFq 'U446 UDC adb-bound' "$IMAGE"
+          grep -aFq 'P446V READ_PROP' "$IMAGE"
+          grep -aFq 'P446V GETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V GETBLOB_DATA' "$IMAGE"
+          grep -aFq 'P446V CONNECTOR_MODE' "$IMAGE"
+          grep -aFq 'P446V GETCRTC' "$IMAGE"
+          grep -aFq 'P446V GETENCODER' "$IMAGE"
+          grep -aFq 'P446V SETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V SNAP_CRTC' "$IMAGE"
+          grep -aFq 'P446V SNAP_CONN' "$IMAGE"
+          grep -aFq 'P446V SNAP_DSI' "$IMAGE"
+          grep -aFq 'P446V SNAP_SAMSUNG' "$IMAGE"
+          grep -aFq 'P446V SNAP_ENC_DETAIL' "$IMAGE"
+          grep -aFq 'P446V SNAP_AUTORF' "$IMAGE"
+          grep -aFq 'P446V POST_WINDOW_BEGIN' "$IMAGE"
+          grep -aFq 'P446V RTC PROBE' "$IMAGE"
+          grep -aFq 'P446V RTC REGISTER' "$IMAGE"
+          grep -aFq 'P446W SPLASH COLD_SELECTED=1' "$IMAGE"
+          grep -aFq 'P446W HANDOFF begin' "$IMAGE"
+          grep -aFq 'P446W HANDOFF end' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=disable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=enable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_prepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_enable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_disable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_unprepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF panel ON_CMDS' "$IMAGE"
+          grep -aFq 'P446W_HANDOFF_POST_COMPLETE' "$IMAGE"
+          grep -aFq 'P446X TOUCH probe-rc=0' "$IMAGE"
+          grep -aFq 'P446X TOUCH FW_WRITE_BLOCKED' "$IMAGE"
+          grep -aFq 'P446X TOUCH EVENT' "$IMAGE"
+          grep -aFq 'P446X TOUCH I2C_ID' "$IMAGE"
+          grep -aFq 'P446X TOUCH REGULATOR_ENABLE' "$IMAGE"
+          grep -aFq 'P446X TOUCH disabled a52.touch=0' "$IMAGE"
+          grep -aFq 'P446W FULL_POST_NORMAL_ON' "$IMAGE"
+          grep -aFq 'P446W USB early legacy g_serial allocated ttyGS3' "$IMAGE"
+          grep -aFq 'P446W U446 COORDINATOR DONE' "$IMAGE"
+          grep -aFq 'P446W U446 CONFIGFS defer' "$IMAGE"
+          test -s "$BUILD/include/generated/utsrelease.h"
+          grep -Fq -- '-Mangrove' "$BUILD/include/generated/utsrelease.h"
+          python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
+          echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
+          test -s "$P445"
+          for marker in 'F0BISECT' 'F0BAR #' 'dbg_busy7=%u' 'intf_valid=%u' 'A52CRASH1 dumper_registered=%d' 'CRASH1 FAULT PID=%u'; do
+            grep -aFq "$marker" "$IMAGE" || { echo "FAIL: compiled GKI Image missing probe marker: $marker"; exit 1; }
+          done
+          grep -Fq 'A52_F0B_AR_IDLE_16X_V2' "$ROOT/drivers/a52_display/msm/sde/sde_encoder_phys_cmd.c" || { echo 'FAIL: F0BAR V2 marker missing from compiled source'; exit 1; }
+          grep -Fq '#define F0B_ACTIVE_STAGE 0' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          grep -Fq 'A52_CRASH1_CB_HOOK_V1' "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c"
+          grep -Fq 'A52_CRASH1_FAULT_HOOK_V1' "$ROOT/arch/arm64/mm/fault.c"
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
+          python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_fix_dsi_pll_hw_init.py --root "$ROOT" --check-only
+          python3 scripts/fence1f_reopen_p445_gate_at_cold_prepare.py --root "$ROOT" --check-only
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          echo "CRASH1: raw FIFO F0 disabled; standard Samsung command remains enabled"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
+          grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
+          grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
+          grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
+          grep -Fq 'P445_GATE_DIAG' "$P445"
+          grep -Fq 'R0_HOT_0_75US' "$P445"
+          grep -Fq 'R1_HOT_0_75US' "$P445"
+          grep -Fq 'R2_HOT_0_75US' "$P445"
+          grep -Fq 'dropped_sections' "$P445"
+          grep -aFq 'R0_HOT_0_75US' "$IMAGE"
+          grep -aFq 'R1_HOT_0_75US' "$IMAGE"
+          grep -aFq 'R2_HOT_0_75US' "$IMAGE"
+          ! grep -aFq 'P440 EARLY start' "$IMAGE"
+          ! grep -aFq 'P440 EARLY unlock_rc' "$IMAGE"
+          ! grep -aFq 'P440 EARLY relock_rc' "$IMAGE"
+          grep -Fq ' a52_p437_mark' "$MAP"
+          grep -Fq ' a52_p439_allow_next' "$MAP"
+          grep -Fq ' a52_p440_event' "$MAP"
+          python3 scripts/445_apply_recovery_ladder.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446_apply_heartbeat_cb2.py --root "$ROOT" --check-only
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446g_apply_te_irq_test.py --root "$ROOT" --check-only
+          grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446G_SKIP_TE_IRQ_TLMM23_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
+          grep -aFq 'J_MISC_TRACE' "$IMAGE"
+          grep -aFq 'msm-qusb-phy-v2' "$IMAGE"
+          grep -aFq 'U1: forcing authenticated high-speed USB gadget' "$IMAGE"
+          grep -aFq 'U1: selecting UTMI as PIPE on lagoon' "$IMAGE"
+          grep -aFq 'U1: optional USB3 PHY absent' "$IMAGE"
+          grep -Fq ' a52_u1_usb2_only' "$MAP" || true
+          python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
+          ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE"
+          ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE"
+          grep -aFq 'U446 UNBIND free_port before_close_wait' "$IMAGE"
+          grep -aFq 'U446 HANDOVER_DISABLED' "$IMAGE"
+          echo "P446U USB source/binary console-first audit PASS"
+          ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
+          ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
+          grep -Fq ' a52_p446_read_cb2' "$MAP"
+          grep -Fq ' a52_p446_mark' "$MAP"
+          grep -Fq ' a52_p446_note_smmu' "$MAP"
+          grep -Fq ' a52_p446_note_iova' "$MAP"
+          grep -Fq ' a52_p446_register_dsi' "$MAP"
+          grep -aFq 'R0_HOT_0_75US' "$IMAGE"
+          grep -aFq 'DSI_KONA_BUS' "$IMAGE"
+          grep -aFq 'MMC_MAJOR179' "$IMAGE"
+          grep -Fq ' a52_p445_try_arm' "$MAP"
+          grep -Fq ' a52_p445_store_section' "$MAP"
+          grep -Fq ' a52_p445_gate_check' "$MAP"
+          grep -Fq ' a52_p445_run_r2' "$MAP"
+          ! grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
+          ccache -s
+      - name: Preserve Phase446AF vmlinux for crash decoding
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          test -s "$BUILD/vmlinux"
+          test -s "$BUILD/System.map"
+          test -s "$ROOT/scripts/faddr2line"
+          mkdir -p phase446af-debug
+          cp "$BUILD/vmlinux" phase446af-debug/vmlinux
+          cp "$BUILD/System.map" phase446af-debug/System.map
+          cp "$ROOT/scripts/faddr2line" phase446af-debug/faddr2line
+          cp "$BUILD/.config" phase446af-debug/final.config
+          readelf -SW phase446af-debug/vmlinux | grep -F '.debug_info'
+          printf '%s\n' "P446AF DWARF vmlinux retained for exact offset decoding" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save exact per-variant Kbuild objects
+        if: success() && steps.kbuild_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            workspace/gki-phase199-out
+            !workspace/gki-phase199-out/vmlinux
+            !workspace/gki-phase199-out/arch/arm64/boot/Image
+          key: mangrove-kbuild-v5-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ steps.build_cache_key.outputs.fingerprint }}-${{ steps.build_cache_key.outputs.config }}-${{ steps.build_cache_key.outputs.toolchain }}
+      - name: Save reusable clang ccache even if packaging fails
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: mangrove-clang-ccache-v3-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Package and audit Phase447C independently compiled ${{ matrix.variant.id }} boot
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          bash scripts/446z_package_preserved.sh
+          python3 -m py_compile scripts/447c_finalize_variant.py
+          python3 scripts/447c_finalize_variant.py \
+            --source f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img \
+            --config workspace/gki-phase199-out/.config \
+            --variant "${{ matrix.variant.id }}" --out phase447b-variants
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          x=json.loads(Path("phase447b-variants/compiled-variant.json").read_text())
+          assert x["primary_cmdline_length"] <= 480
+          assert x["compiled_config"]["CONFIG_LOG_BUF_SHIFT"] == 23
+          print("P447C PRIMARY ARGS:",x["primary_cmdline"])
+          print("P447C BOOT HEADER version=",x["boot_header_version"],"cmdline_length=",x["primary_cmdline_length"])
+          PY
+          if command -v unpack_bootimg >/dev/null 2>&1; then
+            unpack_bootimg --boot_img "$(find phase447b-variants -name '*.boot.img' -type f -print -quit)" --out /tmp/p447c-unpack | head -n 45
+          fi
+          cat phase447b-variants/READ-BEFORE-FLASH.txt >> "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.variant.id }}" in
+            A) ORIGINAL_BOOT="phase447b-variants/A-wave2-battery-only.boot.img" ;;
+            B) ORIGINAL_BOOT="phase447b-variants/B-wave3-dsp-no-mss.boot.img" ;;
+            C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
+            D) ORIGINAL_BOOT="phase447b-variants/D-wave2-ipc-only.boot.img" ;;
+            E) ORIGINAL_BOOT="phase447b-variants/E-wave2-glink-qrtr-only.boot.img" ;;
+            F) ORIGINAL_BOOT="phase447b-variants/F-wave2-therm-guard-glink-qrtr.boot.img" ;;
+            G) ORIGINAL_BOOT="phase447b-variants/G-wave2-manual-adsp-pas.boot.img" ;;
+            *) echo "Invalid Mangrove variant"; exit 1 ;;
+          esac
+          MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
+          test -s "$ORIGINAL_BOOT"
+          cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          if [ "${{ matrix.variant.id }}" = F ]; then
+            # Edit the ACTUAL packaged DTB, not an unused kernel DTS.
+            python3 scripts/453_daily_pstore_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-453-DAILY.boot.img \
+              --report phase447b-variants/P453-RAMOOPS-DTB-MANIFEST.json
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-453-DAILY.boot.img"
+            python3 scripts/453_daily_pstore_dtb.py --boot "$MANGROVE_BOOT" --check-only \
+              | tee phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
+          fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-452-DSP-CHG.boot.img \
+              --report phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json \
+              --config workspace/gki-phase199-out/.config
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-452-DSP-CHG.boot.img"
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --config workspace/gki-phase199-out/.config --check-only \
+              | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+          fi
+          if [ "${{ matrix.variant.id }}" = E ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
+          elif [ "${{ matrix.variant.id }}" = F ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-452-DAILY.boot.img
+          fi
+          printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
+            python3 scripts/448a_ipc_stage1.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
+              | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
+            python3 scripts/448b_glink_qrtr_stage2.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
+              | tee phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            cat phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Phase446i GKI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-GKI-FAIL-DIAG-${{ github.run_number }}-${{ matrix.variant.id }}
+          path: |
+            scripts/446m_apply_gdsc_irq_ab.py
+            scripts/446n_apply_dsi_irq_rearm.py
+            scripts/446p_apply_qcom_dsi_packet.py
+            scripts/446q_reconcile_phase_markers.py
+            scripts/446q_apply_ion_prime_pipeline_trace.py
+            scripts/446r_apply_commit_gem_lifetime.py
+            scripts/446r2_bound_rpmh_tcs.py
+            scripts/446r2_apply_pon_wake_diag.py
+            scripts/a52_final_tree_manifest_audit.py
+            scripts/446s_apply_arm_memlat_pmu.py
+            scripts/446s_port_legacy_pmic_gpio.py
+            scripts/446s_publish_final_inputs.py
+            scripts/446s_apply_gpu_slumber_trace.py
+            scripts/446s_apply_kgsl_smmu_runtime_pm.py
+            scripts/446ad_fix_ipc_logging_compat.py
+            scripts/446ad_gsi_crash_guard.py
+            scripts/446ae_dma_wrapper_guard.py
+            scripts/446af_gpi_callback_abi.py
+            scripts/446af_decode_oops.sh
+            scripts/447b_restore_446ag_touch.py
+            scripts/447b_generate_variants.py
+            scripts/447c_finalize_variant.py
+            scripts/447c_quiet_frame_trace.py
+            scripts/447_flicker_ring.py
+            scripts/447j_vblank_diag.py
+            scripts/447k_vblank_hooks.py
+            scripts/447i_touch_lifecycle_trace.py
+            scripts/447l_usb_stage_diag.py
+            scripts/447n_late_touch_usb_function.py
+            scripts/448a_ipc_stage1.py
+            scripts/447d_se7_se10_i2c.py
+            scripts/447d_readonly_sm5714_fg.py
+            scripts/447e_samsung_battery_platform.py
+            scripts/447e_alias_audit.py
+            scripts/447f_tg_i2c_nr.py
+            scripts/447f_sm5714_fg_child.py
+            scripts/447f_soc_scaling.py
+            scripts/447g_chg_guard.py
+            scripts/447g_ntc_iio.py
+            scripts/447g_adc5_gpio2.py
+            scripts/447h_adc5_tg_ntc.py
+            scripts/447h_ntc_retry.py
+            scripts/447h_tchg_ntc.py
+            scripts/447h_soc_policy.py
+            gki/common/drivers/i2c/busses/i2c-qcom-geni.c
+            gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
+            gki/common/include/linux/ipc_logging.h
+            gki/common/drivers/a52_secure/qsee_ipc_irq_bridge.c
+            vendor/phase446s/a52-pinctrl-spmi-gpio.c
+            phase446r2-manifest/final-tree.json
+            gki/common/drivers/soc/qcom/rpmh-rsc.c
+            gki/common/drivers/a52_secure/a52_pon_wake_diag.c
+            gki/common/drivers/a52_display/msm/msm_gem.c
+            gki/common/drivers/a52_display/msm/msm_atomic.c
+            phase446q-ion-audit/phase446q-final-tree-marker-audit.json
+            gki/common/drivers/staging/android/ion/ion_dma_buf.c
+            gki/common/drivers/staging/android/ion/ion.c
+            gki/common/include/linux/a52_ack_secure_flight_recorder.h
+            gki/common/drivers/a52_display/msm/msm_gem_prime.c
+            gki/common/drivers/a52_display/msm/msm_fb.c
+            gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+            gki/common/drivers/a52_display/msm/sde_power_handle.c
+            gki/common/drivers/a52_display/msm/sde/sde_irq.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/drivers/a52_display/msm/sde/sde_kms.c
+            scripts/446c_apply_takeover_window.py
+            scripts/446g_apply_te_irq_test.py
+            scripts/446h_apply_panel_f0_microscope.py
+            scripts/446i_apply_passive_f0_twin.py
+            gki/common/drivers/a52_display/msm/a52_phase445.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
+            gki/common/drivers/regulator/core.c
+            gki/common/drivers/regulator/refgen.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/439_apply_dsi_autopsy.py
+            scripts/440_apply_early_f0_cleanup_forensics.py
+            scripts/441_apply_vrr_state_compat.py
+            scripts/446d_apply_extra_observers.py
+            scripts/446d_collect_boot_identity.sh
+            gki/common/drivers/clk/qcom/dispcc-lagoon.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-msm.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+      - name: Upload MANGROVE-452-DAILY (read-only charger diagnostics, no charging)
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-453-DAILY-${{ github.run_number }}
+          path: |
+            phase447b-variants/MANGROVE-452-DAILY.boot.img
+            phase447b-variants/MANGROVE-453-DAILY.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            phase447b-variants/P453-RAMOOPS-DTB-MANIFEST.json
+            phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload MANGROVE-452-DSP-CHG (H0 manual charger opt-in + manual ADSP; experimental)
+        if: success() && matrix.variant.id == 'G'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-452-DSP-CHG-${{ github.run_number }}
+          path: |
+            phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+            phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json
+            phase447-inventory/P452-SCM-CALLERS.json
+            scripts/452_h0_sm5714_conservative.py
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Phase447 manifest and compatibility review
+        if: always() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P447-INVENTORY-${{ github.run_number }}
+          path: |
+            merge/manifest.csv
+            merge/userspace-nodes.csv
+            merge/wave3-three-layer-contract.md
+            merge/wave2-447d-runtime-port-status.md
+            merge/wave2-447e-policy-acceptance.md
+            phase447-inventory/
+            scripts/447_stage_control.py
+            scripts/447_manifest_audit.py
+            scripts/447_discover_sources.py
+            scripts/447_config_diff.py
+            scripts/447b_vendor_node_audit.py
+            scripts/447b_collect_windows.ps1
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload Phase446AF DWARF crash-decode symbols
+        if: always() && (matrix.variant.id == 'F' || (matrix.variant.id == 'G' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''))
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 30
+      - name: Upload Phase446i GKI
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}
+          path: f0bisect-gki-p6-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Phase446S final build inputs
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-FINAL-INPUTS-${{ github.run_number }}
+          path: phase446s-final-inputs/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  decode_pc:
+    name: Decode PC (faddr2line)
+    needs: gki
+    # PC decoding is an explicit opt-in tool, not a post-build requirement.
+    # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
+    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug
+      - name: Decode GSI oops function and source line
+        env:
+          PC_INPUT: ${{ inputs.decode_pc }}
+        run: |
+          set -Eeuo pipefail
+          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
+          test -s phase446af-debug/vmlinux
+          bash -n scripts/446af_decode_oops.sh
+          {
+            echo "## P446AF decoded kernel PC"
+            echo "Requested: $PC"
+            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
+          } | tee phase446af-debug/decode.txt
+          {
+            echo '### Phase446AF faddr2line'
+            echo '~~~text'
+            cat phase446af-debug/decode.txt
+            echo '~~~'
+            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload decoded kernel PC
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
+          path: phase446af-debug/decode.txt
+          if-no-files-found: error
+          retention-days: 30
+ "$MAP" || true
+                if grep -Eq '[[:space:]]ufs_qcom_ice_(init|enable|program_key|resume)
+            if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
+              verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'
+            else
+              echo 'P452 ARM_SMMU not built-in; no qcom arm-SMMU code activated' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
+          grep -aFq "P446Z KSU version=" "$IMAGE"
+          grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
+          grep -aFq "P446Z I2C BUS_VOTE" "$IMAGE"
+          grep -aFq "P446AA SE8 BEFORE" "$IMAGE"
+          grep -aFq "P446AA DRM_INPUT" "$IMAGE"
+          grep -aFq "P446AB SE8_CAP" "$IMAGE"
+          grep -aFq "P446AB PROP_GET" "$IMAGE"
+          grep -aFq "P446AB PROP_SET" "$IMAGE"
+          grep -aFq "P446AC GSI_ONLY" "$IMAGE"
+          grep -aFq "P447 GATES source=%s wave=%u mss=%d ipa=%d" "$IMAGE"
+          grep -aFq "P447 GATES initialized wave=" "$IMAGE"
+          grep -aFq "P447D I2C SE%d PROBE" "$IMAGE"
+          grep -aFq "P447 W2 battery FIRST" "$IMAGE"
+          grep -aFq "P447E battery PLATFORM_PROBE rc=0" "$IMAGE"
+          grep -aFq "P447E I2C SE%d DT_ALIAS=%d" "$IMAGE"
+          grep -aFq "P447F I2C NR ctrl=%pa" "$IMAGE"
+          grep -aFq "P447F SM5714 FG_CHILD" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD SAMPLE" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD INHIBIT_OK" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD INHIBIT_FAILED" "$IMAGE"
+          grep -aFq "P447G CHG_GUARD THERM_NTC" "$IMAGE"
+          grep -aFq "gpio1_pu2" "$IMAGE"
+          grep -aFq "P447H ADC5 GPIO" "$IMAGE"
+          grep -aFq "P447H ADC5 PROVIDER DT_OK" "$IMAGE"
+          grep -aFq "P447H TEMP MISSING" "$IMAGE"
+          grep -aFq "gpio2_pu2" "$IMAGE"
+          grep -aFq "gpio3_pu2" "$IMAGE"
+          grep -aFq "gpio4_pu2" "$IMAGE"
+          grep -aFq "P447H NTC RETRY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=" "$IMAGE"
+          grep -aFq "P447H TCHG READY" "$IMAGE"
+          grep -aFq "P447H TEMP therm=%d chg=%d fg=%d" "$IMAGE"
+          grep -aFq "P447H SOC raw=" "$IMAGE"
+          grep -aFq "P447H SOC writer=sysfs" "$IMAGE"
+          grep -aFq "batt_capacity_max" "$IMAGE"
+          grep -aFq "P447B TOUCH FW_REQUEST_SKIPPED" "$IMAGE"
+          grep -aFq "P447B TOUCH IRQ_DEPTH_SKIP" "$IMAGE"
+          grep -aFq "P447B GSI SUMMARY" "$IMAGE"
+          grep -aFq "P446AF GSI RX_SUBMIT" "$IMAGE"
+          grep -aFq "P446AF GSI BADPTR" "$IMAGE"
+          grep -aFq "P446AC HWC_RING READY" "$IMAGE"
+          # 447 mandatory: marker must be compiled into the actual Image,
+          # not merely mentioned by a source-patch script or stale cache.
+          grep -aFq "P447 FLICKER_RING ARMED" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING TRIGGER" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING DUMP_BEGIN" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING PROP" "$IMAGE"
+          grep -aFq "P447 FLICKER_RING DUMP_END" "$IMAGE"
+          # 447J must actually survive compile into final Image, not only source.
+          grep -aFq "P447J VBLANK INIT" "$IMAGE"
+          grep -aFq "P447J VBLANK reason=" "$IMAGE"
+          grep -aFq "P447J VBLANK CRTC idx=" "$IMAGE"
+          grep -aFq "CRTC_HOOK_MISSING_KMS_LEGACY_ONLY" "$IMAGE"
+          grep -aFq "IOCTL_VBLANK_GET_FAILED" "$IMAGE"
+          grep -aFq "IOCTL_PIPE_OOB_OR_NO_LEASE" "$IMAGE"
+          grep -aFq "a52_446ac_hwc_requests" "$IMAGE"
+          grep -aFq "P446Z KSU version=" "$IMAGE"
+          grep -aFq "tag=v4.2.0-rc3 hooks=tracepoint" "$IMAGE"
+          grep -aFq "P446Z TOUCH INIT_ABORT" "$IMAGE"
+          grep -aFq 'P446S MEMLAT skip_monitor' "$IMAGE"
+          grep -aFq 'P446S FRAME seq=' "$IMAGE"
+          grep -aFq 'P446S GPU_CX_CONSUMER' "$IMAGE"
+          grep -aFq 'P446S KGSL_MUTEX held_ms=' "$IMAGE"
+          grep -aFq 'P446S GMU_CX POLL' "$IMAGE"
+          grep -aFq 'P446S KGSL_SMMU_RPM' "$IMAGE"
+          grep -aFq 'P446U PROP seq=' "$IMAGE"
+          grep -aFq 'P446U FRAME_JOIN seq=' "$IMAGE"
+          grep -aFq 'P446U PLANE91 seq=' "$IMAGE"
+          grep -aFq 'P446U MSM_CHECK seq=' "$IMAGE"
+          grep -aFq 'P446U BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'P446U SAMSUNG_BRIGHTNESS ts=' "$IMAGE"
+          grep -aFq 'U446 CONSOLE worker-stop-ack' "$IMAGE"
+          grep -aFq 'U446 UNBIND gs_unbind enter' "$IMAGE"
+          grep -aFq 'U446 UDC configfs probe-exit' "$IMAGE"
+          grep -aFq 'U446 holder pid=' "$IMAGE"
+          grep -aFq 'U446 CONSOLE request-dequeue-enter' "$IMAGE"
+          grep -aFq 'U446 UDC adb-bound' "$IMAGE"
+          grep -aFq 'P446V READ_PROP' "$IMAGE"
+          grep -aFq 'P446V GETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V GETBLOB_DATA' "$IMAGE"
+          grep -aFq 'P446V CONNECTOR_MODE' "$IMAGE"
+          grep -aFq 'P446V GETCRTC' "$IMAGE"
+          grep -aFq 'P446V GETENCODER' "$IMAGE"
+          grep -aFq 'P446V SETPROPERTY' "$IMAGE"
+          grep -aFq 'P446V SNAP_CRTC' "$IMAGE"
+          grep -aFq 'P446V SNAP_CONN' "$IMAGE"
+          grep -aFq 'P446V SNAP_DSI' "$IMAGE"
+          grep -aFq 'P446V SNAP_SAMSUNG' "$IMAGE"
+          grep -aFq 'P446V SNAP_ENC_DETAIL' "$IMAGE"
+          grep -aFq 'P446V SNAP_AUTORF' "$IMAGE"
+          grep -aFq 'P446V POST_WINDOW_BEGIN' "$IMAGE"
+          grep -aFq 'P446V RTC PROBE' "$IMAGE"
+          grep -aFq 'P446V RTC REGISTER' "$IMAGE"
+          grep -aFq 'P446W SPLASH COLD_SELECTED=1' "$IMAGE"
+          grep -aFq 'P446W HANDOFF begin' "$IMAGE"
+          grep -aFq 'P446W HANDOFF end' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=disable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF phase=enable-enter' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_prepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_enable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_disable' "$IMAGE"
+          grep -aFq 'P446W HANDOFF DSI dsi_display_unprepare' "$IMAGE"
+          grep -aFq 'P446W HANDOFF panel ON_CMDS' "$IMAGE"
+          grep -aFq 'P446W_HANDOFF_POST_COMPLETE' "$IMAGE"
+          grep -aFq 'P446X TOUCH probe-rc=0' "$IMAGE"
+          grep -aFq 'P446X TOUCH FW_WRITE_BLOCKED' "$IMAGE"
+          grep -aFq 'P446X TOUCH EVENT' "$IMAGE"
+          grep -aFq 'P446X TOUCH I2C_ID' "$IMAGE"
+          grep -aFq 'P446X TOUCH REGULATOR_ENABLE' "$IMAGE"
+          grep -aFq 'P446X TOUCH disabled a52.touch=0' "$IMAGE"
+          grep -aFq 'P446W FULL_POST_NORMAL_ON' "$IMAGE"
+          grep -aFq 'P446W USB early legacy g_serial allocated ttyGS3' "$IMAGE"
+          grep -aFq 'P446W U446 COORDINATOR DONE' "$IMAGE"
+          grep -aFq 'P446W U446 CONFIGFS defer' "$IMAGE"
+          test -s "$BUILD/include/generated/utsrelease.h"
+          grep -Fq -- '-Mangrove' "$BUILD/include/generated/utsrelease.h"
+          python3 scripts/a52_final_tree_manifest_audit.py --root "$ROOT" --build "$BUILD" --image "$IMAGE" --output "$PWD/phase446r2-manifest/final-tree.json" --strict
+          echo "Phase446S postcompile Image marker and strict manifest PASS" >> "$GITHUB_STEP_SUMMARY"
+          test -s "$P445"
+          for marker in 'F0BISECT' 'F0BAR #' 'dbg_busy7=%u' 'intf_valid=%u' 'A52CRASH1 dumper_registered=%d' 'CRASH1 FAULT PID=%u'; do
+            grep -aFq "$marker" "$IMAGE" || { echo "FAIL: compiled GKI Image missing probe marker: $marker"; exit 1; }
+          done
+          grep -Fq 'A52_F0B_AR_IDLE_16X_V2' "$ROOT/drivers/a52_display/msm/sde/sde_encoder_phys_cmd.c" || { echo 'FAIL: F0BAR V2 marker missing from compiled source'; exit 1; }
+          grep -Fq '#define F0B_ACTIVE_STAGE 0' "$ROOT/drivers/a52_display/msm/dsi/dsi_display.c"
+          grep -Fq 'A52_CRASH1_CB_HOOK_V1' "$ROOT/drivers/a52_display/msm/sde/sde_crtc.c"
+          grep -Fq 'A52_CRASH1_FAULT_HOOK_V1' "$ROOT/arch/arm64/mm/fault.c"
+          python3 scripts/crash1_fix_gki_dma_fence_union.py --root "$ROOT" --check-only
+          python3 scripts/fence1b_disable_sde_dbg_panic.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_quiet_sde_evtlog.py --root "$ROOT" --check-only
+          python3 scripts/fence1c_fix_dsi_pll_hw_init.py --root "$ROOT" --check-only
+          python3 scripts/fence1f_reopen_p445_gate_at_cold_prepare.py --root "$ROOT" --check-only
+          grep -Fxq 'CONFIG_PSTORE_RAM=y' "$BUILD/.config"
+          echo "CRASH1: raw FIFO F0 disabled; standard Samsung command remains enabled"
+          python3 scripts/437_apply_kgsl_open_corridor.py --root "$ROOT" --check-only
+          python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+          python3 scripts/439_apply_dsi_autopsy.py --root "$ROOT" --variant A --check-only
+          python3 scripts/441_apply_vrr_state_compat.py --root "$ROOT" --check-only
+          grep -aFq 'A52_PHASE437_KGSL_OPEN_CORRIDOR_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE438_DEVBW_SEMANTIC_PARITY_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE439_DSI_AUTOPSY_V3' "$IMAGE"
+          grep -aFq 'A52_PHASE440_EARLY_F0_CLEANUP_FORENSICS_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE441_VRR_STATE_COMPAT_V1' "$IMAGE"
+          grep -aFq 'DMS vrr_state fallback = %s' "$IMAGE"
+          grep -Fq 'P445_GATE_DIAG' "$P445"
+          grep -Fq 'R0_HOT_0_75US' "$P445"
+          grep -Fq 'R1_HOT_0_75US' "$P445"
+          grep -Fq 'R2_HOT_0_75US' "$P445"
+          grep -Fq 'dropped_sections' "$P445"
+          grep -aFq 'R0_HOT_0_75US' "$IMAGE"
+          grep -aFq 'R1_HOT_0_75US' "$IMAGE"
+          grep -aFq 'R2_HOT_0_75US' "$IMAGE"
+          ! grep -aFq 'P440 EARLY start' "$IMAGE"
+          ! grep -aFq 'P440 EARLY unlock_rc' "$IMAGE"
+          ! grep -aFq 'P440 EARLY relock_rc' "$IMAGE"
+          grep -Fq ' a52_p437_mark' "$MAP"
+          grep -Fq ' a52_p439_allow_next' "$MAP"
+          grep -Fq ' a52_p440_event' "$MAP"
+          python3 scripts/445_apply_recovery_ladder.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446_apply_heartbeat_cb2.py --root "$ROOT" --check-only
+          python3 scripts/446b_apply_heartbeat_fixes.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446c_apply_takeover_window.py --root "$ROOT" --kind gki --check-only
+          python3 scripts/446g_apply_te_irq_test.py --root "$ROOT" --check-only
+          grep -aFq 'A52_PHASE446_EARLY_SPLASH_HEARTBEAT_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446B_GATE_CB_REFRESH_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446C_TAKEOVER_WINDOW_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446G_SKIP_TE_IRQ_TLMM23_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446H_PANEL_F0_LIFECYCLE_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446I_MATCHED_PASSIVE_F0_TWIN_V1' "$IMAGE"
+          grep -aFq 'J_MISC_TRACE' "$IMAGE"
+          grep -aFq 'msm-qusb-phy-v2' "$IMAGE"
+          grep -aFq 'U1: forcing authenticated high-speed USB gadget' "$IMAGE"
+          grep -aFq 'U1: selecting UTMI as PIPE on lagoon' "$IMAGE"
+          grep -aFq 'U1: optional USB3 PHY absent' "$IMAGE"
+          grep -Fq ' a52_u1_usb2_only' "$MAP" || true
+          python3 scripts/u1_port_legacy_qusb2_phy.py --root "$ROOT" --touchgrass "$PWD/workspace/touchgrass-a52xq" --check-only
+          ! grep -aFq "A52U2 UDC handover: g_serial released" "$IMAGE"
+          ! grep -aFq "A52U2 ConfigFS UDC bind result=" "$IMAGE"
+          grep -aFq 'U446 UNBIND free_port before_close_wait' "$IMAGE"
+          grep -aFq 'U446 HANDOVER_DISABLED' "$IMAGE"
+          echo "P446U USB source/binary console-first audit PASS"
+          ! grep -aFq 'A52_PHASE446F_SKIP_LATE_SMMU_COMPONENT_MATCH_V1' "$IMAGE"
+          ! grep -aFq 'A52_PHASE446E_GKI_KEEP_EARLYMAP_BUILTIN_V1' "$IMAGE"
+          grep -aFq 'A52_PHASE446D_POWER_CLOCK_MICROSCOPE_V1:GKI' "$IMAGE"
+          grep -Fq ' a52_p446_read_cb2' "$MAP"
+          grep -Fq ' a52_p446_mark' "$MAP"
+          grep -Fq ' a52_p446_note_smmu' "$MAP"
+          grep -Fq ' a52_p446_note_iova' "$MAP"
+          grep -Fq ' a52_p446_register_dsi' "$MAP"
+          grep -aFq 'R0_HOT_0_75US' "$IMAGE"
+          grep -aFq 'DSI_KONA_BUS' "$IMAGE"
+          grep -aFq 'MMC_MAJOR179' "$IMAGE"
+          grep -Fq ' a52_p445_try_arm' "$MAP"
+          grep -Fq ' a52_p445_store_section' "$MAP"
+          grep -Fq ' a52_p445_gate_check' "$MAP"
+          grep -Fq ' a52_p445_run_r2' "$MAP"
+          ! grep -aFq 'A52_PHASE442_FIFO_FETCH_DISCRIMINATOR_V1' "$IMAGE"
+          ccache -s
+      - name: Preserve Phase446AF vmlinux for crash decoding
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
+          test -s "$BUILD/vmlinux"
+          test -s "$BUILD/System.map"
+          test -s "$ROOT/scripts/faddr2line"
+          mkdir -p phase446af-debug
+          cp "$BUILD/vmlinux" phase446af-debug/vmlinux
+          cp "$BUILD/System.map" phase446af-debug/System.map
+          cp "$ROOT/scripts/faddr2line" phase446af-debug/faddr2line
+          cp "$BUILD/.config" phase446af-debug/final.config
+          readelf -SW phase446af-debug/vmlinux | grep -F '.debug_info'
+          printf '%s\n' "P446AF DWARF vmlinux retained for exact offset decoding" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save exact per-variant Kbuild objects
+        if: success() && steps.kbuild_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            workspace/gki-phase199-out
+            !workspace/gki-phase199-out/vmlinux
+            !workspace/gki-phase199-out/arch/arm64/boot/Image
+          key: mangrove-kbuild-v5-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ steps.build_cache_key.outputs.fingerprint }}-${{ steps.build_cache_key.outputs.config }}-${{ steps.build_cache_key.outputs.toolchain }}
+      - name: Save reusable clang ccache even if packaging fails
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: mangrove-clang-ccache-v3-${{ runner.os }}-${{ env.GKI_COMMON_SHA }}-${{ matrix.variant.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Package and audit Phase447C independently compiled ${{ matrix.variant.id }} boot
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          bash scripts/446z_package_preserved.sh
+          python3 -m py_compile scripts/447c_finalize_variant.py
+          python3 scripts/447c_finalize_variant.py \
+            --source f0bisect-gki-p6-out/package/boot-f0bisect-gki-p6-v1.img \
+            --config workspace/gki-phase199-out/.config \
+            --variant "${{ matrix.variant.id }}" --out phase447b-variants
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          x=json.loads(Path("phase447b-variants/compiled-variant.json").read_text())
+          assert x["primary_cmdline_length"] <= 480
+          assert x["compiled_config"]["CONFIG_LOG_BUF_SHIFT"] == 23
+          print("P447C PRIMARY ARGS:",x["primary_cmdline"])
+          print("P447C BOOT HEADER version=",x["boot_header_version"],"cmdline_length=",x["primary_cmdline_length"])
+          PY
+          if command -v unpack_bootimg >/dev/null 2>&1; then
+            unpack_bootimg --boot_img "$(find phase447b-variants -name '*.boot.img' -type f -print -quit)" --out /tmp/p447c-unpack | head -n 45
+          fi
+          cat phase447b-variants/READ-BEFORE-FLASH.txt >> "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.variant.id }}" in
+            A) ORIGINAL_BOOT="phase447b-variants/A-wave2-battery-only.boot.img" ;;
+            B) ORIGINAL_BOOT="phase447b-variants/B-wave3-dsp-no-mss.boot.img" ;;
+            C) ORIGINAL_BOOT="phase447b-variants/C-wave3-modem-ipa.boot.img" ;;
+            D) ORIGINAL_BOOT="phase447b-variants/D-wave2-ipc-only.boot.img" ;;
+            E) ORIGINAL_BOOT="phase447b-variants/E-wave2-glink-qrtr-only.boot.img" ;;
+            F) ORIGINAL_BOOT="phase447b-variants/F-wave2-therm-guard-glink-qrtr.boot.img" ;;
+            G) ORIGINAL_BOOT="phase447b-variants/G-wave2-manual-adsp-pas.boot.img" ;;
+            *) echo "Invalid Mangrove variant"; exit 1 ;;
+          esac
+          MANGROVE_BOOT="phase447b-variants/Mangrove-Kernel-447M-${{ matrix.variant.id }}.boot.img"
+          test -s "$ORIGINAL_BOOT"
+          cp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
+          if [ "${{ matrix.variant.id }}" = F ]; then
+            # Edit the ACTUAL packaged DTB, not an unused kernel DTS.
+            python3 scripts/453_daily_pstore_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-453-DAILY.boot.img \
+              --report phase447b-variants/P453-RAMOOPS-DTB-MANIFEST.json
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-453-DAILY.boot.img"
+            python3 scripts/453_daily_pstore_dtb.py --boot "$MANGROVE_BOOT" --check-only \
+              | tee phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
+          fi
+          if [ "${{ matrix.variant.id }}" = G ]; then
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-452-DSP-CHG.boot.img \
+              --report phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json \
+              --config workspace/gki-phase199-out/.config
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-452-DSP-CHG.boot.img"
+            python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
+              --config workspace/gki-phase199-out/.config --check-only \
+              | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+          fi
+          if [ "${{ matrix.variant.id }}" = E ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
+          elif [ "${{ matrix.variant.id }}" = F ]; then
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-452-DAILY.boot.img
+          fi
+          printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ matrix.variant.ipc }}" = 1 ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
+            python3 scripts/448a_ipc_stage1.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
+              | tee phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            cat phase447b-variants/P448-IPC-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ matrix.variant.id }}" = E ] || [ "${{ matrix.variant.id }}" = F ] || [ "${{ matrix.variant.id }}" = G ]; then
+            EXTRA=()
+            if [ "${{ matrix.variant.id }}" = G ]; then EXTRA+=(--manual-pas); fi
+            python3 scripts/448b_glink_qrtr_stage2.py --root "$PWD/gki/common" --tg "$PWD/workspace/touchgrass-a52xq" \
+              --config "$PWD/workspace/gki-phase199-out/.config" --boot "$MANGROVE_BOOT" "${EXTRA[@]}" \
+              | tee phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            cat phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Phase446i GKI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-GKI-FAIL-DIAG-${{ github.run_number }}-${{ matrix.variant.id }}
+          path: |
+            scripts/446m_apply_gdsc_irq_ab.py
+            scripts/446n_apply_dsi_irq_rearm.py
+            scripts/446p_apply_qcom_dsi_packet.py
+            scripts/446q_reconcile_phase_markers.py
+            scripts/446q_apply_ion_prime_pipeline_trace.py
+            scripts/446r_apply_commit_gem_lifetime.py
+            scripts/446r2_bound_rpmh_tcs.py
+            scripts/446r2_apply_pon_wake_diag.py
+            scripts/a52_final_tree_manifest_audit.py
+            scripts/446s_apply_arm_memlat_pmu.py
+            scripts/446s_port_legacy_pmic_gpio.py
+            scripts/446s_publish_final_inputs.py
+            scripts/446s_apply_gpu_slumber_trace.py
+            scripts/446s_apply_kgsl_smmu_runtime_pm.py
+            scripts/446ad_fix_ipc_logging_compat.py
+            scripts/446ad_gsi_crash_guard.py
+            scripts/446ae_dma_wrapper_guard.py
+            scripts/446af_gpi_callback_abi.py
+            scripts/446af_decode_oops.sh
+            scripts/447b_restore_446ag_touch.py
+            scripts/447b_generate_variants.py
+            scripts/447c_finalize_variant.py
+            scripts/447c_quiet_frame_trace.py
+            scripts/447_flicker_ring.py
+            scripts/447j_vblank_diag.py
+            scripts/447k_vblank_hooks.py
+            scripts/447i_touch_lifecycle_trace.py
+            scripts/447l_usb_stage_diag.py
+            scripts/447n_late_touch_usb_function.py
+            scripts/448a_ipc_stage1.py
+            scripts/447d_se7_se10_i2c.py
+            scripts/447d_readonly_sm5714_fg.py
+            scripts/447e_samsung_battery_platform.py
+            scripts/447e_alias_audit.py
+            scripts/447f_tg_i2c_nr.py
+            scripts/447f_sm5714_fg_child.py
+            scripts/447f_soc_scaling.py
+            scripts/447g_chg_guard.py
+            scripts/447g_ntc_iio.py
+            scripts/447g_adc5_gpio2.py
+            scripts/447h_adc5_tg_ntc.py
+            scripts/447h_ntc_retry.py
+            scripts/447h_tchg_ntc.py
+            scripts/447h_soc_policy.py
+            gki/common/drivers/i2c/busses/i2c-qcom-geni.c
+            gki/common/drivers/input/touchscreen/stm/fts5cu56a/fts_ts.c
+            gki/common/include/linux/ipc_logging.h
+            gki/common/drivers/a52_secure/qsee_ipc_irq_bridge.c
+            vendor/phase446s/a52-pinctrl-spmi-gpio.c
+            phase446r2-manifest/final-tree.json
+            gki/common/drivers/soc/qcom/rpmh-rsc.c
+            gki/common/drivers/a52_secure/a52_pon_wake_diag.c
+            gki/common/drivers/a52_display/msm/msm_gem.c
+            gki/common/drivers/a52_display/msm/msm_atomic.c
+            phase446q-ion-audit/phase446q-final-tree-marker-audit.json
+            gki/common/drivers/staging/android/ion/ion_dma_buf.c
+            gki/common/drivers/staging/android/ion/ion.c
+            gki/common/include/linux/a52_ack_secure_flight_recorder.h
+            gki/common/drivers/a52_display/msm/msm_gem_prime.c
+            gki/common/drivers/a52_display/msm/msm_fb.c
+            gki/common/drivers/regulator/a52-legacy-gdsc-regulator.c
+            gki/common/drivers/a52_display/msm/sde_power_handle.c
+            gki/common/drivers/a52_display/msm/sde/sde_irq.c
+            gki/common/drivers/a52_secure/a52_ack_secure_flight_recorder.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_ctrl_hw_cmn.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_display.c
+            gki/common/drivers/a52_display/msm/sde/sde_kms.c
+            scripts/446c_apply_takeover_window.py
+            scripts/446g_apply_te_irq_test.py
+            scripts/446h_apply_panel_f0_microscope.py
+            scripts/446i_apply_passive_f0_twin.py
+            gki/common/drivers/a52_display/msm/a52_phase445.c
+            gki/common/drivers/a52_display/msm/dsi/dsi_panel.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_common.c
+            gki/common/drivers/regulator/core.c
+            gki/common/drivers/regulator/refgen.c
+            gki/common/drivers/a52_display/msm/samsung/ss_dsi_panel_sysfs.c
+            workspace/gki-phase199-out/.config
+            workspace/gki-phase199-out/System.map
+            workspace/gki-phase199-out/arch/arm64/boot/Image
+            scripts/439_apply_dsi_autopsy.py
+            scripts/440_apply_early_f0_cleanup_forensics.py
+            scripts/441_apply_vrr_state_compat.py
+            scripts/446d_apply_extra_observers.py
+            scripts/446d_collect_boot_identity.sh
+            gki/common/drivers/clk/qcom/dispcc-lagoon.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-msm.c
+            gki/common/drivers/pinctrl/qcom/pinctrl-lagoon.c
+          if-no-files-found: warn
+          compression-level: 1
+          retention-days: 7
+      - name: Upload MANGROVE-452-DAILY (read-only charger diagnostics, no charging)
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-453-DAILY-${{ github.run_number }}
+          path: |
+            phase447b-variants/MANGROVE-452-DAILY.boot.img
+            phase447b-variants/MANGROVE-453-DAILY.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            phase447b-variants/P453-RAMOOPS-DTB-MANIFEST.json
+            phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload MANGROVE-452-DSP-CHG (H0 manual charger opt-in + manual ADSP; experimental)
+        if: success() && matrix.variant.id == 'G'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-452-DSP-CHG-${{ github.run_number }}
+          path: |
+            phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
+            phase447b-variants/compiled-variant.json
+            phase447b-variants/READ-BEFORE-FLASH.txt
+            phase447b-variants/P448-IPC-BOOT-AUDIT.txt
+            phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
+            phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+            phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json
+            phase447-inventory/P452-SCM-CALLERS.json
+            scripts/452_h0_sm5714_conservative.py
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Phase447 manifest and compatibility review
+        if: always() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P447-INVENTORY-${{ github.run_number }}
+          path: |
+            merge/manifest.csv
+            merge/userspace-nodes.csv
+            merge/wave3-three-layer-contract.md
+            merge/wave2-447d-runtime-port-status.md
+            merge/wave2-447e-policy-acceptance.md
+            phase447-inventory/
+            scripts/447_stage_control.py
+            scripts/447_manifest_audit.py
+            scripts/447_discover_sources.py
+            scripts/447_config_diff.py
+            scripts/447b_vendor_node_audit.py
+            scripts/447b_collect_windows.ps1
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload Phase446AF DWARF crash-decode symbols
+        if: always() && (matrix.variant.id == 'F' || (matrix.variant.id == 'G' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''))
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 30
+      - name: Upload Phase446i GKI
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-GKI-${{ github.run_number }}
+          path: f0bisect-gki-p6-out/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+      - name: Upload Phase446S final build inputs
+        if: success() && matrix.variant.id == 'F'
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-PHASE446WX-FINAL-INPUTS-${{ github.run_number }}
+          path: phase446s-final-inputs/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  decode_pc:
+    name: Decode PC (faddr2line)
+    needs: gki
+    # PC decoding is an explicit opt-in tool, not a post-build requirement.
+    # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
+    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
+          path: phase446af-debug
+      - name: Decode GSI oops function and source line
+        env:
+          PC_INPUT: ${{ inputs.decode_pc }}
+        run: |
+          set -Eeuo pipefail
+          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
+          test -s phase446af-debug/vmlinux
+          bash -n scripts/446af_decode_oops.sh
+          {
+            echo "## P446AF decoded kernel PC"
+            echo "Requested: $PC"
+            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
+          } | tee phase446af-debug/decode.txt
+          {
+            echo '### Phase446AF faddr2line'
+            echo '~~~text'
+            cat phase446af-debug/decode.txt
+            echo '~~~'
+            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload decoded kernel PC
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
+          path: phase446af-debug/decode.txt
+          if-no-files-found: error
+          retention-days: 30
+ "$MAP"; then
+                  echo "::error title=P452 ICE::ICE entry point linked but guarded diagnostic absent: $ICE_MARKER"
+                  exit 1
+                fi
+                # Exact source guard was checked by strict final-tree audit;
+                # accept absent runtime diagnostic only if all entry points
+                # disappeared from the final link.
+                echo 'P452 ICE entry points absent from System.map (link-pruned); source Lagoon freeze audited' >> "$GITHUB_STEP_SUMMARY"
+              fi
             else
               echo 'P452 UFS ICE not built-in; freeze confirmed by strict final-tree source audit' >> "$GITHUB_STEP_SUMMARY"
             fi

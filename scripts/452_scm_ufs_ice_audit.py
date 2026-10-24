@@ -16,6 +16,8 @@ SCM=Path("drivers/firmware/qcom_scm.c")
 
 # On Lagoon only PAS is opted into native SCM; all other consumers must
 # retain P451 no-provider behavior rather than silently changing hardware.
+# Source-wide audit includes disabled CONFIG_QCOM_RMTFS_MEM/OCMEM/IPA code,
+# ensuring future config changes cannot silently enable SCM-sensitive paths.
 INCIDENTAL_SCM_CALLERS=[
  "drivers/remoteproc/qcom_wcnss.c",
  "drivers/remoteproc/qcom_q6v5_mss.c",
@@ -23,6 +25,9 @@ INCIDENTAL_SCM_CALLERS=[
  "drivers/gpu/drm/msm/adreno/adreno_gpu.c",
  "drivers/cpuidle/cpuidle-qcom-spm.c",
  "drivers/media/platform/qcom/venus/firmware.c",
+ "drivers/soc/qcom/rmtfs_mem.c",
+ "drivers/soc/qcom/ocmem.c",
+ "drivers/net/ipa/ipa_main.c",
 ]
 SCM_FREEZE_TAG="A52_PHASE452_SCM_AVAILABILITY_FROZEN_V1"
 def freeze_incidental_scm(root):
@@ -127,7 +132,7 @@ def check(root):
         if required not in src:
             raise RuntimeError("P452 source safety guard missing "+required)
     check_incidental_scm(root)
-    print("P452 SCM SOURCE PASS: Lagoon ICE disabled, qcom SMMU deferred, 6 incidental consumers kept at 451 behavior; PAS manual only")
+    print("P452 SCM SOURCE PASS: Lagoon ICE disabled, qcom SMMU deferred, 9 incidental consumers kept at 451 behavior; PAS manual only")
 
 def audit_calls(root,out):
     """Enumerate all direct compiled-tree SCM callsites for human review.

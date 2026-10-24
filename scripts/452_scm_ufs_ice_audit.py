@@ -127,6 +127,35 @@ def patch(root):
     freeze_incidental_scm(root)
     check(root)
 
+def check_p97_ice_bypass(ice):
+    """Hard fail unless the old P97 ICE short-circuit still disables crypto.
+
+    The Phase97 branch returns before the later P452 Lagoon diagnostic, so
+    the P452 marker may be optimized out of Image even in a safe build.
+    """
+    if not re.search(r"(?m)^#define[ \t]+A52_UFS_ICE_SAFE_BRINGUP[ \t]+1[ \t]*$", ice):
+        raise RuntimeError("P452 P97 ICE safe bypass must be defined as 1")
+    tag="#if A52_UFS_ICE_SAFE_BRINGUP"
+    if ice.count(tag)!=1:
+        raise RuntimeError("P452 P97 ICE bypass conditional drift")
+    start=ice.index(tag)
+    end=ice.find("#endif",start)
+    if end<0:
+        raise RuntimeError("P452 P97 ICE bypass missing endif")
+    body=ice[start:end]
+    for marker in ("A52 diagnostic: bypassing ICE for storage bring-up",
+                   "hba->caps &= ~UFSHCD_CAP_CRYPTO;", "return 0;"):
+        if marker not in body:
+            raise RuntimeError("P452 P97 ICE bypass missing "+marker)
+    if body.index("hba->caps &= ~UFSHCD_CAP_CRYPTO;") >= body.rindex("return 0;"):
+        raise RuntimeError("P452 P97 ICE bypass must clear capability before return")
+    if any(x in body for x in ("res = platform_get_resourcebyname(",
+                              "qcom_scm_ice_available()", "qcom_ice_readl(")):
+        raise RuntimeError("P452 P97 bypass attempts SCM/ICE access")
+    if "res = platform_get_resource_byname" not in ice[end:]:
+        raise RuntimeError("P452 P97 bypass ordering drift")
+    print("P452 ICE P97 HARD_BYPASS PASS macro=1 cap_clear_before_return=1")
+
 def check(root):
     ice=(root/ICE).read_text()
     smmu=(root/SMMU).read_text()
@@ -146,6 +175,7 @@ def check(root):
         ("qsmmu = devm_kzalloc(smmu->dev",smmu)]:
         if required not in src:
             raise RuntimeError("P452 source safety guard missing "+required)
+    check_p97_ice_bypass(ice)
     check_incidental_scm(root)
     print("P452 SCM SOURCE PASS: Lagoon ICE disabled, qcom SMMU deferred, 9 incidental consumers kept at 451 behavior; PAS manual only")
 

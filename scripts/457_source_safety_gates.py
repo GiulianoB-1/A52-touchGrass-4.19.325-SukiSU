@@ -179,27 +179,28 @@ def check_h0(s):
     if 'a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),0)' not in cleanup:
         raise RuntimeError("P457 H0 unbind must stop WDT after ENQ4FET disable")
 
-    # One watchdog kick on every active tick. The same guard worker is
-    # rescheduled every 10 seconds while H0 is active; it still checks
-    # P449 before servicing the watchdog and remains at 2s while inactive.
+    # P460B: preserve the original P449 2-second thermal protection loop
+    # regardless of H0 state. Hardware WDT kick is independently rate-limited.
     poll=s[s.index("static void a52g_poll("):s.index("static enum power_supply_property a52d_props[]")]
-    if "fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52H0_IDLE_POLL_MS" not in poll:
-        raise RuntimeError("P457 H0 active 10s / baseline 2s poll gate")
-    if "#define A52H0_ACTIVE_POLL_MS 10000" not in s:
-        raise RuntimeError("P458 H0 active interval must be exactly 10s")
-    if "#define A52H0_IDLE_POLL_MS 30000" not in s:
-        raise RuntimeError("P458 H0 idle interval must be exactly 30s")
+    if "#define A52G_GUARD_POLL_MS 2000" not in s:
+        raise RuntimeError("P460B mandatory guard is not exactly 2 seconds")
+    if "msecs_to_jiffies(A52G_GUARD_POLL_MS)" not in poll:
+        raise RuntimeError("P460B H0 scheduling no longer uses original 2s guard")
+    if "fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52H0_IDLE_POLL_MS" in poll:
+        raise RuntimeError("P460B H0 must not override 2s guard cadence")
+    if "#define A52H0_KICK_MIN_MS 10000" not in s:
+        raise RuntimeError("P460B H0 watchdog min kick must be 10 seconds")
     if not (poll.index("if(a52g_sample(fg,false)<0)") <
             poll.index("else a52h0_tick(fg)") <
-            poll.index("fg->a52h0_active ? A52H0_ACTIVE_POLL_MS")):
-        raise RuntimeError("P458 H0 P449 guard must run before charger tick and reschedule")
+            poll.index("msecs_to_jiffies(A52G_GUARD_POLL_MS)")):
+        raise RuntimeError("P460B H0 P449 guard must run before H0 tick and reschedule")
     active=tick[tick.index("if(fg->a52h0_active) {"):tick.index("if(fg->a52h0_timer_started &&")]
     if active.count("a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3))")!=1:
-        raise RuntimeError("P457 H0 must kick WDT exactly once per active tick")
-    if "time_after_eq(now,fg->a52h0_last_kick+" in active or "cycle=30s" in active:
-        raise RuntimeError("P457 H0 stale 30s conditional WDT kick")
+        raise RuntimeError("P460B H0 must have a single runtime watchdog-kick site")
+    if "time_before(now,fg->a52h0_last_kick+" not in active or "msecs_to_jiffies(A52H0_KICK_MIN_MS)" not in active:
+        raise RuntimeError("P460B WDT kick interval not limited to >=10 seconds")
     if not active.index("WDT_OR_ENQ4FET_DRIFT") < active.index("a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3))"):
-        raise RuntimeError("P457 H0 verify WDT before kick")
+        raise RuntimeError("P460B H0 must verify hardware WDT before kicking")
 
     # Failures creating the optional H0 controller must LATCH H0 disabled,
     # never return from the existing FG probe before P449 guard scheduling.

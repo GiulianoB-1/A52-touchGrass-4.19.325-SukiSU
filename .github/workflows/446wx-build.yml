@@ -495,7 +495,7 @@ jobs:
             grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
             grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
             grep -aFq 'P452 H0 ENABLE cur=500' "$IMAGE"
-            grep -aFq 'P452 H0 WDT kick' "$IMAGE"
+            grep -aFq 'P452 H0 KICK wdt=90s' "$IMAGE"
             grep -aFq 'P452 H0 STOP reason=' "$IMAGE"
             grep -aFq 'P452 SCM PROBED native_5_10=1 dload_default=' "$IMAGE"
             if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then

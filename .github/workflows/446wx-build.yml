@@ -1,5 +1,5 @@
-name: Mangrove Kernel | Phase 451 DAILY and manual-start DSP
-run-name: P451 DAILY + DSP (ADSP autoboot OFF; H1 unchanged)
+name: Mangrove Kernel | Phase 452 SCM-only DSP candidate + unchanged DAILY fallback
+run-name: P452 DAILY (fallback) + DSP-SCM-TEST (ADSP autoboot OFF, no H1)
 on:
   push:
     branches:
@@ -42,8 +42,8 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          # DAILY already passed in run 40008718794. DSP-only retry.
-          - { id: G, label: 451-DSP-MANUAL-PAS-RETRY, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: F, label: 452-DAILY-FALLBACK, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: 452-DSP-SCM-MANUAL-PAS, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -464,6 +464,8 @@ jobs:
             python3 -m py_compile scripts/450_dsp_aoss_source_prep.py scripts/451_dsp_pas_source.py scripts/451_dsp_boot_dtb.py
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT"
             python3 scripts/451_dsp_pas_source.py --root "$ROOT"
+            python3 -m py_compile scripts/452_scm_ufs_ice_audit.py
+            python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT"
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
             python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
           fi
@@ -528,7 +530,7 @@ jobs:
           if [ "${{ matrix.variant.id }}" = G ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" \
               --enable REMOTEPROC --enable RPMSG_QCOM_SMD \
-              --enable QCOM_Q6V5_PAS --enable QCOM_SCM
+              --enable QCOM_Q6V5_PAS --enable QCOM_SCM               --disable QCOM_SCM_DOWNLOAD_MODE_DEFAULT
           fi
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
@@ -545,6 +547,7 @@ jobs:
               python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only --manual-pas
               python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
               python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
+              python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT"                 --config "$BUILD/.config" --check-only                 --audit-output "$PWD/phase447-inventory/P452-SCM-CALLERS.json"
             else
               python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
             fi
@@ -646,6 +649,7 @@ jobs:
           if [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
             python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
+            python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT" --check-only --config "$BUILD/.config"
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
@@ -805,6 +809,8 @@ jobs:
             grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
             grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
             grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
+            grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"
+            grep -aFq 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1' "$IMAGE"
           fi
           grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"

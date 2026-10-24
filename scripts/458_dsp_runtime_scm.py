@@ -113,9 +113,25 @@ def check(root):
         raise RuntimeError("P458 SCM sysfs creator must link once")
     if scm.count("platform_device_add(pdev)")!=1 or scm.count("platform_device_alloc(")!=1:
         raise RuntimeError("P458 multiple SCM creator callsites")
-    if "of_changeset_" in scm or "of_platform_device_create" in scm.replace(
-            " * of_platform_device_create*() intentionally", ""):
+    # Inspect executable tokens, not C comments. The source explicitly
+    # documents why of_platform_device_create*() must NOT be called; a
+    # substring gate incorrectly rejected that safety comment in #40119825644.
+    import re
+    executable = re.sub(r"/\\*.*?\\*/|//[^\\n]*", "", scm, flags=re.S)
+    forbidden = (
+        r"\\bof_changeset_[A-Za-z0-9_]*\\s*\\(",
+        r"\\bof_platform_device_create[A-Za-z0-9_]*\\s*\\(",
+        r"\\bof_platform_populate\\s*\\(",
+        r"\\bof_property_write_[A-Za-z0-9_]*\\s*\\(",
+    )
+    if any(re.search(expr, executable) for expr in forbidden):
         raise RuntimeError("P458 cannot turn on OF node globally")
+    # Regression gate: a forbidden API name in a comment is benign, but
+    # an actual call in C must fail the gate.
+    comment_demo = "/* of_platform_device_create() must never run */"
+    assert not re.search(forbidden[1], re.sub(r"/\\*.*?\\*/", "", comment_demo, flags=re.S))
+    assert re.search(forbidden[1], "of_platform_device_create(node, NULL, NULL)")
+
     if scm.count("a52_p458_create_scm_once()")!=1:
         raise RuntimeError("P458 creation call must occur only from sysfs")
     if ("rproc_boot(" in scm or "request_firmware(" in scm or

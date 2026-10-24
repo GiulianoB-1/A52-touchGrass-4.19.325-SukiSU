@@ -28,15 +28,24 @@ def cells(f,node,prop):
     s=run("fdtget","-t","x",f,node,prop,optional=True)
     return None if s is None else [int(v,16) for v in s.split()]
 def inspect(f, patched=False):
-    all_nodes=list(nodes(f))
-    primary=[n for n in all_nodes if n.rsplit("/",1)[-1].lower().startswith("ramoops@")
-             and "b1b00000" in n.lower()]
+    # fdtget -l traversal is not reliable on the repacked Samsung DTB:
+    # parse the complete structure using the same checked Python FDT walker
+    # that U1 uses for all other embedded-boot DTB mutations.
+    from u1_patch_boot_dtb import walk
+    props=walk(f.read_bytes())
+    all_nodes=sorted({entry[0] for entry in props})
+    compat_nodes={entry[0] for entry in props
+                  if entry[1]=="compatible" and
+                  b"ramoops" in entry[5].split(b"\\x00")}
+    primary=sorted(compat_nodes)
     if len(primary)!=1:
-        raise RuntimeError("P453 expected exactly one main ramoops@B1B00000: "+repr(primary))
+        candidates=[n for n in all_nodes if "ramoops" in n.lower()]
+        raise RuntimeError("P453 expected one compatible=ramoops: "+
+                           repr(primary)+" candidates="+repr(candidates))
     node=primary[0]
-    compat=run("fdtget","-t","s",f,node,"compatible",optional=True)
-    if compat is None or "ramoops" not in compat.split():
-        raise RuntimeError("P453 main node not a ramoops compatible: "+str(compat))
+    compat=run("fdtget","-t","s",f,node,"compatible")
+    if "ramoops" not in compat.split():
+        raise RuntimeError("P453 incompatible ramoops node "+node)
     duplicate=[n for n in all_nodes if n.rsplit("/",1)[-1].lower()
                =="a52-ramoops-reserved@b1b00000"]
     if len(duplicate)!=(0 if patched else 1):

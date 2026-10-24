@@ -86,8 +86,14 @@ def patch(s):
 	pr_debug("%s(): QUSB PHY's regulators are turned ON.\n", __func__);''',"mark vote after all rails")
     s=s[:start]+part+s[end:]
     s=once(s,"qphy->tune_val = readl_relaxed(qphy->efuse_reg);",
-       r'''qphy->tune_val = qphy->a52_efuse_valid ?
-		qphy->a52_efuse_cached : readl_relaxed(qphy->efuse_reg);''',
+       r'''/* Probe may read zero before PMIC rails are voted. Defer cache
+	 * initialization to the first POWERED init in that case.
+	 */
+	if (!qphy->a52_efuse_valid) {
+		qphy->a52_efuse_cached=readl_relaxed(qphy->efuse_reg);
+		qphy->a52_efuse_valid=true;
+	}
+	qphy->tune_val=qphy->a52_efuse_cached;''',
        "do not reread unpowered efuse")
     start=s.index("static int qusb_phy_init(struct usb_phy *phy)")
     end=s.index("static void qusb_phy_shutdown(struct usb_phy *phy)",start)
@@ -150,9 +156,9 @@ def patch(s):
 	 */
 	if(qphy->efuse_reg) {
 		qphy->a52_efuse_cached=readl_relaxed(qphy->efuse_reg);
-		qphy->a52_efuse_valid=true;
-		dev_info(dev,"P453 QUSB EFUSE probe_cache=%#x\n",
-			qphy->a52_efuse_cached);
+		qphy->a52_efuse_valid=qphy->a52_efuse_cached!=0;
+		dev_info(dev,"P453 QUSB EFUSE probe_cache=%#x valid=%d\n",
+			qphy->a52_efuse_cached,qphy->a52_efuse_valid);
 	}
 	mutex_init(&qphy->lock);
 	platform_set_drvdata(pdev, qphy);''',"probe efuse snapshot")

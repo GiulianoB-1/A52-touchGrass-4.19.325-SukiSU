@@ -489,22 +489,34 @@ jobs:
             echo 'P453 DAILY: read-only battery status + USB resume/wake compiled' >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ matrix.variant.id }}" = G ]; then
-            grep -Fxq 'CONFIG_A52_447G_CHG_GUARD=y' "$BUILD/.config"
-            grep -aFq 'P452 H0 STATE from=' "$IMAGE"
-            grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
-            grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
-            grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
-            grep -aFq 'P452 H0 ENABLE cur=500' "$IMAGE"
-            grep -aFq 'P452 H0 KICK wdt=90s' "$IMAGE"
-            grep -aFq 'P452 H0 STOP reason=' "$IMAGE"
-            grep -aFq 'P452 SCM PROBED native_5_10=1 dload_default=' "$IMAGE"
+            # Report the EXACT absent linked-image marker. A previous run
+            # built vmlinux/Image successfully but exited silently here.
+            verify_g_marker() {
+              if ! LC_ALL=C grep -aFq -- "$1" "$IMAGE"; then
+                echo "::error title=P452 missing compiled marker::$1"
+                exit 1
+              fi
+              echo "P452 LINK MARKER PASS: $1"
+            }
+            grep -Fxq 'CONFIG_A52_447G_CHG_GUARD=y' "$BUILD/.config" || {
+              echo "::error title=P452 config::A52_447G_CHG_GUARD is not built-in"
+              exit 1
+            }
+            verify_g_marker 'P452 H0 STATE from='
+            verify_g_marker 'P451 ADSP PROBE manual_start=1 auto_boot=0'
+            verify_g_marker 'P448 AOSS probe rc=0'
+            verify_g_marker 'P451 ADSP RAILS lcx=384 lmx=384 rc=0'
+            verify_g_marker 'P452 H0 ENABLE cur=500'
+            verify_g_marker 'P452 H0 KICK wdt=90s'
+            verify_g_marker 'P452 H0 STOP reason='
+            verify_g_marker 'P452 SCM PROBED native_5_10=1 dload_default='
             if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
-              grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"
+              verify_g_marker 'P452 SCM UFS_ICE_FROZEN off baseline_451=1'
             else
               echo 'P452 UFS ICE crypto driver absent; no ICE path can activate' >> "$GITHUB_STEP_SUMMARY"
             fi
             if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
-              grep -aFq 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1' "$IMAGE"
+              verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'
             else
               echo 'P452 ARM_SMMU not built-in; no qcom arm-SMMU code activated' >> "$GITHUB_STEP_SUMMARY"
             fi

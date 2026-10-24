@@ -287,7 +287,14 @@ def patch(s):
     anchor='''\tif (IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))
 \t\tschedule_delayed_work(&fg->a52g_guard_work,'''
     # 447G adds this in probe. Add sysfs creation immediately before.
-    s=once(s,anchor,r'''    rc=a52h0_attrs_create(fg);
+    s=once(s,anchor,r'''    /* Bootloader may leave ENQ4FET ON. Force it OFF before
+     * exposing h0_arm, even if both NTCs are already valid.
+     */
+    a52h0_off(fg,"BOOT_PRE_ARM",false);
+    if (fg->a52h0_killed)
+        return dev_err_probe(fg->dev,-EIO,
+                 "P452 H0 startup inhibit unverified\n");
+    rc=a52h0_attrs_create(fg);
     if (rc)return dev_err_probe(fg->dev,rc,
                         "P452 H0 sysfs arming controls unavailable\n");
 '''+anchor,"attrs after probe")

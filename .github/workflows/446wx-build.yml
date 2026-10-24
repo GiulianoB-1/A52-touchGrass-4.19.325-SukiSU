@@ -530,7 +530,8 @@ jobs:
           if [ "${{ matrix.variant.id }}" = G ]; then
             "$ROOT/scripts/config" --file "$BUILD/.config" \
               --enable REMOTEPROC --enable RPMSG_QCOM_SMD \
-              --enable QCOM_Q6V5_PAS --enable QCOM_SCM               --disable QCOM_SCM_DOWNLOAD_MODE_DEFAULT
+              --enable QCOM_Q6V5_PAS --enable QCOM_SCM \
+              --disable QCOM_SCM_DOWNLOAD_MODE_DEFAULT
           fi
           make -C "$ROOT" O="$BUILD" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           grep -Fxq 'CONFIG_LOCALVERSION="-Mangrove"' "$BUILD/.config"
@@ -547,7 +548,9 @@ jobs:
               python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only --manual-pas
               python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
               python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
-              python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT"                 --config "$BUILD/.config" --check-only                 --audit-output "$PWD/phase447-inventory/P452-SCM-CALLERS.json"
+              python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT" \
+                --config "$BUILD/.config" --check-only \
+                --audit-output "$PWD/phase447-inventory/P452-SCM-CALLERS.json"
             else
               python3 scripts/448b_glink_qrtr_stage2.py --root "$ROOT" --config "$BUILD/.config" --check-only
             fi
@@ -809,8 +812,17 @@ jobs:
             grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
             grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
             grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
-            grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"
-            grep -aFq 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1' "$IMAGE"
+            grep -aFq 'P452 SCM PROBED native_5_10=1 dload_default=' "$IMAGE"
+            if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
+              grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"
+            else
+              echo 'P452 UFS ICE crypto driver absent; no ICE path can activate' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
+              grep -aFq 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1' "$IMAGE"
+            else
+              echo 'P452 ARM_SMMU not built-in; no qcom arm-SMMU code activated' >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           grep -aFq 'P446S MANIFEST PASS' "$IMAGE"
           grep -aFq "P446Z KSU version=" "$IMAGE"

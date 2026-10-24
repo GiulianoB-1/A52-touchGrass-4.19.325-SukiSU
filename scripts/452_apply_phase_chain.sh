@@ -217,9 +217,9 @@ python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
 python3 -m py_compile scripts/447n_late_touch_usb_function.py
 python3 scripts/447n_late_touch_usb_function.py --root "$ROOT"
 python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
-if [ "${A52_VARIANT_ID}" = F ]; then
-  # P453: cold-good tune/efuse and counted regulator ownership after resume.
-  # Only F (DAILY). G's experimental charger remains separately gated.
+if [ "${A52_VARIANT_ID}" = F ] || [ "${A52_VARIANT_ID}" = G ]; then
+  # P460B integration: P453 QUSB regulator vote and tune/PLL recovery
+  # apply to BOTH F and G. This is independent of H0 charging permission.
   python3 -m py_compile scripts/453_daily_usb_resume.py scripts/453_daily_usb_vbus_wake.py
   python3 scripts/453_daily_usb_resume.py --root "$ROOT"
   python3 scripts/453_daily_usb_resume.py --root "$ROOT" --check-only

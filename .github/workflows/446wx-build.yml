@@ -517,14 +517,25 @@ jobs:
                grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
               ICE_MARKER='P452 SCM UFS_ICE_FROZEN off baseline_451=1'
               test -s "$BUILD/drivers/scsi/ufs/ufs-qcom-ice.o" || {
-                echo "::error title=P452 ICE::UFS ICE enabled but compiled object is missing"
+                echo 'P452 ICE ERROR: built-in UFS ICE object missing'
                 exit 1
               }
               if LC_ALL=C grep -aFq "$ICE_MARKER" "$IMAGE"; then
                 echo "P452 LINK MARKER PASS: $ICE_MARKER"
               else
-                echo "P452 ICE linked-image marker absent; checking actual linked symbols"
-                grep -E '[[:space:]]ufs_qcom_ice_(init|enable|program_key|resume)
+                echo 'P452 ICE runtime marker absent, checking live symbols'
+                if grep -Fq 'ufs_qcom_ice_init' "$MAP" ||
+                   grep -Fq 'ufs_qcom_ice_enable' "$MAP" ||
+                   grep -Fq 'ufs_qcom_ice_program_key' "$MAP" ||
+                   grep -Fq 'ufs_qcom_ice_resume' "$MAP"; then
+                  echo 'P452 ICE ERROR: ICE code linked without guard diagnostic'
+                  exit 1
+                fi
+                echo 'P452 ICE entry points not linked; source freeze audited' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            else
+              echo 'P452 ICE not built-in; source freeze audited' >> "$GITHUB_STEP_SUMMARY"
+            fi
             if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
               verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'
             else

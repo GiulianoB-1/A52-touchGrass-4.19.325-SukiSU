@@ -1,5 +1,5 @@
 name: Mangrove Kernel | Phase 452 SCM-only DSP candidate + unchanged DAILY fallback
-run-name: P452 DAILY (fallback) + DSP-SCM-TEST (ADSP autoboot OFF, no H1)
+run-name: P452 DAILY fallback + DSP-CHG H0 (manual ADSP and manual charger opt-in)
 on:
   push:
     branches:
@@ -43,7 +43,7 @@ jobs:
       matrix:
         variant:
           - { id: F, label: 452-DAILY-FALLBACK, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: 452-DSP-SCM-MANUAL-PAS, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: 452-DSP-CHG-H0-MANUAL, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -428,6 +428,11 @@ jobs:
             python3 -m py_compile scripts/451_daily_readonly.py
             python3 scripts/451_daily_readonly.py --root "$ROOT"
             python3 scripts/451_daily_readonly.py --root "$ROOT" --check-only
+            if [ "${{ matrix.variant.id }}" = G ]; then
+              python3 -m py_compile scripts/452_h0_sm5714_conservative.py
+              python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT"
+              python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
+            fi
           fi
           # P447J passive vblank diagnostics retained unchanged.
           python3 -m py_compile scripts/447j_vblank_diag.py
@@ -653,6 +658,7 @@ jobs:
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
             python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
             python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT" --check-only --config "$BUILD/.config"
+            python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
@@ -812,6 +818,9 @@ jobs:
             grep -aFq 'P451 ADSP PROBE manual_start=1 auto_boot=0' "$IMAGE"
             grep -aFq 'P448 AOSS probe rc=0' "$IMAGE"
             grep -aFq 'P451 ADSP RAILS lcx=384 lmx=384 rc=0' "$IMAGE"
+            grep -aFq 'P452 H0 ON manual=1' "$IMAGE"
+            grep -aFq 'P452 H0 KICK wdt=90s' "$IMAGE"
+            grep -aFq 'P452 H0 OFF reason=' "$IMAGE"
             grep -aFq 'P452 SCM PROBED native_5_10=1 dload_default=' "$IMAGE"
             if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
               grep -aFq 'P452 SCM UFS_ICE_FROZEN off baseline_451=1' "$IMAGE"
@@ -1092,10 +1101,10 @@ jobs:
           cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           if [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
-              --output phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img \
+              --output phase447b-variants/MANGROVE-452-DSP-CHG.boot.img \
               --report phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json \
               --config workspace/gki-phase199-out/.config
-            MANGROVE_BOOT="phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img"
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-452-DSP-CHG.boot.img"
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
               | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
@@ -1233,13 +1242,13 @@ jobs:
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload MANGROVE-452-DSP-SCM-TEST (manual ADSP, autoboot disabled, no charger)
+      - name: Upload MANGROVE-452-DSP-CHG (H0 manual charger opt-in + manual ADSP; experimental)
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-452-DSP-SCM-TEST-${{ github.run_number }}
+          name: MANGROVE-452-DSP-CHG-${{ github.run_number }}
           path: |
-            phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img
+            phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
@@ -1247,6 +1256,7 @@ jobs:
             phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
             phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json
             phase447-inventory/P452-SCM-CALLERS.json
+            scripts/452_h0_sm5714_conservative.py
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review

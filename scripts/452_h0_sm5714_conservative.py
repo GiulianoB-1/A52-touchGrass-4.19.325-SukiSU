@@ -18,6 +18,7 @@ SRC=Path("drivers/a52_447/a52_sm5714_fg_ro.c")
 TAG="A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1"
 DECL=r'''
 
+
 /* A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1 */
 #define A52H0_CHGCNTL2 0x18
 #define A52H0_WDTCNTL 0x22
@@ -78,6 +79,10 @@ static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
         else rc=-EIO;
     }
     fg->a52h0_active=false;
+    if(fg->a52h0_usb && !IS_ERR(fg->a52h0_usb))
+        power_supply_changed(fg->a52h0_usb);
+    if(fg->a52h0_ac && !IS_ERR(fg->a52h0_ac))
+        power_supply_changed(fg->a52h0_ac);
     if(permanent || rc)fg->a52h0_killed=true;
     if(fg->a52h0_killed) {
         fg->a52h0_armed=false;
@@ -124,6 +129,7 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
        (flt&0x3f)!=A52H0_FLOAT_4380_CODE || input>0x10)
         return -EUCLEAN; /* Immutable hardware safety contract: FAULT */
     *vb=!!(st&BIT(0));
+    if(*st2&BIT(7))return -ETIME;
     if(!a52h0_sensor_safe(fg,ntc,chg_ntc))
         return -ERANGE;
     if(!*vb)return -ENOLINK;
@@ -131,7 +137,7 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
      * pretending to run TG's ramp, which requires that register.
      */
     /* Raw input>0x10 is already a latched FAULT. Never ramp or write VBUSCNTL. */
-    if(*st2&BIT(7))return -ETIME; /* WDT expired: clear then FAULT */
+    /* An expired WDT was handled before temperature checks. */
     if(for_enable && (ctrl&A52G_CHG_ENQ4FET))
         return -EBUSY; /* guard owns bootloader charging handoff */
     return 0;
@@ -244,6 +250,10 @@ static void a52h0_tick(struct a52d_fg *fg)
        "P452 H0 ON manual=1 WDT=90s kick=before_enable current=500mA float=4380mV battery=%d chg=%d mv=%d readback=PASS\n",
        tbat,tchg,mv);
     if(fg->psy)power_supply_changed(fg->psy);
+    if(fg->a52h0_usb && !IS_ERR(fg->a52h0_usb))
+        power_supply_changed(fg->a52h0_usb);
+    if(fg->a52h0_ac && !IS_ERR(fg->a52h0_ac))
+        power_supply_changed(fg->a52h0_ac);
     goto done;
 fail:
     a52h0_off(fg,"ENABLE_FAILED",true);
@@ -328,6 +338,43 @@ static int a52h0_attrs_create(struct a52d_fg *fg)
     rc=devm_add_action_or_reset(fg->dev,a52h0_attr_cleanup,fg);
     return rc;
 }
+/* Minimal ONLINE mirrors TG VBUS_POK. Without MUIC we do not classify cable. */
+static enum power_supply_property a52h0_input_props[] = {
+    POWER_SUPPLY_PROP_ONLINE,
+};
+static int a52h0_input_get(struct power_supply *psy,
+                           enum power_supply_property prop,
+                           union power_supply_propval *val)
+{
+    struct a52d_fg *fg=power_supply_get_drvdata(psy);
+    int st;
+    if(prop!=POWER_SUPPLY_PROP_ONLINE)return -EINVAL;
+    st=a52h0_regread(fg,A52G_CHG_STATUS1);
+    if(st<0)return st;
+    val->intval=!!(st&BIT(0));
+    return 0;
+}
+static const struct power_supply_desc a52h0_usb_desc={
+    .name="usb", .type=POWER_SUPPLY_TYPE_USB,
+    .properties=a52h0_input_props,
+    .num_properties=ARRAY_SIZE(a52h0_input_props),
+    .get_property=a52h0_input_get,
+};
+static const struct power_supply_desc a52h0_ac_desc={
+    .name="ac", .type=POWER_SUPPLY_TYPE_MAINS,
+    .properties=a52h0_input_props,
+    .num_properties=ARRAY_SIZE(a52h0_input_props),
+    .get_property=a52h0_input_get,
+};
+static int a52h0_register_inputs(struct a52d_fg *fg)
+{
+    struct power_supply_config cfg={ .drv_data=fg };
+    fg->a52h0_usb=devm_power_supply_register(fg->dev,&a52h0_usb_desc,&cfg);
+    if(IS_ERR(fg->a52h0_usb))return PTR_ERR(fg->a52h0_usb);
+    fg->a52h0_ac=devm_power_supply_register(fg->dev,&a52h0_ac_desc,&cfg);
+    if(IS_ERR(fg->a52h0_ac))return PTR_ERR(fg->a52h0_ac);
+    return 0;
+}
 static int a52h0_psy_status(struct a52d_fg *fg,bool online)
 {
     if(fg->a52h0_full)return POWER_SUPPLY_STATUS_FULL;
@@ -361,11 +408,16 @@ def patch(s):
     const char *a52h0_state;
     unsigned long a52h0_ntc_since;
     int a52h0_id;
+    struct power_supply *a52h0_usb, *a52h0_ac;
     unsigned long a52h0_started, a52h0_last_kick;""","fields")
     s=once(s,"static void a52g_poll(struct work_struct *work)",
            DECL+"\nstatic void a52g_poll(struct work_struct *work)","controller code")
     s=once(s,"(void)a52g_sample(fg,false);",
-           "(void)a52g_sample(fg,false);\n    a52h0_tick(fg);","poll after existing P449 guard")
+           "if(a52g_sample(fg,false)<0) {\n"
+           "        mutex_lock(&fg->a52h0_lock);\n"
+           "        a52h0_off(fg,\\\"GUARD_IO\\\",true);\n"
+           "        mutex_unlock(&fg->a52h0_lock);\n"
+           "    } else a52h0_tick(fg);","poll after existing P449 guard")
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",
            "mutex_init(&fg->a52g_ntc_lock);\n    mutex_init(&fg->a52h0_lock);","mutex init")
     # Must be initialized before publishing /sys/... and before first
@@ -394,6 +446,9 @@ def patch(s):
     rc=a52h0_attrs_create(fg);
     if (rc)return dev_err_probe(fg->dev,rc,
                         "P452 H0 sysfs arming controls unavailable\n");
+    rc=a52h0_register_inputs(fg);
+    if (rc)return dev_err_probe(fg->dev,rc,
+                        "P452 H0 usb/ac input supplies unavailable\n");
 '''+anchor,"attrs after probe")
     # Old guard did one charger write. H0 adds exactly ONE audited generic
     # write site; no factory/input/float/FG NV register writes allowed.
@@ -448,7 +503,9 @@ def check(root):
     for key in ("input>0x10","P452 H0 STATE from=",
                 "P452 H0 ENABLE cur=500","a52h0_ntc_since+10*HZ",
                 "P452 H0 RECHARGE vbat=","a52_h0_enable",
-                "A52H0_WDTCNTL,0x06","A52H0_WDTCNTL,BIT(0)"):
+                "A52H0_WDTCNTL,0x06","A52H0_WDTCNTL,BIT(0)",
+                "a52h0_register_inputs(fg)","P452 H0 WDT expired clear FAILED",
+                "GUARD_IO"):
         if key not in s:raise RuntimeError("P452 H0 v2 contract "+key)
     print("P452 H0 SOURCE PASS: guard-first opt-in, handover+thermal hysteresis+FAULT, 500mA, WDT, 4h timer, recharge, strict write allowlist")
 def main():

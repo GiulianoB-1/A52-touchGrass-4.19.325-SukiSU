@@ -449,7 +449,18 @@ def patch(s):
     # worker first, then unregisters the wakeup source. Prevent UAF.
     s=once(s,"cancel_delayed_work_sync(&fg->a52g_guard_work);",
            """cancel_delayed_work_sync(&fg->a52g_guard_work);
-    if(fg->a52h0_active)a52h0_off(fg,"REMOVE",true);
+    /* The psy devres may already be gone here: do NOT call
+     * a52h0_off() because it notifies fg->psy. Disable directly.
+     */
+    if(fg->a52h0_active) {
+        int rc=a52h0_write_masked(fg,A52G_CHG_CNTL1,
+                                   A52G_CHG_ENQ4FET,0);
+        if(!rc)rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),0);
+        if(rc)dev_err(fg->dev,"P452 H0 REMOVE inhibit FAILED rc=%d\n",rc);
+        fg->a52h0_active=false;
+        fg->a52h0_killed=true;
+        fg->a52h0_armed=false;
+    }
     if(fg->a52h0_wake_held) {
         __pm_relax(fg->a52h0_ws);
         fg->a52h0_wake_held=false;

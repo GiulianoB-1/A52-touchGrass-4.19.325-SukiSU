@@ -2,7 +2,7 @@
 """P456 controlled source bisects from 451-DSP-434.
 
 A: 451 + only P452 UFS-ICE guard.
-B: 451 + only P452 qcom SMMU and nine availability freezes.
+B': 451 + only the nine SCM-availability caller freezes; SMMU untouched.
 C: 451 + only P452 H0 manual charger (guard-first/v2 fixes).
 D: full Phase452 G phase chain with ICE source rolled back to P451,
    retaining SCM/SMMU/freeze/H0 sources, but P451 DSP packaging (SCM-off).
@@ -31,12 +31,18 @@ def main():
     source_paths=[ICE,SMMU,SCM,*frozen,scm.get("SRC","")]
     source_paths=list(dict.fromkeys(x for x in source_paths if x))
     original={f:(root/f).read_bytes() for f in source_paths}
-    if a.mode in ("a","b"):
+    if a.mode=="a":
         scm["patch"](root)
-        retained=({ICE} if a.mode=="a" else {SMMU,*frozen})
         for f,raw in original.items():
-            if f not in retained:
+            if f!=ICE:
                 (root/f).write_bytes(raw)
+    elif a.mode=="b":
+        # P457 B': isolate nine no-SCM compatibility conditions.
+        # Do not call scm.patch(), which added the fatal Lagoon
+        # -EPROBE_DEFER to the QCOM SMMU allocation path in P452.
+        scm["freeze_incidental_scm"](root)
+        if (root/SMMU).read_bytes()!=original[SMMU]:
+            raise RuntimeError("P457 B' SMMU must equal the P451 baseline")
     elif a.mode=="c":
         h0=runpy.run_path(str(H0_SCRIPT))
         path=root/h0["SRC"]
@@ -65,8 +71,8 @@ def main():
             changed.append({"file":f,"before_sha256":digest(was),"after_sha256":digest(now)})
     if a.mode=="a" and [x["file"] for x in changed]!=[ICE]:
         raise RuntimeError("A changed files besides ICE: "+str(changed))
-    if a.mode=="b" and set(x["file"] for x in changed)!={SMMU,*frozen}:
-        raise RuntimeError("B has unexpected caller delta")
+    if a.mode=="b" and set(x["file"] for x in changed)!=set(frozen):
+        raise RuntimeError("P457 B' must change exactly nine SCM callers, no SMMU source")
     if a.mode=="c" and changed:
         raise RuntimeError("C modified SCM/SMMU/ICE")
     ice=(root/ICE).read_text()
@@ -82,7 +88,7 @@ def main():
         raise RuntimeError("scope isolation failed: SCM caller modified")
     report={"mode":a.mode,"label":{
        "a":"451 + P452 ICE guard only",
-       "b":"451 + SMMU guard and nine SCM-caller freezes only",
+       "b":"451 + nine SCM-caller freezes only; SMMU source SHA identical",
        "c":"451 + H0 only, conservative v2",
        "d":"452 G phase chain with ICE restored from original 451, P451 SCM-off DTB"
        }[a.mode],

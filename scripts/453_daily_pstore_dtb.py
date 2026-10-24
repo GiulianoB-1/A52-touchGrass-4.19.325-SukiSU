@@ -36,7 +36,7 @@ def inspect(f, patched=False):
     all_nodes=sorted({entry[0] for entry in props})
     compat_nodes={entry[0] for entry in props
                   if entry[1]=="compatible" and
-                  b"ramoops" in entry[5].split(b"\\x00")}
+                  b"ramoops" in entry[5].split(b"\x00")}
     primary=sorted(compat_nodes)
     if len(primary)!=1:
         candidates=[n for n in all_nodes if "ramoops" in n.lower()]

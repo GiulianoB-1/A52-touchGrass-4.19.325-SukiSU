@@ -73,6 +73,19 @@ def patch(root):
         return
     ice=once(ice,"#include <linux/qcom_scm.h>",
              "#include <linux/qcom_scm.h>\n#include <linux/of.h>","ICE OF include")
+    # Execute before ICE MMIO/resource work, not merely inside the
+    # qcom_scm_ice_available() fallback. Preserve P451 no-SCM storage mode.
+    ice=once(ice,'res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ice");',
+       '''/* P452 ICE EARLY_FAIL_CLOSED: Lagoon must never initialize ICE
+        * when native SCM becomes available for the ADSP port.
+        * The shared disable path clears UFSHCD_CAP_CRYPTO.
+        */
+       if (of_machine_is_compatible("qcom,lagoon")) {
+           dev_warn(dev, "P452 SCM UFS_ICE_FROZEN off baseline_451=1\\n");
+           goto disable;
+       }
+       res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ice");''',
+       "ICE early disable")
     ice=once(ice,"if (!qcom_scm_ice_available()) {",
         """/* A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1: 451 has no SCM device,
          * therefore ICE is disabled on Lagoon. Keep the same storage
@@ -126,6 +139,8 @@ def check(root):
         ('if (of_machine_is_compatible("qcom,lagoon") ||',ice),
         ("!qcom_scm_ice_available())",ice),
         ("P452 SCM UFS_ICE_FROZEN",ice),
+        ('/* P452 ICE EARLY_FAIL_CLOSED',ice),
+        ('goto disable;',ice),
         ('if (of_machine_is_compatible("qcom,lagoon")) {',smmu),
         ("P452 SCM QCOM_SMMU_FROZEN",smmu),
         ("qsmmu = devm_kzalloc(smmu->dev",smmu)]:

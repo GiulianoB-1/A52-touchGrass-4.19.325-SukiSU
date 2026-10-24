@@ -457,6 +457,11 @@ jobs:
           python3 -m py_compile scripts/447n_late_touch_usb_function.py
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT"
           python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
+      - name: Apply Phase448 IPC and Phase452 feature overlays; finalize config
+        run: |
+          set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          BUILD="$PWD/workspace/gki-phase199-out"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
             python3 -m py_compile scripts/448a_ipc_stage1.py
             python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"

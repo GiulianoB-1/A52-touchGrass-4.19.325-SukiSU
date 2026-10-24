@@ -520,18 +520,19 @@ jobs:
                 echo 'P452 ICE ERROR: built-in UFS ICE object missing'
                 exit 1
               }
-              if LC_ALL=C grep -aFq "$ICE_MARKER" "$IMAGE"; then
-                echo "P452 LINK MARKER PASS: $ICE_MARKER"
+              grep -Eq '[[:space:]]ufs_qcom_ice_init$' "$MAP" || {
+                echo 'P452 ICE ERROR: built-in ICE entry point not linked'
+                exit 1
+              }
+              # Phase97 safe-bypass clears UFSHCD_CAP_CRYPTO and returns.
+              # The later SCM diagnostic is eliminated by compiler dead code.
+              if LC_ALL=C grep -aFq 'A52 diagnostic: bypassing ICE for storage bring-up' "$IMAGE"; then
+                echo 'P452 ICE LINK PASS: Phase97 safe-bypass is compiled'
+              elif LC_ALL=C grep -aFq "$ICE_MARKER" "$IMAGE"; then
+                echo "P452 ICE LINK PASS: $ICE_MARKER"
               else
-                echo 'P452 ICE runtime marker absent, checking linked symbols'
-                if grep -Fq 'ufs_qcom_ice_init' "$MAP" ||
-                   grep -Fq 'ufs_qcom_ice_enable' "$MAP" ||
-                   grep -Fq 'ufs_qcom_ice_program_key' "$MAP" ||
-                   grep -Fq 'ufs_qcom_ice_resume' "$MAP"; then
-                  echo 'P452 ICE ERROR: linked ICE lacks freeze diagnostic'
-                  exit 1
-                fi
-                echo 'P452 ICE functions pruned; source freeze audited' >> "$GITHUB_STEP_SUMMARY"
+                echo 'P452 ICE ERROR: no proven fail-closed ICE path in linked Image'
+                exit 1
               fi
             else
               echo 'P452 UFS ICE not built-in; source freeze audited' >> "$GITHUB_STEP_SUMMARY"

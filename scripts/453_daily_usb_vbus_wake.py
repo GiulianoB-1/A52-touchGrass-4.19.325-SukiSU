@@ -65,7 +65,7 @@ def patch_udc(s):
 	schedule_work(&gadget->work);''',
        '''	gadget->state = state;
 	/* Limit this strictly to the A52 DWC3 UDC, not arbitrary gadgets. */
-	if(gadget->name && !strcmp(gadget->name,"a600000.dwc3")) {
+	if(gadget->udc && !strcmp(dev_name(&gadget->udc->dev),"a600000.dwc3")) {
 		WRITE_ONCE(a52p453_configured,state==USB_STATE_CONFIGURED);
 		a52p453_refresh_g1_ws();
 	}

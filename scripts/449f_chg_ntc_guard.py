@@ -70,8 +70,7 @@ def check(root):
               "chg_trip=(chgtemp>=550)",
               "mix_trip=(temp>=420 && chgtemp>=500)",
               "(missing_chg && vbus!=0)",
-              "never_reenable=1",
-              "fg->a52g_inhibit_latched=true;"):
+              "never_reenable=1"):
         if x not in s:raise RuntimeError("P449 F contract missing "+x)
     begin=s.index("/* "+TAG+":")
     finish=s.index("if (first || fg->a52g_guard_cycle",begin)
@@ -81,6 +80,11 @@ def check(root):
         raise RuntimeError("P449 F unsafe duplicate")
     if s.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1):
         raise RuntimeError("P449 F must retain only the existing inhibit-only charger write")
+    if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s:
+        if "fg->a52h0_guard_trip=true;" not in s:
+            raise RuntimeError("P449 H0 must hand off condition to controller")
+    elif "fg->a52g_inhibit_latched=true;" not in s:
+        raise RuntimeError("P449 DAILY must retain latched guard")
     if "A52G_CHG_ENQ4FET" not in s or "ctrl & ~A52G_CHG_ENQ4FET" not in s:
         raise RuntimeError("P449 F charger inhibit contract drift")
     print("P449 F GUARD PASS: batt 45C / chg 55C / mix 42+50C; fail closed on missing Tchg under VBUS; one-way inhibit, zero enable writes")

@@ -181,10 +181,18 @@ def check_h0(s):
             raise RuntimeError("P457 H0 FULL/HANDOVER must not latch FAULT " + marker)
 
     # The minimal H0 cannot classify AC without MUIC, only usb ONLINE.
-    if '.name="ac"' in s or "a52h0_ac" in s or "a52h0_ac_desc" in s:
+    # The assembled P451 fuel-gauge C file may contain independently
+    # defined power supplies from legacy vendor integration. Forbid only
+    # AC declarations introduced by the H0 controller, not pre-existing
+    # unrelated supplies elsewhere in the final tree.
+    if '.name="ac"' in h0 or "a52h0_ac" in h0 or "a52h0_ac_desc" in h0:
         raise RuntimeError("P457 H0 must not publish a fake AC supply")
-    if '.name="usb", .type=POWER_SUPPLY_TYPE_USB' not in s:
-        raise RuntimeError("P457 H0 expected one VBUS-backed USB supply")
+    if h0.count('.name="usb", .type=POWER_SUPPLY_TYPE_USB') != 1:
+        raise RuntimeError("P457 H0 expected exactly one VBUS-backed USB supply")
+    if h0.count("devm_power_supply_register(fg->dev,&a52h0_usb_desc,&cfg)") != 1:
+        raise RuntimeError("P457 H0 USB supply registration must occur exactly once")
+    if 'POWER_SUPPLY_TYPE_MAINS' in h0:
+        raise RuntimeError("P457 H0 must not classify AC without MUIC")
     print("P457 H0 REVIEW PASS: wake held/cleanup, active 10s WDT kick, no FG probe abort, FULL/HANDOVER, USB only")
 
 def main():

@@ -44,19 +44,19 @@ def patch(root):
         "ICE availability")
     smmu=once(smmu,"#include <linux/of_device.h>",
               "#include <linux/of_device.h>\n#include <linux/of.h>","SMMU OF include")
-    smmu=once(smmu,'if (!qcom_scm_is_available())\n\t\treturn ERR_PTR(-EPROBE_DEFER);',
+    smmu=once(smmu,"if (!qcom_scm_is_available())",
        r'''/* A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1:
-         * 451 qcom-smmu-qcom was deferred for lack of upstream SCM.
-         * SCM is now present for ADSP only. Keep QCOM SMMU probe behaviour
-         * on Lagoon identical to the 451 kernel; vendor SMMU stays owner.
+         * Upstream SCM becomes available for opt-in ADSP PAS only.
+         * Continue deferring this SMMU on Lagoon exactly as the 451
+         * absent-SCM baseline did. Preserve any existing 5.10
+         * dev_err_probe() return expression verbatim.
          */
         if (of_machine_is_compatible("qcom,lagoon")) {
             dev_info_once(smmu->dev,
                  "P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1\\n");
             return ERR_PTR(-EPROBE_DEFER);
         }
-        if (!qcom_scm_is_available())
-            return ERR_PTR(-EPROBE_DEFER);''',
+        if (!qcom_scm_is_available())''',
        "SMMU SCM availability")
     ice_file.write_text(ice)
     smmu_file.write_text(smmu)

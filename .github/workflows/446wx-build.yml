@@ -586,7 +586,14 @@ jobs:
       - name: Inject scoped P456 source delta and preserve exact P451 configuration
         run: |
           set -Eeuo pipefail
-          python3 scripts/456_451_dsp_bisect.py             --root "$PWD/gki/common"             --mode '${{ matrix.variant.bisect }}'             --report phase447-inventory/P456-SOURCE-SCOPE.json
+          # C changes the P451 read-only charging contract by design.
+          # Validate all P447-P451 baseline source guards first, then add
+          # H0 just before the strict final-tree manifest is computed.
+          if [ "${{ matrix.variant.bisect }}" != c ]; then
+            python3 scripts/456_451_dsp_bisect.py --root "$PWD/gki/common" --mode '${{ matrix.variant.bisect }}' --report phase447-inventory/P456-SOURCE-SCOPE.json
+          else
+            echo 'P456-C H0 deferred until after P451 baseline safety audits'
+          fi
           sha256sum workspace/gki-phase199-out/.config
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
@@ -678,6 +685,17 @@ jobs:
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
+          # P447-P451 check-only guards above legitimately require
+          # UNKNOWN charger status and a single inhibit-only write.
+          # Run them against unchanged P451, then install C's opt-in H0
+          # and audit H0's explicit register allowlist and safe defaults.
+          # Crucially, the strict fingerprint below sees the H0 tree.
+          if [ "${{ matrix.variant.bisect }}" = c ]; then
+            python3 scripts/456_451_dsp_bisect.py --root "$ROOT" --mode c --report phase447-inventory/P456-SOURCE-SCOPE.json
+            python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
+            test -s phase447-inventory/P456-SOURCE-SCOPE.json
+            echo 'P456-C baseline and isolated H0 audit PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
           mkdir -p "$ROOT/include/generated"
           GIT_EXCLUDE="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path info/exclude)"
           test -n "$GIT_EXCLUDE"

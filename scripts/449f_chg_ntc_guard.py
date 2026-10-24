@@ -81,8 +81,15 @@ def check(root):
     if s.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1):
         raise RuntimeError("P449 F must retain only the existing inhibit-only charger write")
     if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s:
-        if "fg->a52h0_guard_trip=true;" not in s:
-            raise RuntimeError("P449 H0 must hand off condition to controller")
+        # New H0 shares the historical P449 latch with its guard-first worker.
+        # Reject source unless the guard still LATCHES unsafe hardware and
+        # H0 refuses all charging while it remains set.
+        for marker in ("fg->a52g_inhibit_latched=true;",
+                       "if(fg->a52g_inhibit_latched)",
+                       'a52h0_off(fg,"guard",false);',
+                       "if(a52g_sample(fg,false)<0)"):
+            if marker not in s:
+                raise RuntimeError("P449 H0 guard-first latch contract missing "+marker)
     elif "fg->a52g_inhibit_latched=true;" not in s:
         raise RuntimeError("P449 DAILY must retain latched guard")
     if "A52G_CHG_ENQ4FET" not in s or "ctrl & ~A52G_CHG_ENQ4FET" not in s:

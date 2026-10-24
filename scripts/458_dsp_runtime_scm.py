@@ -20,7 +20,7 @@ PIL_CANDIDATES=(
 )
 LOCAL=Path("patches/p458/a52_dsp_scm_runtime.c")
 
-PIL_BEGIN="static int pil_tz_driver_probe(struct platform_device *pdev)\n{"
+PIL_BEGIN="\n\td = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);" // first statement after declarations
 PIL_HOLD=r'''
     /* A52_P458_LEGACY_VENUS_NPU_PROBE_FREEZE_V1
      * SCM binding retries every deferred probe. Do NOT allow legacy
@@ -37,7 +37,7 @@ PIL_HOLD=r'''
         return -EPROBE_DEFER;
     }
 '''
-SMP_BEGIN="static int qcom_smp2p_probe(struct platform_device *pdev)\n{"
+SMP_BEGIN="\n\tsmp2p = devm_kzalloc(&pdev->dev, sizeof(*smp2p), GFP_KERNEL);" // first statement after declarations
 SMP_HOLD=r'''
     /* A52_P458_SMP2P_NPU_DEFER_FROZEN_V1: no NPU edge activation
      * on SCM bind; keep unrelated modem/ADSP SMP2P untouched.
@@ -66,12 +66,12 @@ def patch(root):
     pil=pil_path(root)
     s=pil.read_text()
     if MARK not in s:
-        s=once(s,PIL_BEGIN,PIL_BEGIN+PIL_HOLD,"PIL probe")
+        s=once(s,PIL_BEGIN,PIL_HOLD+PIL_BEGIN,"PIL probe guard after declarations")
         pil.write_text(s)
     sp=root/SMP
     s=sp.read_text()
     if SMEM_MARK not in s:
-        s=once(s,SMP_BEGIN,SMP_BEGIN+SMP_HOLD,"NPU SMP2P probe")
+        s=once(s,SMP_BEGIN,SMP_HOLD+SMP_BEGIN,"NPU SMP2P guard after declarations")
         sp.write_text(s)
     src=LOCAL.read_text()
     if src.count("#define "+SCM_MARK)!=1:
@@ -109,6 +109,21 @@ def check(root):
     ):
         if marker not in src:
             raise RuntimeError("P458 mandatory dormant runtime marker missing: "+marker)
+    # Kernel 5.10 builds with -Werror=declaration-after-statement.
+    # Both probes must keep ALL original local declarations before the
+    # newly inserted early-defer guard, and no allocations may precede it.
+    pil_guard=pil.index(MARK)
+    pil_entry=pil.index("static int pil_tz_driver_probe(struct platform_device *pdev)")
+    pil_alloc=pil.index("d = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);",pil_entry)
+    pil_last_decl=pil.index("char md_node[20];",pil_entry)
+    if not (pil_entry < pil_last_decl < pil_guard < pil_alloc):
+        raise RuntimeError("P458 PIL guard must run after all declarations and before resource allocation")
+    smp_guard=smp.index(SMEM_MARK)
+    smp_entry=smp.index("static int qcom_smp2p_probe(struct platform_device *pdev)")
+    smp_alloc=smp.index("smp2p = devm_kzalloc(&pdev->dev, sizeof(*smp2p), GFP_KERNEL);",smp_entry)
+    smp_last_decl=smp.index("int ret;",smp_entry)
+    if not (smp_entry < smp_last_decl < smp_guard < smp_alloc):
+        raise RuntimeError("P458 SMP2P guard must run after all declarations and before resource allocation")
     if mk.count("obj-y += a52_dsp_scm_runtime.o")!=1:
         raise RuntimeError("P458 SCM sysfs creator must link once")
     if scm.count("platform_device_add(pdev)")!=1 or scm.count("platform_device_alloc(")!=1:

@@ -1,9 +1,9 @@
-name: Mangrove Kernel | Phase 451 DAILY and manual-start DSP
-run-name: P451 DAILY + DSP (ADSP autoboot OFF; H1 unchanged)
+name: Mangrove P456 | Phase451 DSP kernel-side four-way source bisect
+run-name: P456 four-way 451 DSP source bisect | no SCM DT, manual ADSP, H0 unarmed
 on:
   push:
     branches:
-      - agent/a52-phase447-big-merge-off-v1
+      - agent/p456-451-dsp-source-bisects
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,8 +42,10 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          # DAILY already passed in run 40008718794. DSP-only retry.
-          - { id: G, label: 451-DSP-MANUAL-PAS-RETRY, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-A-ICE, bisect: a, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-B-SMMU-SCM, bisect: b, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-C-H0, bisect: c, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-D-452-NO-ICE, bisect: d, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -245,8 +247,43 @@ jobs:
           git -C workspace/touchgrass-a52xq checkout --detach FETCH_HEAD
           test "$(git -C workspace/touchgrass-a52xq rev-parse HEAD)" = "$TOUCHGRASS_COMMIT"
       - name: Apply Phase446T delta, retain earlier source contracts
+        env:
+          A52_VARIANT_ID: G
+          A52_VARIANT_IPC: 1
+          A52_VARIANT_WAVE: 2
+          A52_VARIANT_MSS: 0
+          A52_VARIANT_IPA: 0
         run: |
           set -Eeuo pipefail
+          if [ '${{ matrix.variant.bisect }}' = d ]; then
+            ROOT="$PWD/gki/common"
+            # Always use exact 452 source payloads for D, but P451 SCM-off
+            # DTB packaging stays untouched. Never download kernel binaries.
+            git fetch --depth=1 origin f4d761f945f742e143b537412dca7bf4da7b43f8
+            for rel in \
+              scripts/452_apply_phase_chain.sh \
+              scripts/452_scm_ufs_ice_audit.py \
+              scripts/452_h0_sm5714_conservative.py \
+              scripts/447d_readonly_sm5714_fg.py \
+              scripts/447e_samsung_battery_platform.py \
+              scripts/447f_soc_scaling.py \
+              scripts/447g_chg_guard.py \
+              scripts/447g_ntc_iio.py \
+              scripts/447h_ntc_retry.py \
+              scripts/447h_soc_policy.py \
+              scripts/447h_tchg_ntc.py \
+              scripts/449f_chg_ntc_guard.py \
+              scripts/450_daily_fg_and_guard_diag.py \
+              scripts/451_daily_readonly.py; do
+              git show "FETCH_HEAD:$rel" > "$rel"
+            done
+            cp "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c" "$RUNNER_TEMP/p456-451-ice-original.c"
+            bash -n scripts/452_apply_phase_chain.sh
+            bash scripts/452_apply_phase_chain.sh
+            python3 scripts/456_451_dsp_bisect.py --root "$ROOT" --mode d \
+              --pre-ice "$RUNNER_TEMP/p456-451-ice-original.c" \
+              --report "phase447-inventory/P456-SOURCE-SCOPE.json"
+          else
           ROOT="$PWD/gki/common"
           BUILD="$PWD/workspace/gki-phase199-out"
           python3 - <<'PY'
@@ -582,6 +619,10 @@ jobs:
           grep -Fxq 'CONFIG_RTC_HCTOSYS_DEVICE="rtc0"' "$BUILD/.config"
           grep -q 'CONFIG_CMDLINE=".*console=ttyGS3,115200' "$BUILD/.config"
           echo 'P446AC default cold=0 handoff=0, GPI DMA built-in, KSU rc3, ttyGS3 and PMK8350 RTC PASS'
+            python3 scripts/456_451_dsp_bisect.py --root "$ROOT" \
+              --mode '${{ matrix.variant.bisect }}' \
+              --report "phase447-inventory/P456-SOURCE-SCOPE.json"
+          fi
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -1219,7 +1260,7 @@ jobs:
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-451-DSP-${{ github.run_number }}
+          name: MANGROVE-P456-${{ matrix.variant.bisect }}-${{ github.run_number }}
           path: |
             phase447b-variants/MANGROVE-451-DSP.boot.img
             phase447b-variants/compiled-variant.json
@@ -1228,6 +1269,8 @@ jobs:
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
             phase447b-variants/P451-DSP-BOOT-AUDIT.txt
             phase447b-variants/P451-DSP-DTB-MANIFEST.json
+            phase447-inventory/P456-SOURCE-SCOPE.json
+            workspace/gki-phase199-out/.config
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review
@@ -1278,44 +1321,3 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  decode_pc:
-    name: Decode PC (faddr2line)
-    needs: gki
-    if: needs.gki.result == 'success'
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
-          path: phase446af-debug
-      - name: Decode GSI oops function and source line
-        env:
-          PC_INPUT: ${{ inputs.decode_pc }}
-        run: |
-          set -Eeuo pipefail
-          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
-          test -s phase446af-debug/vmlinux
-          bash -n scripts/446af_decode_oops.sh
-          {
-            echo "## P446AF decoded kernel PC"
-            echo "Requested: $PC"
-            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
-          } | tee phase446af-debug/decode.txt
-          {
-            echo '### Phase446AF faddr2line'
-            echo '~~~text'
-            cat phase446af-debug/decode.txt
-            echo '~~~'
-            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload decoded kernel PC
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
-          path: phase446af-debug/decode.txt
-          if-no-files-found: error
-          retention-days: 30

@@ -5,12 +5,6 @@ on:
     branches:
       - agent/p452-scm-h1-staging
   workflow_dispatch:
-    inputs:
-      decode_pc:
-        description: 'Kernel symbol+offset[/size] (exact vmlinux required)'
-        type: string
-        required: false
-        default: ''
 permissions:
   contents: read
   actions: read
@@ -1309,46 +1303,3 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  decode_pc:
-    name: Decode PC (faddr2line)
-    needs: gki
-    # PC decoding is an explicit opt-in tool, not a post-build requirement.
-    # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
-    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
-          path: phase446af-debug
-      - name: Decode GSI oops function and source line
-        env:
-          PC_INPUT: ${{ inputs.decode_pc }}
-        run: |
-          set -Eeuo pipefail
-          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
-          test -s phase446af-debug/vmlinux
-          bash -n scripts/446af_decode_oops.sh
-          {
-            echo "## P446AF decoded kernel PC"
-            echo "Requested: $PC"
-            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
-          } | tee phase446af-debug/decode.txt
-          {
-            echo '### Phase446AF faddr2line'
-            echo '~~~text'
-            cat phase446af-debug/decode.txt
-            echo '~~~'
-            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload decoded kernel PC
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
-          path: phase446af-debug/decode.txt
-          if-no-files-found: error
-          retention-days: 30

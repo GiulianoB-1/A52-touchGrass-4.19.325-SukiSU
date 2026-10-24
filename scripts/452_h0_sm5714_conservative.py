@@ -112,38 +112,6 @@ static bool a52h0_sensor_safe(struct a52d_fg *fg,int *b,int *c)
     *c=a52h_chg_ntc_temp(fg);
     return (*b>=150 && *b<=410 && *c>=-200 && *c<500);
 }
-static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
-                        int *vb,int *vcell,int *st2,int *ntc,int *chg_ntc)
-{
-    int st,fc,flt,ctrl,input,id;
-    *vcell=a52d_mv(fg);
-    st=a52h0_regread(fg,A52G_CHG_STATUS1);
-    *st2=a52h0_regread(fg,A52P450_CHG_STATUS2);
-    fc=a52h0_regread(fg,A52H0_FACTORY1);
-    flt=a52h0_regread(fg,A52H0_BATREG);
-    ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
-    input=a52h0_regread(fg,A52H0_VBUSCNTL);
-    id=a52h0_regread(fg,A52G_CHG_DEVICEID);
-    if(st<0 || *st2<0 || fc<0 || flt<0 || ctrl<0 || input<0 ||
-       id<0 || *vcell<3000 || *vcell>4380)
-        return -EIO;
-    *vb=!!(st&BIT(0));
-    if(!a52h0_sensor_safe(fg,ntc,chg_ntc))
-        return -EAGAIN;
-    if(id!=fg->a52h0_deviceid || !*vb || (fc&(BIT(0)|BIT(1))) ||
-       (flt&0x3f)!=A52H0_FLOAT_4380_CODE)
-        return -EPERM;
-    /* H0 prohibits VBUSCNTL writes. Refuse >500mA input rather than
-     * pretending to run TG's ramp, which requires that register.
-     */
-    if(input>0x10)
-        return -ERANGE;
-    if(*st2&BIT(7))
-        return -ETIME; /* expired WDT must be cleared only while OFF */
-    if(for_enable && (ctrl&A52G_CHG_ENQ4FET))
-        return -EBUSY; /* guard owns bootloader charging handoff */
-    return 0;
-}
 static void a52h0_tick(struct a52d_fg *fg,int guard_rc)
 {
     int vb=0,mv=0,st2=-1,tbat=-10000,tchg=-10000,rc,wdt,ctrl;
@@ -406,11 +374,11 @@ def patch(s):
     # recoverable by hysteresis + user rearm, but F keeps P449's latch.
     s=once(s,"fg->a52g_inhibit_latched=true;",
            "fg->a52h0_guard_trip=true;","H0 guard condition")
-    s=once(s,"if (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\\n\\t\\treturn 0;",
-           "fg->a52h0_guard_trip=false;\\n\\tif (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\\n\\t\\treturn 0;",
+    s=once(s,"if (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\n\t\treturn 0;",
+           "fg->a52h0_guard_trip=false;\n\tif (!IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))\n\t\treturn 0;",
            "guard result reset")
     s=once(s,"rc=a52g_sample(fg,true);",
-           "rc=a52h0_boot_inhibit(fg);\\n        if(rc<0)return dev_err_probe(fg->dev,rc,\\n            \"P452 H0 boot inhibit failed\\\\n\");\\n        rc=a52g_sample(fg,true);",
+           'rc=a52h0_boot_inhibit(fg);\n\t\tif (rc<0) return dev_err_probe(fg->dev,rc,\n\t\t\t"P452 H0 boot inhibit failed\\n");\n\t\trc=a52g_sample(fg,true);',
            "H0 boot off before first P449 sample")
     # Old guard did one charger write. H0 adds exactly ONE audited generic
     # write site; no factory/input/float/FG NV register writes allowed.

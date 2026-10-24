@@ -448,16 +448,16 @@ def patch(s):
     # No devm wakeup action: a52d_fg_unregister cancels the guard
     # worker first, then unregisters the wakeup source. Prevent UAF.
     s=once(s,"cancel_delayed_work_sync(&fg->a52g_guard_work);",
-           "cancel_delayed_work_sync(&fg->a52g_guard_work);\\n"
-           "    if(fg->a52h0_active)a52h0_off(fg,\\\"REMOVE\\\",true);\\n"
-           "    if(fg->a52h0_wake_held) {\\n"
-           "        __pm_relax(fg->a52h0_ws);\\n"
-           "        fg->a52h0_wake_held=false;\\n"
-           "    }\\n"
-           "    if(fg->a52h0_ws) {\\n"
-           "        wakeup_source_unregister(fg->a52h0_ws);\\n"
-           "        fg->a52h0_ws=NULL;\\n"
-           "    }","ordered wakeup teardown")
+           """cancel_delayed_work_sync(&fg->a52g_guard_work);
+    if(fg->a52h0_active)a52h0_off(fg,"REMOVE",true);
+    if(fg->a52h0_wake_held) {
+        __pm_relax(fg->a52h0_ws);
+        fg->a52h0_wake_held=false;
+    }
+    if(fg->a52h0_ws) {
+        wakeup_source_unregister(fg->a52h0_ws);
+        fg->a52h0_ws=NULL;
+    }""","ordered wakeup teardown")
     # Must be initialized before publishing /sys/... and before first
     # a52g_sample() is called in the probe.
     s=once(s,"fg->dev=&client->dev;",

@@ -36,20 +36,24 @@ def inspect(f, patched=False):
     all_nodes=sorted({entry[0] for entry in props})
     compatible=sorted({e[0] for e in props if e[1]=="compatible"
                        and b"ramoops" in e[5].split(b"\x00")})
-    duplicates=[n for n in all_nodes if
-                n.rsplit("/",1)[-1].lower()=="a52-ramoops-reserved@b1b00000"]
+    named=[n for n in all_nodes if
+           n.rsplit("/",1)[-1].lower()=="a52-ramoops-reserved@b1b00000"]
+    # A DT node can be both named "a52-ramoops-reserved" AND have the
+    # ramoops compatible property. That is ONE node, not an overlap.
+    # Delete only an INDEPENDENT, non-compatible reserved-memory node.
+    inert=[n for n in named if n not in compatible]
     if patched:
-        if len(compatible)!=1 or duplicates:
-            raise RuntimeError("P453 post-DTB must contain ONE active ramoops and no inert duplicate: "+
-                               repr((compatible,duplicates)))
+        if len(compatible)!=1 or inert:
+            raise RuntimeError("P453 final FDT must have exactly one active ramoops, no inert duplicate: "+
+                               repr((compatible,inert)))
         node=compatible[0]
     else:
-        # Allow either a known-good active ramoops + inert duplicate, or
-        # the actually observed TG reservation-only input.
-        if len(duplicates)!=1 or len(compatible)>1:
-            raise RuntimeError("P453 unexpected input ramoops topology: "+
-                               repr((compatible,duplicates)))
-        node=compatible[0] if compatible else duplicates[0]
+        if len(compatible)>1 or len(inert)>1 or not (compatible or inert):
+            raise RuntimeError("P453 unexpected source ramoops topology: "+
+                               repr((compatible,inert)))
+        if compatible and inert and compatible[0]==inert[0]:
+            raise RuntimeError("P453 internal duplicate classification error")
+        node=compatible[0] if compatible else inert[0]
     reg=cells(f,node,"reg")
     if reg!=[0,0xb1b00000,0,0x100000]:
         raise RuntimeError("P453 unexpected A52 RAMOOPS region "+repr(reg))
@@ -75,8 +79,9 @@ def inspect(f, patched=False):
     if patched and ecc!=[16]:
         raise RuntimeError("P453 ECC16 missing: "+repr(ecc))
     return {"primary":compatible[0] if compatible else None,
-            "duplicate":duplicates,"reg":reg,
-            "topology":"active-plus-inert" if compatible and duplicates else
+            "duplicate":inert,"reg":reg,
+            "topology":"active-plus-inert" if compatible and inert else
+                       "active-named-reserved" if compatible and named else
                        "active" if compatible else "inert-only",
             "record_bytes":sizes["record-size"][0] if sizes else None,
             "console_bytes":sizes["console-size"][0] if sizes else None,
@@ -87,7 +92,8 @@ def fix(raw):
     with tempfile.TemporaryDirectory() as tmp:
         f=Path(tmp)/"boot.dtb"; f.write_bytes(raw)
         info=inspect(f,False)
-        run("fdtput","-r",f,info["duplicate"][0])
+        for unused in info["duplicate"]:
+            run("fdtput","-r",f,unused)
         if info["primary"] is None:
             # The original DTB has ONLY a non-compatible reserved node.
             # Convert the existing physical region into a single driver-

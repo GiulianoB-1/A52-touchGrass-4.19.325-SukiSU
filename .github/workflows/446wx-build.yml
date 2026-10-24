@@ -846,7 +846,7 @@ jobs:
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
               | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
-            python3 -c 'import runpy; from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P456 D SCM-OFF DTB VERIFIED")'
+            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P456 D SCM-OFF DTB VERIFIED")'
           fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img

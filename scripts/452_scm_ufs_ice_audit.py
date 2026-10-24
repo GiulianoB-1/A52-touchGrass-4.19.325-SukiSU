@@ -36,13 +36,13 @@ def freeze_incidental_scm(root):
         if "#include <linux/of.h>" not in s:
             pos=s.find("#include ")
             if pos<0:raise RuntimeError("P452 no include anchor "+rel)
-            s=s[:pos]+"#include <linux/of.h>\\n"+s[pos:]
+            s=s[:pos]+"#include <linux/of.h>\n"+s[pos:]
         s=s.replace("qcom_scm_is_available()",
           '(!of_machine_is_compatible("qcom,lagoon") && qcom_scm_is_available())')
         s=s.replace("qcom_scm_ice_available()",
           '(!of_machine_is_compatible("qcom,lagoon") && qcom_scm_ice_available())')
         s=s.replace("#include <linux/of.h>",
-          "#include <linux/of.h>\\n/* "+SCM_FREEZE_TAG+" */",1)
+          "#include <linux/of.h>\n/* "+SCM_FREEZE_TAG+" */",1)
         p.write_text(s)
 def check_incidental_scm(root):
     for rel in INCIDENTAL_SCM_CALLERS:

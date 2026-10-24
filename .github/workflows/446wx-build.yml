@@ -1,9 +1,9 @@
-name: Mangrove Kernel | Phase 452 SCM-only DSP candidate + unchanged DAILY fallback
-run-name: P452 DAILY fallback + DSP-CHG H0 (manual ADSP and manual charger opt-in)
+name: Mangrove P456 D - full 452 source minus ICE, with 451 SCM-off DSP DTB
+run-name: P456 D isolated 452-minus-ICE SCM-off build (H0 UNARMED)
 on:
   push:
     branches:
-      - agent/p452-scm-h1-staging
+      - agent/p456-d-452-minus-ice
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,8 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: F, label: 452-DAILY-FALLBACK, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: 452-DSP-CHG-H0-MANUAL, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-D-452-NO-ICE, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -253,8 +252,17 @@ jobs:
           A52_VARIANT_IPA: ${{ matrix.variant.ipa }}
         run: |
           set -Eeuo pipefail
+          ROOT="$PWD/gki/common"
+          cp "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c" "$RUNNER_TEMP/P456-PRE-ICE.c"
           bash -n scripts/452_apply_phase_chain.sh
           bash scripts/452_apply_phase_chain.sh
+          cp "$RUNNER_TEMP/P456-PRE-ICE.c" "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
+          grep -Fq '#define A52_UFS_ICE_SAFE_BRINGUP' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
+          if grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"; then
+            echo 'P456 D ERROR: P452 ICE guard was not fully rolled back'; exit 1
+          fi
+          grep -Fq 'A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
+          echo 'P456 D SOURCE PASS: full G P452 source stage, ONLY ICE restored to original P451/P97 bypass'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -324,7 +332,15 @@ jobs:
           if [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
             python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
-            python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT" --check-only --config "$BUILD/.config"
+            # ICE P452 edit intentionally absent in P456-D, so the original
+            # P452 source audit (which requires it) cannot be used here.
+            # Verify the retained SMMU+9 caller freezes and unchanged P97 bypass.
+            grep -Fq 'A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
+            for file in drivers/remoteproc/qcom_wcnss.c drivers/remoteproc/qcom_q6v5_mss.c drivers/mmc/host/sdhci-msm.c drivers/gpu/drm/msm/adreno/adreno_gpu.c drivers/cpuidle/cpuidle-qcom-spm.c drivers/media/platform/qcom/venus/firmware.c drivers/soc/qcom/rmtfs_mem.c drivers/soc/qcom/ocmem.c drivers/net/ipa/ipa_main.c; do
+              grep -Fq 'A52_PHASE452_SCM_AVAILABILITY_FROZEN_V1' "$ROOT/$file"
+            done
+            grep -Fq 'A52 diagnostic: bypassing ICE for storage bring-up' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
+            ! grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
             python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
@@ -819,6 +835,9 @@ jobs:
               | tee phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
           fi
           if [ "${{ matrix.variant.id }}" = G ]; then
+            # P456 D must use the exact booting P451-DSP map: NO /firmware/scm.
+            git fetch --depth=1 origin b80b04b64c0c7dfcf48a3aac0174f7b834f8b142
+            git show FETCH_HEAD:scripts/451_dsp_boot_dtb.py > scripts/451_dsp_boot_dtb.py
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --output phase447b-variants/MANGROVE-452-DSP-CHG.boot.img \
               --report phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json \
@@ -827,6 +846,15 @@ jobs:
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
               | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+            python3 - <<'PY'
+            import runpy
+            from pathlib import Path
+            from u1_patch_boot_dtb import walk
+            p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]
+            dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]
+            assert not any(node=="/firmware/scm" for node, *_ in walk(dtb)), "P456 D SCM node present"
+            print("P456 D BOOT DTB PASS: P451 DSP map, /firmware/scm ABSENT")
+            PY
           fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
@@ -968,7 +996,7 @@ jobs:
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-452-DSP-CHG-${{ github.run_number }}
+          name: MANGROVE-P456-D-NO-ICE-${{ github.run_number }}
           path: |
             phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
             phase447b-variants/compiled-variant.json
@@ -1029,46 +1057,3 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  decode_pc:
-    name: Decode PC (faddr2line)
-    needs: gki
-    # PC decoding is an explicit opt-in tool, not a post-build requirement.
-    # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
-    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
-          path: phase446af-debug
-      - name: Decode GSI oops function and source line
-        env:
-          PC_INPUT: ${{ inputs.decode_pc }}
-        run: |
-          set -Eeuo pipefail
-          PC="${PC_INPUT:-geni_i2c_xfer+0x408/0xe1c}"
-          test -s phase446af-debug/vmlinux
-          bash -n scripts/446af_decode_oops.sh
-          {
-            echo "## P446AF decoded kernel PC"
-            echo "Requested: $PC"
-            bash scripts/446af_decode_oops.sh phase446af-debug/vmlinux phase446af-debug/faddr2line "$PC"
-          } | tee phase446af-debug/decode.txt
-          {
-            echo '### Phase446AF faddr2line'
-            echo '~~~text'
-            cat phase446af-debug/decode.txt
-            echo '~~~'
-            echo 'Note: historical offsets only map exactly against their original vmlinux build.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload decoded kernel PC
-        uses: actions/upload-artifact@v4
-        with:
-          name: A52XQ-P446AF-DECODE-${{ github.run_number }}
-          path: phase446af-debug/decode.txt
-          if-no-files-found: error
-          retention-days: 30

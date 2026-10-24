@@ -11,6 +11,7 @@ from pathlib import Path
 TAG="A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1"
 ICE=Path("drivers/scsi/ufs/ufs-qcom-ice.c")
 SMMU=Path("drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c")
+SCM=Path("drivers/firmware/qcom_scm.c")
 
 def once(s,a,b,name):
     n=s.count(a)
@@ -20,8 +21,10 @@ def once(s,a,b,name):
 def patch(root):
     ice_file=root/ICE
     smmu_file=root/SMMU
+    scm_file=root/SCM
     ice=ice_file.read_text()
     smmu=smmu_file.read_text()
+    scm=scm_file.read_text()
     if TAG in ice or TAG in smmu:
         check(root)
         return
@@ -57,11 +60,21 @@ def patch(root):
        "SMMU SCM availability")
     ice_file.write_text(ice)
     smmu_file.write_text(smmu)
+    scm=once(scm,"\t__get_convention();",
+        '''    __get_convention();
+    dev_info(&pdev->dev,
+        "P452 SCM PROBED native_5_10=1 dload_default=%d\n",
+        IS_ENABLED(CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT));''',
+        "SCM probe marker")
+    scm_file.write_text(scm)
     check(root)
 
 def check(root):
     ice=(root/ICE).read_text()
     smmu=(root/SMMU).read_text()
+    scm=(root/SCM).read_text()
+    if "P452 SCM PROBED native_5_10=1" not in scm:
+        raise RuntimeError("P452 SCM probe marker missing")
     if ice.count(TAG)!=1 or smmu.count(TAG)!=1:
         raise RuntimeError("P452 freeze missing or duplicated")
     for required,src in [

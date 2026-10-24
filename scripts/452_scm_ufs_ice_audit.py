@@ -61,7 +61,7 @@ def patch(root):
     ice_file.write_text(ice)
     smmu_file.write_text(smmu)
     scm=once(scm,"\t__get_convention();",
-        '''    __get_convention();
+        r'''    __get_convention();
     dev_info(&pdev->dev,
         "P452 SCM PROBED native_5_10=1 dload_default=%d\n",
         IS_ENABLED(CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT));''',

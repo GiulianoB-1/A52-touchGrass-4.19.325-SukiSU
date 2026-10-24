@@ -1280,7 +1280,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload Phase446AF DWARF crash-decode symbols
-        if: always() && (matrix.variant.id == 'F' || (matrix.variant.id == 'G' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''))
+        if: always() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
           name: A52XQ-P446AF-DEBUG-${{ github.run_number }}
@@ -1312,7 +1312,7 @@ jobs:
     needs: gki
     # PC decoding is an explicit opt-in tool, not a post-build requirement.
     # DSP-only push runs do not publish the huge DWARF DEBUG artifact.
-    if: needs.gki.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.decode_pc != ''
+    if: false
     runs-on: ubuntu-22.04
     permissions:
       contents: read

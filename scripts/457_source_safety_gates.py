@@ -91,7 +91,7 @@ def check_h0(s):
     # converted the backslash-n in dev_err() into a physical C newline.
     # This gate MUST inspect the fully GENERATED C, not only the .py file.
     reject_broken_c_string_literals(s)
-    if 'dev_err(fg->dev,"P452 H0 REMOVE inhibit FAILED rc=%d\n",rc);' not in s:
+    if 'dev_err(fg->dev,"P452 H0 REMOVE inhibit FAILED rc=%d\\n",rc);' not in s:
         raise RuntimeError("P457 H0 teardown diagnostic must contain escaped C newline")
     required = [
         "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1",

@@ -274,13 +274,63 @@ def check_h0(s):
         raise RuntimeError("P457 H0 must not classify AC without MUIC")
     print("P458 H0 REVIEW PASS: wake held/cleanup, active 10s idle 30s guard-first WDT, nonfatal FG probe, FULL/HANDOVER, USB-only")
 
+def check_dsp_runtime(root, config, report):
+    # Keep P457's exact source-delta SMMU gate above. No DSP patch may
+    # touch the SMMU file; review the legacy PIL freeze and sysfs creator.
+    import runpy
+    impl = runpy.run_path("scripts/458_dsp_runtime_scm.py")
+    impl["check"](root)
+    pas = (root/"drivers/remoteproc/qcom_q6v5_pas.c").read_text()
+    for token in (
+        "a52_sm6350_adsp_resource",
+        ".auto_boot = false",
+        '.firmware_name = "adsp.mdt"',
+        ".pas_id = 1",
+        "regulator_set_voltage(adsp->cx_supply,384,0xffff)",
+        "regulator_set_voltage(adsp->px_supply,384,0xffff)",
+    ):
+        if token not in pas:
+            raise RuntimeError("P458 manual ADSP PAS contract missing "+token)
+    cfg=config.read_text()
+    for need in (
+        "CONFIG_QCOM_SCM=y",
+        "# CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT is not set",
+        "CONFIG_QCOM_Q6V5_PAS=y",
+        "CONFIG_A52_WAVE_DEFAULT=2",
+    ):
+        if need not in cfg:
+            raise RuntimeError("P458 config source gate "+need)
+    for reject in (
+        "CONFIG_QCOM_Q6V5_MSS=y","CONFIG_QCOM_Q6V5_ADSP=y",
+        "CONFIG_A52_MSS_DEFAULT=y","CONFIG_A52_IPA_DEFAULT=y",
+    ):
+        if reject in cfg:
+            raise RuntimeError("P458 unrequested remoteproc/modem/IPA path "+reject)
+    txt=report.read_text()
+    for device in (
+        "aab0000.qcom,venus", "9800000.qcom,npu",
+        "soc:qcom,smp2p-npu", "3000000.qcom,lpass",
+    ):
+        if device not in txt:
+            raise RuntimeError("P458 deferred-device report missing "+device)
+    if "NOT PROVEN" not in txt or "No Venus firmware load" not in txt:
+        raise RuntimeError("P458 deferred-device report must document unknown causes and firmware freeze")
+    print("P458 DSP HARD GATE PASS: unchanged P457 SMMU delta, manual PAS, SCM dload off, root one-shot creator, 3 unsafe retries frozen, deferred audit present")
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--baseline-smmu", type=Path, required=True)
+    parser.add_argument("--dsp-runtime", action="store_true")
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--deferred-report", type=Path)
     a=parser.parse_args()
     check_smmu(a.baseline_smmu.read_text(), (a.root/SMMU).read_text())
     check_h0((a.root/FG).read_text())
+    if a.dsp_runtime:
+        if not a.config or not a.deferred_report:
+            raise RuntimeError("P458 DSP hard gate requires config and deferred report")
+        check_dsp_runtime(a.root, a.config, a.deferred_report)
 
 if __name__=="__main__":
     main()

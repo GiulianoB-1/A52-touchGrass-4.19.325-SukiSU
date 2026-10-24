@@ -31,6 +31,7 @@ DECL=r'''
 #define A52H0_90S_WDT 0x04
 #define A52H0_MAX_TICKS (14400UL*HZ)
 #define A52H0_ACTIVE_POLL_MS 10000
+#define A52H0_IDLE_POLL_MS 30000
 #define A52H0_OVERVOLT_FAULT_MV 4430
 static int a52h0_regread(struct a52d_fg *fg,u8 r)
 {
@@ -434,14 +435,14 @@ def patch(s):
            "        a52h0_off(fg,\"GUARD_IO\",true);\n"
            "        mutex_unlock(&fg->a52h0_lock);\n"
            "    } else a52h0_tick(fg);","poll after existing P449 guard")
-    # Guard FIRST, then H0. Active polling uses 10s without altering
-    # the existing emergency guard's 2s interval while H0 is OFF.
+    # Guard FIRST, then H0. Single worker: poll 10s while charging,
+    # 30s while OFF/ARMED; do not add a separate H0 charging worker.
     p0=s.index("static void a52g_poll(struct work_struct *work)")
     p1=s.index("static enum power_supply_property a52d_props[]",p0)
     poll=s[p0:p1]
     target="msecs_to_jiffies(A52G_GUARD_POLL_MS)"
     if poll.count(target)!=1:raise RuntimeError("P452 H0 poll timing anchor drift")
-    poll=poll.replace(target,"msecs_to_jiffies(fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52G_GUARD_POLL_MS)")
+    poll=poll.replace(target,"msecs_to_jiffies(fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52H0_IDLE_POLL_MS)")
     s=s[:p0]+poll+s[p1:]
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",
            "mutex_init(&fg->a52g_ntc_lock);\n    mutex_init(&fg->a52h0_lock);","mutex init")
@@ -493,6 +494,8 @@ def patch(s):
     } else {
         /* Bootloader ENQ4FET set is HANDOVER, not an H0 failure. */
         a52h0_off(fg,"BOOT_PRE_ARM",false);
+        if(fg->a52h0_killed)
+            dev_err(fg->dev,"P458 H0 INIT_FAIL BOOT_PRE_ARM inhibit, keep P449 guard\\n");
     }
     if(!fg->a52h0_killed) {
         fg->a52h0_ws=wakeup_source_register(fg->dev,"a52-h0-charging");

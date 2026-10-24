@@ -35,6 +35,31 @@ jobs:
           (out/'446t_decompressed.py').write_text(s)
           print('P459 SHA256',hashlib.sha256(s.encode()).hexdigest())
           PY
+      - name: Inventory all source generators touching system SMMU suspend and busy guards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zlib,base64,re
+          matches=[]
+          for p in Path('scripts').iterdir():
+              if not p.is_file() or not (p.suffix=='.py' or p.suffix=='.z64'):
+                  continue
+              try:
+                  src=(zlib.decompress(base64.b64decode(p.read_text().strip())).decode()
+                       if p.suffix=='.z64' else p.read_text())
+              except Exception:
+                  continue
+              ls=src.splitlines()
+              for i,line in enumerate(ls):
+                  if ('arm_smmu_pm_suspend' in line or
+                      'arm_smmu_runtime_suspend' in line or
+                      'a52_apps_smmu_has_unmanaged_tbus' in line or
+                      ('-EBUSY' in line and any('smmu' in x.lower() for x in ls[max(0,i-35):i+6]))):
+                      matches.append((p.name,i+1,' || '.join(ls[max(0,i-4):min(len(ls),i+7)])))
+          print('P459 SMMU_GENERATOR_REFERENCES',len(matches))
+          for p,line,ctx in matches[:150]:
+              print('P459 GEN',p,line,ctx[:900])
+          PY
       - name: Upload audit evidence
         uses: actions/upload-artifact@v4
         with:

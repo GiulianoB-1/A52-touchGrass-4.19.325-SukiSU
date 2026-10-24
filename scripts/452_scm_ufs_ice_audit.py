@@ -100,21 +100,18 @@ def patch(root):
         "ICE availability")
     smmu=once(smmu,"#include <linux/of_device.h>",
               "#include <linux/of_device.h>\n#include <linux/of.h>","SMMU OF include")
-    # P451's preexisting SCM changes vary the availability spelling.
-    # Inject before qcom arm-SMMU allocation, always fail closed on Lagoon.
-    smmu=once(smmu,'qsmmu = devm_kzalloc(smmu->dev, sizeof(*qsmmu), GFP_KERNEL);',
-       r'''/* A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1:
-         * 451 qcom-smmu-qcom was deferred for lack of upstream SCM.
-         * SCM is now present for ADSP only. Keep QCOM SMMU probe behaviour
-         * on Lagoon identical to the 451 kernel; vendor SMMU stays owner.
+    # The P451 qcom-smmu parent MUST probe. The old P452 patch inserted
+    # a Lagoon -EPROBE_DEFER before devm_kzalloc; B and D fail to boot.
+    # Preserve P451 probe/error paths byte-for-byte except the SCM boolean,
+    # which remains false on Lagoon even when PAS later enables native SCM.
+    smmu=once(smmu,'bool scm = qcom_scm_is_available();',
+       '''/* A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1:
+         * Do NOT defer the APPS/KGSL SMMUs on Lagoon. The existing P451
+         * downstream_handoff path must run even if PAS exposes SCM.
          */
-        if (of_machine_is_compatible("qcom,lagoon")) {
-            dev_info_once(smmu->dev,
-                 "P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1\\n");
-            return ERR_PTR(-EPROBE_DEFER);
-        }
-        qsmmu = devm_kzalloc(smmu->dev, sizeof(*qsmmu), GFP_KERNEL);''',
-       "SMMU allocation guard")
+        bool scm = !of_machine_is_compatible("qcom,lagoon") &&
+                   qcom_scm_is_available();''',
+       "SMMU availability only; no new return or probe defer")
     ice_file.write_text(ice)
     smmu_file.write_text(smmu)
     scm=once(scm,"\t__get_convention();",
@@ -170,14 +167,18 @@ def check(root):
         ("P452 SCM UFS_ICE_FROZEN",ice),
         ('/* P452 ICE EARLY_FAIL_CLOSED',ice),
         ('goto disable;',ice),
-        ('if (of_machine_is_compatible("qcom,lagoon")) {',smmu),
-        ("P452 SCM QCOM_SMMU_FROZEN",smmu),
+        ('bool scm = !of_machine_is_compatible("qcom,lagoon") &&',smmu),
+        ("qcom_scm_is_available();",smmu),
         ("qsmmu = devm_kzalloc(smmu->dev",smmu)]:
         if required not in src:
             raise RuntimeError("P452 source safety guard missing "+required)
     check_p97_ice_bypass(ice)
     check_incidental_scm(root)
-    print("P452 SCM SOURCE PASS: Lagoon ICE disabled, qcom SMMU deferred, 9 incidental consumers kept at 451 behavior; PAS manual only")
+    if "P452 SCM QCOM_SMMU_FROZEN defer" in smmu:
+        raise RuntimeError("P457 SMMU fatal forced Lagoon defer was not removed")
+    if 'if (of_machine_is_compatible("qcom,lagoon")) {\\n' in smmu:
+        raise RuntimeError("P457 unexpected Lagoon gated probe branch")
+    print("P457 SCM SOURCE PASS: Lagoon ICE bypass, qcom SMMU probe retained with SCM=false on Lagoon, nine caller freezes, manual PAS only")
 
 def audit_calls(root,out):
     """Enumerate all direct compiled-tree SCM callsites for human review.

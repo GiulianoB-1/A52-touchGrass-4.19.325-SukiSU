@@ -1,9 +1,9 @@
-name: Mangrove P456 A/B/C isolated 451-DSP source bisects
-run-name: P456 A/B/C 451-DSP source bisects SCM-off H0-unarmed
+name: Mangrove P457 Bprime SMMU baseline preservation bisect
+run-name: P457 Bprime 451-DSP plus nine SCM freezes (SMMU source unchanged)
 on:
   push:
     branches:
-      - agent/p456-451-dsp-source-bisects
+      - agent/p457-bprime-no-smmu-defer
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,9 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: G, label: P456-A-ICE, bisect: a, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: P456-B-SMMU-SCM, bisect: b, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: P456-C-H0, bisect: c, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P457-BPRIME-NO-SMMU-DEFER, bisect: b, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -586,14 +584,16 @@ jobs:
       - name: Inject scoped P456 source delta and preserve exact P451 configuration
         run: |
           set -Eeuo pipefail
-          # C changes the P451 read-only charging contract by design.
+          # Bprime changes only nine SCM callers and preserves 451 SMMU byte for byte.
           # Validate all P447-P451 baseline source guards first, then add
           # H0 just before the strict final-tree manifest is computed.
-          if [ "${{ matrix.variant.bisect }}" != c ]; then
-            python3 scripts/456_451_dsp_bisect.py --root "$PWD/gki/common" --mode '${{ matrix.variant.bisect }}' --report phase447-inventory/P456-SOURCE-SCOPE.json
-          else
-            echo 'P456-C H0 deferred until after P451 baseline safety audits'
+          cp "$PWD/gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c" "$RUNNER_TEMP/P457-PRE-SMMU.c"
+          python3 scripts/456_451_dsp_bisect.py --root "$PWD/gki/common" --mode b --report phase447-inventory/P456-SOURCE-SCOPE.json
+          cmp "$RUNNER_TEMP/P457-PRE-SMMU.c" "$PWD/gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
+          if grep -Fq 'P452 SCM QCOM_SMMU_FROZEN defer' "$PWD/gki/common/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"; then
+            echo 'FAIL: fatal Lagoon SMMU forced defer still present'; exit 1
           fi
+          echo 'P457 Bprime SMMU source byte-identical to P451, no Lagoon deferral injected' >> "$GITHUB_STEP_SUMMARY"
           sha256sum workspace/gki-phase199-out/.config
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
@@ -685,17 +685,8 @@ jobs:
           grep -Fq 'rpmh_flush(&drv->client)' "$ROOT/drivers/soc/qcom/rpmh-rsc.c"
           python3 scripts/423_apply_rpmh_solver_mode_compat.py --root "$ROOT" --check-only
           python3 scripts/438_apply_devbw_semantic_parity.py --root "$ROOT" --check-only
-          # P447-P451 check-only guards above legitimately require
-          # UNKNOWN charger status and a single inhibit-only write.
-          # Run them against unchanged P451, then install C's opt-in H0
-          # and audit H0's explicit register allowlist and safe defaults.
-          # Crucially, the strict fingerprint below sees the H0 tree.
-          if [ "${{ matrix.variant.bisect }}" = c ]; then
-            python3 scripts/456_451_dsp_bisect.py --root "$ROOT" --mode c --report phase447-inventory/P456-SOURCE-SCOPE.json
-            python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
-            test -s phase447-inventory/P456-SOURCE-SCOPE.json
-            echo 'P456-C baseline and isolated H0 audit PASS' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # Bprime must not add *any* SMMU source change after prior audits.
+          cmp "$RUNNER_TEMP/P457-PRE-SMMU.c" "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
           mkdir -p "$ROOT/include/generated"
           GIT_EXCLUDE="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path info/exclude)"
           test -n "$GIT_EXCLUDE"
@@ -1243,7 +1234,7 @@ jobs:
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-P456-${{ matrix.variant.bisect }}-${{ github.run_number }}
+          name: MANGROVE-P457-BPRIME-${{ github.run_number }}
           path: |
             phase447b-variants/MANGROVE-451-DSP.boot.img
             phase447b-variants/compiled-variant.json

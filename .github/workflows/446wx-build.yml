@@ -34,7 +34,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   gki:
-    if: false
+    if: true
     name: Mangrove ${{ matrix.variant.label }} (wave=${{ matrix.variant.wave }} MSS=${{ matrix.variant.mss }} IPA=${{ matrix.variant.ipa }} IPC=${{ matrix.variant.ipc }})
     runs-on: ubuntu-22.04
     timeout-minutes: 180

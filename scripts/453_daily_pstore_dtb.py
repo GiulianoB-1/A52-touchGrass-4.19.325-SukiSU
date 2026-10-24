@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """P453 DAILY: surgical, audited pstore DTB repair in the final boot-v2 image.
 
-Remove the redundant A52 reserved-memory node; retain the sole ramoops
-consumer, install ecc-size=<16>, preserve 3x256KiB zones. This changes
+Convert reservation-only A52 DTBs into a single active ramoops consumer,
+install ecc-size=<16>, and preserve the 256KiB console/record/pmsg zones. This changes
 only the embedded FDT and recalculated Android v2 boot id/DTB size.
 """
 import argparse, hashlib, json, runpy, struct, subprocess, tempfile
@@ -28,51 +28,76 @@ def cells(f,node,prop):
     s=run("fdtget","-t","x",f,node,prop,optional=True)
     return None if s is None else [int(v,16) for v in s.split()]
 def inspect(f, patched=False):
-    # fdtget -l traversal is not reliable on the repacked Samsung DTB:
-    # parse the complete structure using the same checked Python FDT walker
-    # that U1 uses for all other embedded-boot DTB mutations.
+    # Exact CI evidence: the packaged TG DTB can contain ONLY the
+    # inert a52-ramoops-reserved@b1b00000 node, without compatible=ramoops.
+    # Runtime overlays/platform devices must not be inferred from a DTB.
     from u1_patch_boot_dtb import walk
     props=walk(f.read_bytes())
     all_nodes=sorted({entry[0] for entry in props})
-    compat_nodes={entry[0] for entry in props
-                  if entry[1]=="compatible" and
-                  b"ramoops" in entry[5].split(b"\x00")}
-    primary=sorted(compat_nodes)
-    if len(primary)!=1:
-        candidates=[n for n in all_nodes if "ramoops" in n.lower()]
-        raise RuntimeError("P453 expected one compatible=ramoops: "+
-                           repr(primary)+" candidates="+repr(candidates))
-    node=primary[0]
-    compat=run("fdtget","-t","s",f,node,"compatible")
-    if "ramoops" not in compat.split():
-        raise RuntimeError("P453 incompatible ramoops node "+node)
-    duplicate=[n for n in all_nodes if n.rsplit("/",1)[-1].lower()
-               =="a52-ramoops-reserved@b1b00000"]
-    if len(duplicate)!=(0 if patched else 1):
-        raise RuntimeError("P453 duplicate reserved node count "+str(len(duplicate)))
-    sizes={k:cells(f,node,k) for k in ("record-size","console-size","pmsg-size")}
-    for prop,vals in sizes.items():
-        if vals!=[0x40000]:
-            raise RuntimeError(f"P453 {prop} expected 256KiB, got {vals}")
+    compatible=sorted({e[0] for e in props if e[1]=="compatible"
+                       and b"ramoops" in e[5].split(b"\x00")})
+    duplicates=[n for n in all_nodes if
+                n.rsplit("/",1)[-1].lower()=="a52-ramoops-reserved@b1b00000"]
+    if patched:
+        if len(compatible)!=1 or duplicates:
+            raise RuntimeError("P453 post-DTB must contain ONE active ramoops and no inert duplicate: "+
+                               repr((compatible,duplicates)))
+        node=compatible[0]
+    else:
+        # Allow either a known-good active ramoops + inert duplicate, or
+        # the actually observed TG reservation-only input.
+        if len(duplicates)!=1 or len(compatible)>1:
+            raise RuntimeError("P453 unexpected input ramoops topology: "+
+                               repr((compatible,duplicates)))
+        node=compatible[0] if compatible else duplicates[0]
+    reg=cells(f,node,"reg")
+    if reg!=[0,0xb1b00000,0,0x100000]:
+        raise RuntimeError("P453 unexpected A52 RAMOOPS region "+repr(reg))
+    if patched or compatible:
+        sizes={k:cells(f,node,k) for k in
+               ("record-size","console-size","pmsg-size")}
+        for prop,v in sizes.items():
+            if v!=[0x40000]:
+                raise RuntimeError("P453 "+prop+" !=256KiB: "+repr(v))
+    else:
+        sizes=None
     ecc=cells(f,node,"ecc-size")
     if patched and ecc!=[16]:
-        raise RuntimeError("P453 ramoops ECC not 16: "+repr(ecc))
-    reg=cells(f,node,"reg")
-    if not reg or reg[-1]<0xc0000:
-        raise RuntimeError("P453 ramoops region too small: "+repr(reg))
-    return {"primary":node,"duplicate":duplicate,"reg":reg,
-            "record_bytes":sizes["record-size"][0],
-            "console_bytes":sizes["console-size"][0],
-            "pmsg_bytes":sizes["pmsg-size"][0],"ecc_size":ecc}
+        raise RuntimeError("P453 ECC16 missing: "+repr(ecc))
+    return {"primary":compatible[0] if compatible else None,
+            "duplicate":duplicates,"reg":reg,
+            "topology":"active-plus-inert" if compatible and duplicates else
+                       "active" if compatible else "inert-only",
+            "record_bytes":sizes["record-size"][0] if sizes else None,
+            "console_bytes":sizes["console-size"][0] if sizes else None,
+            "pmsg_bytes":sizes["pmsg-size"][0] if sizes else None,
+            "ecc_size":ecc}
 def fix(raw):
     with tempfile.TemporaryDirectory() as tmp:
-        f=Path(tmp)/"boot.dtb";f.write_bytes(raw)
+        f=Path(tmp)/"boot.dtb"; f.write_bytes(raw)
         info=inspect(f,False)
         run("fdtput","-r",f,info["duplicate"][0])
-        run("fdtput","-t","x",f,info["primary"],"ecc-size","0x10")
+        if info["primary"] is None:
+            # The original DTB has ONLY a non-compatible reserved node.
+            # Convert the existing physical region into a single driver-
+            # discoverable ramoops child. Never reserve it twice.
+            n="/reserved-memory/ramoops@b1b00000"
+            run("fdtput","-c",f,n)
+            run("fdtput","-t","s",f,n,"compatible","ramoops")
+            run("fdtput","-t","x",f,n,"reg",
+                *[hex(x) for x in info["reg"]])
+            for prop in ("record-size","console-size","ftrace-size",
+                         "pmsg-size"):
+                run("fdtput","-t","x",f,n,prop,"0x40000")
+            info["converted_inert_to_active"]=True
+        else:
+            n=info["primary"]
+            info["converted_inert_to_active"]=False
+        run("fdtput","-t","x",f,n,"ecc-size","0x10")
         post=inspect(f,True)
         out=f.read_bytes()
         if out==raw:raise RuntimeError("P453 DTB patch had no effect")
+        post["converted_inert_to_active"]=info["converted_inert_to_active"]
         return out,post
 def repack(old,data,dtb):
     page=data["page_size"]; head=bytearray(data["header_page"])

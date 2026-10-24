@@ -289,12 +289,16 @@ def patch(s):
     anchor='''\tif (IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))
 \t\tschedule_delayed_work(&fg->a52g_guard_work,'''
     # 447G adds this in probe. Add sysfs creation immediately before.
-    s=once(s,anchor,'''    rc=a52h0_attrs_create(fg);
+    s=once(s,anchor,r'''    rc=a52h0_attrs_create(fg);
     if (rc)return dev_err_probe(fg->dev,rc,
                         "P452 H0 sysfs arming controls unavailable\n");
 '''+anchor,"attrs after probe")
     # Old guard did one charger write. H0 adds exactly ONE audited generic
     # write site; no factory/input/float/FG NV register writes allowed.
+    s=once(s,"static enum power_supply_property a52d_props[] = {",
+       """static int a52h0_regread(struct a52d_fg *fg,u8 r);
+static int a52h0_psy_status(struct a52d_fg *fg,bool online);
+static enum power_supply_property a52d_props[] = {""","forward functions for FG getters")
     s=once(s,"POWER_SUPPLY_PROP_STATUS,",
            "POWER_SUPPLY_PROP_STATUS,\n    POWER_SUPPLY_PROP_ONLINE,","battery status and online")
     s=once(s,"case POWER_SUPPLY_PROP_STATUS:",

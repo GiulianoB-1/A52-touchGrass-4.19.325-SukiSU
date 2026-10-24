@@ -21,6 +21,7 @@ DECL=r'''
 
 
 /* A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1 */
+/* P460B_H0_GUARD_2S_WDT_10S_V1: original P449 guard cadence retained. */
 #define A52H0_CHGCNTL2 0x18
 #define A52H0_WDTCNTL 0x22
 #define A52H0_BATREG 0x1a
@@ -30,8 +31,7 @@ DECL=r'''
 #define A52H0_FLOAT_4380_CODE 0x27
 #define A52H0_90S_WDT 0x04
 #define A52H0_MAX_TICKS (14400UL*HZ)
-#define A52H0_ACTIVE_POLL_MS 10000
-#define A52H0_IDLE_POLL_MS 30000
+#define A52H0_KICK_MIN_MS 10000
 #define A52H0_OVERVOLT_FAULT_MV 4430
 static int a52h0_regread(struct a52d_fg *fg,u8 r)
 {
@@ -216,12 +216,14 @@ static void a52h0_tick(struct a52d_fg *fg)
            (wdt&0x07)!=(A52H0_90S_WDT|BIT(0))) {
             a52h0_off(fg,"WDT_OR_ENQ4FET_DRIFT",true);goto done;
         }
-        /* One kick on EVERY active tick, no 30s conditional. */
+        /* Guard checks run every 2s; kick hardware WDT no faster than 10s. */
+        if(time_before(now,fg->a52h0_last_kick+
+                 msecs_to_jiffies(A52H0_KICK_MIN_MS)))goto done;
         rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
         if(rc){a52h0_off(fg,"WDT_KICK_FAILED",true);goto done;}
         fg->a52h0_last_kick=now;
         dev_info(fg->dev,
-           "P452 H0 KICK wdt=90s cycle=10s rc=0 battery=%d chg=%d mv=%d\n",
+           "P452 H0 KICK wdt=90s guard=2s min_kick=10s rc=0 battery=%d chg=%d mv=%d\n",
            tbat,tchg,mv);
         goto done;
     }
@@ -435,14 +437,13 @@ def patch(s):
            "        a52h0_off(fg,\"GUARD_IO\",true);\n"
            "        mutex_unlock(&fg->a52h0_lock);\n"
            "    } else a52h0_tick(fg);","poll after existing P449 guard")
-    # Guard FIRST, then H0. Single worker: poll 10s while charging,
-    # 30s while OFF/ARMED; do not add a separate H0 charging worker.
+    # Guard FIRST, then H0. Single worker stays at the P449 2s cadence.
+    # H0 watchdog kicks are independently rate-limited to >=10 seconds.
     p0=s.index("static void a52g_poll(struct work_struct *work)")
     p1=s.index("static enum power_supply_property a52d_props[]",p0)
     poll=s[p0:p1]
     target="msecs_to_jiffies(A52G_GUARD_POLL_MS)"
     if poll.count(target)!=1:raise RuntimeError("P452 H0 poll timing anchor drift")
-    poll=poll.replace(target,"msecs_to_jiffies(fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52H0_IDLE_POLL_MS)")
     s=s[:p0]+poll+s[p1:]
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",
            "mutex_init(&fg->a52g_ntc_lock);\n    mutex_init(&fg->a52h0_lock);","mutex init")
@@ -563,7 +564,8 @@ def check(root):
                 "A52H0_FLOAT_4380_CODE 0x27",
                 "if(fg->a52g_inhibit_latched)",
                 "P452 H0 RECHARGE vbat=",
-                "A52H0_ACTIVE_POLL_MS 10000",
+                "A52H0_KICK_MIN_MS 10000",
+                "P460B_H0_GUARD_2S_WDT_10S_V1",
                 "wakeup_source_register(fg->dev",
                 "wakeup_source_unregister(fg->a52h0_ws)",
                 "P452 H0 INIT_FAIL",
@@ -583,7 +585,11 @@ def check(root):
                 "a52h0_register_inputs(fg)","P452 H0 WDT expired clear FAILED",
                 "GUARD_IO"):
         if key not in s:raise RuntimeError("P452 H0 v2 contract "+key)
-    print("P452 H0 SOURCE PASS: guard-first opt-in, handover+thermal hysteresis+FAULT, 500mA, WDT, 4h timer, recharge, strict write allowlist")
+    if "msecs_to_jiffies(A52G_GUARD_POLL_MS)" not in s or "#define A52G_GUARD_POLL_MS 2000" not in s:
+        raise RuntimeError("P460B 2s charger guard cadence lost")
+    if "time_before(now,fg->a52h0_last_kick+" not in s:
+        raise RuntimeError("P460B watchdog 10s gating absent")
+    print("P460B H0 SOURCE PASS: safety guard 2s regardless of charging, WDT kick >=10s, original H0 safety checks intact")
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--root",type=Path,required=True)

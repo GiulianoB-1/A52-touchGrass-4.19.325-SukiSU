@@ -44,7 +44,9 @@ def patch(root):
         "ICE availability")
     smmu=once(smmu,"#include <linux/of_device.h>",
               "#include <linux/of_device.h>\n#include <linux/of.h>","SMMU OF include")
-    smmu=once(smmu,'if (!qcom_scm_is_available())\n\t\treturn ERR_PTR(-EPROBE_DEFER);',
+    # P451's preexisting SCM changes vary the availability spelling.
+    # Inject before qcom arm-SMMU allocation, always fail closed on Lagoon.
+    smmu=once(smmu,'qsmmu = devm_kzalloc(smmu->dev, sizeof(*qsmmu), GFP_KERNEL);',
        r'''/* A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1:
          * 451 qcom-smmu-qcom was deferred for lack of upstream SCM.
          * SCM is now present for ADSP only. Keep QCOM SMMU probe behaviour
@@ -55,9 +57,8 @@ def patch(root):
                  "P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1\\n");
             return ERR_PTR(-EPROBE_DEFER);
         }
-        if (!qcom_scm_is_available())
-            return ERR_PTR(-EPROBE_DEFER);''',
-       "SMMU SCM availability")
+        qsmmu = devm_kzalloc(smmu->dev, sizeof(*qsmmu), GFP_KERNEL);''',
+       "SMMU allocation guard")
     ice_file.write_text(ice)
     smmu_file.write_text(smmu)
     scm=once(scm,"\t__get_convention();",
@@ -83,7 +84,7 @@ def check(root):
         ("P452 SCM UFS_ICE_FROZEN",ice),
         ('if (of_machine_is_compatible("qcom,lagoon")) {',smmu),
         ("P452 SCM QCOM_SMMU_FROZEN",smmu),
-        ("if (!qcom_scm_is_available())",smmu)]:
+        ("qsmmu = devm_kzalloc(smmu->dev",smmu)]:
         if required not in src:
             raise RuntimeError("P452 source safety guard missing "+required)
     print("P452 SCM SOURCE PASS: Lagoon UFS ICE remains OFF; Qualcomm SMMU stays deferred; PAS opt-in only")

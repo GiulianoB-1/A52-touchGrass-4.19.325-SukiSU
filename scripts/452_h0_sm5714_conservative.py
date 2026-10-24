@@ -17,6 +17,7 @@ from pathlib import Path
 SRC=Path("drivers/a52_447/a52_sm5714_fg_ro.c")
 TAG="A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1"
 DECL=r'''
+
 /* A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1 */
 #define A52H0_CHGCNTL2 0x18
 #define A52H0_WDTCNTL 0x22
@@ -54,6 +55,16 @@ static int a52h0_write_masked(struct a52d_fg *fg,u8 reg,u8 mask,u8 val)
     if((after&mask)!=(val&mask))return -EIO;
     return 0;
 }
+static void a52h0_state(struct a52d_fg *fg, const char *to,
+                        const char *reason)
+{
+    const char *from=fg->a52h0_state ? fg->a52h0_state : "OFF";
+    if (strcmp(from,to)) {
+        dev_info(fg->dev,"P452 H0 STATE from=%s to=%s reason=%s\n",
+                 from,to,reason);
+        fg->a52h0_state=to;
+    }
+}
 static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
 {
     int ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
@@ -68,6 +79,21 @@ static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
     }
     fg->a52h0_active=false;
     if(permanent || rc)fg->a52h0_killed=true;
+    if(fg->a52h0_killed) {
+        fg->a52h0_armed=false;
+        a52h0_state(fg,"FAULT_LATCHED",why);
+    } else if(!strcmp(why,"TOP_OFF")) {
+        a52h0_state(fg,"FULL",why);
+    } else if(!strcmp(why,"BOOT_PRE_ARM")) {
+        a52h0_state(fg,"HANDOVER",why);
+    } else if(!strcmp(why,"MANUAL_DISARM")) {
+        a52h0_state(fg,"OFF",why);
+    } else {
+        fg->a52h0_armed=false;
+        fg->a52h0_rearm=true;
+        a52h0_state(fg,"STOPPED",why);
+    }
+    dev_info(fg->dev,"P452 H0 STOP reason=%s\n",why);
     dev_warn(fg->dev,
        "P452 H0 OFF reason=%s rc=%d permanent=%d killed=%d\n",
        why,rc,permanent,fg->a52h0_killed);
@@ -82,7 +108,7 @@ static bool a52h0_sensor_safe(struct a52d_fg *fg,int *b,int *c)
 static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
                         int *vb,int *vcell,int *st2,int *ntc,int *chg_ntc)
 {
-    int st,fc,flt,ctrl,input;
+    int st,fc,flt,ctrl,input,die;
     *vcell=a52d_mv(fg);
     st=a52h0_regread(fg,A52G_CHG_STATUS1);
     *st2=a52h0_regread(fg,A52P450_CHG_STATUS2);
@@ -90,22 +116,22 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
     flt=a52h0_regread(fg,A52H0_BATREG);
     ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
     input=a52h0_regread(fg,A52H0_VBUSCNTL);
-    if(st<0 || *st2<0 || fc<0 || flt<0 || ctrl<0 || input<0 ||
+    die=a52h0_regread(fg,A52G_CHG_DEVICEID);
+    if(st<0 || *st2<0 || fc<0 || flt<0 || ctrl<0 || input<0 || die<0 ||
        *vcell<3000 || *vcell>4380)
         return -EIO;
+    if(die!=fg->a52h0_id || (fc&(BIT(0)|BIT(1))) ||
+       (flt&0x3f)!=A52H0_FLOAT_4380_CODE || input>0x10)
+        return -EUCLEAN; /* Immutable hardware safety contract: FAULT */
     *vb=!!(st&BIT(0));
     if(!a52h0_sensor_safe(fg,ntc,chg_ntc))
         return -ERANGE;
-    if(!*vb || (fc&(BIT(0)|BIT(1))) ||
-       (flt&0x3f)!=A52H0_FLOAT_4380_CODE)
-        return -EPERM;
+    if(!*vb)return -ENOLINK;
     /* H0 prohibits VBUSCNTL writes. Refuse >500mA input rather than
      * pretending to run TG's ramp, which requires that register.
      */
-    if(100+(input&0x7f)*25>500)
-        return -ERANGE;
-    if(*st2&BIT(7))
-        return -EIO; /* expired WDT must be cleared only while OFF */
+    /* Raw input>0x10 is already a latched FAULT. Never ramp or write VBUSCNTL. */
+    if(*st2&BIT(7))return -ETIME; /* WDT expired: clear then FAULT */
     if(for_enable && (ctrl&A52G_CHG_ENQ4FET))
         return -EBUSY; /* guard owns bootloader charging handoff */
     return 0;
@@ -115,22 +141,49 @@ static void a52h0_tick(struct a52d_fg *fg)
     int vb=0,mv=0,st2=-1,tbat=-10000,tchg=-10000,rc,wdt,ctrl;
     unsigned long now=jiffies;
     mutex_lock(&fg->a52h0_lock);
+    /* Track ten consecutive seconds of both real physical NTCs valid. */
+    {
+        int bt=a52g_ntc_temp(fg),ct=a52h_chg_ntc_temp(fg);
+        if(bt>=-200 && bt<=900 && ct>=-200 && ct<=900) {
+            if(!fg->a52h0_ntc_valid) {
+                fg->a52h0_ntc_valid=true;
+                fg->a52h0_ntc_since=now;
+            }
+        } else {
+            fg->a52h0_ntc_valid=false;
+        }
+    }
+    /* Session timer resets only when unplugged, including while OFF. */
+    {
+        int st=a52h0_regread(fg,A52G_CHG_STATUS1);
+        if(st>=0 && !(st&BIT(0))) {
+            fg->a52h0_timer_started=false;
+            fg->a52h0_full=false;
+        }
+    }
     if(fg->a52h0_killed || !fg->a52h0_armed) {
-        if(fg->a52h0_active) a52h0_off(fg,"DISARM",true);
+        if(fg->a52h0_active) a52h0_off(fg,"MANUAL_DISARM",false);
         goto done;
     }
     if(fg->a52g_inhibit_latched) {
-        a52h0_off(fg,"P449_LATCH",true);
+        a52h0_off(fg,"guard",false);
         goto done;
     }
     rc=a52h0_verify(fg,!fg->a52h0_active,&vb,&mv,&st2,&tbat,&tchg);
     if(rc) {
-        a52h0_off(fg,"SENSOR_OR_HARDWARE",true);
+        if(rc==-ETIME) {
+            a52h0_off(fg,"WDT_EXPIRED",true);
+            if(a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(6),BIT(6)))
+                dev_err(fg->dev,"P452 H0 WDT expired clear FAILED\n");
+        } else if(rc==-ERANGE || rc==-ENOLINK)
+            a52h0_off(fg,rc==-ERANGE ? "temp" : "vbus",false);
+        else
+            a52h0_off(fg,"FAULT_VERIFY",true);
         goto done;
     }
     if(fg->a52h0_active) {
         if(time_after_eq(now,fg->a52h0_started+A52H0_MAX_TICKS)) {
-            a52h0_off(fg,"FOUR_HOUR_TIMER",true);goto done;
+            a52h0_off(fg,"timer",false);goto done;
         }
         if(st2&BIT(5)) {
             fg->a52h0_full=true;
@@ -152,13 +205,21 @@ static void a52h0_tick(struct a52d_fg *fg)
         }
         goto done;
     }
+    if(fg->a52h0_timer_started &&
+       time_after_eq(now,fg->a52h0_started+A52H0_MAX_TICKS)) {
+        a52h0_off(fg,"timer",false);goto done;
+    }
     if(fg->a52h0_full && mv>4310)goto done;
-    if(fg->a52h0_full && mv<=4310)
+    if(fg->a52h0_full && mv<=4310) {
         fg->a52h0_full=false;
+        dev_info(fg->dev,"P452 H0 RECHARGE vbat=%d\n",mv);
+    }
     /* Confirm all limits before setting ENQ4FET. WDT first, always. */
     rc=a52h0_write_masked(fg,A52H0_CHGCNTL2,0xff,A52H0_CHG_FAST_500MA);
     if(rc)goto fail;
-    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,0x07,A52H0_90S_WDT|BIT(0));
+    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,0x06,A52H0_90S_WDT);
+    if(rc)goto fail;
+    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),BIT(0));
     if(rc)goto fail;
     rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
     if(rc)goto fail;
@@ -170,8 +231,15 @@ static void a52h0_tick(struct a52d_fg *fg)
                            A52G_CHG_ENQ4FET);
     if(rc)goto fail;
     fg->a52h0_active=true;
-    fg->a52h0_started=now;
+    if(!fg->a52h0_timer_started) {
+        fg->a52h0_started=now;
+        fg->a52h0_timer_started=true;
+    }
     fg->a52h0_last_kick=now;
+    a52h0_state(fg,"CHARGING","enable");
+    dev_info(fg->dev,
+       "P452 H0 ENABLE cur=500 wdt=90 float=4380 batt=%d chg=%d\n",
+       tbat,tchg);
     dev_warn(fg->dev,
        "P452 H0 ON manual=1 WDT=90s kick=before_enable current=500mA float=4380mV battery=%d chg=%d mv=%d readback=PASS\n",
        tbat,tchg,mv);
@@ -198,12 +266,32 @@ static ssize_t h0_arm_store(struct device *dev,
     bool arm;
     if(kstrtobool(buf,&arm))return -EINVAL;
     mutex_lock(&fg->a52h0_lock);
-    if(arm && (fg->a52h0_killed || fg->a52g_inhibit_latched)) {
-        mutex_unlock(&fg->a52h0_lock);
-        return -EPERM;
+    if(arm) {
+        int bt=a52g_ntc_temp(fg),ct=a52h_chg_ntc_temp(fg);
+        if(fg->a52h0_killed) {
+            mutex_unlock(&fg->a52h0_lock);
+            return -EPERM;
+        }
+        if(!fg->a52h0_ntc_valid ||
+           !time_after_eq(jiffies,fg->a52h0_ntc_since+10*HZ)) {
+            mutex_unlock(&fg->a52h0_lock);
+            return -EAGAIN;
+        }
+        if(bt<150 || bt>410 || ct< -200 || ct>=500 ||
+           ((fg->a52h0_rearm || fg->a52g_inhibit_latched) &&
+            (bt<170 || bt>390 || ct>450))) {
+            mutex_unlock(&fg->a52h0_lock);
+            return -ERANGE;
+        }
+        /* Only explicit manual re-arm clears P449's historic latch
+         * after both physical NTCs recover; next worker runs guard first.
+         */
+        fg->a52g_inhibit_latched=false;
+        fg->a52h0_rearm=false;
+        a52h0_state(fg,"ARMED","manual_rearm");
     }
     fg->a52h0_armed=arm;
-    if(!arm)a52h0_off(fg,"MANUAL_DISARM",true);
+    if(!arm)a52h0_off(fg,"MANUAL_DISARM",false);
     mutex_unlock(&fg->a52h0_lock);
     dev_warn(fg->dev,"P452 H0 ARM optin=%d killed=%d\n",
              arm,fg->a52h0_killed);
@@ -223,20 +311,20 @@ static ssize_t h0_kill_store(struct device *dev,
     mutex_unlock(&fg->a52h0_lock);
     return len;
 }
-static DEVICE_ATTR(h0_arm,0600,h0_arm_show,h0_arm_store);
+static DEVICE_ATTR(a52_h0_enable,0600,h0_arm_show,h0_arm_store);
 static DEVICE_ATTR(h0_kill,0200,NULL,h0_kill_store);
 static void a52h0_attr_cleanup(void *arg)
 {
     struct a52d_fg *fg=arg;
     device_remove_file(fg->dev,&dev_attr_h0_kill);
-    device_remove_file(fg->dev,&dev_attr_h0_arm);
+    device_remove_file(fg->dev,&dev_attr_a52_h0_enable);
 }
 static int a52h0_attrs_create(struct a52d_fg *fg)
 {
-    int rc=device_create_file(fg->dev,&dev_attr_h0_arm);
+    int rc=device_create_file(fg->dev,&dev_attr_a52_h0_enable);
     if(rc)return rc;
     rc=device_create_file(fg->dev,&dev_attr_h0_kill);
-    if(rc){device_remove_file(fg->dev,&dev_attr_h0_arm);return rc;}
+    if(rc){device_remove_file(fg->dev,&dev_attr_a52_h0_enable);return rc;}
     rc=devm_add_action_or_reset(fg->dev,a52h0_attr_cleanup,fg);
     return rc;
 }
@@ -269,6 +357,10 @@ def patch(s):
            """struct delayed_work a52g_guard_work;
     struct mutex a52h0_lock;
     bool a52h0_armed, a52h0_active, a52h0_killed, a52h0_full;
+    bool a52h0_rearm, a52h0_ntc_valid, a52h0_timer_started;
+    const char *a52h0_state;
+    unsigned long a52h0_ntc_since;
+    int a52h0_id;
     unsigned long a52h0_started, a52h0_last_kick;""","fields")
     s=once(s,"static void a52g_poll(struct work_struct *work)",
            DECL+"\nstatic void a52g_poll(struct work_struct *work)","controller code")
@@ -290,6 +382,11 @@ def patch(s):
     s=once(s,anchor,r'''    /* Bootloader may leave ENQ4FET ON. Force it OFF before
      * exposing h0_arm, even if both NTCs are already valid.
      */
+    fg->a52h0_state="OFF";
+    fg->a52h0_rearm=true;
+    fg->a52h0_id=a52h0_regread(fg,A52G_CHG_DEVICEID);
+    if(fg->a52h0_id<0)
+        return dev_err_probe(fg->dev,-EIO,"P452 H0 chip ID read failed\n");
     a52h0_off(fg,"BOOT_PRE_ARM",false);
     if (fg->a52h0_killed)
         return dev_err_probe(fg->dev,-EIO,
@@ -331,7 +428,7 @@ static enum power_supply_property a52d_props[] = {""","forward functions for FG 
 def check(root):
     s=(root/SRC).read_text()
     for key in (TAG,"P452 H0 OFF reason=","P452 H0 ON manual=1",
-                "P452 H0 KICK wdt=90s","dev_attr_h0_kill",
+                "P452 H0 KICK wdt=90s","dev_attr_h0_kill","dev_attr_a52_h0_enable",
                 "POWER_SUPPLY_PROP_ONLINE",
                 "A52H0_MAX_TICKS (14400UL*HZ)",
                 "A52H0_CHG_FAST_500MA 0x20",
@@ -339,7 +436,7 @@ def check(root):
                 "A52H0_WDTCNTL 0x22",
                 "A52H0_FLOAT_4380_CODE 0x27",
                 "if(fg->a52g_inhibit_latched)",
-                "if(fg->a52h0_full && mv<=4310)",
+                "P452 H0 RECHARGE vbat=",
                 "P447G CHG_GUARD INHIBIT_OK"):
         if key not in s:raise RuntimeError("P452 H0 required contract "+key)
     if s.count("i2c_smbus_write_byte_data(")!=2:
@@ -348,7 +445,12 @@ def check(root):
     h0=s[start:s.index("static void a52g_poll",start)]
     if "i2c_smbus_write_word_data(" in h0:
         raise RuntimeError("P452 H0 FG/OTP writes prohibited")
-    print("P452 H0 SOURCE PASS: manual opt-in, kill latch, 500mA, WDT 90/30s, dual NTC, 4h timer, 4380 float, TOP_OFF/4310 recharge, strict write allowlist")
+    for key in ("input>0x10","P452 H0 STATE from=",
+                "P452 H0 ENABLE cur=500","a52h0_ntc_since+10*HZ",
+                "P452 H0 RECHARGE vbat=","a52_h0_enable",
+                "A52H0_WDTCNTL,0x06","A52H0_WDTCNTL,BIT(0)"):
+        if key not in s:raise RuntimeError("P452 H0 v2 contract "+key)
+    print("P452 H0 SOURCE PASS: guard-first opt-in, handover+thermal hysteresis+FAULT, 500mA, WDT, 4h timer, recharge, strict write allowlist")
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--root",type=Path,required=True)

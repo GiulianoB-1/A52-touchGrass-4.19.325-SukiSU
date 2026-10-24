@@ -183,10 +183,16 @@ def check_h0(s):
     # rescheduled every 10 seconds while H0 is active; it still checks
     # P449 before servicing the watchdog and remains at 2s while inactive.
     poll=s[s.index("static void a52g_poll("):s.index("static enum power_supply_property a52d_props[]")]
-    if "fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52G_GUARD_POLL_MS" not in poll:
+    if "fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52H0_IDLE_POLL_MS" not in poll:
         raise RuntimeError("P457 H0 active 10s / baseline 2s poll gate")
     if "#define A52H0_ACTIVE_POLL_MS 10000" not in s:
-        raise RuntimeError("P457 H0 active interval cannot exceed 10s")
+        raise RuntimeError("P458 H0 active interval must be exactly 10s")
+    if "#define A52H0_IDLE_POLL_MS 30000" not in s:
+        raise RuntimeError("P458 H0 idle interval must be exactly 30s")
+    if not (poll.index("if(a52g_sample(fg,false)<0)") <
+            poll.index("else a52h0_tick(fg)") <
+            poll.index("fg->a52h0_active ? A52H0_ACTIVE_POLL_MS")):
+        raise RuntimeError("P458 H0 P449 guard must run before charger tick and reschedule")
     active=tick[tick.index("if(fg->a52h0_active) {"):tick.index("if(fg->a52h0_timer_started &&")]
     if active.count("a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3))")!=1:
         raise RuntimeError("P457 H0 must kick WDT exactly once per active tick")
@@ -204,6 +210,7 @@ def check_h0(s):
     for marker in (
         "fg->a52h0_killed=true;",
         "P452 H0 INIT_FAIL chip id",
+        "P458 H0 INIT_FAIL BOOT_PRE_ARM inhibit",
         "P452 H0 INIT_FAIL wakeup source",
         "P452 H0 INIT_FAIL sysfs",
         "P452 H0 INIT_FAIL usb",
@@ -212,7 +219,11 @@ def check_h0(s):
         if marker not in init:
             raise RuntimeError("P457 H0 optional init fail-closed contract " + marker)
     if "return dev_err_probe(" in init or "return -EIO;" in init or "return rc;" in init:
-        raise RuntimeError("P457 H0 init must not abort FG/P449 probe")
+        raise RuntimeError("P458 H0 init must not abort FG/P449 probe")
+    if 'if(permanent || rc)fg->a52h0_killed=true;' not in off:
+        raise RuntimeError("P458 H0 BOOT_PRE_ARM OFF error must latch H0 killed")
+    if init.index('a52h0_off(fg,"BOOT_PRE_ARM",false)') > init.index("if(!fg->a52h0_killed)"):
+        raise RuntimeError("P458 H0 boot handover inhibit must be checked before optional registrations")
     if "schedule_delayed_work(&fg->a52g_guard_work" not in probe[p1:]:
         raise RuntimeError("P457 H0 init may suppress periodic P449 guard")
     if "if(fg->a52h0_killed)return" in probe:
@@ -261,7 +272,7 @@ def check_h0(s):
         raise RuntimeError("P457 H0 USB supply registration must occur exactly once")
     if 'POWER_SUPPLY_TYPE_MAINS' in h0:
         raise RuntimeError("P457 H0 must not classify AC without MUIC")
-    print("P457 H0 REVIEW PASS: wake held/cleanup, active 10s WDT kick, no FG probe abort, FULL/HANDOVER, USB only")
+    print("P458 H0 REVIEW PASS: wake held/cleanup, active 10s idle 30s guard-first WDT, nonfatal FG probe, FULL/HANDOVER, USB-only")
 
 def main():
     parser=argparse.ArgumentParser()

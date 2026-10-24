@@ -65,7 +65,11 @@ def check_h0(s):
         "a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3))",
         "a52h0_write_masked(fg,A52G_CHG_CNTL1,A52G_CHG_ENQ4FET,",
     ]
-    where = [tick.find(x) for x in sequence]
+    # The active-session WDT kick appears before the initial-enable
+    # sequence in the tick function. Compare ONLY the enable block,
+    # otherwise the first BIT(3) match is the periodic kick.
+    enable=tick[tick.index("/* Confirm all limits before setting ENQ4FET."):]
+    where = [enable.find(x) for x in sequence]
     if any(x < 0 for x in where) or where != sorted(where):
         raise RuntimeError("P457 H0 reviewed watchdog-before-enable sequencing changed")
     # No direct VBUSCNTL/FACTORY writes: all H0 writes must flow through

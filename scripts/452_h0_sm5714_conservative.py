@@ -282,8 +282,6 @@ def patch(s):
            "fg->dev=&client->dev;\n    i2c_set_clientdata(client,fg);","sysfs context")
     # Install attrs after the initial emergency guard is verified. They
     # default OFF even if the bootloader had ENQ4FET=1.
-    s=once(s,"schedule_delayed_work(&fg->a52g_guard_work,",
-           "schedule_delayed_work(&fg->a52g_guard_work,","keep guard")
     # Target the final return of fg_probe via unique log print to avoid
     # touching the probe start and existing mandatory guard contract.
     anchor='''\tif (IS_ENABLED(CONFIG_A52_447G_CHG_GUARD))

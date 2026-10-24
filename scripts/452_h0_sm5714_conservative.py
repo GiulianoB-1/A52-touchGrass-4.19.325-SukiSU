@@ -314,7 +314,7 @@ static enum power_supply_property a52d_props[] = {""","forward functions for FG 
         v->intval=a52h0_psy_status(fg,!!(st&BIT(0)));
         return 0;
     }
-    /* P452 H0 original status: ''',"power supply source")
+    /* P452 H0 original status is intentionally suppressed. */''',"power supply source")
     # The original STATUS body now occurs after inserted comment; remove
     # the stale UNKNOWN constant/return so it cannot override H0 status.
     s=once(s,

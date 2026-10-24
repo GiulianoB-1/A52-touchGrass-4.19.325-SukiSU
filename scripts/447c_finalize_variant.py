@@ -177,7 +177,11 @@ def main():
         "ALL NEW PORTS STILL REQUIRE SOURCE/DT/ABI/NO-NV CERTIFICATION.\n"
         "Do not expect battery percentage or remoteproc states from gates alone.\n"
         "Retain a known-good recovery boot image.\n"
-        + ("P449F IS NOT A CHARGER PORT. NO NORMAL CHARGING; FG+NTC EMERGENCY INHIBIT ONLY.\n" if x.variant in ("F","G") else ""))
+        + ("P452 DAILY: thermal inhibit only; no normal charging.\n" if x.variant=="F" else "")
+        + ("P452 H0: experimental charging, DISABLED AT BOOT. Require manual h0_arm after both NTCs valid.\n"
+           "Not a full sec_battery/MUIC charger. P449 guard stays above H0.\n"
+           "Only manual ADSP start after SCM, ICE, SMMU checks; recovery boot required.\n"
+           if x.variant=="G" else ""))
     print("P447C BOOT PASS",x.variant,"wave",wave,"mss",mss,"ipa",ipa,
           "primary_length",len(p1),"extra_length",len(xtra),
           "SHA256",sha(built))

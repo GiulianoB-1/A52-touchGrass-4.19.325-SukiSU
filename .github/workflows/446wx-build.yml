@@ -593,8 +593,26 @@ jobs:
           # deliberately replaces. Bring over ONLY the 452 check-only logic
           # after source has already been generated from the pinned 451 base.
           git fetch --depth=1 origin f4d761f945f742e143b537412dca7bf4da7b43f8
-          git show FETCH_HEAD:scripts/447d_readonly_sm5714_fg.py > scripts/447d_readonly_sm5714_fg.py
+          # Copy only audit script versions from P452. The 451 kernel was
+          # already patched by the 451 chain; these run check-only and must
+          # not mutate driver sources or modify .config.
+          for script in \
+            scripts/447d_readonly_sm5714_fg.py \
+            scripts/447e_samsung_battery_platform.py \
+            scripts/447f_soc_scaling.py \
+            scripts/447g_chg_guard.py \
+            scripts/447g_ntc_iio.py \
+            scripts/447h_ntc_retry.py \
+            scripts/447h_tchg_ntc.py \
+            scripts/447h_soc_policy.py \
+            scripts/449f_chg_ntc_guard.py \
+            scripts/450_daily_fg_and_guard_diag.py \
+            scripts/451_daily_readonly.py; do
+            git show "FETCH_HEAD:$script" > "$script"
+          done
           python3 scripts/447d_readonly_sm5714_fg.py --root "$PWD/gki/common" --check-only
+          python3 scripts/447e_samsung_battery_platform.py --root "$PWD/gki/common" --check-only
+          python3 scripts/449f_chg_ntc_guard.py --root "$PWD/gki/common" --check-only
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail

@@ -546,9 +546,23 @@ jobs:
               echo 'P452 UFS ICE not built-in; source freeze audited' >> "$GITHUB_STEP_SUMMARY"
             fi
             if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
-              verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'
+              # P457 reverses the fatal P452 unconditional Lagoon probe
+              # defer. The old post-link POSITIVE check was stale and
+              # incorrectly rejected an otherwise successfully linked Image.
+              test -s "$BUILD/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.o" || {
+                echo '::error title=P457 SMMU missing::qcom arm-smmu object not built'
+                exit 1
+              }
+              if LC_ALL=C grep -aFq 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1' "$IMAGE"; then
+                echo '::error title=P457 SMMU regression::fatal Lagoon forced-defer code is present in Image'
+                exit 1
+              fi
+              # Exact P451-source-delta guard is enforced earlier by
+              # 457_source_safety_gates.py, before compilation.
+              echo 'P457 SMMU LINK PASS: qcom arm-smmu built; fatal forced-defer marker ABSENT; P451 probe path retained'
             else
-              echo 'P452 ARM_SMMU not built-in; no qcom arm-SMMU code activated' >> "$GITHUB_STEP_SUMMARY"
+              echo '::error title=P457 SMMU config::CONFIG_ARM_SMMU=y expected for A52 boot'
+              exit 1
             fi
           fi
           grep -aFq 'P446S MANIFEST PASS' "$IMAGE"

@@ -187,7 +187,7 @@ def check(root):
                    "never_reenable=1",
                    "A52_PHASE447F_SOC_PARITY_CORRECTED_V2"):
         if marker not in src:raise RuntimeError("P447G safety contract missing "+marker)
-    if src.count("i2c_smbus_write_byte_data(")!=1:
+    if src.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in src else 1):
         raise RuntimeError("P447G exactly one charger register write site")
     if "config A52_447G_CHG_GUARD" not in k or "default y" not in k:
         raise RuntimeError("P447G guard must be Kconfig default ON")

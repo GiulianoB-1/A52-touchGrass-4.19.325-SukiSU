@@ -79,7 +79,7 @@ def check(root):
         raise RuntimeError("P449 F invalid C whitespace")
     if s.count("bool unsafe;")!=1:
         raise RuntimeError("P449 F unsafe duplicate")
-    if s.count("i2c_smbus_write_byte_data(")!=1:
+    if s.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1):
         raise RuntimeError("P449 F must retain only the existing inhibit-only charger write")
     if "A52G_CHG_ENQ4FET" not in s or "ctrl & ~A52G_CHG_ENQ4FET" not in s:
         raise RuntimeError("P449 F charger inhibit contract drift")

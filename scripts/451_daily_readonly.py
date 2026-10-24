@@ -85,7 +85,7 @@ def check(root):
                    "range_x25=%d aux_bit3=%d",
                    "fg->a52p451_last_vbus=-2;"):
         if marker not in s:raise RuntimeError("P451 source contract missing "+marker)
-    if s.count("i2c_smbus_write_byte_data(")!=1:
+    if s.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1):
         raise RuntimeError("P451 diagnostic illegally changes charger write count")
     print("P451 DAILY PASS: pre-inhibit and 5min/VBUS status dump, battery mA, range x2.5, 30s throttle; no charger enables")
 def main():

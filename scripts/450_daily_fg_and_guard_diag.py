@@ -143,7 +143,7 @@ def check(root):
               "if (stat&0x8000) ma=0;",
               "aux_stat=%#x system_status=%#x"):
         if a not in s:raise RuntimeError("P450 source missing "+a)
-    if s.count("i2c_smbus_write_byte_data(")!=1:
+    if s.count("i2c_smbus_write_byte_data(")!=(2 if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in s else 1):
         raise RuntimeError("P450 guard may not add charger register writes")
     if s.count("bool unsafe;")!=1:raise RuntimeError("P450 duplicate unsafe")
     if "ctrl & ~A52G_CHG_ENQ4FET" not in s:

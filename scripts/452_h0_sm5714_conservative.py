@@ -9,6 +9,7 @@ is switched OFF by the mandatory existing P449 guard before this controller.
 
 TG sm5714_charger.c 6bf351bd: CHGCNTL2 0x18 <- 0x20 (500mA),
 WDTCNTL 0x22 timer 2 (90s), enable bit0, kick bit3; CNTL1 bit3 ENQ4FET.
+H0 holds a wakeup source throughout charging and releases it on every stop.
 Prohibit FACTORY1/VBUSCNTL/CNTL2 writes. If input>500, DECLINE the
 charge attempt (TG >500 ramp is impossible under this allowlist).
 """
@@ -29,6 +30,8 @@ DECL=r'''
 #define A52H0_FLOAT_4380_CODE 0x27
 #define A52H0_90S_WDT 0x04
 #define A52H0_MAX_TICKS (14400UL*HZ)
+#define A52H0_ACTIVE_POLL_MS 10000
+#define A52H0_OVERVOLT_FAULT_MV 4430
 static int a52h0_regread(struct a52d_fg *fg,u8 r)
 {
     return i2c_smbus_read_byte_data(fg->a52g_chg,r);
@@ -79,10 +82,13 @@ static void a52h0_off(struct a52d_fg *fg,const char *why,bool permanent)
         else rc=-EIO;
     }
     fg->a52h0_active=false;
+    /* Release on every stop path, including FAULT and failed enable. */
+    if(fg->a52h0_wake_held) {
+        __pm_relax(fg->a52h0_ws);
+        fg->a52h0_wake_held=false;
+    }
     if(fg->a52h0_usb && !IS_ERR(fg->a52h0_usb))
         power_supply_changed(fg->a52h0_usb);
-    if(fg->a52h0_ac && !IS_ERR(fg->a52h0_ac))
-        power_supply_changed(fg->a52h0_ac);
     if(permanent || rc)fg->a52h0_killed=true;
     if(fg->a52h0_killed) {
         fg->a52h0_armed=false;
@@ -123,13 +129,14 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
     input=a52h0_regread(fg,A52H0_VBUSCNTL);
     die=a52h0_regread(fg,A52G_CHG_DEVICEID);
     if(st<0 || *st2<0 || fc<0 || flt<0 || ctrl<0 || input<0 || die<0 ||
-       *vcell<3000 || *vcell>4380)
+       *vcell<3000 || *vcell>A52H0_OVERVOLT_FAULT_MV)
         return -EIO;
     if(die!=fg->a52h0_id || (fc&(BIT(0)|BIT(1))) ||
        (flt&0x3f)!=A52H0_FLOAT_4380_CODE || input>0x10)
         return -EUCLEAN; /* Immutable hardware safety contract: FAULT */
     *vb=!!(st&BIT(0));
     if(*st2&BIT(7))return -ETIME;
+    if(*vcell>4380)return -EOVERFLOW; /* FULL, not fault until >4430 */
     if(!a52h0_sensor_safe(fg,ntc,chg_ntc))
         return -ERANGE;
     if(!*vb)return -ENOLINK;
@@ -139,7 +146,7 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
     /* Raw input>0x10 is already a latched FAULT. Never ramp or write VBUSCNTL. */
     /* An expired WDT was handled before temperature checks. */
     if(for_enable && (ctrl&A52G_CHG_ENQ4FET))
-        return -EBUSY; /* guard owns bootloader charging handoff */
+        return -EALREADY; /* bootloader HANDOVER, not FAULT */
     return 0;
 }
 static void a52h0_tick(struct a52d_fg *fg)
@@ -181,6 +188,13 @@ static void a52h0_tick(struct a52d_fg *fg)
             a52h0_off(fg,"WDT_EXPIRED",true);
             if(a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(6),BIT(6)))
                 dev_err(fg->dev,"P452 H0 WDT expired clear FAILED\n");
+        } else if(rc==-EOVERFLOW) {
+            fg->a52h0_full=true;
+            a52h0_off(fg,"TOP_OFF",false);
+        } else if(rc==-EALREADY) {
+            a52h0_off(fg,"BOOT_PRE_ARM",false);
+            fg->a52h0_armed=false;
+            fg->a52h0_rearm=true;
         } else if(rc==-ERANGE || rc==-ENOLINK)
             a52h0_off(fg,rc==-ERANGE ? "temp" : "vbus",false);
         else
@@ -201,14 +215,13 @@ static void a52h0_tick(struct a52d_fg *fg)
            (wdt&0x07)!=(A52H0_90S_WDT|BIT(0))) {
             a52h0_off(fg,"WDT_OR_ENQ4FET_DRIFT",true);goto done;
         }
-        if(time_after_eq(now,fg->a52h0_last_kick+30*HZ)) {
-            rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
-            if(rc){a52h0_off(fg,"WDT_KICK_FAILED",true);goto done;}
-            fg->a52h0_last_kick=now;
-            dev_info(fg->dev,
-               "P452 H0 KICK wdt=90s cycle=30s rc=0 battery=%d chg=%d mv=%d\n",
-               tbat,tchg,mv);
-        }
+        /* One kick on EVERY active tick, no 30s conditional. */
+        rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
+        if(rc){a52h0_off(fg,"WDT_KICK_FAILED",true);goto done;}
+        fg->a52h0_last_kick=now;
+        dev_info(fg->dev,
+           "P452 H0 KICK wdt=90s cycle=10s rc=0 battery=%d chg=%d mv=%d\n",
+           tbat,tchg,mv);
         goto done;
     }
     if(fg->a52h0_timer_started &&
@@ -233,9 +246,13 @@ static void a52h0_tick(struct a52d_fg *fg)
     if(wdt<0 || (wdt&0x7)!=(A52H0_90S_WDT|BIT(0))) {
         rc=-EIO;goto fail;
     }
+    if(!fg->a52h0_ws){rc=-ENODEV;goto fail;}
+    /* Acquire BEFORE ENQ4FET to close the suspend window. */
+    __pm_stay_awake(fg->a52h0_ws);
+    fg->a52h0_wake_held=true;
     rc=a52h0_write_masked(fg,A52G_CHG_CNTL1,A52G_CHG_ENQ4FET,
                            A52G_CHG_ENQ4FET);
-    if(rc)goto fail;
+    if(rc)goto fail; /* a52h0_off releases wake on all errors */
     fg->a52h0_active=true;
     if(!fg->a52h0_timer_started) {
         fg->a52h0_started=now;
@@ -252,8 +269,6 @@ static void a52h0_tick(struct a52d_fg *fg)
     if(fg->psy)power_supply_changed(fg->psy);
     if(fg->a52h0_usb && !IS_ERR(fg->a52h0_usb))
         power_supply_changed(fg->a52h0_usb);
-    if(fg->a52h0_ac && !IS_ERR(fg->a52h0_ac))
-        power_supply_changed(fg->a52h0_ac);
     goto done;
 fail:
     a52h0_off(fg,"ENABLE_FAILED",true);
@@ -360,19 +375,15 @@ static const struct power_supply_desc a52h0_usb_desc={
     .num_properties=ARRAY_SIZE(a52h0_input_props),
     .get_property=a52h0_input_get,
 };
-static const struct power_supply_desc a52h0_ac_desc={
-    .name="ac", .type=POWER_SUPPLY_TYPE_MAINS,
-    .properties=a52h0_input_props,
-    .num_properties=ARRAY_SIZE(a52h0_input_props),
-    .get_property=a52h0_input_get,
-};
 static int a52h0_register_inputs(struct a52d_fg *fg)
 {
     struct power_supply_config cfg={ .drv_data=fg };
     fg->a52h0_usb=devm_power_supply_register(fg->dev,&a52h0_usb_desc,&cfg);
-    if(IS_ERR(fg->a52h0_usb))return PTR_ERR(fg->a52h0_usb);
-    fg->a52h0_ac=devm_power_supply_register(fg->dev,&a52h0_ac_desc,&cfg);
-    if(IS_ERR(fg->a52h0_ac))return PTR_ERR(fg->a52h0_ac);
+    if(IS_ERR(fg->a52h0_usb)) {
+        int rc=PTR_ERR(fg->a52h0_usb);
+        fg->a52h0_usb=NULL;
+        return rc;
+    }
     return 0;
 }
 static int a52h0_psy_status(struct a52d_fg *fg,bool online)
@@ -400,6 +411,9 @@ def patch(s):
               "a52g_ntc_temp(struct a52d_fg *fg)"):
         if x not in s:raise RuntimeError("P452 H0 missing dependency "+x)
     # Store all gate state in existing FG owner; no second driver/device.
+    s=once(s,"#include <linux/i2c.h>",
+           "#include <linux/i2c.h>\n#include <linux/pm_wakeup.h>",
+           "H0 PM wake API")
     s=once(s,"struct delayed_work a52g_guard_work;",
            """struct delayed_work a52g_guard_work;
     struct mutex a52h0_lock;
@@ -408,7 +422,9 @@ def patch(s):
     const char *a52h0_state;
     unsigned long a52h0_ntc_since;
     int a52h0_id;
-    struct power_supply *a52h0_usb, *a52h0_ac;
+    struct power_supply *a52h0_usb;
+    struct wakeup_source *a52h0_ws;
+    bool a52h0_wake_held;
     unsigned long a52h0_started, a52h0_last_kick;""","fields")
     s=once(s,"static void a52g_poll(struct work_struct *work)",
            DECL+"\nstatic void a52g_poll(struct work_struct *work)","controller code")
@@ -418,8 +434,30 @@ def patch(s):
            "        a52h0_off(fg,\"GUARD_IO\",true);\n"
            "        mutex_unlock(&fg->a52h0_lock);\n"
            "    } else a52h0_tick(fg);","poll after existing P449 guard")
+    # Guard FIRST, then H0. Active polling uses 10s without altering
+    # the existing emergency guard's 2s interval while H0 is OFF.
+    p0=s.index("static void a52g_poll(struct work_struct *work)")
+    p1=s.index("static enum power_supply_property a52d_props[]",p0)
+    poll=s[p0:p1]
+    target="msecs_to_jiffies(A52G_GUARD_POLL_MS)"
+    if poll.count(target)!=1:raise RuntimeError("P452 H0 poll timing anchor drift")
+    poll=poll.replace(target,"msecs_to_jiffies(fg->a52h0_active ? A52H0_ACTIVE_POLL_MS : A52G_GUARD_POLL_MS)")
+    s=s[:p0]+poll+s[p1:]
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",
            "mutex_init(&fg->a52g_ntc_lock);\n    mutex_init(&fg->a52h0_lock);","mutex init")
+    # No devm wakeup action: a52d_fg_unregister cancels the guard
+    # worker first, then unregisters the wakeup source. Prevent UAF.
+    s=once(s,"cancel_delayed_work_sync(&fg->a52g_guard_work);",
+           "cancel_delayed_work_sync(&fg->a52g_guard_work);\\n"
+           "    if(fg->a52h0_active)a52h0_off(fg,\\\"REMOVE\\\",true);\\n"
+           "    if(fg->a52h0_wake_held) {\\n"
+           "        __pm_relax(fg->a52h0_ws);\\n"
+           "        fg->a52h0_wake_held=false;\\n"
+           "    }\\n"
+           "    if(fg->a52h0_ws) {\\n"
+           "        wakeup_source_unregister(fg->a52h0_ws);\\n"
+           "        fg->a52h0_ws=NULL;\\n"
+           "    }","ordered wakeup teardown")
     # Must be initialized before publishing /sys/... and before first
     # a52g_sample() is called in the probe.
     s=once(s,"fg->dev=&client->dev;",
@@ -437,18 +475,37 @@ def patch(s):
     fg->a52h0_state="OFF";
     fg->a52h0_rearm=true;
     fg->a52h0_id=a52h0_regread(fg,A52G_CHG_DEVICEID);
-    if(fg->a52h0_id<0)
-        return dev_err_probe(fg->dev,-EIO,"P452 H0 chip ID read failed\n");
-    a52h0_off(fg,"BOOT_PRE_ARM",false);
-    if (fg->a52h0_killed)
-        return dev_err_probe(fg->dev,-EIO,
-                 "P452 H0 startup inhibit unverified\n");
-    rc=a52h0_attrs_create(fg);
-    if (rc)return dev_err_probe(fg->dev,rc,
-                        "P452 H0 sysfs arming controls unavailable\n");
-    rc=a52h0_register_inputs(fg);
-    if (rc)return dev_err_probe(fg->dev,rc,
-                        "P452 H0 usb/ac input supplies unavailable\n");
+    if(fg->a52h0_id<0) {
+        fg->a52h0_killed=true;
+        dev_err(fg->dev,"P452 H0 INIT_FAIL chip id rc=%d; P449 guard retained\n",
+                fg->a52h0_id);
+    } else {
+        /* Bootloader ENQ4FET set is HANDOVER, not an H0 failure. */
+        a52h0_off(fg,"BOOT_PRE_ARM",false);
+    }
+    if(!fg->a52h0_killed) {
+        fg->a52h0_ws=wakeup_source_register(fg->dev,"a52-h0-charging");
+        if(!fg->a52h0_ws) {
+            fg->a52h0_killed=true;
+            dev_err(fg->dev,"P452 H0 INIT_FAIL wakeup source; P449 guard retained\n");
+        }
+    }
+    if(!fg->a52h0_killed) {
+        rc=a52h0_attrs_create(fg);
+        if(rc) {
+            fg->a52h0_killed=true;
+            dev_err(fg->dev,"P452 H0 INIT_FAIL sysfs rc=%d; P449 guard retained\n",rc);
+        }
+    }
+    if(!fg->a52h0_killed) {
+        rc=a52h0_register_inputs(fg);
+        if(rc) {
+            fg->a52h0_killed=true;
+            dev_err(fg->dev,"P452 H0 INIT_FAIL usb rc=%d; P449 guard retained\n",rc);
+        }
+    }
+    if(fg->a52h0_killed)
+        dev_warn(fg->dev,"P452 H0 FAULT_LATCHED init; no arm, P449 guard scheduled\n");
 '''+anchor,"attrs after probe")
     # Old guard did one charger write. H0 adds exactly ONE audited generic
     # write site; no factory/input/float/FG NV register writes allowed.
@@ -492,6 +549,11 @@ def check(root):
                 "A52H0_FLOAT_4380_CODE 0x27",
                 "if(fg->a52g_inhibit_latched)",
                 "P452 H0 RECHARGE vbat=",
+                "A52H0_ACTIVE_POLL_MS 10000",
+                "wakeup_source_register(fg->dev",
+                "wakeup_source_unregister(fg->a52h0_ws)",
+                "P452 H0 INIT_FAIL",
+                "POWER_SUPPLY_STATUS_FULL",
                 "P447G CHG_GUARD INHIBIT_OK"):
         if key not in s:raise RuntimeError("P452 H0 required contract "+key)
     if s.count("i2c_smbus_write_byte_data(")!=2:

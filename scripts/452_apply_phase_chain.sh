@@ -181,6 +181,13 @@ if [ "${A52_VARIANT_ID}" = F ] || [ "${A52_VARIANT_ID}" = G ]; then
   python3 -m py_compile scripts/451_daily_readonly.py
   python3 scripts/451_daily_readonly.py --root "$ROOT"
   python3 scripts/451_daily_readonly.py --root "$ROOT" --check-only
+  if [ "${A52_VARIANT_ID}" = F ]; then
+    # 451-DAILY capture 2026-10-24 11:42: real charger status only.
+    # No charging enable path or policy transition.
+    python3 -m py_compile scripts/453_daily_battery_status.py
+    python3 scripts/453_daily_battery_status.py --root "$ROOT"
+    python3 scripts/453_daily_battery_status.py --root "$ROOT" --check-only
+  fi
   if [ "${A52_VARIANT_ID}" = G ]; then
     python3 -m py_compile scripts/452_h0_sm5714_conservative.py
     python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT"
@@ -210,6 +217,15 @@ python3 scripts/447l_usb_stage_diag.py --root "$ROOT" --check-only
 python3 -m py_compile scripts/447n_late_touch_usb_function.py
 python3 scripts/447n_late_touch_usb_function.py --root "$ROOT"
 python3 scripts/447n_late_touch_usb_function.py --root "$ROOT" --check-only
+if [ "${A52_VARIANT_ID}" = F ]; then
+  # P453: cold-good tune/efuse and counted regulator ownership after resume.
+  # Only F (DAILY). G's experimental charger remains separately gated.
+  python3 -m py_compile scripts/453_daily_usb_resume.py scripts/453_daily_usb_vbus_wake.py
+  python3 scripts/453_daily_usb_resume.py --root "$ROOT"
+  python3 scripts/453_daily_usb_resume.py --root "$ROOT" --check-only
+  python3 scripts/453_daily_usb_vbus_wake.py --root "$ROOT"
+  python3 scripts/453_daily_usb_vbus_wake.py --root "$ROOT" --check-only
+fi
 if [ "${A52_VARIANT_IPC}" = 1 ]; then
   python3 -m py_compile scripts/448a_ipc_stage1.py
   python3 scripts/448a_ipc_stage1.py --root "$ROOT" --tg "$PWD/workspace/touchgrass-a52xq"

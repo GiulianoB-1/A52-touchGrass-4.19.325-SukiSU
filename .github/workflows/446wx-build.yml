@@ -1,9 +1,9 @@
-name: Mangrove P457 full 452-G minus fatal SMMU defer, SCM-off DSP DTB
-run-name: P457 452-G ICE + H0 + SCM freezes; SMMU probe preserved; SCM-off DTB
+name: Mangrove P458 H0 safety plus ramoops ECC48, P457 SMMU frozen
+run-name: P458 H0 reviewed charger + ramoops ECC48, P457 SMMU unchanged, DSP/SCM frozen
 on:
   push:
     branches:
-      - agent/p457-452g-no-smmu-defer
+      - agent/p458-h0-pstore-ecc48
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: G, label: P457-452G-NO-SMMU-DEFER, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P458-H0-PSTORE-ECC48, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -256,11 +256,12 @@ jobs:
           # Pin the known-working P451 SMMU source before Phase452.
           cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c" "$RUNNER_TEMP/P457-PRE-SMMU.c"
           bash -n scripts/452_apply_phase_chain.sh
+          python3 -m py_compile scripts/458_pstore_ecc48_dtb.py scripts/457_source_safety_gates.py scripts/452_h0_sm5714_conservative.py
           bash scripts/452_apply_phase_chain.sh
           grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
           grep -Fq '#define A52_UFS_ICE_SAFE_BRINGUP' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
           python3 scripts/457_source_safety_gates.py --root "$ROOT" --baseline-smmu "$RUNNER_TEMP/P457-PRE-SMMU.c"
-          echo 'P457 452G SOURCE PASS: ICE + H0 + SCM caller freezes; P451 SMMU probe retained'
+          echo 'P458 SOURCE PASS: reviewed H0 10s active / 30s idle; P457 452G SMMU frozen, no new DSP/SCM runtime'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -852,7 +853,20 @@ jobs:
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
               | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
-            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P457 452-G SCM-OFF DTB VERIFIED")'
+            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P458 P457-BASE SCM-OFF DTB VERIFIED")'
+            # P458 only changes the finalized boot FDT's ramoops node:
+            # drop inert reservation duplicate, keep a single active region,
+            # set ecc-size=<48>. No kernel/ramdisk/SCM/PAS modifications.
+            python3 scripts/458_pstore_ecc48_dtb.py --boot "$MANGROVE_BOOT" \
+              --output phase447b-variants/MANGROVE-P458-H0-RAMOOPS-ECC48.boot.img \
+              --report phase447b-variants/P458-RAMOOPS-DTB-MANIFEST.json
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-P458-H0-RAMOOPS-ECC48.boot.img"
+            python3 scripts/458_pstore_ecc48_dtb.py --boot "$MANGROVE_BOOT" --check-only \
+              | tee phase447b-variants/P458-RAMOOPS-BOOT-AUDIT.txt
+            # Final post-repack SCM invariant: never sneak in an active SCM
+            # OF node while changing the single ramoops reservation.
+            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-P458-H0-RAMOOPS-ECC48.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "P458 accidentally added SCM"; print("P458 NO-NEW-SCM-DTB PASS")'
+            echo 'P458 runtime acceptance (NOT CI-verified): pstore: Registered ramoops' >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
@@ -990,13 +1004,16 @@ jobs:
             phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload MANGROVE-452-DSP-CHG (H0 manual charger opt-in + manual ADSP; experimental)
+      - name: Upload MANGROVE-P458 H0 + ECC48 (charging default OFF; manual PAS unchanged)
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-P457-452G-NO-SMMU-DEFER-${{ github.run_number }}
+          name: MANGROVE-P458-H0-PSTORE-ECC48-${{ github.run_number }}
           path: |
+            phase447b-variants/MANGROVE-P458-H0-RAMOOPS-ECC48.boot.img
             phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
+            phase447b-variants/P458-RAMOOPS-DTB-MANIFEST.json
+            phase447b-variants/P458-RAMOOPS-BOOT-AUDIT.txt
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
@@ -1005,6 +1022,8 @@ jobs:
             phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json
             phase447-inventory/P452-SCM-CALLERS.json
             scripts/452_h0_sm5714_conservative.py
+            scripts/457_source_safety_gates.py
+            scripts/458_pstore_ecc48_dtb.py
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review

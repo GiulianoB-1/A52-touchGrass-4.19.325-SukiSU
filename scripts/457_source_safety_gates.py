@@ -189,11 +189,12 @@ def check_h0(s):
     # state variable 'a52h0_active'. Substring checks falsely reject it.
     import re
     if ('.name="ac"' in h0 or
-        re.search(r"\\ba52h0_ac\\b", h0) or
-        re.search(r"\\ba52h0_ac_desc\\b", h0)):
+        re.search(r"\ba52h0_ac\b", h0) or
+        re.search(r"\ba52h0_ac_desc\b", h0)):
         raise RuntimeError("P457 H0 must not publish a fake AC supply")
     # Catch regression of this gate itself: active state is not an AC psy.
-    assert re.search(r"\\ba52h0_ac\\b", "a52h0_active") is None
+    assert re.search(r"\ba52h0_ac\b", "a52h0_active") is None
+    assert re.search(r"\ba52h0_ac\b", "a52h0_ac") is not None
     if h0.count('.name="usb", .type=POWER_SUPPLY_TYPE_USB') != 1:
         raise RuntimeError("P457 H0 expected exactly one VBUS-backed USB supply")
     if h0.count("devm_power_supply_register(fg->dev,&a52h0_usb_desc,&cfg)") != 1:

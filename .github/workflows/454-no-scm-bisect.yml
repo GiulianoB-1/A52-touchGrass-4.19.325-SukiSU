@@ -1,0 +1,67 @@
+name: Mangrove P454 SCM-off bisect (G #487, no kernel rebuild)
+run-name: P454 no-SCM exact-image bisect + optional ECC16 pstore
+on:
+  push:
+    branches:
+      - agent/p454-scm-off-bisect
+    paths:
+      - scripts/454_scm_off_bisect.py
+      - .github/workflows/454-no-scm-bisect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: mangrove-p454-no-scm
+  cancel-in-progress: false
+jobs:
+  bisect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deterministic bisect builder
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/454_scm_off_bisect.py scripts/u1_patch_boot_dtb.py scripts/38_repack_a52_p1_boot.py
+      - name: Download exact previously compiled G 487 kernel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p phase454/source
+          gh run download 40091810132 \
+            -R GiulianoB-1/A526B-Mangrove-Kernel \
+            -n MANGROVE-452-DSP-CHG-487 \
+            -D phase454/source
+          SRC="phase454/source/phase447b-variants/MANGROVE-452-DSP-CHG.boot.img"
+          test -s "$SRC"
+          echo "c633875defc4ff7d573fd73d4d14b631ef17027d9cf1dd0e7ff9317fb7b5de2e  $SRC" | sha256sum -c -
+      - name: Create SCM-off control and SCM-off ECC16 crash diagnostic
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/454_scm_off_bisect.py \
+            --source phase454/source/phase447b-variants/MANGROVE-452-DSP-CHG.boot.img \
+            --out phase454/out
+          cd phase454/out
+          echo '784babd942476d7194f6b8ce704899ff8658e9a9c4e76956ac00f02531d48add  MANGROVE-452-SCM-OFF-487.boot.img' | sha256sum -c -
+          echo '1dc649bd3b30476640a61d9142f9a1c0ca14a97609266f9b8c789e5a9aeb060b  MANGROVE-452-SCM-OFF-PSTORE-ECC16-487.boot.img' | sha256sum -c -
+          {
+            echo '## Mangrove P454 - no-SCM bisect'
+            echo 'Source: compiled #487 G image (SHA256 pinned); kernel+ramdisk byte-identical.'
+            echo 'Control: remove only /firmware/scm; retain stock pstore settings.'
+            echo 'Diagnostic: also enable ramoops ECC16 with 256KiB record/console/pmsg.'
+            echo 'H0 charger remains experimental and manual/unarmed; do not enable.'
+            echo 'Secure-side SMMU reset is NOT proven fixed until a controlled hardware boot.'
+            echo 'Use a known-good recovery; no automated flash.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish audited bisect images (NOT hardware-tested)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MANGROVE-454-SCM-OFF-BISECT
+          path: |
+            phase454/out/MANGROVE-452-SCM-OFF-487.boot.img
+            phase454/out/MANGROVE-452-SCM-OFF-PSTORE-ECC16-487.boot.img
+            phase454/out/P454-MANIFEST.json
+          if-no-files-found: error
+          retention-days: 30

@@ -1,9 +1,9 @@
-name: Mangrove P456 D - full 452 source minus ICE, with 451 SCM-off DSP DTB
-run-name: P456 D isolated 452-minus-ICE SCM-off build (H0 UNARMED)
+name: Mangrove P457 full 452-G minus fatal SMMU defer, SCM-off DSP DTB
+run-name: P457 452-G ICE + H0 + SCM freezes; SMMU probe preserved; SCM-off DTB
 on:
   push:
     branches:
-      - agent/p456-d-452-minus-ice
+      - agent/p457-452g-no-smmu-defer
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: G, label: P456-D-452-NO-ICE, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P457-452G-NO-SMMU-DEFER, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -253,16 +253,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="$PWD/gki/common"
-          cp "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c" "$RUNNER_TEMP/P456-PRE-ICE.c"
+          # Pin the known-working P451 SMMU source before Phase452.
+          cp "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c" "$RUNNER_TEMP/P457-PRE-SMMU.c"
           bash -n scripts/452_apply_phase_chain.sh
           bash scripts/452_apply_phase_chain.sh
-          cp "$RUNNER_TEMP/P456-PRE-ICE.c" "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
+          grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
           grep -Fq '#define A52_UFS_ICE_SAFE_BRINGUP' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
-          if grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"; then
-            echo 'P456 D ERROR: P452 ICE guard was not fully rolled back'; exit 1
-          fi
-          grep -Fq 'A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
-          echo 'P456 D SOURCE PASS: full G P452 source stage, ONLY ICE restored to original P451/P97 bypass'
+          python3 scripts/457_source_safety_gates.py --root "$ROOT" --baseline-smmu "$RUNNER_TEMP/P457-PRE-SMMU.c"
+          echo 'P457 452G SOURCE PASS: ICE + H0 + SCM caller freezes; P451 SMMU probe retained'
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail
@@ -332,16 +330,10 @@ jobs:
           if [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/450_dsp_aoss_source_prep.py --root "$ROOT" --check-only
             python3 scripts/451_dsp_pas_source.py --root "$ROOT" --check-only
-            # ICE P452 edit intentionally absent in P456-D, so the original
-            # P452 source audit (which requires it) cannot be used here.
-            # Verify the retained SMMU+9 caller freezes and unchanged P97 bypass.
-            grep -Fq 'A52_PHASE452_SCM_ICE_SMMU_FREEZE_V1' "$ROOT/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c"
-            for file in drivers/remoteproc/qcom_wcnss.c drivers/remoteproc/qcom_q6v5_mss.c drivers/mmc/host/sdhci-msm.c drivers/gpu/drm/msm/adreno/adreno_gpu.c drivers/cpuidle/cpuidle-qcom-spm.c drivers/media/platform/qcom/venus/firmware.c drivers/soc/qcom/rmtfs_mem.c drivers/soc/qcom/ocmem.c drivers/net/ipa/ipa_main.c; do
-              grep -Fq 'A52_PHASE452_SCM_AVAILABILITY_FROZEN_V1' "$ROOT/$file"
-            done
-            grep -Fq 'A52 diagnostic: bypassing ICE for storage bring-up' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
-            ! grep -Fq 'P452 ICE EARLY_FAIL_CLOSED' "$ROOT/drivers/scsi/ufs/ufs-qcom-ice.c"
+            # Re-audit full 452-G including ICE, then review H0.
+            python3 scripts/452_scm_ufs_ice_audit.py --root "$ROOT" --check-only
             python3 scripts/452_h0_sm5714_conservative.py --root "$ROOT" --check-only
+            python3 scripts/457_source_safety_gates.py --root "$ROOT" --baseline-smmu "$RUNNER_TEMP/P457-PRE-SMMU.c"
           fi
           python3 scripts/447j_vblank_diag.py --root "$ROOT" --check-only
           python3 scripts/447k_vblank_hooks.py --root "$ROOT" --check-only
@@ -835,7 +827,7 @@ jobs:
               | tee phase447b-variants/P453-RAMOOPS-BOOT-AUDIT.txt
           fi
           if [ "${{ matrix.variant.id }}" = G ]; then
-            # P456 D must use the exact booting P451-DSP map: NO /firmware/scm.
+            # P457 452-G must use the booting P451-DSP map: NO /firmware/scm.
             git fetch --depth=1 origin b80b04b64c0c7dfcf48a3aac0174f7b834f8b142
             git show FETCH_HEAD:scripts/451_dsp_boot_dtb.py > scripts/451_dsp_boot_dtb.py
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
@@ -846,7 +838,7 @@ jobs:
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
               | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
-            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P456 D SCM-OFF DTB VERIFIED")'
+            python3 -c 'import runpy,sys; sys.path.insert(0,"scripts"); from pathlib import Path; from u1_patch_boot_dtb import walk; p=runpy.run_path("scripts/38_repack_a52_p1_boot.py")["parse_boot"]; dtb=p(Path("phase447b-variants/MANGROVE-452-DSP-CHG.boot.img").read_bytes())["dtb"]; assert all(path!="/firmware/scm" for path, *_ in walk(dtb)), "SCM unexpectedly present"; print("P457 452-G SCM-OFF DTB VERIFIED")'
           fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
@@ -988,7 +980,7 @@ jobs:
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-P456-D-NO-ICE-${{ github.run_number }}
+          name: MANGROVE-P457-452G-NO-SMMU-DEFER-${{ github.run_number }}
           path: |
             phase447b-variants/MANGROVE-452-DSP-CHG.boot.img
             phase447b-variants/compiled-variant.json

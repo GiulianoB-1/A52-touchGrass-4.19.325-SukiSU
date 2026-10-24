@@ -240,9 +240,29 @@ def check(root):
     mk=(root/M).read_text()
     cfg=(root/K).read_text()
     for marker in (TAG,"POWER_SUPPLY_PROP_CAPACITY","P447 W2 battery FIRST",
-      "A52D_FG_RADDR","A52_447_SM5714","i2c_new_dummy_device",
-      "POWER_SUPPLY_STATUS_UNKNOWN"):
+      "A52D_FG_RADDR","A52_447_SM5714","i2c_new_dummy_device"):
         if marker not in f:raise RuntimeError("P447D FG source missing "+marker)
+    # P447D is read-only and reports UNKNOWN until the explicitly selected
+    # P452 H0 charger controller adds real, opt-in charger state. The strict
+    # pre-compile audit runs after overlays, so enforce the correct contract
+    # for the final assembled source rather than requiring the old placeholder.
+    if "A52_PHASE452_H0_MANUAL_SAFE_CHARGER_V1" in f:
+        for marker in (
+            "static int a52h0_psy_status(",
+            "if(fg->a52h0_full)return POWER_SUPPLY_STATUS_FULL;",
+            "if(fg->a52h0_active)return POWER_SUPPLY_STATUS_CHARGING;",
+            "POWER_SUPPLY_STATUS_NOT_CHARGING",
+            "POWER_SUPPLY_STATUS_DISCHARGING",
+            "v->intval=a52h0_psy_status(fg,!!(st&BIT(0)))",
+            "static DEVICE_ATTR(a52_h0_enable,0600,h0_arm_show,h0_arm_store);",
+        ):
+            if marker not in f:
+                raise RuntimeError("P447D H0 final status contract missing "+marker)
+        if "POWER_SUPPLY_STATUS_UNKNOWN" in f:
+            raise RuntimeError("P447D H0 still contains obsolete UNKNOWN status")
+        print("P447D FG H0 STATUS PASS: real opt-in charging/full/not-charging state")
+    elif "POWER_SUPPLY_STATUS_UNKNOWN" not in f:
+        raise RuntimeError("P447D FG RO fallback must report UNKNOWN")
     if "A52D_FG_WADDR" in f or "A52D_FG_WDATA" in f:
         raise RuntimeError("P447D FG contains a forbidden WADDR/WDATA constant")
     if "obj-$(CONFIG_A52_447D_SM5714_RO)" not in mk:

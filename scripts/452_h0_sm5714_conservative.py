@@ -415,7 +415,7 @@ def patch(s):
     s=once(s,"(void)a52g_sample(fg,false);",
            "if(a52g_sample(fg,false)<0) {\n"
            "        mutex_lock(&fg->a52h0_lock);\n"
-           "        a52h0_off(fg,\\\"GUARD_IO\\\",true);\n"
+           "        a52h0_off(fg,\"GUARD_IO\",true);\n"
            "        mutex_unlock(&fg->a52h0_lock);\n"
            "    } else a52h0_tick(fg);","poll after existing P449 guard")
     s=once(s,"mutex_init(&fg->a52g_ntc_lock);",

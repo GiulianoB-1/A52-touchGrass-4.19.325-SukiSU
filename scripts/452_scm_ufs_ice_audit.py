@@ -13,6 +13,44 @@ ICE=Path("drivers/scsi/ufs/ufs-qcom-ice.c")
 SMMU=Path("drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c")
 SCM=Path("drivers/firmware/qcom_scm.c")
 
+
+# On Lagoon only PAS is opted into native SCM; all other consumers must
+# retain P451 no-provider behavior rather than silently changing hardware.
+INCIDENTAL_SCM_CALLERS=[
+ "drivers/remoteproc/qcom_wcnss.c",
+ "drivers/remoteproc/qcom_q6v5_mss.c",
+ "drivers/mmc/host/sdhci-msm.c",
+ "drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+ "drivers/cpuidle/cpuidle-qcom-spm.c",
+ "drivers/media/platform/qcom/venus/firmware.c",
+]
+SCM_FREEZE_TAG="A52_PHASE452_SCM_AVAILABILITY_FROZEN_V1"
+def freeze_incidental_scm(root):
+    for rel in INCIDENTAL_SCM_CALLERS:
+        p=root/rel
+        if not p.is_file():raise RuntimeError("P452 missing SCM caller "+rel)
+        s=p.read_text()
+        if SCM_FREEZE_TAG in s:continue
+        n=s.count("qcom_scm_is_available()")+s.count("qcom_scm_ice_available()")
+        if not n:raise RuntimeError("P452 SCM availability caller drift "+rel)
+        if "#include <linux/of.h>" not in s:
+            pos=s.find("#include ")
+            if pos<0:raise RuntimeError("P452 no include anchor "+rel)
+            s=s[:pos]+"#include <linux/of.h>\\n"+s[pos:]
+        s=s.replace("qcom_scm_is_available()",
+          '(!of_machine_is_compatible("qcom,lagoon") && qcom_scm_is_available())')
+        s=s.replace("qcom_scm_ice_available()",
+          '(!of_machine_is_compatible("qcom,lagoon") && qcom_scm_ice_available())')
+        s=s.replace("#include <linux/of.h>",
+          "#include <linux/of.h>\\n/* "+SCM_FREEZE_TAG+" */",1)
+        p.write_text(s)
+def check_incidental_scm(root):
+    for rel in INCIDENTAL_SCM_CALLERS:
+        s=(root/rel).read_text()
+        if s.count(SCM_FREEZE_TAG)!=1:raise RuntimeError("P452 SCM missing marker "+rel)
+        if '(!of_machine_is_compatible("qcom,lagoon") && qcom_scm_' not in s:
+            raise RuntimeError("P452 SCM missing Lagoon freeze "+rel)
+
 def once(s,a,b,name):
     n=s.count(a)
     if n!=1:raise RuntimeError(f"P452 {name}: anchor count {n}")
@@ -68,6 +106,7 @@ def patch(root):
         IS_ENABLED(CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT));''',
         "SCM probe marker")
     scm_file.write_text(scm)
+    freeze_incidental_scm(root)
     check(root)
 
 def check(root):
@@ -87,7 +126,8 @@ def check(root):
         ("qsmmu = devm_kzalloc(smmu->dev",smmu)]:
         if required not in src:
             raise RuntimeError("P452 source safety guard missing "+required)
-    print("P452 SCM SOURCE PASS: Lagoon UFS ICE remains OFF; Qualcomm SMMU stays deferred; PAS opt-in only")
+    check_incidental_scm(root)
+    print("P452 SCM SOURCE PASS: Lagoon ICE disabled, qcom SMMU deferred, 6 incidental consumers kept at 451 behavior; PAS manual only")
 
 def audit_calls(root,out):
     """Enumerate all direct compiled-tree SCM callsites for human review.
@@ -119,7 +159,13 @@ def audit_calls(root,out):
       "drivers/remoteproc/qcom_q6v5_pas.c",
       str(ICE),str(SMMU),"drivers/firmware/qcom_scm.c",
     }
-    bad=[r for r in conds if r["file"] not in expected]
+    scoped=set(INCIDENTAL_SCM_CALLERS)
+    bad=[r for r in conds if r["file"] not in expected and
+         not (r["file"] in scoped and
+              '!of_machine_is_compatible("qcom,lagoon")' in r["text"])]
+    # Exact manifest of frozen conditional SCM sites, never silently exempt.
+    if {r["file"] for r in conds if r["file"] in scoped}!=scoped:
+        raise RuntimeError("P452 incidental availability source inventory drift")
     obj={"tag":TAG,"total_callsite_lines":len(records),
          "unique_symbols":sorted(names),
          "conditional_availability_sites":conds,
@@ -128,7 +174,7 @@ def audit_calls(root,out):
     out.parent.mkdir(parents=True,exist_ok=True)
     out.write_text(json.dumps(obj,indent=2)+"\n")
     if bad:
-        raise RuntimeError("P452 SCM: additional availability-branching callers require review "+repr(bad[:6]))
+        raise RuntimeError("P452 SCM: additional availability-branching callers require review "+repr(bad))
     check(root)
     print(f"P452 SCM CALLER AUDIT PASS source_sites={len(records)} symbols={len(names)} conditional_sites={len(conds)}")
     print("P452 SCM KNOWN RISKS: downstream SCM coexistence, Venus/ZAP/PAS secure calls, no normal charging changes")

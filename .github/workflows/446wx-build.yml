@@ -510,10 +510,14 @@ jobs:
             verify_g_marker 'P452 H0 KICK wdt=90s'
             verify_g_marker 'P452 H0 STOP reason='
             verify_g_marker 'P452 SCM PROBED native_5_10=1 dload_default='
-            if grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
+            # Kbuild: ufs-qcom-ice.o needs BOTH the Qualcomm UFS host
+            # and inline crypto. The source safety audit runs in all cases.
+            grep -E '^CONFIG_SCSI_UFS_(QCOM|CRYPTO)=' "$BUILD/.config" || true
+            if grep -Fxq 'CONFIG_SCSI_UFS_QCOM=y' "$BUILD/.config" &&
+               grep -Fxq 'CONFIG_SCSI_UFS_CRYPTO=y' "$BUILD/.config"; then
               verify_g_marker 'P452 SCM UFS_ICE_FROZEN off baseline_451=1'
             else
-              echo 'P452 UFS ICE crypto driver absent; no ICE path can activate' >> "$GITHUB_STEP_SUMMARY"
+              echo 'P452 UFS ICE not built-in; freeze confirmed by strict final-tree source audit' >> "$GITHUB_STEP_SUMMARY"
             fi
             if grep -Fxq 'CONFIG_ARM_SMMU=y' "$BUILD/.config"; then
               verify_g_marker 'P452 SCM QCOM_SMMU_FROZEN defer baseline_451=1'

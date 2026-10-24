@@ -1080,18 +1080,18 @@ jobs:
           cmp "$ORIGINAL_BOOT" "$MANGROVE_BOOT"
           if [ "${{ matrix.variant.id }}" = G ]; then
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
-              --output phase447b-variants/MANGROVE-451-DSP.boot.img \
-              --report phase447b-variants/P451-DSP-DTB-MANIFEST.json \
+              --output phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img \
+              --report phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json \
               --config workspace/gki-phase199-out/.config
-            MANGROVE_BOOT="phase447b-variants/MANGROVE-451-DSP.boot.img"
+            MANGROVE_BOOT="phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img"
             python3 scripts/451_dsp_boot_dtb.py --boot "$MANGROVE_BOOT" \
               --config workspace/gki-phase199-out/.config --check-only \
-              | tee phase447b-variants/P451-DSP-BOOT-AUDIT.txt
+              | tee phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
           fi
           if [ "${{ matrix.variant.id }}" = E ]; then
             cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-449-DAILY.boot.img
           elif [ "${{ matrix.variant.id }}" = F ]; then
-            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-451-DAILY.boot.img
+            cp "$MANGROVE_BOOT" phase447b-variants/MANGROVE-452-DAILY.boot.img
           fi
           printf 'Mangrove Kernel variant %s packaged: %s\n' "${{ matrix.variant.id }}" "$MANGROVE_BOOT" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ matrix.variant.ipc }}" = 1 ]; then
@@ -1208,32 +1208,33 @@ jobs:
           if-no-files-found: warn
           compression-level: 1
           retention-days: 7
-      - name: Upload MANGROVE-451-DAILY (read-only charger diagnostics, no charging)
+      - name: Upload MANGROVE-452-DAILY (read-only charger diagnostics, no charging)
         if: success() && matrix.variant.id == 'F'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-451-DAILY-${{ github.run_number }}
+          name: MANGROVE-452-DAILY-${{ github.run_number }}
           path: |
-            phase447b-variants/MANGROVE-451-DAILY.boot.img
+            phase447b-variants/MANGROVE-452-DAILY.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
           if-no-files-found: error
           compression-level: 0
-      - name: Upload MANGROVE-451-DSP (manual ADSP, autoboot disabled, no charger)
+      - name: Upload MANGROVE-452-DSP-SCM-TEST (manual ADSP, autoboot disabled, no charger)
         if: success() && matrix.variant.id == 'G'
         uses: actions/upload-artifact@v4
         with:
-          name: MANGROVE-451-DSP-${{ github.run_number }}
+          name: MANGROVE-452-DSP-SCM-TEST-${{ github.run_number }}
           path: |
-            phase447b-variants/MANGROVE-451-DSP.boot.img
+            phase447b-variants/MANGROVE-452-DSP-SCM-TEST.boot.img
             phase447b-variants/compiled-variant.json
             phase447b-variants/READ-BEFORE-FLASH.txt
             phase447b-variants/P448-IPC-BOOT-AUDIT.txt
             phase447b-variants/P448-GLINK-QRTR-BOOT-AUDIT.txt
-            phase447b-variants/P451-DSP-BOOT-AUDIT.txt
-            phase447b-variants/P451-DSP-DTB-MANIFEST.json
+            phase447b-variants/P452-SCM-DSP-BOOT-AUDIT.txt
+            phase447b-variants/P452-SCM-DSP-DTB-MANIFEST.json
+            phase447-inventory/P452-SCM-CALLERS.json
           if-no-files-found: error
           compression-level: 0
       - name: Upload Phase447 manifest and compatibility review

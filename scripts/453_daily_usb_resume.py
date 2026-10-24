@@ -22,9 +22,9 @@ def patch(s):
               "static int qusb_phy_init(struct usb_phy *phy)",
               "static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)"):
         if v not in s:raise RuntimeError("P453 USB prerequisite missing "+v)
-    s=once(s,'''	bool			override_bias_ctrl2;
+    s=once(s,r'''	bool			override_bias_ctrl2;
 };''',
-       '''	bool			override_bias_ctrl2;
+       r'''	bool			override_bias_ctrl2;
 	/* A52_PHASE453_QUSB2_S2IDLE_RESTORE_V1
 	 * Only successful regulator_enable() permits one disable vote.
 	 * Duplicate suspend callbacks must not underflow PM6350 LDOs.
@@ -45,7 +45,7 @@ def patch(s):
     part=s[start:end]
     part=once(part,"int ret = 0;","int ret = 0, first_err = 0;","disable rc")
     part=once(part,"mutex_lock(&qphy->lock);",
-       '''mutex_lock(&qphy->lock);
+       r'''mutex_lock(&qphy->lock);
 	if (!qphy->a52_rails_on) {
 		dev_info(qphy->phy.dev,"P453 QUSB RAIL skip_duplicate_disable\n");
 		mutex_unlock(&qphy->lock);
@@ -55,11 +55,11 @@ def patch(s):
         original=f"ret = regulator_disable(qphy->{which});"
         part=once(part,original,original+"\n\tif (ret && !first_err) first_err = ret;",
                   "retain first disable failure "+which)
-    part=once(part,'''	mutex_unlock(&qphy->lock);
+    part=once(part,r'''	mutex_unlock(&qphy->lock);
 
 	return ret;
 }''',
-       '''	if (!first_err)
+       r'''	if (!first_err)
 		qphy->a52_rails_on = false;
 	else
 		dev_err(qphy->phy.dev,
@@ -74,36 +74,36 @@ def patch(s):
     end=s.index("static void qusb_phy_get_tune1_param(",start)
     part=s[start:end]
     part=once(part,"mutex_lock(&qphy->lock);",
-      '''mutex_lock(&qphy->lock);
+      r'''mutex_lock(&qphy->lock);
 	if (qphy->a52_rails_on) {
 		dev_info(qphy->phy.dev,"P453 QUSB RAIL reuse enabled supplies\n");
 		mutex_unlock(&qphy->lock);
 		return 0;
 	}''',"enable ownership check")
-    part=once(part,'''	pr_debug("%s(): QUSB PHY's regulators are turned ON.\n", __func__);''',
-       '''	qphy->a52_rails_on = true;
+    part=once(part,r'''	pr_debug("%s(): QUSB PHY's regulators are turned ON.\n", __func__);''',
+       r'''	qphy->a52_rails_on = true;
 	dev_info(qphy->phy.dev,"P453 QUSB RAIL enabled=1 balanced=1\n");
 	pr_debug("%s(): QUSB PHY's regulators are turned ON.\n", __func__);''',"mark vote after all rails")
     s=s[:start]+part+s[end:]
     s=once(s,"qphy->tune_val = readl_relaxed(qphy->efuse_reg);",
-       '''qphy->tune_val = qphy->a52_efuse_valid ?
+       r'''qphy->tune_val = qphy->a52_efuse_valid ?
 		qphy->a52_efuse_cached : readl_relaxed(qphy->efuse_reg);''',
        "do not reread unpowered efuse")
     start=s.index("static int qusb_phy_init(struct usb_phy *phy)")
     end=s.index("static void qusb_phy_shutdown(struct usb_phy *phy)",start)
     part=s[start:end]
     part=once(part,"int p_index;","int p_index, p453_rc;","init rc")
-    part=once(part,'''	qusb_phy_reset(qphy);''',
-       '''	/* Ensure rails are up BEFORE reset, tune or PLL polling. */
+    part=once(part,r'''	qusb_phy_reset(qphy);''',
+       r'''	/* Ensure rails are up BEFORE reset, tune or PLL polling. */
 	p453_rc = qusb_phy_enable_power(qphy);
 	if (p453_rc) {
 		dev_err(phy->dev,"P453 QUSB PHY init rails failed rc=%d\n",p453_rc);
 		return p453_rc;
 	}
 	qusb_phy_reset(qphy);''',"init power before reset")
-    part=once(part,'''	/* ensure above writes are completed before re-enabling PHY */
+    part=once(part,r'''	/* ensure above writes are completed before re-enabling PHY */
 	wmb();''',
-       '''	/* Program probe/cold-good values AFTER the DT init sequence.
+       r'''	/* Program probe/cold-good values AFTER the DT init sequence.
 	 * Suspend can zero the PHY register bank while the efuse is gated.
 	 */
 	if (qphy->a52_tuning_valid) {
@@ -119,12 +119,12 @@ def patch(s):
 	}
 	/* ensure above writes are completed before re-enabling PHY */
 	wmb();''',"restore cached PHY registers")
-    part=once(part,'''	if (!(reg & CORE_READY_STATUS)) {
+    part=once(part,r'''	if (!(reg & CORE_READY_STATUS)) {
 		dev_err(phy->dev, "QUSB PHY PLL LOCK fails:%x\n", reg);
 		WARN_ON(1);
 	}
 	return 0;''',
-       '''	if (!(reg & CORE_READY_STATUS)) {
+       r'''	if (!(reg & CORE_READY_STATUS)) {
 		dev_err(phy->dev, "P453 QUSB PLL LOCK fails:%x (no WARN storm)\n", reg);
 		return -ETIMEDOUT;
 	}
@@ -143,9 +143,9 @@ def patch(s):
 	}
 	return 0;''',"cache after successful PLL")
     s=s[:start]+part+s[end:]
-    s=once(s,'''	mutex_init(&qphy->lock);
+    s=once(s,r'''	mutex_init(&qphy->lock);
 	platform_set_drvdata(pdev, qphy);''',
-       '''	/* Read efuse while still in probe. First valid cold init is
+       r'''	/* Read efuse while still in probe. First valid cold init is
 	 * authoritative for analog tune/impedance registers.
 	 */
 	if(qphy->efuse_reg) {
@@ -161,14 +161,14 @@ def patch(s):
     part=s[start:end]
     part=once(part,"u32 linestate = 0, intr_mask = 0;",
               "u32 linestate = 0, intr_mask = 0;\n\tint p453_rc;","resume rc")
-    part=once(part,'''			qusb_phy_enable_power(qphy);
+    part=once(part,r'''			qusb_phy_enable_power(qphy);
 			qusb_phy_enable_clocks(qphy, true);''',
-       '''			p453_rc=qusb_phy_enable_power(qphy);
+       r'''			p453_rc=qusb_phy_enable_power(qphy);
 			if(p453_rc)return p453_rc;
 			qusb_phy_enable_clocks(qphy, true);''',
        "resume balanced power")
-    part=once(part,'''		qphy->suspended = false;''',
-       '''		/* Restore the known-good tuning only on a lost PLL,
+    part=once(part,r'''		qphy->suspended = false;''',
+       r'''		/* Restore the known-good tuning only on a lost PLL,
 		 * avoiding a disruptive reset on an active USB session.
 		 */
 		if(qphy->a52_tuning_valid && !qusb_phy_pll_locked(qphy)) {

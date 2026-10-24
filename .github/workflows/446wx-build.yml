@@ -1,9 +1,9 @@
-name: Mangrove P456 A/B/C isolated 451-DSP source bisects
-run-name: P456 A/B/C 451-DSP source bisects SCM-off H0-unarmed
+name: Mangrove P456 C only 451-DSP plus manual H0
+run-name: P456 C H0 source-only bisect; legacy P447D audit parity
 on:
   push:
     branches:
-      - agent/p456-451-dsp-source-bisects
+      - agent/p456-c-h0-audit
   workflow_dispatch:
     inputs:
       decode_pc:
@@ -42,9 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { id: G, label: P456-A-ICE, bisect: a, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: P456-B-SMMU-SCM, bisect: b, wave: 2, mss: 0, ipa: 0, ipc: 1 }
-          - { id: G, label: P456-C-H0, bisect: c, wave: 2, mss: 0, ipa: 0, ipc: 1 }
+          - { id: G, label: P456-C-H0-REVIEWED, bisect: c, wave: 2, mss: 0, ipa: 0, ipc: 1 }
     env:
       GH_TOKEN: ${{ github.token }}
     # P447C: independent .config builds in parallel in the SAME workflow run.
@@ -588,6 +586,15 @@ jobs:
           set -Eeuo pipefail
           python3 scripts/456_451_dsp_bisect.py             --root "$PWD/gki/common"             --mode '${{ matrix.variant.bisect }}'             --report phase447-inventory/P456-SOURCE-SCOPE.json
           sha256sum workspace/gki-phase199-out/.config
+      - name: Validate H0-aware P447D source checker (does not modify C)
+        run: |
+          set -Eeuo pipefail
+          # The 451 checker expects POWER_SUPPLY_STATUS_UNKNOWN, which H0
+          # deliberately replaces. Bring over ONLY the 452 check-only logic
+          # after source has already been generated from the pinned 451 base.
+          git fetch --depth=1 origin f4d761f945f742e143b537412dca7bf4da7b43f8
+          git show FETCH_HEAD:scripts/447d_readonly_sm5714_fg.py > scripts/447d_readonly_sm5714_fg.py
+          python3 scripts/447d_readonly_sm5714_fg.py --root "$PWD/gki/common" --check-only
       - name: Mandatory strict final-tree manifest audit (pre-compile)
         run: |
           set -Eeuo pipefail

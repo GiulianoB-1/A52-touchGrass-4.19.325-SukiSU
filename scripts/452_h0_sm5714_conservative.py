@@ -144,60 +144,130 @@ static int a52h0_verify(struct a52d_fg *fg,bool for_enable,
         return -EBUSY; /* guard owns bootloader charging handoff */
     return 0;
 }
-static void a52h0_tick(struct a52d_fg *fg)
+static void a52h0_tick(struct a52d_fg *fg,int guard_rc)
 {
     int vb=0,mv=0,st2=-1,tbat=-10000,tchg=-10000,rc,wdt,ctrl;
+    int id,flt,input,fc,st1;
     unsigned long now=jiffies;
+    bool safe,ready;
     mutex_lock(&fg->a52h0_lock);
-    if(fg->a52h0_killed || !fg->a52h0_armed) {
-        if(fg->a52h0_active) a52h0_off(fg,"DISARM",true);
+    /* This function runs AFTER P449 every cycle. Guard always wins. */
+    if(guard_rc<0 || fg->a52g_inhibit_latched) {
+        a52h0_off(fg,"GUARD_FAULT",true);goto done;
+    }
+    id=a52h0_regread(fg,A52G_CHG_DEVICEID);
+    st1=a52h0_regread(fg,A52G_CHG_STATUS1);
+    st2=a52h0_regread(fg,A52P450_CHG_STATUS2);
+    flt=a52h0_regread(fg,A52H0_BATREG);
+    input=a52h0_regread(fg,A52H0_VBUSCNTL);
+    fc=a52h0_regread(fg,A52H0_FACTORY1);
+    if(id<0 || st1<0 || st2<0 || flt<0 || input<0 || fc<0) {
+        a52h0_off(fg,"I2C_READ",true);goto done;
+    }
+    if(id!=fg->a52h0_deviceid || (flt&0x3f)!=A52H0_FLOAT_4380_CODE ||
+       input>0x10 || (fc&(BIT(0)|BIT(1)))) {
+        a52h0_off(fg,id!=fg->a52h0_deviceid?"chip_id":
+            (flt&0x3f)!=A52H0_FLOAT_4380_CODE?"float":
+            input>0x10?"vbuscntl":"factory",true);
         goto done;
     }
-    if(fg->a52g_inhibit_latched) {
-        a52h0_off(fg,"P449_LATCH",true);
+    if(st2&BIT(7)) {
+        a52h0_off(fg,"WDT_EXPIRED",true);
+        rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(6),BIT(6));
+        dev_err(fg->dev,"P452 H0 WDT_EXPIRED clear_rc=%d FAULT_LATCHED\n",rc);
         goto done;
     }
-    rc=a52h0_verify(fg,!fg->a52h0_active,&vb,&mv,&st2,&tbat,&tchg);
-    if(rc) {
-        a52h0_off(fg,"SENSOR_OR_HARDWARE",true);
+    if(fg->a52h0_killed)goto done;
+    vb=!!(st1&BIT(0));
+    if(!vb) {
+        if(fg->a52h0_vbus_seen) {
+            fg->a52h0_elapsed=0;
+            fg->a52h0_full=false;
+            fg->a52h0_handover=true;
+            fg->a52h0_rearm=true;
+            fg->a52h0_armed=false;
+            fg->a52h0_ntc_valid_since=0;
+        }
+        fg->a52h0_vbus_seen=false;
+        if(fg->a52h0_active)a52h0_off(fg,"vbus",false);
         goto done;
+    }
+    fg->a52h0_vbus_seen=true;
+    safe=a52h0_sensor_safe(fg,&tbat,&tchg);
+    if(safe && !fg->a52h0_guard_trip) {
+        if(!fg->a52h0_ntc_valid_since)
+            fg->a52h0_ntc_valid_since=now;
+    } else {
+        fg->a52h0_ntc_valid_since=0;
+    }
+    ready=fg->a52h0_ntc_valid_since &&
+          time_after_eq(now,fg->a52h0_ntc_valid_since+10*HZ);
+    if(!safe || fg->a52h0_guard_trip) {
+        if(fg->a52h0_active || fg->a52h0_armed) {
+            fg->a52h0_rearm=true;
+            fg->a52h0_armed=false;
+            a52h0_off(fg,safe?"guard":"ntc",false);
+        }
+        goto done;
+    }
+    mv=a52d_mv(fg);
+    if(mv<0){a52h0_off(fg,"fg_read",true);goto done;}
+    if(mv<3000 || mv>4380 || tbat<150 || tbat>410 || tchg>=500) {
+        if(fg->a52h0_armed || fg->a52h0_active) {
+            fg->a52h0_armed=false;
+            fg->a52h0_rearm=true;
+            a52h0_off(fg,"temp_or_vbat",false);
+        }
+        goto done;
+    }
+    if(!ready || fg->a52h0_handover || !fg->a52h0_armed) {
+        if(fg->a52h0_active)a52h0_off(fg,"MANUAL_DISARM",false);
+        goto done;
+    }
+    if(fg->a52h0_elapsed+
+       (fg->a52h0_active?now-fg->a52h0_started:0)>=A52H0_MAX_TICKS) {
+        fg->a52h0_rearm=true;
+        fg->a52h0_armed=false;
+        a52h0_off(fg,"timer",false);goto done;
     }
     if(fg->a52h0_active) {
-        if(time_after_eq(now,fg->a52h0_started+A52H0_MAX_TICKS)) {
-            a52h0_off(fg,"FOUR_HOUR_TIMER",true);goto done;
+        ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
+        wdt=a52h0_regread(fg,A52H0_WDTCNTL);
+        if(ctrl<0 || wdt<0 || !(ctrl&A52G_CHG_ENQ4FET) ||
+           (wdt&0x7)!=(A52H0_90S_WDT|BIT(0))) {
+            a52h0_off(fg,"wdt_drift",true);goto done;
         }
         if(st2&BIT(5)) {
             fg->a52h0_full=true;
             a52h0_off(fg,"TOP_OFF",false);goto done;
         }
-        ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
-        wdt=a52h0_regread(fg,A52H0_WDTCNTL);
-        if(ctrl<0 || wdt<0 || !(ctrl&A52G_CHG_ENQ4FET) ||
-           (wdt&0x07)!=(A52H0_90S_WDT|BIT(0))) {
-            a52h0_off(fg,"WDT_OR_ENQ4FET_DRIFT",true);goto done;
-        }
         if(time_after_eq(now,fg->a52h0_last_kick+30*HZ)) {
             rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
-            if(rc){a52h0_off(fg,"WDT_KICK_FAILED",true);goto done;}
+            if(rc){a52h0_off(fg,"wdt_kick",true);goto done;}
             fg->a52h0_last_kick=now;
-            dev_info(fg->dev,
-               "P452 H0 KICK wdt=90s cycle=30s rc=0 battery=%d chg=%d mv=%d\n",
-               tbat,tchg,mv);
+            dev_info(fg->dev,"P452 H0 WDT kick\n");
         }
         goto done;
     }
-    if(fg->a52h0_full && mv>4310)goto done;
-    if(fg->a52h0_full && mv<=4310)
+    if(fg->a52h0_full && mv>=4310)goto done;
+    if(fg->a52h0_full) {
         fg->a52h0_full=false;
-    /* Confirm all limits before setting ENQ4FET. WDT first, always. */
+        dev_info(fg->dev,"P452 H0 RECHARGE vbat=%d\n",mv);
+    }
+    ctrl=a52h0_regread(fg,A52G_CHG_CNTL1);
+    if(ctrl<0 || (ctrl&A52G_CHG_ENQ4FET)) {
+        a52h0_off(fg,"unexpected_enable",true);goto done;
+    }
     rc=a52h0_write_masked(fg,A52H0_CHGCNTL2,0xff,A52H0_CHG_FAST_500MA);
     if(rc)goto fail;
-    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,0x07,A52H0_90S_WDT|BIT(0));
+    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,0x06,A52H0_90S_WDT);
+    if(rc)goto fail;
+    rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(0),BIT(0));
     if(rc)goto fail;
     rc=a52h0_write_masked(fg,A52H0_WDTCNTL,BIT(3),BIT(3));
     if(rc)goto fail;
     wdt=a52h0_regread(fg,A52H0_WDTCNTL);
-    if(wdt<0 || (wdt&0x7)!=(A52H0_90S_WDT|BIT(0))) {
+    if(wdt<0 || (wdt&0x07)!=(A52H0_90S_WDT|BIT(0))) {
         rc=-EIO;goto fail;
     }
     rc=a52h0_write_masked(fg,A52G_CHG_CNTL1,A52G_CHG_ENQ4FET,
@@ -206,13 +276,14 @@ static void a52h0_tick(struct a52d_fg *fg)
     fg->a52h0_active=true;
     fg->a52h0_started=now;
     fg->a52h0_last_kick=now;
+    a52h0_set_state(fg,2,"user_enable");
     dev_warn(fg->dev,
-       "P452 H0 ON manual=1 WDT=90s kick=before_enable current=500mA float=4380mV battery=%d chg=%d mv=%d readback=PASS\n",
-       tbat,tchg,mv);
+      "P452 H0 ENABLE cur=500 wdt=90 float=4380 batt=%d chg=%d\n",
+      tbat,tchg);
     if(fg->psy)power_supply_changed(fg->psy);
     goto done;
 fail:
-    a52h0_off(fg,"ENABLE_FAILED",true);
+    a52h0_off(fg,"write_readback",true);
 done:
     mutex_unlock(&fg->a52h0_lock);
 }
@@ -220,59 +291,58 @@ static ssize_t h0_arm_show(struct device *dev,
                            struct device_attribute *attr,char *buf)
 {
     struct a52d_fg *fg=dev_get_drvdata(dev);
-    return scnprintf(buf,PAGE_SIZE,"armed=%d active=%d killed=%d full=%d\n",
-                     fg->a52h0_armed,fg->a52h0_active,
-                     fg->a52h0_killed,fg->a52h0_full);
+    return scnprintf(buf,PAGE_SIZE,
+            "enable=%d active=%d state=%s handover=%d rearm=%d killed=%d total_s=%lu\n",
+            fg->a52h0_armed,fg->a52h0_active,
+            a52h0_state_str(fg->a52h0_state),fg->a52h0_handover,
+            fg->a52h0_rearm,fg->a52h0_killed,fg->a52h0_elapsed/HZ);
 }
 static ssize_t h0_arm_store(struct device *dev,
                             struct device_attribute *attr,
                             const char *buf,size_t len)
 {
     struct a52d_fg *fg=dev_get_drvdata(dev);
-    bool arm;
-    if(kstrtobool(buf,&arm))return -EINVAL;
+    bool enable;
+    int b,c;
+    if(kstrtobool(buf,&enable))return -EINVAL;
     mutex_lock(&fg->a52h0_lock);
-    if(arm && (fg->a52h0_killed || fg->a52g_inhibit_latched)) {
-        mutex_unlock(&fg->a52h0_lock);
-        return -EPERM;
+    if(enable) {
+        if(fg->a52h0_killed || fg->a52g_inhibit_latched) {
+            mutex_unlock(&fg->a52h0_lock);
+            return -EPERM;
+        }
+        if(!fg->a52h0_ntc_valid_since ||
+           !time_after_eq(jiffies,fg->a52h0_ntc_valid_since+10*HZ) ||
+           !a52h0_sensor_safe(fg,&b,&c) ||
+           b<150 || b>410 || c>=500 ||
+           (fg->a52h0_rearm && (b<170 || b>390 || c>450))) {
+            mutex_unlock(&fg->a52h0_lock);
+            return -EAGAIN;
+        }
+        fg->a52h0_handover=false;
+        fg->a52h0_rearm=false;
+        fg->a52h0_armed=true;
+        a52h0_set_state(fg,1,"user_rearm");
+    } else {
+        fg->a52h0_armed=false;
     }
-    fg->a52h0_armed=arm;
-    if(!arm)a52h0_off(fg,"MANUAL_DISARM",true);
     mutex_unlock(&fg->a52h0_lock);
-    dev_warn(fg->dev,"P452 H0 ARM optin=%d killed=%d\n",
-             arm,fg->a52h0_killed);
+    /* Work owns ALL register writes. The OFF request is synchronous. */
+    mod_delayed_work(system_wq,&fg->a52g_guard_work,0);
+    if(!enable)flush_delayed_work(&fg->a52g_guard_work);
     return len;
 }
-static ssize_t h0_kill_store(struct device *dev,
-                             struct device_attribute *attr,
-                             const char *buf,size_t len)
-{
-    struct a52d_fg *fg=dev_get_drvdata(dev);
-    bool kill;
-    if(kstrtobool(buf,&kill) || !kill)return -EINVAL;
-    mutex_lock(&fg->a52h0_lock);
-    fg->a52h0_killed=true;
-    fg->a52h0_armed=false;
-    a52h0_off(fg,"KILL_SWITCH",true);
-    mutex_unlock(&fg->a52h0_lock);
-    return len;
-}
-static DEVICE_ATTR(h0_arm,0600,h0_arm_show,h0_arm_store);
-static DEVICE_ATTR(h0_kill,0200,NULL,h0_kill_store);
+static DEVICE_ATTR(a52_h0_enable,0600,h0_arm_show,h0_arm_store);
 static void a52h0_attr_cleanup(void *arg)
 {
     struct a52d_fg *fg=arg;
-    device_remove_file(fg->dev,&dev_attr_h0_kill);
-    device_remove_file(fg->dev,&dev_attr_h0_arm);
+    device_remove_file(fg->dev,&dev_attr_a52_h0_enable);
 }
 static int a52h0_attrs_create(struct a52d_fg *fg)
 {
-    int rc=device_create_file(fg->dev,&dev_attr_h0_arm);
+    int rc=device_create_file(fg->dev,&dev_attr_a52_h0_enable);
     if(rc)return rc;
-    rc=device_create_file(fg->dev,&dev_attr_h0_kill);
-    if(rc){device_remove_file(fg->dev,&dev_attr_h0_arm);return rc;}
-    rc=devm_add_action_or_reset(fg->dev,a52h0_attr_cleanup,fg);
-    return rc;
+    return devm_add_action_or_reset(fg->dev,a52h0_attr_cleanup,fg);
 }
 static int a52h0_psy_status(struct a52d_fg *fg,bool online)
 {
@@ -374,16 +444,16 @@ static enum power_supply_property a52d_props[] = {""","forward functions for FG 
     return s
 def check(root):
     s=(root/SRC).read_text()
-    for key in (TAG,"P452 H0 STOP reason=","P452 H0 ON manual=1",
-                "P452 H0 KICK wdt=90s","dev_attr_h0_kill",
+    for key in (TAG,"P452 H0 STOP reason=","P452 H0 ENABLE cur=500",
+                "P452 H0 WDT kick","dev_attr_a52_h0_enable",
                 "POWER_SUPPLY_PROP_ONLINE",
                 "A52H0_MAX_TICKS (14400UL*HZ)",
                 "A52H0_CHG_FAST_500MA 0x20",
                 "A52H0_CHGCNTL2 0x18",
                 "A52H0_WDTCNTL 0x22",
                 "A52H0_FLOAT_4380_CODE 0x27",
-                "if(fg->a52g_inhibit_latched)",
-                "if(fg->a52h0_full && mv<=4310)",
+                "fg->a52h0_guard_trip=true;",
+                "if(fg->a52h0_full)",
                 "P447G CHG_GUARD INHIBIT_OK"):
         if key not in s:raise RuntimeError("P452 H0 required contract "+key)
     if s.count("i2c_smbus_write_byte_data(")!=2:
